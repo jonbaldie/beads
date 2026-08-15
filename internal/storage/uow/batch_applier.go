@@ -182,7 +182,7 @@ func (r *uowApplyRun) applyCreate(ctx context.Context, index int, item *publicop
 	if err != nil {
 		return itemErr(storageissueops.ClassifyPublicCreateError(err))
 	}
-	issue, err := hydrateIssueOperation(ctx, r.uw, created.Issue, false, false)
+	issue, err := hydrateIssueOperation(ctx, r.uw, created.Issue, false)
 	if err != nil {
 		return err
 	}
@@ -269,7 +269,7 @@ func (r *uowApplyRun) runUpdate(ctx context.Context, request publicops.UpdateReq
 	if err != nil {
 		return publicops.UpdateResult{}, err
 	}
-	before, err = hydrateIssueOperation(ctx, r.uw, before, false, request.IssuePlaneOnly)
+	before, err = hydrateIssueOperation(ctx, r.uw, before, request.IssuePlaneOnly)
 	if err != nil {
 		return publicops.UpdateResult{}, err
 	}
@@ -287,7 +287,7 @@ func (r *uowApplyRun) runUpdate(ctx context.Context, request publicops.UpdateReq
 	if err != nil {
 		return publicops.UpdateResult{}, err
 	}
-	issue, err := hydrateIssueOperation(ctx, r.uw, updated, false, request.IssuePlaneOnly)
+	issue, err := hydrateIssueOperation(ctx, r.uw, updated, request.IssuePlaneOnly)
 	if err != nil {
 		return publicops.UpdateResult{}, err
 	}
@@ -314,7 +314,7 @@ func (r *uowApplyRun) applyClose(ctx context.Context, index int, item *publicops
 			return itemErr(err)
 		}
 	}
-	before, err := hydrateIssueOperation(ctx, r.uw, issue, false, false)
+	before, err := hydrateIssueOperation(ctx, r.uw, issue, false)
 	if err != nil {
 		return err
 	}
@@ -336,7 +336,7 @@ func (r *uowApplyRun) applyClose(ctx context.Context, index int, item *publicops
 	if closed.Issue != nil {
 		issue = closed.Issue
 	}
-	hydrated, err := hydrateIssueOperation(ctx, r.uw, issue, false, false)
+	hydrated, err := hydrateIssueOperation(ctx, r.uw, issue, false)
 	if err != nil {
 		return err
 	}

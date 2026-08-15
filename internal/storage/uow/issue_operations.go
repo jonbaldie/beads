@@ -166,7 +166,7 @@ func createParams(request publicops.CreateRequest) (domain.CreateIssueParams, bo
 	return params, issue.Ephemeral || issue.NoHistory, nil
 }
 
-func hydrateIssueOperation(ctx context.Context, uw UnitOfWork, issue *types.Issue, includeComments, issuePlaneOnly bool) (*types.Issue, error) {
+func hydrateIssueOperation(ctx context.Context, uw UnitOfWork, issue *types.Issue, issuePlaneOnly bool) (*types.Issue, error) {
 	if issue == nil {
 		return nil, fmt.Errorf("hydrate issue operation: created issue is nil")
 	}
@@ -175,9 +175,7 @@ func hydrateIssueOperation(ctx context.Context, uw UnitOfWork, issue *types.Issu
 		return nil, fmt.Errorf("hydrate issue operation: %w", err)
 	}
 	clone := storageissueops.CloneCreateRequest(publicops.CreateRequest{Issue: stored}).Issue
-	if !includeComments {
-		clone.Comments = nil
-	}
+	clone.Comments = nil
 	labels := uw.LabelUseCase()
 	if labels == nil {
 		return nil, fmt.Errorf("hydrate issue labels: label use case is unavailable")
@@ -205,21 +203,6 @@ func hydrateIssueOperation(ctx context.Context, uw UnitOfWork, issue *types.Issu
 		return nil, fmt.Errorf("hydrate issue dependencies: %w", err)
 	}
 	clone.Dependencies = records[clone.ID]
-
-	if includeComments {
-		comments := uw.CommentUseCase()
-		if comments == nil {
-			return nil, fmt.Errorf("hydrate issue comments: comment use case is unavailable")
-		}
-		if useWisp {
-			clone.Comments, err = comments.GetCommentsForWisp(ctx, clone.ID)
-		} else {
-			clone.Comments, err = comments.GetCommentsForIssue(ctx, clone.ID)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("hydrate issue comments: %w", err)
-		}
-	}
 	return storageissueops.CloneCreateRequest(publicops.CreateRequest{Issue: clone}).Issue, nil
 }
 
