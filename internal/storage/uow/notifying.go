@@ -12,10 +12,12 @@
 // fire-and-forget hooks the DoltStorage plumbing runs, with the same event per
 // operation (see hookEventForOp).
 //
-// THE WRAP IS AT THE PROVIDER, NOT AT EACH VERB. Every capability this package
-// publishes is built from a provider and reaches its writes through the unit of
-// work's use cases, so re-binding the accessors to the wrapper and recording at
-// the use-case seam covers all of them at once — including roles added later.
+// THE WRAP IS AT THE PROVIDER, NOT AT EACH VERB. Most capabilities this package
+// publishes reach their writes through the unit of work's use cases, so
+// re-binding the accessors to the wrapper and recording at the use-case seam
+// covers those roles — including roles added later. Lifecycle is the exception:
+// it runs the shared Execute* body on the statement runner and records hooks
+// from the result, so it does not depend on the use-case recorder.
 // The accessors are declared rather than delegated for the reason
 // hook_issue_operations.go gives: an accessor that hands back the INNER
 // provider's role builds it on the inner provider and silently drops every hook
@@ -56,10 +58,11 @@
 //     through the same engine and fires nothing either; a hook per imported
 //     issue would be a new behavior on both, not a fix to this one.
 //
-//  4. A GUARDED VERB'S PRECONDITION IS NOT AN UPDATE. `bd close
-//     --expect-version` spells its compare-and-set as a separate ApplyUpdate
-//     that writes nothing; the DoltStorage plumbing passes the precondition
-//     into the close. See specWrites.
+//  4. A GUARDED VERB'S PRECONDITION IS NOT AN UPDATE. Lifecycle close and
+//     reopen pass ExpectedVersion into ExecuteClose / ExecuteReopen, matching
+//     the store adapters. Other roles that still spell a compare-and-set as a
+//     separate ApplyUpdate must not record that precondition as an update.
+//     See specWrites.
 //
 //  5. THE PROMOTION COMMENT. `bd promote` records an audit comment on the
 //     promoted issue, and this plumbing's one comment verb fires on_update for
@@ -425,6 +428,15 @@ type notifyingUOW struct {
 	depUC     domain.DependencyUseCase
 	labelUC   domain.LabelUseCase
 	commentUC domain.CommentUseCase
+}
+
+// StatementRunner forwards the inner transaction so Lifecycle can run the
+// shared Execute* body without peeling this decorator.
+func (u *notifyingUOW) StatementRunner() storageissueops.DBTX {
+	if src, ok := u.UnitOfWork.(interface{ StatementRunner() storageissueops.DBTX }); ok {
+		return src.StatementRunner()
+	}
+	return nil
 }
 
 func (u *notifyingUOW) IssueUseCase() domain.IssueUseCase {

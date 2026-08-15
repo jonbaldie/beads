@@ -42,13 +42,11 @@ var _ publicops.BatchApplier = (*batchApplier)(nil)
 
 // ApplyBatch applies every item in ONE unit of work and commits them together.
 //
-// THIS LEG IS A GENUINELY INDEPENDENT BODY, unlike the third leg of MetadataCAS
-// or TreeWalker, and the reason is mechanical rather than chosen. The shared
-// store body composes issueops.ExecuteCreate, ExecuteUpdate and ExecuteClose,
-// every one of which takes a *sql.Tx; a unit of work's runner is a *sql.Conn
-// with a transaction open on it, and no interface between the two publishes the
-// other. So the store bodies could not be reached from here without rewriting
-// three of the oldest write paths in the tree to take an interface.
+// THIS LEG IS STILL A GENUINELY INDEPENDENT BODY. Lifecycle now reaches
+// ExecuteCreate / ExecuteUpdate / ExecuteClose through the unit of work's
+// DBTX runner. BatchApplier has not been routed yet: it still composes
+// create, update, and close through the domain use cases. That leftover
+// fork is a follow-up, not evidence that Execute* is unreachable.
 //
 // WHAT THAT MEANS FOR THE CONTRACT is stated in its header: this is a second
 // vote on what a batch MEANS, not a wrapper check, and the cases are worth
