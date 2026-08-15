@@ -114,8 +114,13 @@ for beads package boundaries, test gates, and domain terms.
   with `.golangci.yml` and the `gms_pure_go` build tag, and a Windows
   non-CGO cross-lint pass. Do not treat a raw `golangci-lint run` as the
   gate.
-- Production Go code changes should report no violations on the `messgo`
+- Scope `messgo` and `mutago` to production Go in the diff against the
+  merge base, not the whole tree and not `_test.go` files. A finding in
+  code the change did not touch does not block the change.
+- Those production changes should report no violations on the `messgo`
   rulesets `design`, `codesize`, and `unusedcode`.
+- Those production changes should report a covered-MSI of 80% or above
+  from `mutago`.
 - Production builds need `CGO_ENABLED=1` and `-tags=gms_pure_go`. Use
   `make build`, `make test`, or `./scripts/test.sh`. A bare
   `go build ./cmd/bd` fails the ICU linker path. See
