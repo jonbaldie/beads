@@ -74,47 +74,9 @@ func lifecycleStatementRunner(uw UnitOfWork) (storageissueops.DBTX, error) {
 	return nil, fmt.Errorf("lifecycle: %T does not expose a statement runner", uw)
 }
 
-func recordLifecycleCreate(ctx context.Context, uw UnitOfWork, request publicops.CreateRequest, created *types.Issue) {
-	n, ok := uw.(*notifyingUOW)
-	if !ok || created == nil {
-		return
-	}
-	n.rec.record(opCreate, n.snapshotter().anyPlane(ctx, created.ID))
-	params, _, err := createParams(request)
-	if err != nil {
-		return
-	}
-	for _, source := range createEdgeSources(created.ID, params) {
-		n.rec.record(opDepAdd, n.snapshotter().anyPlaneWithEdges(ctx, source))
-	}
-}
-
-func recordLifecycleUpdate(ctx context.Context, uw UnitOfWork, request publicops.UpdateRequest) {
-	n, ok := uw.(*notifyingUOW)
-	if !ok {
-		return
-	}
-	spec, err := updateSpec(request)
-	if err != nil || !specWrites(spec) {
-		return
-	}
-	n.rec.record(opUpdate, n.snapshotter().anyPlane(ctx, request.IssueID))
-}
-
-func recordLifecycleClose(ctx context.Context, uw UnitOfWork, id string) {
-	n, ok := uw.(*notifyingUOW)
-	if !ok {
-		return
-	}
-	n.rec.record(opClose, n.snapshotter().anyPlane(ctx, id))
-}
-
-func recordLifecycleReopen(ctx context.Context, uw UnitOfWork, id string, changed bool) {
-	n, ok := uw.(*notifyingUOW)
-	if !ok || !changed {
-		return
-	}
-	n.rec.record(opUpdate, n.snapshotter().anyPlane(ctx, id))
+func notifyLifecycle(uw UnitOfWork) *notifyingUOW {
+	n, _ := uw.(*notifyingUOW)
+	return n
 }
 
 // Create creates one issue in a retried unit-of-work transaction.
@@ -132,7 +94,9 @@ func (o *issueOperations) Create(ctx context.Context, request publicops.CreateRe
 		if err != nil {
 			return publicops.CreateResult{}, "", err
 		}
-		recordLifecycleCreate(ctx, uw, snapshot, result.Issue)
+		if n := notifyLifecycle(uw); n != nil && result.Issue != nil {
+			n.recordCreate(ctx, result.Issue.ID, snapshot)
+		}
 		return result, "create issue", nil
 	})
 }
@@ -221,7 +185,9 @@ func (o *issueOperations) Update(ctx context.Context, request publicops.UpdateRe
 		if err != nil {
 			return publicops.UpdateResult{}, "", err
 		}
-		recordLifecycleUpdate(ctx, uw, snapshot)
+		if n := notifyLifecycle(uw); n != nil {
+			n.recordUpdate(ctx, snapshot)
+		}
 		return result, updateHistoryEntry(snapshot, result.Changed), nil
 	})
 }
@@ -378,7 +344,9 @@ func (o *issueOperations) Close(ctx context.Context, request publicops.CloseRequ
 		if err != nil {
 			return publicops.CloseResult{}, "", err
 		}
-		recordLifecycleClose(ctx, uw, snapshot.IssueID)
+		if n := notifyLifecycle(uw); n != nil {
+			n.recordClose(ctx, snapshot.IssueID)
+		}
 		return result, "close issue", nil
 	})
 }
@@ -398,7 +366,9 @@ func (o *issueOperations) Reopen(ctx context.Context, request publicops.ReopenRe
 		if err != nil {
 			return publicops.ReopenResult{}, "", err
 		}
-		recordLifecycleReopen(ctx, uw, snapshot.IssueID, result.Changed)
+		if n := notifyLifecycle(uw); n != nil {
+			n.recordReopen(ctx, snapshot.IssueID, result.Changed)
+		}
 		return result, storageissueops.HistoryEntry(snapshot.Provenance, "reopen issue"), nil
 	})
 }

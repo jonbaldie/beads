@@ -14,28 +14,11 @@ import (
 // update, close, and reopen.
 func TestExecuteLifecycleVerbsTakeDBTX(t *testing.T) {
 	t.Parallel()
-
-	var create func(context.Context, DBTX, publicops.CreateRequest) (publicops.CreateResult, ChangedTables, error)
-	create = ExecuteCreate
-	if create == nil {
-		t.Fatal("ExecuteCreate is nil")
-	}
-
-	var update func(context.Context, DBTX, publicops.UpdateRequest) (publicops.UpdateResult, ChangedTables, error)
-	update = ExecuteUpdate
-	if update == nil {
-		t.Fatal("ExecuteUpdate is nil")
-	}
-
-	var closeFn func(context.Context, DBTX, publicops.CloseRequest) (publicops.CloseResult, ChangedTables, error)
-	closeFn = ExecuteClose
-	if closeFn == nil {
-		t.Fatal("ExecuteClose is nil")
-	}
-
-	var reopen func(context.Context, DBTX, publicops.ReopenRequest) (publicops.ReopenResult, ChangedTables, error)
-	reopen = ExecuteReopen
-	if reopen == nil {
-		t.Fatal("ExecuteReopen is nil")
-	}
+	// Compile-time pin only. A *sql.Tx-only signature fails to assign.
+	var (
+		_ func(context.Context, DBTX, publicops.CreateRequest) (publicops.CreateResult, ChangedTables, error) = ExecuteCreate
+		_ func(context.Context, DBTX, publicops.UpdateRequest) (publicops.UpdateResult, ChangedTables, error) = ExecuteUpdate
+		_ func(context.Context, DBTX, publicops.CloseRequest) (publicops.CloseResult, ChangedTables, error)   = ExecuteClose
+		_ func(context.Context, DBTX, publicops.ReopenRequest) (publicops.ReopenResult, ChangedTables, error) = ExecuteReopen
+	)
 }

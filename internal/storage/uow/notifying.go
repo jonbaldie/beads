@@ -433,7 +433,7 @@ type notifyingUOW struct {
 // StatementRunner forwards the inner transaction so Lifecycle can run the
 // shared Execute* body without peeling this decorator.
 func (u *notifyingUOW) StatementRunner() storageissueops.DBTX {
-	if src, ok := u.UnitOfWork.(interface{ StatementRunner() storageissueops.DBTX }); ok {
+	if src, ok := u.UnitOfWork.(statementSource); ok {
 		return src.StatementRunner()
 	}
 	return nil
@@ -817,33 +817,74 @@ func (u *recordingIssueUC) created(
 	}
 }
 
+func (u *notifyingUOW) recordCreate(ctx context.Context, createdID string, request publicops.CreateRequest) {
+	u.rec.record(opCreate, u.snapshotter().anyPlane(ctx, createdID))
+	for _, source := range createEdgeSourcesFromRequest(createdID, request) {
+		u.rec.record(opDepAdd, u.snapshotter().anyPlaneWithEdges(ctx, source))
+	}
+}
+
+func (u *notifyingUOW) recordUpdate(ctx context.Context, request publicops.UpdateRequest) {
+	if !updateRequestWrites(request) {
+		return
+	}
+	u.rec.record(opUpdate, u.snapshotter().anyPlane(ctx, request.IssueID))
+}
+
+func (u *notifyingUOW) recordClose(ctx context.Context, id string) {
+	u.rec.record(opClose, u.snapshotter().anyPlane(ctx, id))
+}
+
+func (u *notifyingUOW) recordReopen(ctx context.Context, id string, changed bool) {
+	if !changed {
+		return
+	}
+	u.rec.record(opUpdate, u.snapshotter().anyPlane(ctx, id))
+}
+
+// updateRequestWrites reports whether a public update asked to change anything.
+// It is the Lifecycle twin of specWrites: expectations alone are not a write.
+func updateRequestWrites(request publicops.UpdateRequest) bool {
+	if request.Claim {
+		return true
+	}
+	return !reflect.DeepEqual(request.Patch, publicops.IssuePatch{})
+}
+
+// createEdgeSourcesFromRequest returns the distinct issue ids a create's edges
+// leave, in write order, using the same prepared dependencies ExecuteCreate
+// writes.
+func createEdgeSourcesFromRequest(createdID string, request publicops.CreateRequest) []string {
+	var sources []string
+	seen := map[string]bool{}
+	for _, dependency := range storage.CreatePublicCreateDependencies(createdID, request) {
+		if dependency == nil || dependency.IssueID == "" || seen[dependency.IssueID] {
+			continue
+		}
+		seen[dependency.IssueID] = true
+		sources = append(sources, dependency.IssueID)
+	}
+	return sources
+}
+
 // createEdgeSources returns the distinct issue ids a create's edges LEAVE, in
 // the order the edges are written, resolving the reverse-edge swap exactly as
 // storage.CreatePublicCreateDependencies does.
 func createEdgeSources(createdID string, params domain.CreateIssueParams) []string {
-	var sources []string
-	seen := map[string]bool{}
-	add := func(id string) {
-		if id == "" || seen[id] {
-			return
-		}
-		seen[id] = true
-		sources = append(sources, id)
-	}
-	if params.ParentID != "" {
-		add(createdID)
-	}
+	request := publicops.CreateRequest{ParentID: params.ParentID}
 	if params.WaitsFor != nil {
-		add(createdID)
+		request.WaitsFor = &publicops.WaitsFor{SpawnerID: params.WaitsFor.SpawnerID, Gate: params.WaitsFor.Gate}
 	}
 	for _, dependency := range params.Dependencies {
-		if dependency.SwapDirection {
-			add(dependency.TargetID)
-			continue
-		}
-		add(createdID)
+		request.Dependencies = append(request.Dependencies, publicops.CreateDependency{
+			TargetID: dependency.TargetID,
+			Type:     dependency.Type,
+			Reverse:  dependency.SwapDirection,
+			Metadata: dependency.Metadata,
+			ThreadID: dependency.ThreadID,
+		})
 	}
-	return sources
+	return createEdgeSourcesFromRequest(createdID, request)
 }
 
 // ApplyIssueGraph and ApplyWispGraph report a whole plan the way one create
