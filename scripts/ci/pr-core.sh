@@ -20,5 +20,9 @@ beads_test_env_enter
 GO_TEST_PKG_PARALLEL="${GO_TEST_PKG_PARALLEL:-4}"
 GO_TEST_PARALLEL="${GO_TEST_PARALLEL:-4}"
 
+# -race requires cgo. .buildflags defaults CGO_ENABLED=0 for the fast no-CGO
+# graph; this wrapper is the race contract and must enable cgo.
+export CGO_ENABLED=1
+
 ci_time "pr-core go test" -- \
     go test -p "$GO_TEST_PKG_PARALLEL" -parallel "$GO_TEST_PARALLEL" -race -short -skip '^TestEmbedded' ./...
