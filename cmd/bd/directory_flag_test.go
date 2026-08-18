@@ -2,9 +2,11 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
+	"github.com/jonbaldie/beads/internal/routing"
 	"github.com/spf13/cobra"
 )
 
@@ -63,6 +65,154 @@ func TestResolveChangeDirBeadsDirRejectsFile(t *testing.T) {
 func TestResolveChangeDirBeadsDirRejectsDirectoryWithoutProject(t *testing.T) {
 	if _, err := resolveChangeDirBeadsDir(t.TempDir()); err == nil {
 		t.Fatal("expected -C target without a beads project to fail")
+	}
+}
+
+func resetChangeDirState(t *testing.T) {
+	t.Helper()
+	origWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	oldChangeDir := changeDir
+	t.Cleanup(func() {
+		changeDir = oldChangeDir
+		restoreChangeDirSelection()
+		_ = os.Chdir(origWD)
+	})
+	changeDir = ""
+	restoreChangeDirSelection()
+}
+
+func TestApplyChangeDirSelectionInitAllowsMissingProject(t *testing.T) {
+	resetChangeDirState(t)
+
+	startWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if resolved, err := filepath.EvalSymlinks(startWD); err == nil {
+		startWD = resolved
+	}
+
+	target := t.TempDir()
+	if resolved, err := filepath.EvalSymlinks(target); err == nil {
+		target = resolved
+	}
+	t.Setenv("BEADS_DIR", "sentinel")
+	if err := os.Unsetenv("BEADS_DIR"); err != nil {
+		t.Fatalf("Unsetenv BEADS_DIR: %v", err)
+	}
+
+	changeDir = target
+	if err := applyChangeDirSelection(initCmd); err != nil {
+		t.Fatalf("init -C on a directory without .beads: %v", err)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if resolved, err := filepath.EvalSymlinks(wd); err == nil {
+		wd = resolved
+	}
+	if wd != target {
+		t.Fatalf("cwd after init -C = %q, want %q", wd, target)
+	}
+	if _, ok := os.LookupEnv("BEADS_DIR"); ok {
+		t.Fatal("init -C without a beads project must not set BEADS_DIR")
+	}
+
+	restoreChangeDirSelection()
+	after, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd after restore: %v", err)
+	}
+	if resolved, err := filepath.EvalSymlinks(after); err == nil {
+		after = resolved
+	}
+	if after != startWD {
+		t.Fatalf("cwd after restore = %q, want %q", after, startWD)
+	}
+}
+
+func TestApplyChangeDirSelectionListRejectsMissingProject(t *testing.T) {
+	resetChangeDirState(t)
+
+	startWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+
+	changeDir = t.TempDir()
+	if err := applyChangeDirSelection(listCmd); err == nil {
+		t.Fatal("list -C without a beads project must fail")
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if wd != startWD {
+		t.Fatalf("failed list -C changed cwd to %q, want %q", wd, startWD)
+	}
+}
+
+func TestApplyChangeDirSelectionNotionInitRejectsMissingProject(t *testing.T) {
+	resetChangeDirState(t)
+
+	changeDir = t.TempDir()
+	if err := applyChangeDirSelection(notionInitCmd); err == nil {
+		t.Fatal("notion init -C without a beads project must fail")
+	}
+}
+
+func TestApplyChangeDirSelectionReadsTargetGitConfig(t *testing.T) {
+	resetChangeDirState(t)
+
+	target := t.TempDir()
+	if resolved, err := filepath.EvalSymlinks(target); err == nil {
+		target = resolved
+	}
+	beadsDir := filepath.Join(target, ".beads")
+	if err := os.MkdirAll(beadsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(beadsDir, "metadata.json"), []byte(`{"backend":"dolt"}`), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	cmd := exec.Command("git", "init")
+	cmd.Dir = target
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "config", "beads.role", "maintainer")
+	cmd.Dir = target
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git config: %v\n%s", err, out)
+	}
+
+	changeDir = target
+	if err := applyChangeDirSelection(listCmd); err != nil {
+		t.Fatalf("list -C: %v", err)
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	if resolved, err := filepath.EvalSymlinks(wd); err == nil {
+		wd = resolved
+	}
+	if wd != target {
+		t.Fatalf("cwd after list -C = %q, want %q", wd, target)
+	}
+	if got := os.Getenv("BEADS_DIR"); got != beadsDir {
+		t.Fatalf("BEADS_DIR = %q, want %q", got, beadsDir)
+	}
+	role, err := routing.DetectUserRole(".")
+	if err != nil {
+		t.Fatalf("DetectUserRole: %v", err)
+	}
+	if role != routing.Maintainer {
+		t.Fatalf("DetectUserRole(.) = %q, want maintainer after -C into a repo with beads.role", role)
 	}
 }
 
