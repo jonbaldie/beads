@@ -9,6 +9,8 @@ import (
 
 func TestRunLintWarningsDoNotFailByDefault(t *testing.T) {
 	t.Parallel()
+	stdioMutex.Lock()
+	defer stdioMutex.Unlock()
 
 	issues := []*types.Issue{{
 		ID:          "bd-feat",
@@ -18,14 +20,15 @@ func TestRunLintWarningsDoNotFailByDefault(t *testing.T) {
 		Status:      types.StatusOpen,
 	}}
 
-	err := captureStdout(t, func() error { return runLint(issues, false) })
-	if err != nil {
+	if err := runLint(issues, false); err != nil {
 		t.Fatalf("runLint without --strict should exit 0 on warnings, got %v", err)
 	}
 }
 
 func TestRunLintStrictFailsOnWarnings(t *testing.T) {
 	t.Parallel()
+	stdioMutex.Lock()
+	defer stdioMutex.Unlock()
 
 	issues := []*types.Issue{{
 		ID:          "bd-feat",
@@ -35,7 +38,7 @@ func TestRunLintStrictFailsOnWarnings(t *testing.T) {
 		Status:      types.StatusOpen,
 	}}
 
-	err := captureStdout(t, func() error { return runLint(issues, true) })
+	err := runLint(issues, true)
 	if err == nil {
 		t.Fatal("runLint --strict should fail when warnings exist")
 	}
@@ -47,6 +50,8 @@ func TestRunLintStrictFailsOnWarnings(t *testing.T) {
 
 func TestRunLintCleanIsSuccess(t *testing.T) {
 	t.Parallel()
+	stdioMutex.Lock()
+	defer stdioMutex.Unlock()
 
 	issues := []*types.Issue{{
 		ID:          "bd-chore",
@@ -56,7 +61,7 @@ func TestRunLintCleanIsSuccess(t *testing.T) {
 		Status:      types.StatusOpen,
 	}}
 
-	if err := captureStdout(t, func() error { return runLint(issues, true) }); err != nil {
+	if err := runLint(issues, true); err != nil {
 		t.Fatalf("clean lint --strict should succeed, got %v", err)
 	}
 }
