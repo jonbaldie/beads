@@ -140,7 +140,7 @@ func TestProtocol_ReadyClaimComposesWithFilters(t *testing.T) {
 			t.Fatalf("L3.5: --claim --parent %s claimed %s, which is not a descendant of the epic", epic, id)
 		}
 		delete(underEpic, id) // never the same issue twice
-		w.run("close", id, "--reason", "done")
+		w.runEnv([]string{"BEADS_ACTOR=alice"}, "close", id, "--reason", "done")
 	}
 	if len(underEpic) != 0 {
 		t.Errorf("L3.5: --claim --parent left %v unclaimed; --parent must be transitive (R3)", underEpic)
