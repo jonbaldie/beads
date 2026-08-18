@@ -18,7 +18,8 @@ func TestRunLintWarningsDoNotFailByDefault(t *testing.T) {
 		Status:      types.StatusOpen,
 	}}
 
-	if err := runLint(issues, false); err != nil {
+	err := captureStdout(t, func() error { return runLint(issues, false) })
+	if err != nil {
 		t.Fatalf("runLint without --strict should exit 0 on warnings, got %v", err)
 	}
 }
@@ -34,7 +35,7 @@ func TestRunLintStrictFailsOnWarnings(t *testing.T) {
 		Status:      types.StatusOpen,
 	}}
 
-	err := runLint(issues, true)
+	err := captureStdout(t, func() error { return runLint(issues, true) })
 	if err == nil {
 		t.Fatal("runLint --strict should fail when warnings exist")
 	}
@@ -55,7 +56,7 @@ func TestRunLintCleanIsSuccess(t *testing.T) {
 		Status:      types.StatusOpen,
 	}}
 
-	if err := runLint(issues, true); err != nil {
+	if err := captureStdout(t, func() error { return runLint(issues, true) }); err != nil {
 		t.Fatalf("clean lint --strict should succeed, got %v", err)
 	}
 }
