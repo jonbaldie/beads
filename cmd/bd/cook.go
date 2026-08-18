@@ -17,15 +17,22 @@ import (
 )
 
 // stepTypeToIssueType converts a formula step type string to a types.IssueType.
-// Returns types.TypeTask for empty types. Non-empty types pass through
-// (trimmed and normalized) rather than being validated here: at pour and
-// cook --persist time, flattenUnregisteredIssueTypes degrades types that
-// are neither built-in nor registered in types.custom to task (with a
-// warning), and the storage layer validates what remains — the same
-// division of labor as bd create --type.
+// Returns types.TypeTask for empty types and for the formula step kind
+// "human" (human-assigned work, not an issue type). Other non-empty types
+// pass through (trimmed and normalized) rather than being validated here:
+// at pour and cook --persist time, flattenUnregisteredIssueTypes degrades
+// types that are neither built-in nor registered in types.custom to task
+// (with a warning), and the storage layer validates what remains — the
+// same division of labor as bd create --type.
 func stepTypeToIssueType(stepType string) types.IssueType {
 	stepType = strings.TrimSpace(stepType)
 	if stepType == "" {
+		return types.TypeTask
+	}
+	// Formula step kind "human" is a proto-pour convention (a person does
+	// the work), not a beads issue type. Map it to task so flatten does
+	// not warn as if "human" were a typo. Gates remain [steps.gate].
+	if strings.EqualFold(stepType, "human") {
 		return types.TypeTask
 	}
 	return types.IssueType(stepType).Normalize()
