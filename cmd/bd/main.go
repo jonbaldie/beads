@@ -791,6 +791,8 @@ func init() {
 	rootCmd.SetHelpFunc(colorizedHelpFunc)
 }
 
+var errNoBeadsProject = errors.New("no beads project found")
+
 func resolveChangeDirAbs(path string) (string, error) {
 	if strings.TrimSpace(path) == "" {
 		return "", nil
@@ -819,7 +821,7 @@ func resolveChangeDirBeadsDir(path string) (string, error) {
 	}
 	beadsDir := beads.FindBeadsDirFrom(absPath)
 	if beadsDir == "" {
-		return "", fmt.Errorf("cannot use -C directory %q: no beads project found", path)
+		return "", fmt.Errorf("cannot use -C directory %q: %w", path, errNoBeadsProject)
 	}
 	return beadsDir, nil
 }
@@ -860,15 +862,18 @@ func applyChangeDirSelection(cmd *cobra.Command) error {
 	if err != nil {
 		return HandleError("%v", err)
 	}
-	beadsDir := beads.FindBeadsDirFrom(absPath)
-	if beadsDir == "" && !allowsChangeDirWithoutProject(cmd) {
-		return HandleError("cannot use -C directory %q: no beads project found", changeDir)
+	beadsDir, err := resolveChangeDirBeadsDir(changeDir)
+	if err != nil {
+		if !errors.Is(err, errNoBeadsProject) || !allowsChangeDirWithoutProject(cmd) {
+			return HandleError("%v", err)
+		}
+		if err := chdirForChangeDir(absPath); err != nil {
+			return HandleError("%v", err)
+		}
+		return nil
 	}
 	if err := chdirForChangeDir(absPath); err != nil {
 		return HandleError("%v", err)
-	}
-	if beadsDir == "" {
-		return nil
 	}
 	changeDirEnvSnapshot = make(map[string]envSnapshotValue, 3)
 	for _, key := range []string{"BEADS_DIR", "BEADS_DB", "BD_DB"} {
