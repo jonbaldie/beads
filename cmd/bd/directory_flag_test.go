@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jonbaldie/beads/internal/routing"
+	"github.com/jonbaldie/beads/internal/testutil"
 	"github.com/spf13/cobra"
 )
 
@@ -84,21 +85,30 @@ func resetChangeDirState(t *testing.T) {
 	restoreChangeDirSelection()
 }
 
-func TestApplyChangeDirSelectionInitAllowsMissingProject(t *testing.T) {
-	resetChangeDirState(t)
-
-	startWD, err := os.Getwd()
+func mustGetwd(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
 	}
-	if resolved, err := filepath.EvalSymlinks(startWD); err == nil {
-		startWD = resolved
-	}
+	return wd
+}
 
-	target := t.TempDir()
-	if resolved, err := filepath.EvalSymlinks(target); err == nil {
-		target = resolved
+func canonicalTestPath(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return path
 	}
+	return resolved
+}
+
+func TestApplyChangeDirSelectionInitAllowsMissingProject(t *testing.T) {
+	resetChangeDirState(t)
+
+	startWD := canonicalTestPath(t, mustGetwd(t))
+
+	target := canonicalTestPath(t, t.TempDir())
 	t.Setenv("BEADS_DIR", "sentinel")
 	if err := os.Unsetenv("BEADS_DIR"); err != nil {
 		t.Fatalf("Unsetenv BEADS_DIR: %v", err)
@@ -108,13 +118,7 @@ func TestApplyChangeDirSelectionInitAllowsMissingProject(t *testing.T) {
 	if err := applyChangeDirSelection(initCmd); err != nil {
 		t.Fatalf("init -C on a directory without .beads: %v", err)
 	}
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	if resolved, err := filepath.EvalSymlinks(wd); err == nil {
-		wd = resolved
-	}
+	wd := canonicalTestPath(t, mustGetwd(t))
 	if wd != target {
 		t.Fatalf("cwd after init -C = %q, want %q", wd, target)
 	}
@@ -123,13 +127,7 @@ func TestApplyChangeDirSelectionInitAllowsMissingProject(t *testing.T) {
 	}
 
 	restoreChangeDirSelection()
-	after, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd after restore: %v", err)
-	}
-	if resolved, err := filepath.EvalSymlinks(after); err == nil {
-		after = resolved
-	}
+	after := canonicalTestPath(t, mustGetwd(t))
 	if after != startWD {
 		t.Fatalf("cwd after restore = %q, want %q", after, startWD)
 	}
@@ -138,20 +136,12 @@ func TestApplyChangeDirSelectionInitAllowsMissingProject(t *testing.T) {
 func TestApplyChangeDirSelectionListRejectsMissingProject(t *testing.T) {
 	resetChangeDirState(t)
 
-	startWD, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-
+	startWD := mustGetwd(t)
 	changeDir = t.TempDir()
 	if err := applyChangeDirSelection(listCmd); err == nil {
 		t.Fatal("list -C without a beads project must fail")
 	}
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	if wd != startWD {
+	if wd := mustGetwd(t); wd != startWD {
 		t.Fatalf("failed list -C changed cwd to %q, want %q", wd, startWD)
 	}
 }
@@ -168,10 +158,7 @@ func TestApplyChangeDirSelectionNotionInitRejectsMissingProject(t *testing.T) {
 func TestApplyChangeDirSelectionReadsTargetGitConfig(t *testing.T) {
 	resetChangeDirState(t)
 
-	target := t.TempDir()
-	if resolved, err := filepath.EvalSymlinks(target); err == nil {
-		target = resolved
-	}
+	target := canonicalTestPath(t, t.TempDir())
 	beadsDir := filepath.Join(target, ".beads")
 	if err := os.MkdirAll(beadsDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
@@ -184,6 +171,9 @@ func TestApplyChangeDirSelectionReadsTargetGitConfig(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v\n%s", err, out)
 	}
+	if err := testutil.ForceRepoLocalHooksPath(target); err != nil {
+		t.Fatalf("force repo-local hooks path: %v", err)
+	}
 	cmd = exec.Command("git", "config", "beads.role", "maintainer")
 	cmd.Dir = target
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -194,13 +184,7 @@ func TestApplyChangeDirSelectionReadsTargetGitConfig(t *testing.T) {
 	if err := applyChangeDirSelection(listCmd); err != nil {
 		t.Fatalf("list -C: %v", err)
 	}
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	if resolved, err := filepath.EvalSymlinks(wd); err == nil {
-		wd = resolved
-	}
+	wd := canonicalTestPath(t, mustGetwd(t))
 	if wd != target {
 		t.Fatalf("cwd after list -C = %q, want %q", wd, target)
 	}

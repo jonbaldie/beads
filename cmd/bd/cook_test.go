@@ -1045,6 +1045,8 @@ func TestStepTypeToIssueType(t *testing.T) {
 }
 
 func TestCookFormulaToSubgraph_HumanStepTypeMapsToTask(t *testing.T) {
+	// Pour seam: processStepToIssue must use the mapper so type=human
+	// lands as task on the cooked subgraph, not only in isolation.
 	f := &formula.Formula{
 		Formula: "feature-workflow",
 		Version: 1,
