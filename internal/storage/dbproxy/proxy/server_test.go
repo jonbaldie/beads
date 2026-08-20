@@ -460,6 +460,47 @@ func TestProxy_BackendCrash_ShutsDownToSelfHeal(t *testing.T) {
 	assert.Equal(t, int64(1), s.BackendDeadShutdowns)
 }
 
+// TestProxy_BackendCrash_RunningLagsDial_StillSelfHeals reproduces a narrower
+// timing window inside GH#5842's fix: the real DoltServer's Running() only
+// flips false once cmd.Wait() reaps the killed process, but the OS tears
+// down the listening socket (so Dial fails) synchronously with process
+// death, before that reap completes. A connection that lands in this gap
+// sees Dial fail and Running() still (stale) true, so naive handleConn logic
+// would skip self-heal on that attempt and leave the proxy running forever
+// with a backend that can never dial successfully again.
+func TestProxy_BackendCrash_RunningLagsDial_StillSelfHeals(t *testing.T) {
+	t.Parallel()
+
+	ts := server.New()
+	stats := &proxy.Stats{}
+	port := freeTCPPort(t)
+	root := t.TempDir()
+
+	h := runProxy(t, proxy.ProxyOpts{
+		RootDir: root, Port: port, Server: ts, Stats: stats,
+	})
+	waitListening(t, root, listenWait)
+
+	// Backend dies now (Dial fails from this point on), but Running() will
+	// keep reporting true for a short window, as measured against the real
+	// DoltServer's cmd.Wait() reap latency.
+	ts.CrashDelayed(errors.New("dolt sql-server exited"), 20*time.Millisecond)
+
+	// The very first connection after the crash lands inside the lag
+	// window (Running() still true). It must not be the only chance the
+	// proxy gets to notice the backend is dead.
+	conn := dialProxy(t, port)
+	_, err := conn.Read(make([]byte, 1))
+	assert.Error(t, err, "connection racing the dead backend should fail")
+	require.NoError(t, conn.Close())
+
+	require.NoError(t, h.waitErr(t, shutdownWait), "proxy should self-heal even when Running() lags the dead backend's Dial failure")
+	assertNoPidFile(t, root)
+
+	s := stats.Snapshot()
+	assert.Equal(t, int64(1), s.BackendDeadShutdowns)
+}
+
 func TestProxy_IdleTimeout_Fires(t *testing.T) {
 	t.Parallel()
 

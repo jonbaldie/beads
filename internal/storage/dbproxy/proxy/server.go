@@ -94,6 +94,21 @@ const (
 	idleWatcherMinInterval = 1 * time.Second
 	backendStopTimeout     = 5 * time.Minute
 	tcpKeepAlivePeriod     = 30 * time.Second
+
+	// backendDeathPollBudget/Interval bound a short re-poll of Running()
+	// after a Dial failure. A real backend's OS-level socket teardown (which
+	// makes Dial fail) happens synchronously with process death, but
+	// DatabaseServer.Running() only flips false once cmd.Wait() reaps the
+	// dead process — typically microseconds to a few milliseconds later, but
+	// not instantaneous. A single unlucky Dial can land in that gap and see
+	// Running() still (stale) true; without a re-poll that connection would
+	// be the proxy's only chance to notice the backend is gone, and it would
+	// run forever with a backend that never dials successfully again. The
+	// budget is comfortably larger than the observed reap lag while staying
+	// small enough not to meaningfully delay the (rare) genuinely-transient
+	// Dial failure case, where Running() stays true for the whole budget.
+	backendDeathPollBudget   = 250 * time.Millisecond
+	backendDeathPollInterval = 5 * time.Millisecond
 )
 
 var errIdleTimeout = errors.New("idle timeout reached")
@@ -450,7 +465,7 @@ func (p *proxyServer) handleConn(ctx context.Context, client net.Conn) error {
 		p.tracef("handleConn(%s) backend dial error: %v", addr, err)
 		p.stats.IncBackendDialError()
 		_ = client.Close()
-		if !p.server.Running(ctx) {
+		if p.backendConfirmedDead(ctx) {
 			// The backend (e.g. the dolt sql-server child) exited independently
 			// of this proxy process (GH#5842): DatabaseServer.Start is single-
 			// shot per instance (by design, see doltserver_test.go), so this
@@ -507,6 +522,30 @@ func (p *proxyServer) handleConn(ctx context.Context, client net.Conn) error {
 		return err
 	})
 	return g.Wait()
+}
+
+// backendConfirmedDead re-polls Running() for up to backendDeathPollBudget
+// after a Dial failure before concluding the backend is actually dead. A
+// single Running()==true right after Dial fails is not conclusive: it can
+// be stale for up to the real backend's process-reap latency (see
+// backendDeathPollBudget's doc comment). Polling briefly here, rather than
+// trusting the first read, keeps a connection that lands in that gap from
+// being the proxy's only (missed) chance to notice the backend is gone.
+func (p *proxyServer) backendConfirmedDead(ctx context.Context) bool {
+	deadline := time.Now().Add(backendDeathPollBudget)
+	for {
+		if !p.server.Running(ctx) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(backendDeathPollInterval):
+		}
+	}
 }
 
 func waitForServerReady(ctx context.Context, s server.DatabaseServer, timeout time.Duration) error {

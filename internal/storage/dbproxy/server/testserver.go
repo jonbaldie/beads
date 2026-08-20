@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"time"
 )
 
 type TestDatabaseServer interface {
@@ -90,6 +91,24 @@ func (s *TestDatabaseServerImpl) Crash(err error) {
 	s.started = false
 	s.crashErr = err
 	s.mu.Unlock()
+}
+
+// CrashDelayed reproduces the real DoltServer reap-lag window (GH#5842
+// follow-up): the backend socket dies immediately (Dial fails from this
+// call onward), but Running() keeps reporting true for reapDelay, mimicking
+// cmd.Wait() not having reaped the killed process yet. Real proxy callers
+// observe exactly this ordering because the OS tears down the listening
+// socket synchronously with process exit while wait4() reaping happens on
+// its own schedule, typically microseconds to a few milliseconds later.
+func (s *TestDatabaseServerImpl) CrashDelayed(err error, reapDelay time.Duration) {
+	s.mu.Lock()
+	s.crashErr = err
+	s.mu.Unlock()
+	time.AfterFunc(reapDelay, func() {
+		s.mu.Lock()
+		s.started = false
+		s.mu.Unlock()
+	})
 }
 
 func (s *TestDatabaseServerImpl) Snapshot() Counters {
