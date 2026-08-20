@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // TokenType represents the type of a lexer token.
@@ -104,13 +105,17 @@ func NewLexer(input string) *Lexer {
 }
 
 // next returns the next rune and advances position.
+//
+// input is decoded as UTF-8 (not raw bytes): treating each byte as its own
+// rune corrupts any multi-byte sequence once it round-trips through
+// strings.Builder.WriteRune (e.g. "café" becomes "cafÃ©").
 func (l *Lexer) next() rune {
 	if l.pos >= len(l.input) {
 		l.width = 0
 		return 0
 	}
-	r := rune(l.input[l.pos])
-	l.width = 1
+	r, w := utf8.DecodeRuneInString(l.input[l.pos:])
+	l.width = w
 	l.pos += l.width
 	return r
 }
@@ -120,7 +125,8 @@ func (l *Lexer) peek() rune {
 	if l.pos >= len(l.input) {
 		return 0
 	}
-	return rune(l.input[l.pos])
+	r, _ := utf8.DecodeRuneInString(l.input[l.pos:])
+	return r
 }
 
 // backup steps back one rune.
