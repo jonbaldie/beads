@@ -221,6 +221,13 @@ type VersionChange struct {
 // versionChanges contains agent-actionable changes for recent versions
 var versionChanges = []VersionChange{
 	{
+		Version: "1.2.2",
+		Date:    "2026-08-20",
+		Changes: []string{
+			"FIX: dbproxy self-heal no longer misses a dead backend when DatabaseServer.Running() lags the OS-level Dial() failure by the process-reap window; a bounded re-poll (backendConfirmedDead) closes the race so the proxy always self-heals instead of hanging forever against a dead backend (#12).",
+		},
+	},
+	{
 		Version: "1.2.1",
 		Date:    "2026-08-11",
 		Changes: []string{

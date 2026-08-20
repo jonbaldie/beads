@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-08-20
+
+### Fixed
+
+- **dbproxy self-heal missed a dead backend inside a narrow reap-lag race**
+  (#12). `DatabaseServer.Running()` only flips false once `cmd.Wait()` reaps
+  the killed backend process, but the OS tears down the listening socket
+  (making `Dial()` fail) synchronously with process death, before that reap
+  completes. A connection landing in that gap saw `Dial()` fail while
+  `Running()` was still (stale) true, so the self-heal introduced in 1.2.1's
+  GH#5842 fix concluded the failure was transient and skipped self-heal,
+  leaving the proxy running forever against a backend that could never dial
+  successfully again. `handleConn` now re-polls `Running()` for up to 250ms
+  before conceding a `Dial()` failure was transient, closing the race.
+
 ## [1.2.1] - 2026-08-11
 
 (Released as 1.2.1: the v1.2.0 tag burned pre-publish on a freebsd
