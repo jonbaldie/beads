@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-08-26
+
+### Fixed
+
+- **`ValidateIssueTitle` named the 500-byte limit as characters and accepted
+  invalid UTF-8** (#15). A 167-character CJK title (501 bytes) was rejected
+  as "500 characters or less (got 501)". The godoc already said the limit is
+  500 bytes; the error now says bytes. Invalid UTF-8 titles such as `ok\xff`
+  are rejected, so JSONL export can no longer silently replace them with
+  U+FFFD. The interactive create form uses the same gate.
+
+- **Query lexer treated each UTF-8 byte as its own rune** (#14). `Lexer.next()`
+  / `peek()` cast raw bytes to `rune`, so `label="café"` tokenized as
+  `"cafÃ©"` and failed to match real Unicode field data. The lexer now
+  decodes full runes via `utf8.DecodeRuneInString`.
+
 ## [1.2.2] - 2026-08-20
 
 ### Fixed

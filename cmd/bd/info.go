@@ -221,6 +221,14 @@ type VersionChange struct {
 // versionChanges contains agent-actionable changes for recent versions
 var versionChanges = []VersionChange{
 	{
+		Version: "1.2.3",
+		Date:    "2026-08-26",
+		Changes: []string{
+			"FIX: issue titles reject invalid UTF-8 and report the 500-byte limit as bytes, not characters — a 167-rune CJK title is no longer described as 501 characters, and JSONL export can no longer silently replace a corrupt title with U+FFFD (#15).",
+			"FIX: query lexer decodes full UTF-8 runes instead of casting each byte to a rune, so predicates like label=\"café\" match real Unicode field data (#14).",
+		},
+	},
+	{
 		Version: "1.2.2",
 		Date:    "2026-08-20",
 		Changes: []string{
