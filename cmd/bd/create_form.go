@@ -283,10 +283,7 @@ func runCreateForm(cmd *cobra.Command) error {
 					if strings.TrimSpace(s) == "" {
 						return fmt.Errorf("title is required")
 					}
-					if len(s) > 500 {
-						return fmt.Errorf("title must be 500 characters or less")
-					}
-					return nil
+					return types.ValidateIssueTitle(s)
 				}),
 
 			huh.NewText().

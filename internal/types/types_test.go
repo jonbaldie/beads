@@ -43,13 +43,13 @@ func TestIssueValidation(t *testing.T) {
 			name: "title too long",
 			issue: Issue{
 				ID:        "test-1",
-				Title:     string(make([]byte, 501)), // 501 characters
+				Title:     string(make([]byte, 501)), // 501 bytes of NUL
 				Status:    StatusOpen,
 				Priority:  2,
 				IssueType: TypeFeature,
 			},
 			wantErr: true,
-			errMsg:  "title must be 500 characters or less",
+			errMsg:  "title must be 500 bytes or less",
 		},
 		{
 			name: "invalid priority too low",
@@ -232,6 +232,48 @@ func TestIssueValidation(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestValidateIssueTitleErrorNamesBytes(t *testing.T) {
+	// 167 CJK runes is 501 bytes — over the 500-byte limit, under 500 characters.
+	title := strings.Repeat("\u4f60", 167)
+	err := ValidateIssueTitle(title)
+	if err == nil {
+		t.Fatal("ValidateIssueTitle() accepted a 501-byte title")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "characters") {
+		t.Fatalf("error names characters while counting bytes: %s", msg)
+	}
+	if !strings.Contains(msg, "bytes") {
+		t.Fatalf("error should name the measured unit (bytes): %s", msg)
+	}
+	if !strings.Contains(msg, "501") {
+		t.Fatalf("error should report the byte count 501: %s", msg)
+	}
+}
+
+func TestValidateIssueTitleRejectsInvalidUTF8(t *testing.T) {
+	const want = "title must be valid UTF-8"
+	err := ValidateIssueTitle("ok\xff")
+	if err == nil {
+		t.Fatal("ValidateIssueTitle() accepted invalid UTF-8")
+	}
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("ValidateIssueTitle() error = %v, want %q", err, want)
+	}
+	err = (&Issue{
+		Title:     "ok\xff",
+		Status:    StatusOpen,
+		Priority:  2,
+		IssueType: TypeTask,
+	}).Validate()
+	if err == nil {
+		t.Fatal("Issue.Validate() accepted an invalid UTF-8 title")
+	}
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("Issue.Validate() error = %v, want %q", err, want)
 	}
 }
 
