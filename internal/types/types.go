@@ -333,13 +333,16 @@ func CheckTextLen(name, val string) error {
 }
 
 // ValidateIssueTitle checks the canonical issue-title requirements. The title
-// must be nonempty and at most 500 bytes.
+// must be nonempty, valid UTF-8, and at most 500 bytes.
 func ValidateIssueTitle(title string) error {
 	if len(title) == 0 {
 		return fmt.Errorf("title is required")
 	}
+	if !utf8.ValidString(title) {
+		return fmt.Errorf("title must be valid UTF-8")
+	}
 	if len(title) > 500 {
-		return fmt.Errorf("title must be 500 characters or less (got %d)", len(title))
+		return fmt.Errorf("title must be 500 bytes or less (got %d)", len(title))
 	}
 	return nil
 }
