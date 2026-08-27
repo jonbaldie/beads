@@ -147,33 +147,17 @@ in; 13 is the HTTP surface, which lands with the command rather than after it.
    `…InTx` function, and it is tempting to read that as the rule for tx-level
    bodies. It is not. Those two take a `DBTX`, which is exactly the method set
    `domain/db.Runner` publishes, so the unit-of-work leg reaches them through
-   the domain repository.    `issueops.BatchApplier` still has two bodies: it composes create, update,
-   and close through the domain use cases rather than through
-   `ExecuteCreate` / `ExecuteUpdate` / `ExecuteClose`. Those Execute verbs now
-   take `DBTX`, which `domain/db.Runner` satisfies, so a later slice can route
-   the unit-of-work BatchApplier through the same body the store adapters use.
-   Lifecycle already does that. Do not treat the leftover BatchApplier fork as
-   evidence that Execute* cannot be reached from a unit of work.
+    the domain repository. `issueops.BatchApplier` is the same shape as
+    Lifecycle: `ApplyBatchInTx` takes `DBTX`, the store adapters wrap it in
+    their own transaction, and the unit-of-work adapter passes the open
+    runner. Do not grow a second apply body when every function the body
+    calls already takes an interface `Runner` satisfies.
 
-   So that role has TWO bodies, and its contract says so at the top rather than
-   claiming three legs and one reading. **The test is mechanical: does every
-   function your body calls take an interface `Runner` satisfies?** Ask it
-   before you write the contract header, because the header's vote count is
-   what tells the next reader how much a three-leg run is worth.
-
-   **THEN SHARE EVERYTHING THE FORK DOES NOT FORCE YOU TO DUPLICATE, and be
-   precise about which half that is.** `BatchApplier`'s two bodies share their
-   request VALIDATION and their commit-message rule outright — one function
-   each, called from both. Its end gate is the interesting case, because it is
-   shared at the LEAF and forked at the ORCHESTRATION: both legs reach the same
-   `issueops.CheckBlockingHierarchyInTx` and the same
-   `AppendSchedulingGraphInTx`/`CycleThroughEdgesInGraph` walk (the unit-of-work
-   leg through two repository methods that delegate to them), so the two cannot
-   disagree about what a conflict or a cycle IS — but which edges get collected,
-   in what order, and how the refusal is wrapped are written twice. That is the
-   shape to aim for and the shape to describe honestly: "the legs share their
-   end gate" would be a claim the code does not support, and the next reader
-   would trust it.
+    **The test is mechanical: does every function your body calls take an
+    interface `Runner` satisfies?** Ask it before you write the contract
+    header, because the header's vote count is what tells the next reader
+    how much a three-leg run is worth. If the answer is yes, the contract
+    is one body plus wrapper checks, not two votes.
 
 4. **The unit-of-work body and its source interface.**
    `internal/storage/uow/<role>.go`, declaring `type <Role>Source interface {

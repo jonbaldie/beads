@@ -1,12 +1,23 @@
 package issueops
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/jonbaldie/beads/internal/storage"
 	publicops "github.com/jonbaldie/beads/issueops"
 )
+
+// TestApplyBatchInTxTakesDBTX pins the seam that lets the unit-of-work
+// adapter share ApplyBatchInTx. The store adapters pass *sql.Tx. The
+// unit-of-work adapter passes domain/db.Runner. Both satisfy DBTX. A
+// *sql.Tx-only signature is what forced the unit-of-work adapter to
+// re-orchestrate the batch.
+func TestApplyBatchInTxTakesDBTX(t *testing.T) {
+	t.Parallel()
+	var _ func(context.Context, DBTX, storage.ApplyBatchPlan) (publicops.ApplyBatchResult, BatchApplyWrite, error) = ApplyBatchInTx
+}
 
 // applyBatchCommitResult builds a result from a (kind, changed) list, which is
 // all the message rule reads.

@@ -273,11 +273,8 @@ func (p *notifyingProvider) DependencyEditor() (publicops.DependencyEditor, erro
 	return NewDependencyEditor(p)
 }
 
-// BatchApplier builds on THIS provider, like every role above it, so the
-// notifications its items produce are the ones the recording use cases already
-// emit for a create, an update, a close and an edge. It needs no recorder of
-// its own for that reason: the role composes those use cases rather than
-// reaching past them.
+// BatchApplier builds on THIS provider. Landed items are announced after
+// ApplyBatchInTx, not by composing recording use cases.
 func (p *notifyingProvider) BatchApplier() (publicops.BatchApplier, error) {
 	return NewBatchApplier(p)
 }
@@ -835,6 +832,14 @@ func (u *notifyingUOW) recordClose(ctx context.Context, id string) {
 	u.rec.record(opClose, u.snapshotter().anyPlane(ctx, id))
 }
 
+func (u *notifyingUOW) recordUpdateLanded(ctx context.Context, id string) {
+	u.rec.record(opUpdate, u.snapshotter().anyPlane(ctx, id))
+}
+
+func (u *notifyingUOW) recordDepAdd(ctx context.Context, id string) {
+	u.rec.record(opDepAdd, u.snapshotter().anyPlaneWithEdges(ctx, id))
+}
+
 func (u *notifyingUOW) recordReopen(ctx context.Context, id string, changed bool) {
 	if !changed {
 		return
@@ -1147,11 +1152,12 @@ func (u *recordingIssueUC) ClaimReadyWisp(ctx context.Context, filter types.Work
 //
 // THE BATCH COMPOSITIONS OVERRIDE THAT, and they do it above these verbs rather
 // than inside them, because these are the SAME methods a single close reaches.
-// closeBatchItem and uowApplyRun.applyClose rewind the recorded notification
-// when the item persisted nothing, matching hookBatchCloser and hookBatchApplier
-// on the other plumbing (ga-2yaqp.1) — otherwise a teardown replayed against an
-// already-closed convoy runs on_close once per item on every pass. Gate here
-// and the single close would lose its re-close firing with it.
+// closeBatchItem rewinds a recorded notification when the item persisted
+// nothing. BatchApplier never records that close: announceBatchApply fires
+// only on Changed. Both match hookBatchCloser and hookBatchApplier
+// (ga-2yaqp.1) — otherwise a teardown replayed against an already-closed
+// convoy runs on_close once per item on every pass. Gate here and the
+// single close would lose its re-close firing with it.
 //
 // The snapshot read is PLANE-PINNED to the verb that was called, while the verb
 // itself tolerates an id from either plane. That gap is unreachable as shipped:

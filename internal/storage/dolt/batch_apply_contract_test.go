@@ -13,9 +13,8 @@ import (
 // transaction and composes the commit message inside it, because the default
 // message names how much LANDED.
 //
-// It is ONE of TWO votes: the embedded wiring is the same body on a different
-// engine, and only the unit-of-work leg is an independent implementation. See
-// the contract file's header.
+// It shares ApplyBatchInTx with the embedded wiring and the unit-of-work
+// adapter. See the contract file's header.
 //
 // The cases are subtests of one parent so the whole role suite shares one store
 // and one copy-on-write branch. setupTestStore already marks the PARENT

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
-	"time"
 
 	"github.com/jonbaldie/beads/internal/storage"
 	"github.com/jonbaldie/beads/internal/storage/dberrors"
@@ -481,15 +480,4 @@ func validateReopenRequest(request publicops.ReopenRequest) error {
 		return validationError(fmt.Errorf("reopen: actor and issue ID must not be empty"))
 	}
 	return nil
-}
-
-func semanticIssueEqual(left, right *types.Issue) bool {
-	if left == nil || right == nil {
-		return left == right
-	}
-	leftCopy := *left
-	rightCopy := *right
-	leftCopy.UpdatedAt, rightCopy.UpdatedAt = time.Time{}, time.Time{}
-	leftCopy.RowVersion, rightCopy.RowVersion = 0, 0
-	return reflect.DeepEqual(leftCopy, rightCopy)
 }
