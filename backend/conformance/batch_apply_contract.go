@@ -18,16 +18,11 @@ import (
 // genuinely disagrees is parked at its own wiring site with skipKnownDivergence
 // so the case still runs on the ones that agree.
 //
-// THREE LEGS, TWO INDEPENDENT BODIES — and unlike TreeWalker and MetadataCAS
-// that is a real two-vote contract rather than one reading plus two wrapper
-// checks. dolt and embeddeddolt share
-// internal/storage/issueops.ApplyBatchInTx, each wrapping it in its own
-// transaction. The unit-of-work leg (internal/storage/uow.batchApplier) has its
-// OWN body. ExecuteCreate / ExecuteUpdate / ExecuteClose now take DBTX, which
-// the unit-of-work runner satisfies, and Lifecycle already uses that seam.
-// BatchApplier has not been routed yet. A per-leg failure here can still be a
-// second implementation disagreeing about what a batch MEANS, not only a
-// wrapper losing a field.
+// THREE LEGS, ONE BODY. dolt, embeddeddolt, and the unit-of-work adapter all
+// reach internal/storage/issueops.ApplyBatchInTx. The stores wrap it in their
+// own transaction; the unit-of-work adapter passes the open runner as DBTX.
+// A per-leg failure here is a wrapper losing a field, not a second
+// implementation disagreeing about what a batch means.
 //
 // THE CASES ARE STILL WRITTEN THE CAREFUL WAY. They read RAW ROWS through
 // QueryScalar rather than asking the role what it just did — a role-answer
@@ -52,9 +47,9 @@ import (
 // because one transaction and five produce identical answers when nothing else
 // is writing, and a concurrent case would be flaky at three engines — buying a
 // red suite people learn to re-run rather than a guarantee. What holds it
-// instead is the SHAPE of the two bodies: ApplyBatchInTx takes a transaction it
-// did not open, and the unit-of-work body runs inside one RunTxResult, so there
-// is no two-call composition to regress into without deleting them. The
+// instead is the SHAPE of the one body: ApplyBatchInTx takes a DBTX it
+// did not open, and every adapter runs it inside one transaction, so there
+// is no two-call composition to regress into without deleting it. The
 // ROLLBACK cases below are the closest observable proxy and they are not the
 // same claim — a body that opened a transaction per item and undid the earlier
 // ones by hand would pass every one of them. The probe that would upgrade this

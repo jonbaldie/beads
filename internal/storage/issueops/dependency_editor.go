@@ -211,7 +211,7 @@ func addDependencyEdgeInTx(ctx context.Context, tx *sql.Tx, request publicops.Ad
 // The message is built through domain.NewCycleError so it errors.Is-matches
 // ErrDependencyCycle while rendering byte-for-byte what the direct bulk path
 // already prints.
-func checkAddedEdgesForCycles(ctx context.Context, tx *sql.Tx, edges []publicops.DependencyEdge) error {
+func checkAddedEdgesForCycles(ctx context.Context, tx DBTX, edges []publicops.DependencyEdge) error {
 	var pairs [][2]string
 	for _, edge := range edges {
 		if !types.IsSchedulingEdge(edge.Type) {

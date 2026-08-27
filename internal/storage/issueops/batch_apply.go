@@ -2,7 +2,6 @@ package issueops
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -22,22 +21,10 @@ import (
 // package because the items must see one another's writes, and
 // storage.DoltStorage publishes methods, not transactions.
 //
-// TWO OF THE THREE LEGS SHARE IT: the Dolt-backed stores each wrap it in their
-// own transaction. THE UNIT-OF-WORK LEG DOES NOT, and cannot — it has a body of
-// its own in internal/storage/uow/batch_applier.go. The reason is mechanical
-// rather than chosen: this body composes ExecuteCreate, ExecuteUpdate and
-// ExecuteClose, every one of which takes a *sql.Tx, while a unit of work's
-// runner is a *sql.Conn with a transaction open on it, and neither publishes
-// the other. Reaching this function from there would mean widening three of the
-// oldest write paths in the tree to take an interface.
-//
-// So a three-leg contract run over this role is TWO INDEPENDENT VOTES plus an
-// engine check, not one reading plus two wrapper checks — which is what the
-// conformance contract's header states and what its cases are written for.
-// What keeps the two bodies from meaning different things is the sharing that
-// IS possible: the request validation (storage.PlanApplyBatch), the
-// commit-message rule (ApplyBatchCommitMessage) and the two leaf checks the end
-// gate runs are one definition each, reached from both.
+// ALL THREE LEGS SHARE IT: the Dolt-backed stores each wrap it in their own
+// transaction, and the unit-of-work adapter passes the open runner as DBTX.
+// ExecuteCreate, ExecuteUpdate, ExecuteClose, AddDependencyInTx and the end
+// gate all take DBTX, so there is one body for what a batch means.
 //
 // IT COMPOSES THE SINGLE-VERB BODIES rather than restating them. A create item
 // is ExecuteCreate, an update is ExecuteUpdate, a close is ExecuteClose: the
@@ -57,7 +44,7 @@ import (
 // It reports what the request DID alongside the result, because only the caller
 // knows what to do with that; see BatchApplyWrite for why those are two facts
 // rather than one.
-func ApplyBatchInTx(ctx context.Context, tx *sql.Tx, plan storage.ApplyBatchPlan) (publicops.ApplyBatchResult, BatchApplyWrite, error) {
+func ApplyBatchInTx(ctx context.Context, tx DBTX, plan storage.ApplyBatchPlan) (publicops.ApplyBatchResult, BatchApplyWrite, error) {
 	run := &applyBatchRun{
 		plan:   plan,
 		keys:   make(map[string]string, len(plan.KeyIndex)),
@@ -193,7 +180,7 @@ type appliedEdge struct {
 
 // apply runs the three phases in order: the items, the metadata splice, the end
 // gate.
-func (r *applyBatchRun) apply(ctx context.Context, tx *sql.Tx) error {
+func (r *applyBatchRun) apply(ctx context.Context, tx DBTX) error {
 	for i := range r.plan.Items {
 		if err := r.applyItem(ctx, tx, i); err != nil {
 			return err
@@ -206,7 +193,7 @@ func (r *applyBatchRun) apply(ctx context.Context, tx *sql.Tx) error {
 }
 
 // applyItem applies one item and records its outcome at its own index.
-func (r *applyBatchRun) applyItem(ctx context.Context, tx *sql.Tx, index int) error {
+func (r *applyBatchRun) applyItem(ctx context.Context, tx DBTX, index int) error {
 	item := r.plan.Items[index]
 	switch item.Kind {
 	case publicops.ItemCreate:
@@ -236,7 +223,7 @@ func (r *applyBatchRun) applyItem(ctx context.Context, tx *sql.Tx, index int) er
 // assignment and the error classification beside them, which is the drift the
 // role exists to avoid, and the cost is bounded by the request's hundred-item
 // cap. Revisit it with a measurement, not with a copy of ExecuteCreateBatch.
-func (r *applyBatchRun) applyCreate(ctx context.Context, tx *sql.Tx, index int, item *publicops.CreateItem) error {
+func (r *applyBatchRun) applyCreate(ctx context.Context, tx DBTX, index int, item *publicops.CreateItem) error {
 	created, tables, err := ExecuteCreate(ctx, tx, publicops.CreateRequest{
 		Actor:         r.plan.Actor,
 		Issue:         item.Issue,
@@ -265,7 +252,7 @@ func (r *applyBatchRun) applyCreate(ctx context.Context, tx *sql.Tx, index int, 
 // applyUpdate patches one row through the same body a single update runs, which
 // is what makes the guards evaluate AS-MODIFIED for free: the row it reads is
 // the row this request has already written.
-func (r *applyBatchRun) applyUpdate(ctx context.Context, tx *sql.Tx, index int, item *publicops.UpdateItem) error {
+func (r *applyBatchRun) applyUpdate(ctx context.Context, tx DBTX, index int, item *publicops.UpdateItem) error {
 	id, err := r.resolve(item.Target, index, "target")
 	if err != nil {
 		return err
@@ -298,7 +285,7 @@ func (r *applyBatchRun) applyUpdate(ctx context.Context, tx *sql.Tx, index int, 
 // applyClose closes one row through the same body a single close runs, so close
 // policy is evaluated at THIS ITEM against the row as this request has already
 // changed it.
-func (r *applyBatchRun) applyClose(ctx context.Context, tx *sql.Tx, index int, item *publicops.CloseItem) error {
+func (r *applyBatchRun) applyClose(ctx context.Context, tx DBTX, index int, item *publicops.CloseItem) error {
 	id, err := r.resolve(item.Target, index, "target")
 	if err != nil {
 		return err
@@ -334,7 +321,7 @@ func (r *applyBatchRun) applyClose(ctx context.Context, tx *sql.Tx, index int, i
 // re-add of the same pair with the same type reports Changed false and stages
 // nothing — the rule RemoveDependencyResult.Removed states for the mirror
 // operation.
-func (r *applyBatchRun) applyDepAdd(ctx context.Context, tx *sql.Tx, index int, item *publicops.DepAddItem) error {
+func (r *applyBatchRun) applyDepAdd(ctx context.Context, tx DBTX, index int, item *publicops.DepAddItem) error {
 	source, err := r.resolve(item.Source, index, "source")
 	if err != nil {
 		return err
@@ -423,7 +410,7 @@ func (r *applyBatchRun) applyDepAdd(ctx context.Context, tx *sql.Tx, index int, 
 // A caller reading the event stream sees a create and then an update rather
 // than one create carrying values nothing could have known yet — which is
 // honest, and is what the leaf documents.
-func (r *applyBatchRun) spliceMetadataRefs(ctx context.Context, tx *sql.Tx) error {
+func (r *applyBatchRun) spliceMetadataRefs(ctx context.Context, tx DBTX) error {
 	for index := range r.plan.Items {
 		item := r.plan.Items[index]
 		if item.Kind != publicops.ItemCreate || len(item.Create.MetadataRefs) == 0 {
@@ -508,7 +495,7 @@ func (r *applyBatchRun) resolveMetadataRefs(index int, refs map[string]publicops
 // them close together, so it is raised as the request's own refusal with no
 // item wrapper. The HIERARCHY half IS per edge — one blocking edge gating one
 // issue on one of its own ancestors — so it names the item that carried it.
-func (r *applyBatchRun) runEndGate(ctx context.Context, tx *sql.Tx) error {
+func (r *applyBatchRun) runEndGate(ctx context.Context, tx DBTX) error {
 	if len(r.edges) == 0 {
 		return nil
 	}

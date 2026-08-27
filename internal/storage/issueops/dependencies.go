@@ -170,7 +170,7 @@ type DepTargetPrecheck struct {
 // same-type re-add or a silent structural add. Callers that stage tables for a
 // Dolt commit stage the events table only when an event row exists, so a
 // no-event add cannot sweep unrelated pending rows into the commit (GH#2455).
-func AddDependencyInTx(ctx context.Context, tx *sql.Tx, dep *types.Dependency, actor string, opts AddDependencyOpts) (bool, error) {
+func AddDependencyInTx(ctx context.Context, tx DBTX, dep *types.Dependency, actor string, opts AddDependencyOpts) (bool, error) {
 	return addDependencyInTx(ctx, tx, dep, actor, opts, nil)
 }
 

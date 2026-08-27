@@ -13,9 +13,8 @@ import (
 // store, which hands back the SAME body the server-backed store does
 // (internal/storage/issueops.ApplyBatchInTx) and differs only in how it reaches
 // a transaction and in that its version commit is published after that
-// transaction rather than inside it. That is what this wiring catches; it is
-// not an independent vote on the body — the unit-of-work leg is the second
-// vote. See the contract file's header.
+// transaction rather than inside it. The unit-of-work adapter wraps the same
+// body on DBTX. See the contract file's header.
 //
 // One environment for the whole suite: booting an embedded engine per case
 // would dominate the runtime, every case namespaces its ids, and the history

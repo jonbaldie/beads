@@ -38,7 +38,7 @@ type hookBatchCloser struct {
 //
 // BOTH WRITE PLUMBINGS ANSWER THIS WAY. The proxied-server path composes the
 // same close through a unit of work, and its batch compositions
-// (uow.closeBatchItem, uowApplyRun.applyClose) rewind the recorded notification
+// (uow.closeBatchItem rewinds; announceBatchApply skips) the recorded notification
 // for an item that persisted nothing — so `bd serve` and the direct store agree
 // about what a replayed teardown announces.
 //

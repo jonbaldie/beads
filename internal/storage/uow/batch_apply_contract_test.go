@@ -8,16 +8,8 @@ import (
 )
 
 // TestBatchApplyContract runs the BatchApplier contract against the
-// unit-of-work provider, and this is the leg that makes the contract a TWO-VOTE
-// one. It is still a genuinely independent body: Lifecycle now shares
-// ExecuteCreate / ExecuteUpdate / ExecuteClose, but this role still
-// re-derives those verbs through the domain use cases, reaching only the
-// SHARED pieces it can (storage.PlanApplyBatch for the request rules,
-// issueops.ApplyBatchCommitMessage for the entry).
-//
-// It is therefore the leg where a disagreement about what a batch MEANS shows
-// up, not just a wrapper losing a field: the as-modified guards, the end gate
-// and the plane routing are written twice.
+// unit-of-work provider. This leg now wraps ApplyBatchInTx on the open
+// DBTX runner, the same body the Dolt-backed stores wrap.
 //
 // One provider for the whole suite (each newUOWRoleFixtureProvider boots a real
 // Dolt sql-server) and NO t.Parallel: this backend has no per-test

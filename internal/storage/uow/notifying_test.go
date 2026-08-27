@@ -979,32 +979,51 @@ func assertFired(t *testing.T, got, want []firedHook) {
 }
 
 // TestNotifyingUOWBatchApplierAnnouncesOnlyLandedCloses is the BatchApplier's
-// half of the batch firing rule the parity table pins for closeBatchItem. Both
-// compositions reach the same recording close verb, so both had the same defect
-// and both need their own case: a fix applied to one of them passes the other's
-// tests untouched (ga-2yaqp.1).
-//
-// The batch mixes a row that is already closed with one that is not, which is
-// the shape a replayed teardown produces. Only the row that actually closed is
-// a script's business.
+// half of the batch firing rule the parity table pins for closeBatchItem.
+// ApplyBatchInTx reports Changed; announceBatchApply fires only for landed
+// closes. The batch mixes a row that is already closed with one that is not,
+// which is the shape a replayed teardown produces (ga-2yaqp.1).
 func TestNotifyingUOWBatchApplierAnnouncesOnlyLandedCloses(t *testing.T) {
 	closedAlready := seedIssue("bd-closed")
 	closedAlready.Status = types.StatusClosed
 	f := newNotifyFixture(t, closedAlready, seedIssue("bd-open"))
+	uw := f.newUOW(t)
 
-	applier, err := NewBatchApplier(f.provider)
-	if err != nil {
-		t.Fatalf("NewBatchApplier: %v", err)
-	}
-	if _, err := applier.ApplyBatch(context.Background(), publicops.ApplyBatchRequest{
-		Actor: "tester",
-		Items: []publicops.ApplyItem{
-			{Kind: publicops.ItemClose, Close: &publicops.CloseItem{Target: publicops.Ref{ID: "bd-closed"}}},
-			{Kind: publicops.ItemClose, Close: &publicops.CloseItem{Target: publicops.Ref{ID: "bd-open"}}},
+	announceBatchApply(context.Background(), uw, publicops.ApplyBatchResult{
+		Items: []publicops.ItemResult{
+			{Kind: publicops.ItemClose, IssueID: "bd-closed", Changed: false, Issue: closedAlready},
+			{Kind: publicops.ItemClose, IssueID: "bd-open", Changed: true, Issue: seedIssue("bd-open")},
 		},
-	}); err != nil {
-		t.Fatalf("ApplyBatch: %v", err)
+	})
+	if err := uw.Commit(context.Background(), "test"); err != nil {
+		t.Fatalf("Commit: %v", err)
 	}
 
 	assertFired(t, f.runner.events(), []firedHook{{hooks.EventClose, "bd-open"}})
+}
+
+func TestNotifyingUOWBatchApplierAnnouncesCreateUpdateAndDistinctDepSources(t *testing.T) {
+	f := newNotifyFixture(t, seedIssue("bd-a"), seedIssue("bd-b"), seedIssue("bd-c"))
+	uw := f.newUOW(t)
+
+	announceBatchApply(context.Background(), uw, publicops.ApplyBatchResult{
+		Items: []publicops.ItemResult{
+			{Kind: publicops.ItemCreate, IssueID: "bd-a", Changed: true, Issue: seedIssue("bd-a")},
+			{Kind: publicops.ItemUpdate, IssueID: "bd-b", Changed: true, Issue: seedIssue("bd-b")},
+			{Kind: publicops.ItemUpdate, IssueID: "bd-b", Changed: false, Issue: seedIssue("bd-b")},
+			{Kind: publicops.ItemDepAdd, IssueID: "bd-a", Changed: true},
+			{Kind: publicops.ItemDepAdd, IssueID: "bd-c", Changed: false},
+			{Kind: publicops.ItemDepAdd, IssueID: "bd-c", Changed: true},
+			{Kind: publicops.ItemDepAdd, IssueID: "bd-c", Changed: true},
+		},
+	})
+	if err := uw.Commit(context.Background(), "test"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	assertFired(t, f.runner.events(), []firedHook{
+		{hooks.EventCreate, "bd-a"},
+		{hooks.EventUpdate, "bd-b"},
+		{hooks.EventUpdate, "bd-c"},
+	})
 }
