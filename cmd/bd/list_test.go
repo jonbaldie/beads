@@ -33,27 +33,41 @@ func (h *listTestHelper) createTestIssues() {
 	now := time.Now()
 	h.issues = []*types.Issue{
 		{
-			Title:       "Bug Issue",
-			Description: "Test bug",
-			Priority:    0,
-			IssueType:   types.TypeBug,
-			Status:      types.StatusOpen,
+			IssueContent: types.IssueContent{
+				Title:       "Bug Issue",
+				Description: "Test bug",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  0,
+				IssueType: types.TypeBug,
+				Status:    types.StatusOpen,
+			},
 		},
 		{
-			Title:       "Feature Issue",
-			Description: "Test feature",
-			Priority:    1,
-			IssueType:   types.TypeFeature,
-			Status:      types.StatusInProgress,
-			Assignee:    testUserAlice,
+			IssueContent: types.IssueContent{
+				Title:       "Feature Issue",
+				Description: "Test feature",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				IssueType: types.TypeFeature,
+				Status:    types.StatusInProgress,
+				Assignee:  testUserAlice,
+			},
 		},
 		{
-			Title:       "Task Issue",
-			Description: "Test task",
-			Priority:    2,
-			IssueType:   types.TypeTask,
-			Status:      types.StatusClosed,
-			ClosedAt:    &now,
+			IssueContent: types.IssueContent{
+				Title:       "Task Issue",
+				Description: "Test task",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				IssueType: types.TypeTask,
+				Status:    types.StatusClosed,
+			},
+			IssueTimes: types.IssueTimes{
+				ClosedAt: &now,
+			},
 		},
 	}
 	for _, issue := range h.issues {
@@ -113,34 +127,34 @@ func TestListCommandSuite(t *testing.T) {
 
 		t.Run("filter by status", func(t *testing.T) {
 			status := types.StatusOpen
-			results := h.search(types.IssueFilter{Status: &status})
+			results := h.search(types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Status: &status}})
 			h.assertCount(len(results), 1, "open issues")
 			h.assertEqual(types.StatusOpen, results[0].Status, "status")
 		})
 
 		t.Run("filter by priority", func(t *testing.T) {
 			priority := 0
-			results := h.search(types.IssueFilter{Priority: &priority})
+			results := h.search(types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Priority: &priority}})
 			h.assertCount(len(results), 1, "P0 issues")
 			h.assertEqual(0, results[0].Priority, "priority")
 		})
 
 		t.Run("filter by assignee", func(t *testing.T) {
 			assignee := testUserAlice
-			results := h.search(types.IssueFilter{Assignee: &assignee})
+			results := h.search(types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Assignee: &assignee}})
 			h.assertCount(len(results), 1, "issues for alice")
 			h.assertEqual(testUserAlice, results[0].Assignee, "assignee")
 		})
 
 		t.Run("filter by issue type", func(t *testing.T) {
 			issueType := types.TypeBug
-			results := h.search(types.IssueFilter{IssueType: &issueType})
+			results := h.search(types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IssueType: &issueType}})
 			h.assertCount(len(results), 1, "bug issues")
 			h.assertEqual(types.TypeBug, results[0].IssueType, "type")
 		})
 
 		t.Run("filter by label", func(t *testing.T) {
-			results := h.search(types.IssueFilter{Labels: []string{"critical"}})
+			results := h.search(types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Labels: []string{"critical"}}})
 			h.assertCount(len(results), 1, "issues with critical label")
 			if len(results) > 0 {
 				h.assertEqual("Bug Issue", results[0].Title, "label-filtered issue title")
@@ -148,7 +162,7 @@ func TestListCommandSuite(t *testing.T) {
 		})
 
 		t.Run("filter by title search", func(t *testing.T) {
-			results := h.search(types.IssueFilter{TitleSearch: "Bug"})
+			results := h.search(types.IssueFilter{IssueFilterCore: types.IssueFilterCore{TitleSearch: "Bug"}})
 			h.assertCount(len(results), 1, "issues matching 'Bug'")
 			if len(results) > 0 {
 				h.assertEqual("Bug Issue", results[0].Title, "title-search result")
@@ -156,7 +170,7 @@ func TestListCommandSuite(t *testing.T) {
 		})
 
 		t.Run("limit results", func(t *testing.T) {
-			results := h.search(types.IssueFilter{Limit: 2})
+			results := h.search(types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 2}})
 			h.assertAtMost(len(results), 2, "issues")
 		})
 
@@ -250,30 +264,43 @@ func TestListQueryCapabilitiesSuite(t *testing.T) {
 
 	// Create test issues with varied attributes
 	issue1 := &types.Issue{
-		Title:       "Authentication Bug",
-		Description: "Login fails with special characters",
-		Notes:       "Needs urgent fix",
-		Priority:    0,
-		IssueType:   types.TypeBug,
-		Status:      types.StatusOpen,
-		Assignee:    "alice",
+		IssueContent: types.IssueContent{
+			Title:       "Authentication Bug",
+			Description: "Login fails with special characters",
+			Notes:       "Needs urgent fix",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  0,
+			IssueType: types.TypeBug,
+			Status:    types.StatusOpen,
+			Assignee:  "alice",
+		},
 	}
 	issue2 := &types.Issue{
-		Title:       "Add OAuth Support",
-		Description: "", // Empty description
-		Priority:    2,
-		IssueType:   types.TypeFeature,
-		Status:      types.StatusInProgress,
-		// No assignee
+		IssueContent: types.IssueContent{
+			Title:       "Add OAuth Support",
+			Description: "",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			// Empty description
+			Priority:  2,
+			IssueType: types.TypeFeature,
+			Status:    types.StatusInProgress,
+		},
+		// No assignee,
 	}
 	issue3 := &types.Issue{
-		Title:       "Update Documentation",
-		Description: "Update README with new features",
-		Notes:       "Include OAuth setup",
-		Priority:    3,
-		IssueType:   types.TypeTask,
-		Status:      types.StatusOpen,
-		Assignee:    "bob",
+		IssueContent: types.IssueContent{
+			Title:       "Update Documentation",
+			Description: "Update README with new features",
+			Notes:       "Include OAuth setup",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  3,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+			Assignee:  "bob",
+		},
 	}
 
 	for _, issue := range []*types.Issue{issue1, issue2, issue3} {
@@ -294,7 +321,9 @@ func TestListQueryCapabilitiesSuite(t *testing.T) {
 
 	t.Run("pattern matching - title contains", func(t *testing.T) {
 		results, err := s.SearchIssues(ctx, "", types.IssueFilter{
-			TitleContains: "Auth",
+			IssueFilterMatch: types.IssueFilterMatch{
+				TitleContains: "Auth",
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search failed: %v", err)
@@ -306,7 +335,9 @@ func TestListQueryCapabilitiesSuite(t *testing.T) {
 
 	t.Run("pattern matching - description contains", func(t *testing.T) {
 		results, err := s.SearchIssues(ctx, "", types.IssueFilter{
-			DescriptionContains: "special characters",
+			IssueFilterMatch: types.IssueFilterMatch{
+				DescriptionContains: "special characters",
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search failed: %v", err)
@@ -321,7 +352,9 @@ func TestListQueryCapabilitiesSuite(t *testing.T) {
 
 	t.Run("pattern matching - notes contains", func(t *testing.T) {
 		results, err := s.SearchIssues(ctx, "", types.IssueFilter{
-			NotesContains: "OAuth",
+			IssueFilterMatch: types.IssueFilterMatch{
+				NotesContains: "OAuth",
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search failed: %v", err)
@@ -336,7 +369,9 @@ func TestListQueryCapabilitiesSuite(t *testing.T) {
 
 	t.Run("empty description check", func(t *testing.T) {
 		results, err := s.SearchIssues(ctx, "", types.IssueFilter{
-			EmptyDescription: true,
+			IssueFilterFlags: types.IssueFilterFlags{
+				EmptyDescription: true,
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search failed: %v", err)
@@ -351,7 +386,9 @@ func TestListQueryCapabilitiesSuite(t *testing.T) {
 
 	t.Run("no assignee check", func(t *testing.T) {
 		results, err := s.SearchIssues(ctx, "", types.IssueFilter{
-			NoAssignee: true,
+			IssueFilterFlags: types.IssueFilterFlags{
+				NoAssignee: true,
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search failed: %v", err)
@@ -366,7 +403,9 @@ func TestListQueryCapabilitiesSuite(t *testing.T) {
 
 	t.Run("no labels check", func(t *testing.T) {
 		results, err := s.SearchIssues(ctx, "", types.IssueFilter{
-			NoLabels: true,
+			IssueFilterFlags: types.IssueFilterFlags{
+				NoLabels: true,
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search failed: %v", err)
@@ -385,7 +424,9 @@ func TestListQueryCapabilitiesSuite(t *testing.T) {
 	t.Run("skip labels hydration", func(t *testing.T) {
 		// Default hydration: issue1 has labels populated.
 		hydrated, err := s.SearchIssues(ctx, "", types.IssueFilter{
-			IDs: []string{issue1.ID},
+			IssueFilterCore: types.IssueFilterCore{
+				IDs: []string{issue1.ID},
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search failed: %v", err)
@@ -398,8 +439,12 @@ func TestListQueryCapabilitiesSuite(t *testing.T) {
 		}
 		// SkipLabels=true: same row, but Labels is left nil.
 		skipped, err := s.SearchIssues(ctx, "", types.IssueFilter{
-			IDs:        []string{issue1.ID},
-			SkipLabels: true,
+			IssueFilterCore: types.IssueFilterCore{
+				IDs: []string{issue1.ID},
+			},
+			IssueFilterHydrate: types.IssueFilterHydrate{
+				SkipLabels: true,
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search with SkipLabels failed: %v", err)
@@ -419,7 +464,9 @@ func TestListQueryCapabilitiesSuite(t *testing.T) {
 		// issue1 has "critical" and "security"; issue3 has "docs"; issue2 has none.
 		// Excluding "critical" should return issue2 and issue3.
 		results, err := s.SearchIssues(ctx, "", types.IssueFilter{
-			ExcludeLabels: []string{"critical"},
+			IssueFilterCore: types.IssueFilterCore{
+				ExcludeLabels: []string{"critical"},
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search failed: %v", err)
@@ -442,7 +489,9 @@ func TestListQueryCapabilitiesSuite(t *testing.T) {
 	t.Run("exclude label - multiple", func(t *testing.T) {
 		// Excluding "critical" and "docs" leaves only issue2.
 		results, err := s.SearchIssues(ctx, "", types.IssueFilter{
-			ExcludeLabels: []string{"critical", "docs"},
+			IssueFilterCore: types.IssueFilterCore{
+				ExcludeLabels: []string{"critical", "docs"},
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search failed: %v", err)
@@ -458,8 +507,10 @@ func TestListQueryCapabilitiesSuite(t *testing.T) {
 	t.Run("exclude label - combined with include", func(t *testing.T) {
 		// Include "security" AND exclude "docs": should return issue1 only.
 		results, err := s.SearchIssues(ctx, "", types.IssueFilter{
-			Labels:        []string{"security"},
-			ExcludeLabels: []string{"docs"},
+			IssueFilterCore: types.IssueFilterCore{
+				Labels:        []string{"security"},
+				ExcludeLabels: []string{"docs"},
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search failed: %v", err)
@@ -475,7 +526,9 @@ func TestListQueryCapabilitiesSuite(t *testing.T) {
 	t.Run("priority range - min", func(t *testing.T) {
 		minPrio := 2
 		results, err := s.SearchIssues(ctx, "", types.IssueFilter{
-			PriorityMin: &minPrio,
+			IssueFilterFlags: types.IssueFilterFlags{
+				PriorityMin: &minPrio,
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search failed: %v", err)
@@ -488,7 +541,9 @@ func TestListQueryCapabilitiesSuite(t *testing.T) {
 	t.Run("priority range - max", func(t *testing.T) {
 		maxPrio := 1
 		results, err := s.SearchIssues(ctx, "", types.IssueFilter{
-			PriorityMax: &maxPrio,
+			IssueFilterFlags: types.IssueFilterFlags{
+				PriorityMax: &maxPrio,
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search failed: %v", err)
@@ -502,8 +557,10 @@ func TestListQueryCapabilitiesSuite(t *testing.T) {
 		minPrio := 1
 		maxPrio := 2
 		results, err := s.SearchIssues(ctx, "", types.IssueFilter{
-			PriorityMin: &minPrio,
-			PriorityMax: &maxPrio,
+			IssueFilterFlags: types.IssueFilterFlags{
+				PriorityMin: &minPrio,
+				PriorityMax: &maxPrio,
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search failed: %v", err)
@@ -515,7 +572,9 @@ func TestListQueryCapabilitiesSuite(t *testing.T) {
 
 	t.Run("date range - created after", func(t *testing.T) {
 		results, err := s.SearchIssues(ctx, "", types.IssueFilter{
-			CreatedAfter: &twoDaysAgo,
+			IssueFilterMatch: types.IssueFilterMatch{
+				CreatedAfter: &twoDaysAgo,
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search failed: %v", err)
@@ -529,7 +588,9 @@ func TestListQueryCapabilitiesSuite(t *testing.T) {
 	t.Run("date range - updated before", func(t *testing.T) {
 		futureTime := now.Add(24 * time.Hour)
 		results, err := s.SearchIssues(ctx, "", types.IssueFilter{
-			UpdatedBefore: &futureTime,
+			IssueFilterMatch: types.IssueFilterMatch{
+				UpdatedBefore: &futureTime,
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search failed: %v", err)
@@ -542,7 +603,9 @@ func TestListQueryCapabilitiesSuite(t *testing.T) {
 
 	t.Run("date range - closed after", func(t *testing.T) {
 		results, err := s.SearchIssues(ctx, "", types.IssueFilter{
-			ClosedAfter: &yesterday,
+			IssueFilterMatch: types.IssueFilterMatch{
+				ClosedAfter: &yesterday,
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search failed: %v", err)
@@ -556,9 +619,13 @@ func TestListQueryCapabilitiesSuite(t *testing.T) {
 		minPrio := 0
 		maxPrio := 2
 		results, err := s.SearchIssues(ctx, "", types.IssueFilter{
-			TitleContains: "Auth",
-			PriorityMin:   &minPrio,
-			PriorityMax:   &maxPrio,
+			IssueFilterMatch: types.IssueFilterMatch{
+				TitleContains: "Auth",
+			},
+			IssueFilterFlags: types.IssueFilterFlags{
+				PriorityMin: &minPrio,
+				PriorityMax: &maxPrio,
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search failed: %v", err)
@@ -582,10 +649,14 @@ func TestListLabelFiltersAcnquj(t *testing.T) {
 
 	mk := func(title string, labels ...string) *types.Issue {
 		issue := &types.Issue{
-			Title:     title,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Status:    types.StatusOpen,
+			IssueContent: types.IssueContent{
+				Title: title,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				IssueType: types.TypeTask,
+				Status:    types.StatusOpen,
+			},
 		}
 		if err := s.CreateIssue(ctx, issue, "test-user"); err != nil {
 			t.Fatalf("create %q: %v", title, err)
@@ -615,7 +686,7 @@ func TestListLabelFiltersAcnquj(t *testing.T) {
 
 	// AC#1: -l X returns ONLY beads with label X.
 	t.Run("label_single", func(t *testing.T) {
-		results, err := s.SearchIssues(ctx, "", types.IssueFilter{Labels: []string{"fruit"}})
+		results, err := s.SearchIssues(ctx, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Labels: []string{"fruit"}}})
 		if err != nil {
 			t.Fatalf("search: %v", err)
 		}
@@ -630,7 +701,7 @@ func TestListLabelFiltersAcnquj(t *testing.T) {
 
 	// AC#1 + AC#6: -l X -l Y (AND semantics).
 	t.Run("label_and_composition", func(t *testing.T) {
-		results, err := s.SearchIssues(ctx, "", types.IssueFilter{Labels: []string{"fruit", "drink"}})
+		results, err := s.SearchIssues(ctx, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Labels: []string{"fruit", "drink"}}})
 		if err != nil {
 			t.Fatalf("search: %v", err)
 		}
@@ -642,7 +713,7 @@ func TestListLabelFiltersAcnquj(t *testing.T) {
 
 	// AC#2: --label-any A,B (OR semantics).
 	t.Run("label_any_or_composition", func(t *testing.T) {
-		results, err := s.SearchIssues(ctx, "", types.IssueFilter{LabelsAny: []string{"dessert", "drink"}})
+		results, err := s.SearchIssues(ctx, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{LabelsAny: []string{"dessert", "drink"}}})
 		if err != nil {
 			t.Fatalf("search: %v", err)
 		}
@@ -657,7 +728,7 @@ func TestListLabelFiltersAcnquj(t *testing.T) {
 
 	// AC#3: --label-pattern glob matches labels by pattern.
 	t.Run("label_pattern_glob", func(t *testing.T) {
-		results, err := s.SearchIssues(ctx, "", types.IssueFilter{LabelPattern: "tech-*"})
+		results, err := s.SearchIssues(ctx, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{LabelPattern: "tech-*"}})
 		if err != nil {
 			t.Fatalf("search: %v", err)
 		}
@@ -672,7 +743,7 @@ func TestListLabelFiltersAcnquj(t *testing.T) {
 
 	// AC#4: --title-contains case-insensitive substring.
 	t.Run("title_contains_case_insensitive", func(t *testing.T) {
-		results, err := s.SearchIssues(ctx, "", types.IssueFilter{TitleContains: "PIE"})
+		results, err := s.SearchIssues(ctx, "", types.IssueFilter{IssueFilterMatch: types.IssueFilterMatch{TitleContains: "PIE"}})
 		if err != nil {
 			t.Fatalf("search: %v", err)
 		}
@@ -684,7 +755,7 @@ func TestListLabelFiltersAcnquj(t *testing.T) {
 
 	// AC#5: -l NONEXISTENT returns empty.
 	t.Run("label_nonexistent_empty", func(t *testing.T) {
-		results, err := s.SearchIssues(ctx, "", types.IssueFilter{Labels: []string{"ZZZZZZZZ-no-such-label"}})
+		results, err := s.SearchIssues(ctx, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Labels: []string{"ZZZZZZZZ-no-such-label"}}})
 		if err != nil {
 			t.Fatalf("search: %v", err)
 		}
@@ -707,10 +778,14 @@ func TestStableTreeOrdering(t *testing.T) {
 	// Helper to create issue with specific priority for testing sort stability
 	createIssue := func(title string, priority int) *types.Issue {
 		issue := &types.Issue{
-			Title:     title,
-			Priority:  priority,
-			IssueType: types.TypeTask,
-			Status:    types.StatusOpen,
+			IssueContent: types.IssueContent{
+				Title: title,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  priority,
+				IssueType: types.TypeTask,
+				Status:    types.StatusOpen,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test-user"); err != nil {
 			t.Fatalf("Failed to create issue %s: %v", title, err)
@@ -854,19 +929,33 @@ func TestTreeViewUsesWispDependencyRecords(t *testing.T) {
 	store := newTestStoreWithPrefix(t, filepath.Join(t.TempDir(), "test.db"), "test")
 
 	parent := &types.Issue{
-		ID:        "tree-wisp-parent",
-		Title:     "Parent epic",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "tree-wisp-parent",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Parent epic",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
 	}
 	child := &types.Issue{
-		ID:        "tree-wisp-child",
-		Title:     "Wisp child",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: "tree-wisp-child",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Wisp child",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	for _, issue := range []*types.Issue{parent, child} {
 		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
@@ -923,11 +1012,17 @@ func TestFormatIssueLong(t *testing.T) {
 		{
 			name: "open issue",
 			issue: &types.Issue{
-				ID:        "test-123",
-				Title:     "Test Issue",
-				Priority:  1,
-				IssueType: types.TypeBug,
-				Status:    types.StatusOpen,
+				IssueID: types.IssueID{
+					ID: "test-123",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Test Issue",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Priority:  1,
+					IssueType: types.TypeBug,
+					Status:    types.StatusOpen,
+				},
 			},
 			labels: nil,
 			want:   "test-123",
@@ -935,11 +1030,17 @@ func TestFormatIssueLong(t *testing.T) {
 		{
 			name: "closed issue",
 			issue: &types.Issue{
-				ID:        "test-456",
-				Title:     "Closed Issue",
-				Priority:  0,
-				IssueType: types.TypeTask,
-				Status:    types.StatusClosed,
+				IssueID: types.IssueID{
+					ID: "test-456",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Closed Issue",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Priority:  0,
+					IssueType: types.TypeTask,
+					Status:    types.StatusClosed,
+				},
 			},
 			labels: nil,
 			want:   "test-456",
@@ -947,12 +1048,18 @@ func TestFormatIssueLong(t *testing.T) {
 		{
 			name: "issue with assignee",
 			issue: &types.Issue{
-				ID:        "test-789",
-				Title:     "Assigned Issue",
-				Priority:  2,
-				IssueType: types.TypeFeature,
-				Status:    types.StatusInProgress,
-				Assignee:  "alice",
+				IssueID: types.IssueID{
+					ID: "test-789",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Assigned Issue",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Priority:  2,
+					IssueType: types.TypeFeature,
+					Status:    types.StatusInProgress,
+					Assignee:  "alice",
+				},
 			},
 			labels: nil,
 			want:   "Assignee: alice",
@@ -960,11 +1067,17 @@ func TestFormatIssueLong(t *testing.T) {
 		{
 			name: "issue with labels",
 			issue: &types.Issue{
-				ID:        "test-abc",
-				Title:     "Labeled Issue",
-				Priority:  1,
-				IssueType: types.TypeBug,
-				Status:    types.StatusOpen,
+				IssueID: types.IssueID{
+					ID: "test-abc",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Labeled Issue",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Priority:  1,
+					IssueType: types.TypeBug,
+					Status:    types.StatusOpen,
+				},
 			},
 			labels: []string{"critical", "security"},
 			want:   "Labels:",
@@ -994,11 +1107,17 @@ func TestFormatIssueCompact(t *testing.T) {
 		{
 			name: "basic issue",
 			issue: &types.Issue{
-				ID:        "test-123",
-				Title:     "Test Issue",
-				Priority:  1,
-				IssueType: types.TypeBug,
-				Status:    types.StatusOpen,
+				IssueID: types.IssueID{
+					ID: "test-123",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Test Issue",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Priority:  1,
+					IssueType: types.TypeBug,
+					Status:    types.StatusOpen,
+				},
 			},
 			labels: nil,
 			want:   "Test Issue",
@@ -1006,12 +1125,18 @@ func TestFormatIssueCompact(t *testing.T) {
 		{
 			name: "issue with assignee",
 			issue: &types.Issue{
-				ID:        "test-456",
-				Title:     "Assigned Issue",
-				Priority:  2,
-				IssueType: types.TypeTask,
-				Status:    types.StatusInProgress,
-				Assignee:  "bob",
+				IssueID: types.IssueID{
+					ID: "test-456",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Assigned Issue",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Priority:  2,
+					IssueType: types.TypeTask,
+					Status:    types.StatusInProgress,
+					Assignee:  "bob",
+				},
 			},
 			labels: nil,
 			want:   "@bob",
@@ -1019,11 +1144,17 @@ func TestFormatIssueCompact(t *testing.T) {
 		{
 			name: "issue with labels",
 			issue: &types.Issue{
-				ID:        "test-789",
-				Title:     "Labeled Issue",
-				Priority:  0,
-				IssueType: types.TypeFeature,
-				Status:    types.StatusOpen,
+				IssueID: types.IssueID{
+					ID: "test-789",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Labeled Issue",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Priority:  0,
+					IssueType: types.TypeFeature,
+					Status:    types.StatusOpen,
+				},
 			},
 			labels: []string{"urgent"},
 			want:   "[urgent]",
@@ -1031,11 +1162,17 @@ func TestFormatIssueCompact(t *testing.T) {
 		{
 			name: "closed issue",
 			issue: &types.Issue{
-				ID:        "test-def",
-				Title:     "Closed Issue",
-				Priority:  3,
-				IssueType: types.TypeTask,
-				Status:    types.StatusClosed,
+				IssueID: types.IssueID{
+					ID: "test-def",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Closed Issue",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Priority:  3,
+					IssueType: types.TypeTask,
+					Status:    types.StatusClosed,
+				},
 			},
 			labels: nil,
 			want:   "Closed Issue",
@@ -1185,11 +1322,17 @@ func TestFormatIssueCompactWithDependencies(t *testing.T) {
 		{
 			name: "issue with blocked by",
 			issue: &types.Issue{
-				ID:        "test-123",
-				Title:     "Blocked Issue",
-				Priority:  1,
-				IssueType: types.TypeTask,
-				Status:    types.StatusOpen,
+				IssueID: types.IssueID{
+					ID: "test-123",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Blocked Issue",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Priority:  1,
+					IssueType: types.TypeTask,
+					Status:    types.StatusOpen,
+				},
 			},
 			blockedBy: []string{"test-100"},
 			blocks:    nil,
@@ -1198,11 +1341,17 @@ func TestFormatIssueCompactWithDependencies(t *testing.T) {
 		{
 			name: "issue with blocks",
 			issue: &types.Issue{
-				ID:        "test-456",
-				Title:     "Blocking Issue",
-				Priority:  1,
-				IssueType: types.TypeTask,
-				Status:    types.StatusOpen,
+				IssueID: types.IssueID{
+					ID: "test-456",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Blocking Issue",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Priority:  1,
+					IssueType: types.TypeTask,
+					Status:    types.StatusOpen,
+				},
 			},
 			blockedBy: nil,
 			blocks:    []string{"test-200", "test-300"},
@@ -1211,11 +1360,17 @@ func TestFormatIssueCompactWithDependencies(t *testing.T) {
 		{
 			name: "issue with both",
 			issue: &types.Issue{
-				ID:        "test-789",
-				Title:     "Middle Issue",
-				Priority:  1,
-				IssueType: types.TypeTask,
-				Status:    types.StatusOpen,
+				IssueID: types.IssueID{
+					ID: "test-789",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Middle Issue",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Priority:  1,
+					IssueType: types.TypeTask,
+					Status:    types.StatusOpen,
+				},
 			},
 			blockedBy: []string{"test-100"},
 			blocks:    []string{"test-200"},
@@ -1224,11 +1379,17 @@ func TestFormatIssueCompactWithDependencies(t *testing.T) {
 		{
 			name: "issue with no dependencies",
 			issue: &types.Issue{
-				ID:        "test-abc",
-				Title:     "Independent Issue",
-				Priority:  1,
-				IssueType: types.TypeTask,
-				Status:    types.StatusOpen,
+				IssueID: types.IssueID{
+					ID: "test-abc",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Independent Issue",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Priority:  1,
+					IssueType: types.TypeTask,
+					Status:    types.StatusOpen,
+				},
 			},
 			blockedBy: nil,
 			blocks:    nil,
@@ -1255,11 +1416,17 @@ func TestFormatIssueCompactBlockedIcon(t *testing.T) {
 
 	t.Run("open issue with blockers shows blocked icon", func(t *testing.T) {
 		issue := &types.Issue{
-			ID:        "test-blocked",
-			Title:     "Blocked by dependency",
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Status:    types.StatusOpen,
+			IssueID: types.IssueID{
+				ID: "test-blocked",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Blocked by dependency",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				IssueType: types.TypeTask,
+				Status:    types.StatusOpen,
+			},
 		}
 		var buf strings.Builder
 		formatIssueCompact(&buf, issue, nil, []string{"blocker-1"}, nil, "")
@@ -1275,11 +1442,17 @@ func TestFormatIssueCompactBlockedIcon(t *testing.T) {
 
 	t.Run("open issue without blockers shows open icon", func(t *testing.T) {
 		issue := &types.Issue{
-			ID:        "test-open",
-			Title:     "Normal open issue",
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Status:    types.StatusOpen,
+			IssueID: types.IssueID{
+				ID: "test-open",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Normal open issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				IssueType: types.TypeTask,
+				Status:    types.StatusOpen,
+			},
 		}
 		var buf strings.Builder
 		formatIssueCompact(&buf, issue, nil, nil, nil, "")
@@ -1291,11 +1464,17 @@ func TestFormatIssueCompactBlockedIcon(t *testing.T) {
 
 	t.Run("in_progress issue with blockers keeps in_progress icon", func(t *testing.T) {
 		issue := &types.Issue{
-			ID:        "test-wip",
-			Title:     "In progress with blocker",
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Status:    types.StatusInProgress,
+			IssueID: types.IssueID{
+				ID: "test-wip",
+			},
+			IssueContent: types.IssueContent{
+				Title: "In progress with blocker",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				IssueType: types.TypeTask,
+				Status:    types.StatusInProgress,
+			},
 		}
 		var buf strings.Builder
 		formatIssueCompact(&buf, issue, nil, []string{"blocker-1"}, nil, "")
@@ -1355,46 +1534,82 @@ func TestListTimeBasedFilters(t *testing.T) {
 
 	// Create test issues with varied due_at and defer_until values
 	issueNoSchedule := &types.Issue{
-		Title:     "Issue without scheduling",
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
+		IssueContent: types.IssueContent{
+			Title: "Issue without scheduling",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
 	}
 	issueDeferredFuture := &types.Issue{
-		Title:      "Deferred until tomorrow",
-		Priority:   2,
-		IssueType:  types.TypeTask,
-		Status:     types.StatusOpen,
-		DeferUntil: &tomorrow,
+		IssueContent: types.IssueContent{
+			Title: "Deferred until tomorrow",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
+		IssueLease: types.IssueLease{
+			DeferUntil: &tomorrow,
+		},
 	}
 	issueDeferredPast := &types.Issue{
-		Title:      "Was deferred until yesterday",
-		Priority:   2,
-		IssueType:  types.TypeTask,
-		Status:     types.StatusOpen,
-		DeferUntil: &yesterday,
+		IssueContent: types.IssueContent{
+			Title: "Was deferred until yesterday",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
+		IssueLease: types.IssueLease{
+			DeferUntil: &yesterday,
+		},
 	}
 	issueDueNextWeek := &types.Issue{
-		Title:     "Due next week",
-		Priority:  1,
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		DueAt:     &nextWeek,
+		IssueContent: types.IssueContent{
+			Title: "Due next week",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  1,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
+		IssueLease: types.IssueLease{
+			DueAt: &nextWeek,
+		},
 	}
 	issueOverdue := &types.Issue{
-		Title:     "Overdue issue",
-		Priority:  0,
-		IssueType: types.TypeBug,
-		Status:    types.StatusOpen,
-		DueAt:     &yesterday,
+		IssueContent: types.IssueContent{
+			Title: "Overdue issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  0,
+			IssueType: types.TypeBug,
+			Status:    types.StatusOpen,
+		},
+		IssueLease: types.IssueLease{
+			DueAt: &yesterday,
+		},
 	}
 	issueOverdueClosed := &types.Issue{
-		Title:     "Overdue but closed",
-		Priority:  0,
-		IssueType: types.TypeBug,
-		Status:    types.StatusClosed,
-		DueAt:     &yesterday,
-		ClosedAt:  &now,
+		IssueContent: types.IssueContent{
+			Title: "Overdue but closed",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  0,
+			IssueType: types.TypeBug,
+			Status:    types.StatusClosed,
+		},
+		IssueTimes: types.IssueTimes{
+			ClosedAt: &now,
+		},
+		IssueLease: types.IssueLease{
+			DueAt: &yesterday,
+		},
 	}
 
 	for _, issue := range []*types.Issue{
@@ -1408,7 +1623,9 @@ func TestListTimeBasedFilters(t *testing.T) {
 
 	t.Run("filter by deferred flag", func(t *testing.T) {
 		results, err := s.SearchIssues(ctx, "", types.IssueFilter{
-			Deferred: true,
+			IssueFilterHydrate: types.IssueFilterHydrate{
+				Deferred: true,
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search failed: %v", err)
@@ -1421,7 +1638,9 @@ func TestListTimeBasedFilters(t *testing.T) {
 
 	t.Run("filter by defer-after", func(t *testing.T) {
 		results, err := s.SearchIssues(ctx, "", types.IssueFilter{
-			DeferAfter: &now,
+			IssueFilterHydrate: types.IssueFilterHydrate{
+				DeferAfter: &now,
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search failed: %v", err)
@@ -1434,7 +1653,9 @@ func TestListTimeBasedFilters(t *testing.T) {
 
 	t.Run("filter by defer-before", func(t *testing.T) {
 		results, err := s.SearchIssues(ctx, "", types.IssueFilter{
-			DeferBefore: &now,
+			IssueFilterHydrate: types.IssueFilterHydrate{
+				DeferBefore: &now,
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search failed: %v", err)
@@ -1447,7 +1668,9 @@ func TestListTimeBasedFilters(t *testing.T) {
 
 	t.Run("filter by due-after", func(t *testing.T) {
 		results, err := s.SearchIssues(ctx, "", types.IssueFilter{
-			DueAfter: &now,
+			IssueFilterHydrate: types.IssueFilterHydrate{
+				DueAfter: &now,
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search failed: %v", err)
@@ -1460,7 +1683,9 @@ func TestListTimeBasedFilters(t *testing.T) {
 
 	t.Run("filter by due-before", func(t *testing.T) {
 		results, err := s.SearchIssues(ctx, "", types.IssueFilter{
-			DueBefore: &now,
+			IssueFilterHydrate: types.IssueFilterHydrate{
+				DueBefore: &now,
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search failed: %v", err)
@@ -1473,7 +1698,9 @@ func TestListTimeBasedFilters(t *testing.T) {
 
 	t.Run("filter by overdue", func(t *testing.T) {
 		results, err := s.SearchIssues(ctx, "", types.IssueFilter{
-			Overdue: true,
+			IssueFilterHydrate: types.IssueFilterHydrate{
+				Overdue: true,
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search failed: %v", err)
@@ -1490,20 +1717,28 @@ func TestListTimeBasedFilters(t *testing.T) {
 	t.Run("combined filters defer and due", func(t *testing.T) {
 		// Issue with both defer_until and due_at
 		bothSet := &types.Issue{
-			Title:      "Both deferred and due",
-			Priority:   1,
-			IssueType:  types.TypeTask,
-			Status:     types.StatusOpen,
-			DeferUntil: &tomorrow,
-			DueAt:      &nextWeek,
+			IssueContent: types.IssueContent{
+				Title: "Both deferred and due",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				IssueType: types.TypeTask,
+				Status:    types.StatusOpen,
+			},
+			IssueLease: types.IssueLease{
+				DeferUntil: &tomorrow,
+				DueAt:      &nextWeek,
+			},
 		}
 		if err := s.CreateIssue(ctx, bothSet, "test-user"); err != nil {
 			t.Fatalf("Failed to create issue: %v", err)
 		}
 
 		results, err := s.SearchIssues(ctx, "", types.IssueFilter{
-			Deferred: true,
-			DueAfter: &now,
+			IssueFilterHydrate: types.IssueFilterHydrate{
+				Deferred: true,
+				DueAfter: &now,
+			},
 		})
 		if err != nil {
 			t.Fatalf("Search failed: %v", err)
@@ -1526,10 +1761,14 @@ func TestHierarchicalChildren(t *testing.T) {
 	// Helper to create issue
 	createIssue := func(title string, issueType types.IssueType) *types.Issue {
 		issue := &types.Issue{
-			Title:     title,
-			Priority:  2,
-			IssueType: issueType,
-			Status:    types.StatusOpen,
+			IssueContent: types.IssueContent{
+				Title: title,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				IssueType: issueType,
+				Status:    types.StatusOpen,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test-user"); err != nil {
 			t.Fatalf("Failed to create issue %s: %v", title, err)
@@ -1667,11 +1906,17 @@ func TestFormatDependencyInfoWithParent(t *testing.T) {
 func TestFormatIssueCompactWithParent(t *testing.T) {
 	t.Parallel()
 	issue := &types.Issue{
-		ID:        "test-child",
-		Title:     "Child Task",
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
+		IssueID: types.IssueID{
+			ID: "test-child",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Child Task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
 	}
 
 	t.Run("shows parent annotation", func(t *testing.T) {
@@ -1712,22 +1957,34 @@ func TestGetBlockingInfoForIssues_ParentChildSeparation(t *testing.T) {
 
 	// Create parent and child
 	parent := &types.Issue{
-		Title:     "Parent Epic",
-		Priority:  2,
-		IssueType: types.TypeEpic,
-		Status:    types.StatusOpen,
+		IssueContent: types.IssueContent{
+			Title: "Parent Epic",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeEpic,
+			Status:    types.StatusOpen,
+		},
 	}
 	child := &types.Issue{
-		Title:     "Child Task",
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
+		IssueContent: types.IssueContent{
+			Title: "Child Task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
 	}
 	blocker := &types.Issue{
-		Title:     "Blocker Task",
-		Priority:  1,
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
+		IssueContent: types.IssueContent{
+			Title: "Blocker Task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  1,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
 	}
 
 	for _, issue := range []*types.Issue{parent, child, blocker} {
@@ -1787,22 +2044,34 @@ func TestListJSON_ParentField(t *testing.T) {
 	ctx := context.Background()
 
 	parent := &types.Issue{
-		Title:     "Parent Epic",
-		Priority:  2,
-		IssueType: types.TypeEpic,
-		Status:    types.StatusOpen,
+		IssueContent: types.IssueContent{
+			Title: "Parent Epic",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeEpic,
+			Status:    types.StatusOpen,
+		},
 	}
 	child := &types.Issue{
-		Title:     "Child Task",
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
+		IssueContent: types.IssueContent{
+			Title: "Child Task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
 	}
 	standalone := &types.Issue{
-		Title:     "Standalone Task",
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
+		IssueContent: types.IssueContent{
+			Title: "Standalone Task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
 	}
 
 	for _, issue := range []*types.Issue{parent, child, standalone} {

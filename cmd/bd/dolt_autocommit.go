@@ -17,7 +17,7 @@ import (
 func transact(ctx context.Context, s storage.DoltStorage, commitMsg string, fn func(tx storage.Transaction) error) error {
 	err := s.RunInTransaction(ctx, commitMsg, fn)
 	if err == nil {
-		commandDidExplicitDoltCommit = true
+		setCommandDidExplicitDoltCommit(true)
 	}
 	return err
 }
@@ -41,7 +41,7 @@ func transactHonoringAutoCommit(ctx context.Context, s storage.DoltStorage, comm
 
 	err = s.RunInTransaction(ctx, msg, fn)
 	if err == nil && committedExplicitly {
-		commandDidExplicitDoltCommit = true
+		setCommandDidExplicitDoltCommit(true)
 	}
 	return err
 }
@@ -53,7 +53,7 @@ func transactHonoringAutoCommit(ctx context.Context, s storage.DoltStorage, comm
 // backend), where per-write version commits are the only behavior that
 // exists — treat it as "on".
 func writesCommitNow() (bool, error) {
-	if strings.TrimSpace(doltAutoCommit) == "" {
+	if strings.TrimSpace(getDoltAutoCommit()) == "" {
 		return true, nil
 	}
 	mode, err := getDoltAutoCommitMode()

@@ -38,10 +38,10 @@ func runListProxiedServer(cmd *cobra.Command, ctx context.Context, out io.Writer
 }
 
 func openProxiedListUOW(ctx context.Context) (uow.UnitOfWork, error) {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return nil, errors.New("proxied-server UOW provider not initialized")
 	}
-	uw, err := uowProvider.NewUOW(ctx)
+	uw, err := getUOWProvider().NewUOW(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("open unit of work: %w", err)
 	}
@@ -79,7 +79,7 @@ func runListProxiedPage(ctx context.Context, out io.Writer, in listInput) error 
 		return err
 	}
 
-	if jsonOutput {
+	if isJSONOutput() {
 		page, err := rd.List(ctx, in.ListRequest)
 		if err != nil {
 			return err
@@ -104,91 +104,104 @@ func runListProxiedWatch(_ *cobra.Command, ctx context.Context, in listInput) er
 	if in.formatStr != "" {
 		return errors.New("--format under --proxied-server --watch is not supported")
 	}
-
 	uw, filter, err := openAndPrepare(ctx, in)
 	if err != nil {
 		return err
 	}
 	uw.Close(ctx)
-
-	load := func() ([]*types.Issue, bool, map[string][]*types.Dependency, error) {
-		uw, err := openProxiedListUOW(ctx)
-		if err != nil {
-			return nil, false, nil, err
-		}
-		defer uw.Close(ctx)
-
-		var issues []*types.Issue
-		var hasMore bool
-		switch {
-		case in.ReadyFlag:
-			wf := workapi.ReadyFilterFromIssueFilter(filter)
-			page, perr := uw.IssueUseCase().GetReadyWork(ctx, wf)
-			if perr != nil {
-				return nil, false, nil, perr
-			}
-			issues, hasMore = workapi.FinishPage(page.Items, in.SortBy, in.Reverse, in.effectiveLimit, page.HasMore)
-		case in.ParentID != "":
-			issues, err = gatherProxiedHierarchical(ctx, uw, in.ParentID, filter)
-			if err != nil {
-				return nil, false, nil, err
-			}
-			// The tree is gathered, not queried, so no seam reported a
-			// has-more: the cut is the only thing that can say the limit hid
-			// a descendant. Its order is the tree's own, not --sort's.
-			issues, hasMore = workapi.FinishPage(issues, "id", false, in.effectiveLimit, false)
-		default:
-			page, perr := uw.IssueUseCase().SearchIssues(ctx, "", filter)
-			if perr != nil {
-				return nil, false, nil, perr
-			}
-			issues, hasMore = workapi.FinishPage(page.Items, in.SortBy, in.Reverse, in.effectiveLimit, page.HasMore)
-		}
-
-		deps, err := loadDepsForIssues(ctx, uw, issues)
-		if err != nil {
-			return nil, false, nil, err
-		}
-		return issues, hasMore, deps, nil
-	}
-
-	issues, hasMore, deps, err := load()
+	issues, hasMore, deps, err := loadProxiedWatchPage(ctx, in, filter)
 	if err != nil {
 		return fmt.Errorf("initial query: %w", err)
 	}
 	displayPrettyListWithDeps(issues, true, deps, hasMore)
 	printTruncationHint(hasMore, in.effectiveLimit)
-	lastSnapshot := issueSnapshot(issues)
+	return watchProxiedList(ctx, in, filter, issueSnapshot(issues))
+}
 
+func loadProxiedWatchPage(ctx context.Context, in listInput, filter types.IssueFilter) ([]*types.Issue, bool, map[string][]*types.Dependency, error) {
+	uw, err := openProxiedListUOW(ctx)
+	if err != nil {
+		return nil, false, nil, err
+	}
+	defer uw.Close(ctx)
+	issues, hasMore, err := fetchProxiedWatchIssues(ctx, uw, in, filter)
+	if err != nil {
+		return nil, false, nil, err
+	}
+	deps, err := loadDepsForIssues(ctx, uw, issues)
+	if err != nil {
+		return nil, false, nil, err
+	}
+	return issues, hasMore, deps, nil
+}
+
+func fetchProxiedWatchIssues(ctx context.Context, uw uow.UnitOfWork, in listInput, filter types.IssueFilter) ([]*types.Issue, bool, error) {
+	switch {
+	case in.ReadyFlag:
+		page, err := uw.IssueUseCase().GetReadyWork(ctx, workapi.ReadyFilterFromIssueFilter(filter))
+		if err != nil {
+			return nil, false, err
+		}
+		issues, hasMore := workapi.FinishPage(page.Items, in.SortBy, in.Reverse, in.effectiveLimit, page.HasMore)
+		return issues, hasMore, nil
+	case in.ParentID != "":
+		issues, err := gatherProxiedHierarchical(ctx, uw, in.ParentID, filter)
+		if err != nil {
+			return nil, false, err
+		}
+		// The tree is gathered, not queried, so no seam reported a
+		// has-more: the cut is the only thing that can say the limit hid
+		// a descendant. Its order is the tree's own, not --sort's.
+		issues, hasMore := workapi.FinishPage(issues, "id", false, in.effectiveLimit, false)
+		return issues, hasMore, nil
+	default:
+		page, err := uw.IssueUseCase().SearchIssues(ctx, "", filter)
+		if err != nil {
+			return nil, false, err
+		}
+		issues, hasMore := workapi.FinishPage(page.Items, in.SortBy, in.Reverse, in.effectiveLimit, page.HasMore)
+		return issues, hasMore, nil
+	}
+}
+
+func watchProxiedList(ctx context.Context, in listInput, filter types.IssueFilter, lastSnapshot string) error {
 	fmt.Fprintf(os.Stderr, "\nWatching for changes... (Press Ctrl+C to exit)\n")
-
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigChan)
-
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
-
 	for {
 		select {
 		case <-sigChan:
 			fmt.Fprintf(os.Stderr, "\nStopped watching.\n")
 			return nil
 		case <-ticker.C:
-			issues, hasMore, deps, err := load()
+			updated, err := refreshProxiedWatch(ctx, in, filter, lastSnapshot)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error refreshing issues: %v\n", err)
 				continue
 			}
-			snap := issueSnapshot(issues)
-			if snap != lastSnapshot {
-				lastSnapshot = snap
-				displayPrettyListWithDeps(issues, true, deps, hasMore)
-				printTruncationHint(hasMore, in.effectiveLimit)
-				fmt.Fprintf(os.Stderr, "\nWatching for changes... (Press Ctrl+C to exit)\n")
+			if updated != "" {
+				lastSnapshot = updated
 			}
 		}
 	}
+}
+
+func refreshProxiedWatch(ctx context.Context, in listInput, filter types.IssueFilter, lastSnapshot string) (string, error) {
+	issues, hasMore, deps, err := loadProxiedWatchPage(ctx, in, filter)
+	if err != nil {
+		return "", err
+	}
+	snap := issueSnapshot(issues)
+	if snap == lastSnapshot {
+		return "", nil
+	}
+	displayPrettyListWithDeps(issues, true, deps, hasMore)
+	printTruncationHint(hasMore, in.effectiveLimit)
+	fmt.Fprintf(os.Stderr, "\nWatching for changes... (Press Ctrl+C to exit)\n")
+	return snap, nil
 }
 
 // emitProxiedListJSONResult writes the page the role already finished. It runs
@@ -218,33 +231,44 @@ func loadDepsForIssues(ctx context.Context, uw uow.UnitOfWork, issues []*types.I
 }
 
 func renderProxiedListText(ctx context.Context, out io.Writer, issues []*types.Issue, in listInput, truncated bool) error {
+	if in.formatStr != "" || in.prettyFormat {
+		return renderProxiedListFormatted(ctx, out, issues, in, truncated)
+	}
+	blocking, labelsMap, err := loadProxiedListDecorations(ctx, issues)
+	if err != nil {
+		return err
+	}
+	return writeProxiedListText(issues, in, truncated, blocking, labelsMap)
+}
+
+func renderProxiedListFormatted(ctx context.Context, out io.Writer, issues []*types.Issue, in listInput, truncated bool) error {
 	// --format and the pretty tree want the WHOLE dependency record set for the
 	// page — every edge type, no status rule — which is neither role's
 	// question. They open their own unit of work for it, which is what lets
 	// every other rendering below reach its roles without one.
-	if in.formatStr != "" || in.prettyFormat {
-		uw, err := openProxiedListUOW(ctx)
-		if err != nil {
+	uw, err := openProxiedListUOW(ctx)
+	if err != nil {
+		return err
+	}
+	defer uw.Close(ctx)
+	depsByIssueID, err := loadDepsForIssues(ctx, uw, issues)
+	if err != nil {
+		return err
+	}
+	if in.formatStr != "" {
+		if err := outputFormattedList(out, issues, depsByIssueID, in.formatStr); err != nil {
 			return err
 		}
-		defer uw.Close(ctx)
-		depsByIssueID, err := loadDepsForIssues(ctx, uw, issues)
-		if err != nil {
-			return err
-		}
-		if in.formatStr != "" {
-			if err := outputFormattedList(out, issues, depsByIssueID, in.formatStr); err != nil {
-				return err
-			}
-			printTruncationHint(truncated, in.effectiveLimit)
-			return nil
-		}
-		displayPrettyListWithDepsMode(issues, false, depsByIssueID, in.depsMode, truncated)
 		printTruncationHint(truncated, in.effectiveLimit)
-		printSkipLabelsFooter(in.SkipLabels)
 		return nil
 	}
+	displayPrettyListWithDepsMode(issues, false, depsByIssueID, in.depsMode, truncated)
+	printTruncationHint(truncated, in.effectiveLimit)
+	printSkipLabelsFooter(in.SkipLabels)
+	return nil
+}
 
+func loadProxiedListDecorations(ctx context.Context, issues []*types.Issue) (listBlocking, map[string][]string, error) {
 	issueIDs := make([]string, len(issues))
 	labelsMap := make(map[string][]string, len(issues))
 	for i, issue := range issues {
@@ -253,45 +277,35 @@ func renderProxiedListText(ctx context.Context, out io.Writer, issues []*types.I
 			labelsMap[issue.ID] = issue.Labels
 		}
 	}
-
 	// The decoration, onto issueops.BlockingAnnotator. This route FAILS on the
 	// read where the direct one swallows it, and both are kept exactly as they
 	// were: converging them is a behavior decision recorded for the owner
 	// (AMBIGUITIES.md, A-blk-1) rather than taken here.
 	annotator, err := proxiedBlockingAnnotator()
 	if err != nil {
-		return err
+		return listBlocking{}, nil, err
 	}
 	result, err := annotator.AnnotateBlocking(ctx, issueops.BlockingRequest{IDs: issueIDs})
 	if err != nil {
-		return fmt.Errorf("load blocking info: %w", err)
+		return listBlocking{}, nil, fmt.Errorf("load blocking info: %w", err)
 	}
-	blocking := newListBlocking(result)
+	return newListBlocking(result), labelsMap, nil
+}
 
-	var buf strings.Builder
-	switch {
-	case ui.IsAgentMode():
+func writeProxiedListText(issues []*types.Issue, in listInput, truncated bool, blocking listBlocking, labelsMap map[string][]string) error {
+	if ui.IsAgentMode() {
+		var buf strings.Builder
 		for _, issue := range issues {
 			formatAgentIssue(&buf, issue, blocking.blockedBy[issue.ID], blocking.blocks[issue.ID], blocking.parent[issue.ID])
 		}
 		fmt.Print(buf.String())
 		printTruncationHint(truncated, in.effectiveLimit)
 		return nil
-	case in.longFormat:
-		buf.WriteString(fmt.Sprintf("\nFound %d issues:\n\n", len(issues)))
-		for _, issue := range issues {
-			formatIssueLong(&buf, issue, labelsMap[issue.ID], in.SkipLabels)
-		}
-	default:
-		for _, issue := range issues {
-			formatIssueCompact(&buf, issue, labelsMap[issue.ID], blocking.blockedBy[issue.ID], blocking.blocks[issue.ID], blocking.parent[issue.ID])
-		}
 	}
-
+	buf := formatProxiedListBody(issues, in, blocking, labelsMap)
 	if in.SkipLabels && !isQuiet() {
 		buf.WriteString(skipLabelsFooterText())
 	}
-
 	if err := ui.ToPager(buf.String(), ui.PagerOptions{NoPager: in.noPager}); err != nil {
 		if _, werr := fmt.Fprint(os.Stdout, buf.String()); werr != nil {
 			fmt.Fprintf(os.Stderr, "Error writing output: %v\n", werr)
@@ -299,4 +313,19 @@ func renderProxiedListText(ctx context.Context, out io.Writer, issues []*types.I
 	}
 	printTruncationHint(truncated, in.effectiveLimit)
 	return nil
+}
+
+func formatProxiedListBody(issues []*types.Issue, in listInput, blocking listBlocking, labelsMap map[string][]string) strings.Builder {
+	var buf strings.Builder
+	if in.longFormat {
+		buf.WriteString(fmt.Sprintf("\nFound %d issues:\n\n", len(issues)))
+		for _, issue := range issues {
+			formatIssueLong(&buf, issue, labelsMap[issue.ID], in.SkipLabels)
+		}
+		return buf
+	}
+	for _, issue := range issues {
+		formatIssueCompact(&buf, issue, labelsMap[issue.ID], blocking.blockedBy[issue.ID], blocking.blocks[issue.ID], blocking.parent[issue.ID])
+	}
+	return buf
 }

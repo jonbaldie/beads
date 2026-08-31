@@ -55,10 +55,10 @@ func TestApplyReplacementsWordBoundary(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			subgraph := &TemplateSubgraph{
-				Root: &types.Issue{ID: "root", Title: "Root"},
+				Root: &types.Issue{IssueID: types.IssueID{ID: "root"}, IssueContent: types.IssueContent{Title: "Root"}},
 				Issues: []*types.Issue{
-					{ID: "root", Title: "Root"},
-					{ID: "step", Title: tt.issueTitle},
+					{IssueID: types.IssueID{ID: "root"}, IssueContent: types.IssueContent{Title: "Root"}},
+					{IssueID: types.IssueID{ID: "step"}, IssueContent: types.IssueContent{Title: tt.issueTitle}},
 				},
 			}
 			result := subgraphToFormula(subgraph, "test-formula", tt.replacements)

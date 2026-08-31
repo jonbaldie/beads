@@ -59,23 +59,8 @@ func cleanDatabases(ctx context.Context, conn versioncontrolops.DBConn, opts cle
 	if err != nil {
 		return HandleError("listing databases: %v", err)
 	}
-
-	if len(stale) == 0 {
-		fmt.Println("No stale databases found.")
-	} else {
-		fmt.Printf("Found %d stale databases:\n", len(stale))
-		for _, name := range stale {
-			fmt.Printf("  %s\n", name)
-		}
-	}
-
-	if opts.dryRun {
-		if len(stale) > 0 {
-			fmt.Println("\n(dry run — no databases dropped)")
-		}
-		if opts.purgeDropped {
-			fmt.Println("(dry run — --purge-dropped ignored; no purge performed)")
-		}
+	printStaleDatabases(stale)
+	if printCleanDatabasesDryRun(stale, opts) {
 		return nil
 	}
 
@@ -85,7 +70,36 @@ func cleanDatabases(ctx context.Context, conn versioncontrolops.DBConn, opts cle
 	}
 
 	fmt.Println()
-	if shouldPurgeDroppedDatabases(opts.purgeDropped, dropped) {
+	printCleanDatabasesPurge(ctx, conn, opts.purgeDropped, dropped)
+	return nil
+}
+
+func printStaleDatabases(stale []string) {
+	if len(stale) == 0 {
+		fmt.Println("No stale databases found.")
+		return
+	}
+	fmt.Printf("Found %d stale databases:\n", len(stale))
+	for _, name := range stale {
+		fmt.Printf("  %s\n", name)
+	}
+}
+
+func printCleanDatabasesDryRun(stale []string, opts cleanDatabasesOptions) bool {
+	if !opts.dryRun {
+		return false
+	}
+	if len(stale) > 0 {
+		fmt.Println("\n(dry run — no databases dropped)")
+	}
+	if opts.purgeDropped {
+		fmt.Println("(dry run — --purge-dropped ignored; no purge performed)")
+	}
+	return true
+}
+
+func printCleanDatabasesPurge(ctx context.Context, conn versioncontrolops.DBConn, purgeDropped bool, dropped int) {
+	if shouldPurgeDroppedDatabases(purgeDropped, dropped) {
 		if err := purgeDroppedDatabases(ctx, conn); err != nil {
 			fmt.Fprintf(os.Stderr, "  WARN: PURGE_DROPPED_DATABASES failed: %v\n", err)
 			fmt.Fprintln(os.Stderr, "  Try `dolt sql -q 'CALL DOLT_PURGE_DROPPED_DATABASES()'`.")
@@ -98,7 +112,6 @@ func cleanDatabases(ctx context.Context, conn versioncontrolops.DBConn, opts cle
 		fmt.Println("Pass --purge-dropped to permanently reclaim their disk. This purges ALL dropped")
 		fmt.Println("databases on the server (server-global), not just the ones from this run.")
 	}
-	return nil
 }
 
 func dropStaleDatabases(ctx context.Context, conn versioncontrolops.DBConn, stale []string) (int, error) {

@@ -42,15 +42,15 @@ func TestCountLabelsAcrossIssues(t *testing.T) {
 		{
 			name: "counts every hydrated label once per issue",
 			issues: []*types.Issue{
-				{ID: "be-1", Labels: []string{"backend", "urgent"}},
-				{ID: "be-2", Labels: []string{"backend"}},
-				{ID: "be-3", Labels: []string{"urgent", "docs"}},
+				{IssueID: types.IssueID{ID: "be-1"}, IssueGraph: types.IssueGraph{Labels: []string{"backend", "urgent"}}},
+				{IssueID: types.IssueID{ID: "be-2"}, IssueGraph: types.IssueGraph{Labels: []string{"backend"}}},
+				{IssueID: types.IssueID{ID: "be-3"}, IssueGraph: types.IssueGraph{Labels: []string{"urgent", "docs"}}},
 			},
 			want: map[string]int{"backend": 2, "urgent": 2, "docs": 1},
 		},
 		{
 			name:   "issues without labels contribute nothing",
-			issues: []*types.Issue{{ID: "be-1"}, {ID: "be-2", Labels: []string{}}},
+			issues: []*types.Issue{{IssueID: types.IssueID{ID: "be-1"}}, {IssueID: types.IssueID{ID: "be-2"}, IssueGraph: types.IssueGraph{Labels: []string{}}}},
 			want:   map[string]int{},
 		},
 		{
@@ -87,7 +87,7 @@ func TestCountLabelsAcrossIssues(t *testing.T) {
 func TestCountLabelsAcrossIssues_SearchFilter(t *testing.T) {
 	t.Parallel()
 
-	store := &searchOnlyStore{issues: []*types.Issue{{ID: "be-1", Labels: []string{"x"}}}}
+	store := &searchOnlyStore{issues: []*types.Issue{{IssueID: types.IssueID{ID: "be-1"}, IssueGraph: types.IssueGraph{Labels: []string{"x"}}}}}
 	if _, err := countLabelsAcrossIssues(context.Background(), store); err != nil {
 		t.Fatalf("countLabelsAcrossIssues: %v", err)
 	}

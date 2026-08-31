@@ -18,7 +18,12 @@ import (
 // cfg.Gateway). ServerMode is set because gateway init always targets a server.
 func TestApplyInitGatewayCredentialAdoptsToken(t *testing.T) {
 	t.Setenv("BEADS_DOLT_CREDENTIAL_COMMAND", "printf tok-init")
-	doltCfg := &dolt.Config{ServerMode: true, AutoStart: true}
+	doltCfg := &dolt.Config{
+		ServerOptions: dolt.ServerOptions{
+			ServerMode: true,
+			AutoStart:  true,
+		},
+	}
 	if err := applyInitGatewayCredential(context.Background(), t.TempDir(), doltCfg); err != nil {
 		t.Fatalf("applyInitGatewayCredential: %v", err)
 	}
@@ -41,7 +46,11 @@ func TestApplyInitGatewayCredentialAdoptsToken(t *testing.T) {
 // the helper returning nil with the config untouched proves it did not.
 func TestApplyInitGatewayCredentialSkipsEmbeddedMode(t *testing.T) {
 	t.Setenv("BEADS_DOLT_CREDENTIAL_COMMAND", "false")
-	doltCfg := &dolt.Config{AutoStart: true} // ServerMode defaults to false
+	doltCfg := &dolt.Config{
+		ServerOptions: dolt.ServerOptions{
+			AutoStart: true,
+		},
+	} // ServerMode defaults to false
 	if err := applyInitGatewayCredential(context.Background(), t.TempDir(), doltCfg); err != nil {
 		t.Fatalf("embedded init must not run the credential command: %v", err)
 	}
@@ -54,7 +63,12 @@ func TestApplyInitGatewayCredentialSkipsEmbeddedMode(t *testing.T) {
 // left exactly as the caller built it.
 func TestApplyInitGatewayCredentialNoopWithoutCommand(t *testing.T) {
 	t.Setenv("BEADS_DOLT_CREDENTIAL_COMMAND", "")
-	doltCfg := &dolt.Config{ServerMode: true, AutoStart: true}
+	doltCfg := &dolt.Config{
+		ServerOptions: dolt.ServerOptions{
+			ServerMode: true,
+			AutoStart:  true,
+		},
+	}
 	if err := applyInitGatewayCredential(context.Background(), t.TempDir(), doltCfg); err != nil {
 		t.Fatalf("applyInitGatewayCredential: %v", err)
 	}
@@ -67,7 +81,12 @@ func TestApplyInitGatewayCredentialNoopWithoutCommand(t *testing.T) {
 // never leaves a fallback (root) user behind.
 func TestApplyInitGatewayCredentialFailsClosed(t *testing.T) {
 	t.Setenv("BEADS_DOLT_CREDENTIAL_COMMAND", "false")
-	doltCfg := &dolt.Config{ServerMode: true, AutoStart: true}
+	doltCfg := &dolt.Config{
+		ServerOptions: dolt.ServerOptions{
+			ServerMode: true,
+			AutoStart:  true,
+		},
+	}
 	err := applyInitGatewayCredential(context.Background(), t.TempDir(), doltCfg)
 	if err == nil {
 		t.Fatal("expected an error when the credential command fails")
@@ -81,7 +100,13 @@ func TestApplyInitGatewayCredentialFailsClosed(t *testing.T) {
 // command is not run). Mirrors ApplyGatewayCredential's preset short-circuit.
 func TestApplyInitGatewayCredentialPresetWins(t *testing.T) {
 	t.Setenv("BEADS_DOLT_CREDENTIAL_COMMAND", "false")
-	doltCfg := &dolt.Config{ServerMode: true, ServerUser: "preset", AutoStart: true}
+	doltCfg := &dolt.Config{
+		ServerOptions: dolt.ServerOptions{
+			ServerMode: true,
+			ServerUser: "preset",
+			AutoStart:  true,
+		},
+	}
 	if err := applyInitGatewayCredential(context.Background(), t.TempDir(), doltCfg); err != nil {
 		t.Fatalf("preset should short-circuit before running the command: %v", err)
 	}

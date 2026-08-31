@@ -13,11 +13,17 @@ func TestRunLintWarningsDoNotFailByDefault(t *testing.T) {
 	defer stdioMutex.Unlock()
 
 	issues := []*types.Issue{{
-		ID:          "bd-feat",
-		Title:       "Add dark mode",
-		Description: "Ship the toggle",
-		IssueType:   types.TypeFeature,
-		Status:      types.StatusOpen,
+		IssueID: types.IssueID{
+			ID: "bd-feat",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Add dark mode",
+			Description: "Ship the toggle",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeFeature,
+			Status:    types.StatusOpen,
+		},
 	}}
 
 	if err := runLint(issues, false); err != nil {
@@ -31,11 +37,17 @@ func TestRunLintStrictFailsOnWarnings(t *testing.T) {
 	defer stdioMutex.Unlock()
 
 	issues := []*types.Issue{{
-		ID:          "bd-feat",
-		Title:       "Add dark mode",
-		Description: "Ship the toggle",
-		IssueType:   types.TypeFeature,
-		Status:      types.StatusOpen,
+		IssueID: types.IssueID{
+			ID: "bd-feat",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Add dark mode",
+			Description: "Ship the toggle",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeFeature,
+			Status:    types.StatusOpen,
+		},
 	}}
 
 	err := runLint(issues, true)
@@ -54,11 +66,17 @@ func TestRunLintCleanIsSuccess(t *testing.T) {
 	defer stdioMutex.Unlock()
 
 	issues := []*types.Issue{{
-		ID:          "bd-chore",
-		Title:       "Bump deps",
-		Description: "Routine",
-		IssueType:   types.TypeChore,
-		Status:      types.StatusOpen,
+		IssueID: types.IssueID{
+			ID: "bd-chore",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Bump deps",
+			Description: "Routine",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeChore,
+			Status:    types.StatusOpen,
+		},
 	}}
 
 	if err := runLint(issues, true); err != nil {

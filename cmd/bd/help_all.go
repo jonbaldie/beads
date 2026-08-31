@@ -14,17 +14,20 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// helpAllFlag is the --all flag for the help command
-var helpAllFlag bool
+type helpOptions struct {
+	all      bool
+	doc      string
+	list     bool
+	docsRoot string
+}
 
-// helpDocFlag is the --doc flag for generating single command docs
-var helpDocFlag string
-
-// helpListFlag is the --list flag for listing available commands
-var helpListFlag bool
-
-// helpDocsRootFlag is the --docs-root flag for generating repository docs in one process.
-var helpDocsRootFlag string
+func helpOptionsFromCommand(cmd *cobra.Command) helpOptions {
+	all, _ := cmd.Flags().GetBool("all")
+	doc, _ := cmd.Flags().GetString("doc")
+	list, _ := cmd.Flags().GetBool("list")
+	docsRoot, _ := cmd.Flags().GetString("docs-root")
+	return helpOptions{all: all, doc: doc, list: list, docsRoot: docsRoot}
+}
 
 // registerHelpAllFlag adds the --all, --doc, and --list flags to Cobra's auto-generated help command.
 // Must be called after rootCmd.InitDefaultHelpCmd() has run (i.e., after first Execute
@@ -32,58 +35,74 @@ var helpDocsRootFlag string
 func registerHelpAllFlag() {
 	// Cobra lazily creates the help command. We need to find it.
 	for _, cmd := range rootCmd.Commands() {
-		if cmd.Name() == "help" {
-			if cmd.Flags().Lookup("all") != nil {
-				return
-			}
-			cmd.Flags().BoolVar(&helpAllFlag, "all", false, "Show help for all commands in a single document")
-			cmd.Flags().StringVar(&helpDocFlag, "doc", "", "Generate markdown docs for a single command")
-			cmd.Flags().BoolVar(&helpListFlag, "list", false, "List all available commands")
-			cmd.Flags().StringVar(&helpDocsRootFlag, "docs-root", "", "Generate repository CLI docs under this root")
-
-			// Wrap the existing Run to check --all, --doc, and --list first
-			originalRun := cmd.Run
-			cmd.Run = nil
-			cmd.SilenceUsage = true
-			cmd.SilenceErrors = true
-			cmd.RunE = func(cmd *cobra.Command, args []string) error {
-				if helpDocsRootFlag != "" {
-					if err := writeGeneratedCLIDocs(rootCmd, helpDocsRootFlag); err != nil {
-						fmt.Fprintln(os.Stderr, err)
-						return SilentExit()
-					}
-					return nil
-				}
-				if helpListFlag {
-					// Handle --list flag: list all available commands
-					listAllCommands(os.Stdout, rootCmd)
-					return nil
-				}
-				if helpDocFlag != "" {
-					// Handle --doc flag: generate single command docs
-					cmdPath := helpDocFlag
-					if len(args) > 0 {
-						cmdPath = strings.Join(append([]string{helpDocFlag}, args...), " ")
-					}
-					if err := writeSingleCommandDoc(os.Stdout, rootCmd, cmdPath); err != nil {
-						fmt.Fprintln(os.Stderr, err)
-						fmt.Fprintf(os.Stderr, "Available commands: %s\n", strings.Join(availableCommandNames(rootCmd), " "))
-						return SilentExit()
-					}
-					return nil
-				}
-				if helpAllFlag {
-					writeAllHelp(os.Stdout, rootCmd)
-					return nil
-				}
-				if originalRun != nil {
-					originalRun(cmd, args)
-				}
-				return nil
-			}
-			return
+		if cmd.Name() != "help" {
+			continue
 		}
+		configureHelpCommand(cmd)
+		return
 	}
+}
+
+func configureHelpCommand(cmd *cobra.Command) {
+	if cmd.Flags().Lookup("all") != nil {
+		return
+	}
+	cmd.Flags().Bool("all", false, "Show help for all commands in a single document")
+	cmd.Flags().String("doc", "", "Generate markdown docs for a single command")
+	cmd.Flags().Bool("list", false, "List all available commands")
+	cmd.Flags().String("docs-root", "", "Generate repository CLI docs under this root")
+
+	// Wrap the existing Run to check --all, --doc, and --list first.
+	originalRun := cmd.Run
+	cmd.Run = nil
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		return executeHelpCommand(cmd, args, originalRun)
+	}
+}
+
+func executeHelpCommand(cmd *cobra.Command, args []string, originalRun func(*cobra.Command, []string)) error {
+	opts := helpOptionsFromCommand(cmd)
+	if opts.docsRoot != "" {
+		return generateHelpDocs(opts.docsRoot)
+	}
+	if opts.list {
+		listAllCommands(os.Stdout, rootCmd)
+		return nil
+	}
+	if opts.doc != "" {
+		return generateSingleHelpDoc(opts.doc, args)
+	}
+	if opts.all {
+		writeAllHelp(os.Stdout, rootCmd)
+		return nil
+	}
+	if originalRun != nil {
+		originalRun(cmd, args)
+	}
+	return nil
+}
+
+func generateHelpDocs(repoRoot string) error {
+	if err := writeGeneratedCLIDocs(rootCmd, repoRoot); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return SilentExit()
+	}
+	return nil
+}
+
+func generateSingleHelpDoc(doc string, args []string) error {
+	cmdPath := doc
+	if len(args) > 0 {
+		cmdPath = strings.Join(append([]string{doc}, args...), " ")
+	}
+	if err := writeSingleCommandDoc(os.Stdout, rootCmd, cmdPath); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintf(os.Stderr, "Available commands: %s\n", strings.Join(availableCommandNames(rootCmd), " "))
+		return SilentExit()
+	}
+	return nil
 }
 
 // writeAllHelp writes a complete markdown reference for all commands,
@@ -91,81 +110,106 @@ func registerHelpAllFlag() {
 func writeAllHelp(w io.Writer, root *cobra.Command) {
 	fmt.Fprintf(w, "# bd — Complete Command Reference\n\n")
 	fmt.Fprintf(w, "Reference for bd Latest. Generated from `bd help --all`.\n\n")
+	groups := collectHelpGroups(root)
+	writeHelpTableOfContents(w, groups)
+	writeHelpGlobalFlags(w, root)
+	writeHelpCommandDetails(w, groups)
+}
 
-	// Collect commands grouped by their GroupID
-	type group struct {
-		title    string
-		commands []*cobra.Command
+type helpGroup struct {
+	title    string
+	commands []*cobra.Command
+}
+
+type helpGroupCollection struct {
+	groups    []*helpGroup
+	byID      map[string]*helpGroup
+	ungrouped *helpGroup
+}
+
+func collectHelpGroups(root *cobra.Command) []*helpGroup {
+	collection := helpGroupCollection{byID: make(map[string]*helpGroup, len(root.Groups()))}
+	for _, group := range root.Groups() {
+		collection.addGroup(group.ID, group.Title)
 	}
-
-	// Build ordered group list from root's groups
-	groups := root.Groups()
-	groupMap := make(map[string]*group, len(groups))
-	var orderedGroups []*group
-	for _, g := range groups {
-		grp := &group{title: g.Title}
-		groupMap[g.ID] = grp
-		orderedGroups = append(orderedGroups, grp)
-	}
-
-	// Ungrouped commands (if any)
-	var ungrouped []*group
-
 	for _, cmd := range root.Commands() {
-		if !cmd.IsAvailableCommand() && cmd.Name() != "help" {
-			continue
-		}
-		if gid := cmd.GroupID; gid != "" {
-			if grp, ok := groupMap[gid]; ok {
-				grp.commands = append(grp.commands, cmd)
-			}
-		} else {
-			// Ungrouped
-			if len(ungrouped) == 0 {
-				ungrouped = append(ungrouped, &group{title: "Other Commands:"})
-			}
-			ungrouped[0].commands = append(ungrouped[0].commands, cmd)
-		}
+		collection.addCommand(cmd)
 	}
+	return collection.allGroups()
+}
 
-	// Table of contents
+func (c *helpGroupCollection) addGroup(id, title string) {
+	group := &helpGroup{title: title}
+	c.byID[id] = group
+	c.groups = append(c.groups, group)
+}
+
+func (c *helpGroupCollection) addCommand(cmd *cobra.Command) {
+	if !cmd.IsAvailableCommand() && cmd.Name() != "help" {
+		return
+	}
+	if cmd.GroupID != "" {
+		if group, ok := c.byID[cmd.GroupID]; ok {
+			group.commands = append(group.commands, cmd)
+		}
+		return
+	}
+	if c.ungrouped == nil {
+		c.ungrouped = &helpGroup{title: "Other Commands:"}
+	}
+	c.ungrouped.commands = append(c.ungrouped.commands, cmd)
+}
+
+func (c *helpGroupCollection) allGroups() []*helpGroup {
+	groups := append([]*helpGroup(nil), c.groups...)
+	if c.ungrouped != nil {
+		groups = append(groups, c.ungrouped)
+	}
+	return groups
+}
+
+func writeHelpTableOfContents(w io.Writer, groups []*helpGroup) {
 	fmt.Fprintf(w, "## Table of Contents\n\n")
-	allGroups := append(orderedGroups, ungrouped...)
-	for _, grp := range allGroups {
-		if len(grp.commands) == 0 {
+	for _, group := range groups {
+		if len(group.commands) == 0 {
 			continue
 		}
-		fmt.Fprintf(w, "### %s\n\n", grp.title)
-		for _, cmd := range grp.commands {
-			anchor := "bd-" + strings.ReplaceAll(cmd.Name(), "-", "-")
-			fmt.Fprintf(w, "- [bd %s](#%s) — %s\n", cmd.Name(), anchor, escapeMDXText(cmd.Short))
-			// Include subcommands in TOC
-			for _, sub := range cmd.Commands() {
-				if !sub.IsAvailableCommand() {
-					continue
-				}
-				subAnchor := "bd-" + cmd.Name() + "-" + strings.ReplaceAll(sub.Name(), "-", "-")
-				fmt.Fprintf(w, "  - [bd %s %s](#%s) — %s\n", cmd.Name(), sub.Name(), subAnchor, escapeMDXText(sub.Short))
-			}
+		fmt.Fprintf(w, "### %s\n\n", group.title)
+		for _, cmd := range group.commands {
+			writeHelpTOCCommand(w, cmd)
 		}
 		fmt.Fprintf(w, "\n")
 	}
+}
 
-	// Global flags (once)
+func writeHelpTOCCommand(w io.Writer, cmd *cobra.Command) {
+	anchor := "bd-" + strings.ReplaceAll(cmd.Name(), "-", "-")
+	fmt.Fprintf(w, "- [bd %s](#%s) — %s\n", cmd.Name(), anchor, escapeMDXText(cmd.Short))
+	for _, sub := range cmd.Commands() {
+		if !sub.IsAvailableCommand() {
+			continue
+		}
+		subAnchor := "bd-" + cmd.Name() + "-" + strings.ReplaceAll(sub.Name(), "-", "-")
+		fmt.Fprintf(w, "  - [bd %s %s](#%s) — %s\n", cmd.Name(), sub.Name(), subAnchor, escapeMDXText(sub.Short))
+	}
+}
+
+func writeHelpGlobalFlags(w io.Writer, root *cobra.Command) {
 	fmt.Fprintf(w, "---\n\n## Global Flags\n\n")
 	fmt.Fprintf(w, "These flags apply to all commands:\n\n")
 	fmt.Fprintf(w, "```\n")
 	fmt.Fprintf(w, "%s", root.PersistentFlags().FlagUsages())
 	fmt.Fprintf(w, "```\n\n")
+}
 
-	// Command details
+func writeHelpCommandDetails(w io.Writer, groups []*helpGroup) {
 	fmt.Fprintf(w, "---\n\n")
-	for _, grp := range allGroups {
-		if len(grp.commands) == 0 {
+	for _, group := range groups {
+		if len(group.commands) == 0 {
 			continue
 		}
-		fmt.Fprintf(w, "## %s\n\n", grp.title)
-		for _, cmd := range grp.commands {
+		fmt.Fprintf(w, "## %s\n\n", group.title)
+		for _, cmd := range group.commands {
 			writeCommandHelp(w, cmd, "bd", 3)
 		}
 	}
@@ -203,13 +247,23 @@ func writeCommandHelp(w io.Writer, cmd *cobra.Command, parentPath string, depth 
 // writeCommandBody writes the heading-independent parts of a command's help:
 // description, usage, aliases, examples, and local flags.
 func writeCommandBody(w io.Writer, cmd *cobra.Command) {
-	// Description
+	writeCommandDescription(w, cmd)
+	writeCommandUsage(w, cmd)
+	writeCommandAliases(w, cmd)
+	writeCommandExamples(w, cmd)
+	writeCommandFlags(w, cmd)
+	writeCommandSupplement(w, cmd)
+}
+
+func writeCommandDescription(w io.Writer, cmd *cobra.Command) {
 	if cmd.Long != "" {
 		fmt.Fprintf(w, "%s\n\n", escapeMDXText(cmd.Long))
 	} else if cmd.Short != "" {
 		fmt.Fprintf(w, "%s\n\n", escapeMDXText(cmd.Short))
 	}
+}
 
+func writeCommandUsage(w io.Writer, cmd *cobra.Command) {
 	// Usage — mirror the binary's --help output: a runnable command shows its
 	// UseLine; a command with subcommands also shows `<path> [command]`.
 	// UseLine() alone appends "[flags]" even on non-runnable parents, which
@@ -225,23 +279,28 @@ func writeCommandBody(w io.Writer, cmd *cobra.Command) {
 		usage = append(usage, strings.TrimRight(cmd.UseLine(), " "))
 	}
 	fmt.Fprintf(w, "```\n%s\n```\n\n", strings.Join(usage, "\n"))
+}
 
-	// Aliases
+func writeCommandAliases(w io.Writer, cmd *cobra.Command) {
 	if len(cmd.Aliases) > 0 {
 		fmt.Fprintf(w, "**Aliases:** %s\n\n", strings.Join(cmd.Aliases, ", "))
 	}
+}
 
-	// Examples
+func writeCommandExamples(w io.Writer, cmd *cobra.Command) {
 	if cmd.Example != "" {
 		fmt.Fprintf(w, "**Examples:**\n\n```bash\n%s\n```\n\n", cmd.Example)
 	}
+}
 
-	// Local flags (not inherited/global)
+func writeCommandFlags(w io.Writer, cmd *cobra.Command) {
 	localFlags := cmd.NonInheritedFlags()
 	if localFlags.HasFlags() {
 		fmt.Fprintf(w, "**Flags:**\n\n```\n%s```\n\n", localFlags.FlagUsages())
 	}
+}
 
+func writeCommandSupplement(w io.Writer, cmd *cobra.Command) {
 	// Embedded doc supplement (raw Markdown, no MDX escaping).
 	if sup, ok := commandDocSupplements[cmd.CommandPath()]; ok {
 		fmt.Fprintf(w, "%s\n\n", strings.TrimSpace(sup))

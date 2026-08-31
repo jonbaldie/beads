@@ -21,10 +21,10 @@ func TestWouldCreateCycle(t *testing.T) {
 
 	// Create issues: A, B, C, D (isolated)
 	issues := []*types.Issue{
-		{ID: "cycle-a", Title: "A", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, CreatedAt: time.Now()},
-		{ID: "cycle-b", Title: "B", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, CreatedAt: time.Now()},
-		{ID: "cycle-c", Title: "C", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, CreatedAt: time.Now()},
-		{ID: "cycle-d", Title: "D", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, CreatedAt: time.Now()},
+		{IssueID: types.IssueID{ID: "cycle-a"}, IssueContent: types.IssueContent{Title: "A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}, IssueTimes: types.IssueTimes{CreatedAt: time.Now()}},
+		{IssueID: types.IssueID{ID: "cycle-b"}, IssueContent: types.IssueContent{Title: "B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}, IssueTimes: types.IssueTimes{CreatedAt: time.Now()}},
+		{IssueID: types.IssueID{ID: "cycle-c"}, IssueContent: types.IssueContent{Title: "C"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}, IssueTimes: types.IssueTimes{CreatedAt: time.Now()}},
+		{IssueID: types.IssueID{ID: "cycle-d"}, IssueContent: types.IssueContent{Title: "D"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}, IssueTimes: types.IssueTimes{CreatedAt: time.Now()}},
 	}
 	for _, issue := range issues {
 		if err := s.CreateIssue(ctx, issue, "test"); err != nil {

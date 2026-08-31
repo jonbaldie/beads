@@ -23,98 +23,299 @@ func TestMessagingSuite(t *testing.T) {
 
 	// === Lifecycle data ===
 	lifecycleMsg := &types.Issue{
-		ID: "msg-lifecycle", Title: "Build failed on main",
-		Description: "CI pipeline reports failure on commit abc123",
-		Status:      types.StatusOpen, Priority: 1, IssueType: "message",
-		Sender: "ci-bot", Assignee: "dev-team", Ephemeral: true,
-		CreatedAt: now, UpdatedAt: now,
+		IssueID: types.IssueID{
+			ID: "msg-lifecycle",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Build failed on main",
+			Description: "CI pipeline reports failure on commit abc123",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: "message",
+			Assignee:  "dev-team",
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+		IssueWisp: types.IssueWisp{
+			Sender:    "ci-bot",
+			Ephemeral: true,
+		},
 	}
 
 	// === SearchByType data ===
 	searchTask := &types.Issue{
-		ID: "msg-search-task", Title: "Regular task (search)",
-		Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask,
-		CreatedAt: now, UpdatedAt: now,
+		IssueID: types.IssueID{
+			ID: "msg-search-task",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Regular task (search)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
 	}
 	searchMsg := &types.Issue{
-		ID: "msg-search-msg", Title: "Agent notification (search)",
-		Status: types.StatusOpen, Priority: 2, IssueType: "message",
-		Sender: "coordinator", Assignee: "worker-1", Ephemeral: true,
-		CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second),
+		IssueID: types.IssueID{
+			ID: "msg-search-msg",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Agent notification (search)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: "message",
+			Assignee:  "worker-1",
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now.Add(time.Second),
+			UpdatedAt: now.Add(time.Second),
+		},
+		IssueWisp: types.IssueWisp{
+			Sender:    "coordinator",
+			Ephemeral: true,
+		},
 	}
 
 	// === Supersedes data ===
 	v1 := &types.Issue{
-		ID: "msg-v1", Title: "Design Doc v1", Description: "Initial design for feature X",
-		Status: types.StatusClosed, Priority: 2, IssueType: types.TypeTask,
-		CreatedAt: now, UpdatedAt: now,
+		IssueID: types.IssueID{
+			ID: "msg-v1",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Design Doc v1",
+			Description: "Initial design for feature X",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
 	}
 	v2 := &types.Issue{
-		ID: "msg-v2", Title: "Design Doc v2", Description: "Revised design for feature X",
-		Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask,
-		CreatedAt: now.Add(time.Hour), UpdatedAt: now.Add(time.Hour),
+		IssueID: types.IssueID{
+			ID: "msg-v2",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Design Doc v2",
+			Description: "Revised design for feature X",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now.Add(time.Hour),
+			UpdatedAt: now.Add(time.Hour),
+		},
 	}
 
 	// === Duplicates data ===
 	canonical := &types.Issue{
-		ID: "msg-canonical", Title: "Auth login fails with SSO",
-		Description: "Users can't login via SSO",
-		Status:      types.StatusOpen, Priority: 1, IssueType: types.TypeBug,
-		CreatedAt: now, UpdatedAt: now,
+		IssueID: types.IssueID{
+			ID: "msg-canonical",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Auth login fails with SSO",
+			Description: "Users can't login via SSO",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeBug,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
 	}
 	dup := &types.Issue{
-		ID: "msg-dup", Title: "SSO login broken",
-		Description: "Single sign-on authentication not working",
-		Status:      types.StatusOpen, Priority: 1, IssueType: types.TypeBug,
-		CreatedAt: now.Add(time.Minute), UpdatedAt: now.Add(time.Minute),
+		IssueID: types.IssueID{
+			ID: "msg-dup",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "SSO login broken",
+			Description: "Single sign-on authentication not working",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeBug,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now.Add(time.Minute),
+			UpdatedAt: now.Add(time.Minute),
+		},
 	}
 
 	// === Thread data ===
 	threadOrig := &types.Issue{
-		ID: "msg-thread-orig", Title: "Sprint planning discussion",
-		Description: "Let's plan the next sprint",
-		Status:      types.StatusOpen, Priority: 2, IssueType: "message",
-		Sender: "lead", Assignee: "team", Ephemeral: true,
-		CreatedAt: now, UpdatedAt: now,
+		IssueID: types.IssueID{
+			ID: "msg-thread-orig",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Sprint planning discussion",
+			Description: "Let's plan the next sprint",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: "message",
+			Assignee:  "team",
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+		IssueWisp: types.IssueWisp{
+			Sender:    "lead",
+			Ephemeral: true,
+		},
 	}
 	threadReply1 := &types.Issue{
-		ID: "msg-thread-r1", Title: "Re: Sprint planning",
-		Description: "I can take the auth refactor",
-		Status:      types.StatusOpen, Priority: 2, IssueType: "message",
-		Sender: "worker-1", Assignee: "lead", Ephemeral: true,
-		CreatedAt: now.Add(time.Minute), UpdatedAt: now.Add(time.Minute),
+		IssueID: types.IssueID{
+			ID: "msg-thread-r1",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Re: Sprint planning",
+			Description: "I can take the auth refactor",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: "message",
+			Assignee:  "lead",
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now.Add(time.Minute),
+			UpdatedAt: now.Add(time.Minute),
+		},
+		IssueWisp: types.IssueWisp{
+			Sender:    "worker-1",
+			Ephemeral: true,
+		},
 	}
 	threadReply2 := &types.Issue{
-		ID: "msg-thread-r2", Title: "Re: Sprint planning",
-		Description: "I'll handle the database migration",
-		Status:      types.StatusOpen, Priority: 2, IssueType: "message",
-		Sender: "worker-2", Assignee: "lead", Ephemeral: true,
-		CreatedAt: now.Add(2 * time.Minute), UpdatedAt: now.Add(2 * time.Minute),
+		IssueID: types.IssueID{
+			ID: "msg-thread-r2",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Re: Sprint planning",
+			Description: "I'll handle the database migration",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: "message",
+			Assignee:  "lead",
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now.Add(2 * time.Minute),
+			UpdatedAt: now.Add(2 * time.Minute),
+		},
+		IssueWisp: types.IssueWisp{
+			Sender:    "worker-2",
+			Ephemeral: true,
+		},
 	}
 
 	// === Ephemeral cleanup data ===
 	permTask := &types.Issue{
-		ID: "msg-perm-task", Title: "Permanent task (eph)",
-		Status: types.StatusClosed, Priority: 2, IssueType: types.TypeTask,
-		CreatedAt: now, UpdatedAt: now,
+		IssueID: types.IssueID{
+			ID: "msg-perm-task",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Permanent task (eph)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
 	}
 	closedEph := &types.Issue{
-		ID: "msg-closed-eph", Title: "Old notification (eph)",
-		Status: types.StatusClosed, Priority: 3, IssueType: "message",
-		Sender: "bot", Ephemeral: true, CreatedAt: now, UpdatedAt: now,
+		IssueID: types.IssueID{
+			ID: "msg-closed-eph",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Old notification (eph)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  3,
+			IssueType: "message",
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+		IssueWisp: types.IssueWisp{
+			Sender:    "bot",
+			Ephemeral: true,
+		},
 	}
 	openEph := &types.Issue{
-		ID: "msg-open-eph", Title: "Unread notification (eph)",
-		Status: types.StatusOpen, Priority: 2, IssueType: "message",
-		Sender: "bot", Ephemeral: true, CreatedAt: now, UpdatedAt: now,
+		IssueID: types.IssueID{
+			ID: "msg-open-eph",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Unread notification (eph)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: "message",
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+		IssueWisp: types.IssueWisp{
+			Sender:    "bot",
+			Ephemeral: true,
+		},
 	}
 
 	// === Sender preservation data ===
 	senderMsg := &types.Issue{
-		ID: "msg-sender", Title: "Status update",
-		Status: types.StatusOpen, Priority: 3, IssueType: "message",
-		Sender: "agent-alpha", Assignee: "agent-beta",
-		CreatedAt: now, UpdatedAt: now,
+		IssueID: types.IssueID{
+			ID: "msg-sender",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Status update",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  3,
+			IssueType: "message",
+			Assignee:  "agent-beta",
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+		IssueWisp: types.IssueWisp{
+			Sender: "agent-alpha",
+		},
 	}
 
 	// Bulk create all issues
@@ -188,7 +389,7 @@ func TestMessagingSuite(t *testing.T) {
 
 	t.Run("SearchByType", func(t *testing.T) {
 		msgType := types.IssueType("message")
-		results, err := testStore.SearchIssues(ctx, "", types.IssueFilter{IssueType: &msgType})
+		results, err := testStore.SearchIssues(ctx, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IssueType: &msgType}})
 		if err != nil {
 			t.Fatalf("SearchIssues: %v", err)
 		}
@@ -295,7 +496,7 @@ func TestMessagingSuite(t *testing.T) {
 		// Search for closed ephemeral issues
 		statusClosed := types.StatusClosed
 		ephTrue := true
-		filter := types.IssueFilter{Status: &statusClosed, Ephemeral: &ephTrue}
+		filter := types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Status: &statusClosed}, IssueFilterFlags: types.IssueFilterFlags{Ephemeral: &ephTrue}}
 		closedEphResults, err := testStore.SearchIssues(ctx, "", filter)
 		if err != nil {
 			t.Fatalf("SearchIssues: %v", err)

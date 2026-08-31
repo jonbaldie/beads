@@ -42,115 +42,117 @@ func registerCommonIssueFlags(cmd *cobra.Command) {
 // Returns the value, whether any flag was explicitly changed, and any error.
 func getDescriptionFlag(cmd *cobra.Command) (string, bool, error) {
 	if stdinFlag, _ := cmd.Flags().GetBool("stdin"); stdinFlag {
-		content, err := readBodyFile("-")
-		if err != nil {
-			return "", false, HandleError("reading from stdin: %v", err)
-		}
-		return content, true, nil
+		return readDescriptionStdin()
 	}
-
 	bodyFileChanged := cmd.Flags().Changed("body-file")
 	descFileChanged := cmd.Flags().Changed("description-file")
+	if bodyFileChanged || descFileChanged {
+		return descriptionFromBodyFile(cmd, bodyFileChanged, descFileChanged)
+	}
+	return descriptionFromInlineFlags(cmd)
+}
+
+func readDescriptionStdin() (string, bool, error) {
+	content, err := readBodyFile("-")
+	if err != nil {
+		return "", false, HandleError("reading from stdin: %v", err)
+	}
+	return content, true, nil
+}
+
+func descriptionFromBodyFile(cmd *cobra.Command, bodyFileChanged, descFileChanged bool) (string, bool, error) {
+	if err := rejectConflictingBodyFiles(cmd, bodyFileChanged, descFileChanged); err != nil {
+		return "", false, err
+	}
+	filePath, _ := cmd.Flags().GetString("description-file")
+	if bodyFileChanged {
+		filePath, _ = cmd.Flags().GetString("body-file")
+	}
 	descChanged := cmd.Flags().Changed("description")
 	bodyChanged := cmd.Flags().Changed("body")
 	messageChanged := cmd.Flags().Changed("message")
-
-	if bodyFileChanged && descFileChanged {
-		bodyFile, _ := cmd.Flags().GetString("body-file")
-		descFile, _ := cmd.Flags().GetString("description-file")
-		if bodyFile != descFile {
-			return "", false, HandleError("cannot specify both --body-file and --description-file with different values")
-		}
+	if descChanged || bodyChanged || messageChanged {
+		return "", false, HandleError("cannot specify both --body-file and --description/--body/--message")
 	}
-
-	if bodyFileChanged || descFileChanged {
-		var filePath string
-		if bodyFileChanged {
-			filePath, _ = cmd.Flags().GetString("body-file")
-		} else {
-			filePath, _ = cmd.Flags().GetString("description-file")
-		}
-
-		if descChanged || bodyChanged || messageChanged {
-			return "", false, HandleError("cannot specify both --body-file and --description/--body/--message")
-		}
-
-		content, err := readBodyFile(filePath)
-		if err != nil {
-			return "", false, HandleError("reading body file: %v", err)
-		}
-		return content, true, nil
+	content, err := readBodyFile(filePath)
+	if err != nil {
+		return "", false, HandleError("reading body file: %v", err)
 	}
+	return content, true, nil
+}
 
+func rejectConflictingBodyFiles(cmd *cobra.Command, bodyFileChanged, descFileChanged bool) error {
+	if !bodyFileChanged || !descFileChanged {
+		return nil
+	}
+	bodyFile, _ := cmd.Flags().GetString("body-file")
+	descFile, _ := cmd.Flags().GetString("description-file")
+	if bodyFile != descFile {
+		return HandleError("cannot specify both --body-file and --description-file with different values")
+	}
+	return nil
+}
+
+func descriptionFromInlineFlags(cmd *cobra.Command) (string, bool, error) {
 	desc, _ := cmd.Flags().GetString("description")
 	body, _ := cmd.Flags().GetString("body")
 	message, _ := cmd.Flags().GetString("message")
-
 	if desc == "-" || body == "-" || message == "-" {
-		values := make(map[string]string)
-		if descChanged {
-			values["--description"] = desc
-		}
-		if bodyChanged {
-			values["--body"] = body
-		}
-		if messageChanged {
-			values["--message"] = message
-		}
-		if len(values) > 1 {
-			var firstVal string
-			for _, v := range values {
-				if firstVal == "" {
-					firstVal = v
-				} else if v != firstVal {
-					fmt.Fprintf(os.Stderr, "Error: cannot specify multiple description flags with different values\n")
-					for flag, val := range values {
-						fmt.Fprintf(os.Stderr, "  %s: %q\n", flag, val)
-					}
-					return "", false, SilentExit()
-				}
-			}
-		}
-		content, err := readBodyFile("-")
-		if err != nil {
-			return "", false, HandleError("reading from stdin: %v", err)
-		}
-		return content, true, nil
+		return descriptionFromDashAlias(cmd, desc, body, message)
 	}
+	return pickInlineDescription(cmd, desc, body, message)
+}
 
-	changedCount := 0
+func descriptionFromDashAlias(cmd *cobra.Command, desc, body, message string) (string, bool, error) {
+	values := dashDescriptionValues(cmd, desc, body, message)
+	if err := rejectConflictingDashDescriptions(values); err != nil {
+		return "", false, err
+	}
+	return readDescriptionStdin()
+}
+
+func dashDescriptionValues(cmd *cobra.Command, desc, body, message string) map[string]string {
+	values := make(map[string]string)
+	if cmd.Flags().Changed("description") {
+		values["--description"] = desc
+	}
+	if cmd.Flags().Changed("body") {
+		values["--body"] = body
+	}
+	if cmd.Flags().Changed("message") {
+		values["--message"] = message
+	}
+	return values
+}
+
+func rejectConflictingDashDescriptions(values map[string]string) error {
+	if len(values) <= 1 {
+		return nil
+	}
 	var firstVal string
-	var firstFlag string
-	if descChanged {
-		changedCount++
-		firstVal = desc
-		firstFlag = "--description"
-	}
-	if bodyChanged {
-		changedCount++
+	for _, v := range values {
 		if firstVal == "" {
-			firstVal = body
-			firstFlag = "--body"
-		} else if body != firstVal {
-			fmt.Fprintf(os.Stderr, "Error: cannot specify both %s and --body with different values\n", firstFlag)
-			fmt.Fprintf(os.Stderr, "  %s: %q\n", firstFlag, firstVal)
-			fmt.Fprintf(os.Stderr, "  --body:        %q\n", body)
-			return "", false, SilentExit()
+			firstVal = v
+			continue
+		}
+		if v != firstVal {
+			fmt.Fprintf(os.Stderr, "Error: cannot specify multiple description flags with different values\n")
+			for flag, val := range values {
+				fmt.Fprintf(os.Stderr, "  %s: %q\n", flag, val)
+			}
+			return SilentExit()
 		}
 	}
-	if messageChanged {
-		changedCount++
-		if firstVal == "" {
-			firstVal = message
-			firstFlag = "--message"
-		} else if message != firstVal {
-			fmt.Fprintf(os.Stderr, "Error: cannot specify both %s and --message with different values\n", firstFlag)
-			fmt.Fprintf(os.Stderr, "  %s: %q\n", firstFlag, firstVal)
-			fmt.Fprintf(os.Stderr, "  --message:     %q\n", message)
-			return "", false, SilentExit()
-		}
-	}
+	return nil
+}
 
+func pickInlineDescription(cmd *cobra.Command, desc, body, message string) (string, bool, error) {
+	descChanged := cmd.Flags().Changed("description")
+	bodyChanged := cmd.Flags().Changed("body")
+	messageChanged := cmd.Flags().Changed("message")
+	if err := rejectConflictingInlineDescriptions(descChanged, bodyChanged, messageChanged, desc, body, message); err != nil {
+		return "", false, err
+	}
 	if descChanged {
 		return desc, true, nil
 	}
@@ -160,8 +162,31 @@ func getDescriptionFlag(cmd *cobra.Command) (string, bool, error) {
 	if messageChanged {
 		return message, true, nil
 	}
-
 	return desc, descChanged, nil
+}
+
+func rejectConflictingInlineDescriptions(descChanged, bodyChanged, messageChanged bool, desc, body, message string) error {
+	if err := rejectDescriptionPair(descChanged, bodyChanged, "--description", "--body", desc, body); err != nil {
+		return err
+	}
+	firstVal, firstFlag := desc, "--description"
+	if !descChanged {
+		firstVal, firstFlag = body, "--body"
+	}
+	if !descChanged && !bodyChanged {
+		return nil
+	}
+	return rejectDescriptionPair(true, messageChanged, firstFlag, "--message", firstVal, message)
+}
+
+func rejectDescriptionPair(firstSet, secondSet bool, firstFlag, secondFlag, firstVal, secondVal string) error {
+	if !firstSet || !secondSet || secondVal == firstVal {
+		return nil
+	}
+	fmt.Fprintf(os.Stderr, "Error: cannot specify both %s and %s with different values\n", firstFlag, secondFlag)
+	fmt.Fprintf(os.Stderr, "  %s: %q\n", firstFlag, firstVal)
+	fmt.Fprintf(os.Stderr, "  %s: %q\n", secondFlag, secondVal)
+	return SilentExit()
 }
 
 // getDesignFlag retrieves the design value from --design-file or --design.
@@ -237,40 +262,13 @@ type textSources struct {
 // one (echo, heredocs) — while file content is passed through verbatim like
 // every other file-input flag. Returns "" with provided=false when no source
 // is given at all.
-func textFromSources(src textSources) (text string, provided bool, err error) {
-	type source struct {
-		name    string
-		resolve func() (string, error)
-	}
-	var sources []source
-	if positional := strings.Join(src.positional, " "); strings.TrimSpace(positional) != "" {
-		sources = append(sources, source{fmt.Sprintf("positional text %q", positional), func() (string, error) {
-			return positional, nil
-		}})
-	}
-	if src.stdin != nil {
-		sources = append(sources, source{"--stdin", func() (string, error) {
-			content, err := io.ReadAll(src.stdin)
-			if err != nil {
-				return "", fmt.Errorf("reading from stdin: %w", err)
-			}
-			return strings.TrimRight(string(content), "\r\n"), nil
-		}})
-	}
-	if src.filePath != "" {
-		sources = append(sources, source{"--file", func() (string, error) {
-			// Verbatim, like every other file-input flag (--body-file,
-			// --design-file, --reason-file): a file is a deliberate payload,
-			// so its trailing newlines are preserved.
-			return readBodyFile(src.filePath)
-		}})
-	}
-	if src.flagSet || src.flagText != "" {
-		sources = append(sources, source{src.flagName, func() (string, error) {
-			return src.flagText, nil
-		}})
-	}
+type textSource struct {
+	name    string
+	resolve func() (string, error)
+}
 
+func textFromSources(src textSources) (text string, provided bool, err error) {
+	sources := collectTextSources(src)
 	provided = len(sources) > 0 || len(src.positional) > 0
 	switch len(sources) {
 	case 0:
@@ -279,12 +277,68 @@ func textFromSources(src textSources) (text string, provided bool, err error) {
 		text, err = sources[0].resolve()
 		return text, provided, err
 	default:
-		names := make([]string, len(sources))
-		for i, s := range sources {
-			names[i] = s.name
-		}
-		return "", provided, fmt.Errorf("cannot combine %s", strings.Join(names, " with "))
+		return "", provided, combinedTextSourceError(sources)
 	}
+}
+
+func collectTextSources(src textSources) []textSource {
+	var sources []textSource
+	sources = appendPositionalTextSource(sources, src.positional)
+	sources = appendStdinTextSource(sources, src.stdin)
+	sources = appendFileTextSource(sources, src.filePath)
+	return appendFlagTextSource(sources, src)
+}
+
+func appendPositionalTextSource(sources []textSource, positional []string) []textSource {
+	joined := strings.Join(positional, " ")
+	if strings.TrimSpace(joined) == "" {
+		return sources
+	}
+	return append(sources, textSource{fmt.Sprintf("positional text %q", joined), func() (string, error) {
+		return joined, nil
+	}})
+}
+
+func appendStdinTextSource(sources []textSource, stdin io.Reader) []textSource {
+	if stdin == nil {
+		return sources
+	}
+	return append(sources, textSource{"--stdin", func() (string, error) {
+		content, err := io.ReadAll(stdin)
+		if err != nil {
+			return "", fmt.Errorf("reading from stdin: %w", err)
+		}
+		return strings.TrimRight(string(content), "\r\n"), nil
+	}})
+}
+
+func appendFileTextSource(sources []textSource, filePath string) []textSource {
+	if filePath == "" {
+		return sources
+	}
+	return append(sources, textSource{"--file", func() (string, error) {
+		// Verbatim, like every other file-input flag (--body-file,
+		// --design-file, --reason-file): a file is a deliberate payload,
+		// so its trailing newlines are preserved.
+		return readBodyFile(filePath)
+	}})
+}
+
+func appendFlagTextSource(sources []textSource, src textSources) []textSource {
+	if !src.flagSet && src.flagText == "" {
+		return sources
+	}
+	return append(sources, textSource{src.flagName, func() (string, error) {
+		return src.flagText, nil
+	}})
+}
+
+func combinedTextSourceError(sources []textSource) error {
+	names := make([]string, len(sources))
+	for i, s := range sources {
+		names[i] = s.name
+	}
+	return fmt.Errorf("cannot combine %s", strings.Join(names, " with "))
 }
 
 // cmdTextSources builds textSources from a command's --stdin and --file

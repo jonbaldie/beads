@@ -91,8 +91,21 @@ func renderGoldenLines(t *testing.T) []byte {
 
 	// A minimal open task — the common case; exercises omitempty elision.
 	minimal := &types.Issue{
-		ID: "bd-100", Title: "wire the seam", Status: types.StatusOpen,
-		IssueType: types.TypeTask, Priority: 1, CreatedAt: created, UpdatedAt: updated,
+		IssueID: types.IssueID{
+			ID: "bd-100",
+		},
+		IssueContent: types.IssueContent{
+			Title: "wire the seam",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  1,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: created,
+			UpdatedAt: updated,
+		},
 	}
 	// A richly populated feature with labels, metadata, and an external ref —
 	// exercises the full field surface consumers may read. It deliberately omits
@@ -101,41 +114,122 @@ func renderGoldenLines(t *testing.T) []byte {
 	// array. Dependency edges are recorded solely through the top-level "dep"
 	// field on the dep_add / dep_remove records below.
 	full := &types.Issue{
-		ID: "bd-101", Title: "durable journal", Description: "append-only record",
-		AcceptanceCriteria: "replayable", Status: types.StatusInProgress,
-		IssueType: types.TypeFeature, Priority: 0, Assignee: "worker-1",
-		Owner: "dev@example.com", EstimatedMinutes: &est, CreatedAt: created,
-		CreatedBy: "author", UpdatedAt: updated, ExternalRef: strptr("gh-9"),
-		SourceSystem: "github", Metadata: json.RawMessage(`{"k":"v"}`),
-		Labels: []string{"infra", "urgent"},
+		IssueID: types.IssueID{
+			ID: "bd-101",
+		},
+		IssueContent: types.IssueContent{
+			Title:              "durable journal",
+			Description:        "append-only record",
+			AcceptanceCriteria: "replayable",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:           types.StatusInProgress,
+			IssueType:        types.TypeFeature,
+			Priority:         0,
+			Assignee:         "worker-1",
+			Owner:            "dev@example.com",
+			EstimatedMinutes: &est,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: created,
+			CreatedBy: "author",
+			UpdatedAt: updated,
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef:  strptr("gh-9"),
+			SourceSystem: "github",
+			Metadata:     json.RawMessage(`{"k":"v"}`),
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"infra", "urgent"},
+		},
 	}
 	// A claimed issue, carrying the lease pair a claim stamps. Fixed values, not
 	// time.Now(): see TestEventsJournalGoldenIsDeterministic.
 	claimed := &types.Issue{
-		ID: "bd-102", Title: "leased work", Status: types.StatusInProgress,
-		IssueType: types.TypeTask, Priority: 1, Assignee: "worker-1",
-		CreatedAt: created, UpdatedAt: updated,
-		LeaseExpiresAt: &leaseExpiry, HeartbeatAt: &heartbeat,
+		IssueID: types.IssueID{
+			ID: "bd-102",
+		},
+		IssueContent: types.IssueContent{
+			Title: "leased work",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusInProgress,
+			IssueType: types.TypeTask,
+			Priority:  1,
+			Assignee:  "worker-1",
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: created,
+			UpdatedAt: updated,
+		},
+		IssueLease: types.IssueLease{
+			LeaseExpiresAt: &leaseExpiry,
+			HeartbeatAt:    &heartbeat,
+		},
 	}
 	// A closed issue — exercises close_reason / closed_at marshaling.
 	closedIssue := &types.Issue{
-		ID: "bd-101", Title: "durable journal", Status: types.StatusClosed,
-		IssueType: types.TypeFeature, Priority: 0, CreatedAt: created,
-		UpdatedAt: closed, ClosedAt: &closed, CloseReason: "shipped",
+		IssueID: types.IssueID{
+			ID: "bd-101",
+		},
+		IssueContent: types.IssueContent{
+			Title: "durable journal",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			IssueType: types.TypeFeature,
+			Priority:  0,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt:   created,
+			UpdatedAt:   closed,
+			ClosedAt:    &closed,
+			CloseReason: "shipped",
+		},
 	}
 	// A blocked issue — is_blocked is the persisted readiness projection a graph
 	// delta needs to be replayable, and it is journal-only (omitempty, so the
 	// false case is elided).
 	blocked := &types.Issue{
-		ID: "bd-100", Title: "wire the seam", Status: types.StatusOpen,
-		IssueType: types.TypeTask, Priority: 1, CreatedAt: created, UpdatedAt: updated,
-		IsBlocked: true,
+		IssueID: types.IssueID{
+			ID: "bd-100",
+		},
+		IssueContent: types.IssueContent{
+			Title: "wire the seam",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  1,
+			IsBlocked: true,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: created,
+			UpdatedAt: updated,
+		},
 	}
 	// An ephemeral wisp — exercises the ephemeral/wisp_type fields.
 	wisp := &types.Issue{
-		ID: "bd-wisp-1", Title: "convoy member", Status: types.StatusOpen,
-		IssueType: types.TypeTask, Priority: 2, CreatedAt: created, UpdatedAt: updated,
-		Ephemeral: true, WispType: types.WispType("convoy"),
+		IssueID: types.IssueID{
+			ID: "bd-wisp-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "convoy member",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: created,
+			UpdatedAt: updated,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+			WispType:  types.WispType("convoy"),
+		},
 	}
 	// The engine-only comment op: a replayable comment payload, so a consumer
 	// can reproduce comment text without re-reading the database. Both sources

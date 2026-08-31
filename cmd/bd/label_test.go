@@ -21,10 +21,14 @@ type labelTestHelper struct {
 
 func (h *labelTestHelper) createIssue(title string, issueType types.IssueType, priority int) *types.Issue {
 	issue := &types.Issue{
-		Title:     title,
-		Priority:  priority,
-		IssueType: issueType,
-		Status:    types.StatusOpen,
+		IssueContent: types.IssueContent{
+			Title: title,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  priority,
+			IssueType: issueType,
+			Status:    types.StatusOpen,
+		},
 	}
 	if err := h.s.CreateIssue(h.ctx, issue, "test-user"); err != nil {
 		h.t.Fatalf("Failed to create issue: %v", err)
@@ -217,11 +221,17 @@ func TestLabelCommands(t *testing.T) {
 				t.Fatalf("failed to get next child ID: %v", err)
 			}
 			child := &types.Issue{
-				ID:        childID,
-				Title:     fmt.Sprintf("Child %d", i),
-				Priority:  2,
-				Status:    types.StatusOpen,
-				IssueType: types.TypeTask,
+				IssueID: types.IssueID{
+					ID: childID,
+				},
+				IssueContent: types.IssueContent{
+					Title: fmt.Sprintf("Child %d", i),
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Priority:  2,
+					Status:    types.StatusOpen,
+					IssueType: types.TypeTask,
+				},
 			}
 			if err := s.CreateIssue(ctx, child, "test-user"); err != nil {
 				t.Fatalf("failed to create child %d: %v", i, err)
@@ -239,7 +249,7 @@ func TestLabelCommands(t *testing.T) {
 
 		// Propagate: find children via ParentID filter, add label
 		parentID := parent.ID
-		childIssues, err := s.SearchIssues(ctx, "", types.IssueFilter{ParentID: &parentID})
+		childIssues, err := s.SearchIssues(ctx, "", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{ParentID: &parentID}})
 		if err != nil {
 			t.Fatalf("failed to search children: %v", err)
 		}
@@ -268,11 +278,17 @@ func TestLabelCommands(t *testing.T) {
 			t.Fatalf("failed to get next child ID: %v", err)
 		}
 		child1 := &types.Issue{
-			ID:        child1ID,
-			Title:     "Child already labeled",
-			Priority:  2,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: child1ID,
+			},
+			IssueContent: types.IssueContent{
+				Title: "Child already labeled",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := s.CreateIssue(ctx, child1, "test-user"); err != nil {
 			t.Fatalf("failed to create child1: %v", err)
@@ -293,11 +309,17 @@ func TestLabelCommands(t *testing.T) {
 			t.Fatalf("failed to get next child ID: %v", err)
 		}
 		child2 := &types.Issue{
-			ID:        child2ID,
-			Title:     "Child not yet labeled",
-			Priority:  2,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: child2ID,
+			},
+			IssueContent: types.IssueContent{
+				Title: "Child not yet labeled",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := s.CreateIssue(ctx, child2, "test-user"); err != nil {
 			t.Fatalf("failed to create child2: %v", err)
@@ -313,7 +335,7 @@ func TestLabelCommands(t *testing.T) {
 
 		// Propagate (AddLabel is idempotent)
 		parentID := parent.ID
-		childIssues, err := s.SearchIssues(ctx, "", types.IssueFilter{ParentID: &parentID})
+		childIssues, err := s.SearchIssues(ctx, "", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{ParentID: &parentID}})
 		if err != nil {
 			t.Fatalf("failed to search children: %v", err)
 		}
@@ -335,7 +357,7 @@ func TestLabelCommands(t *testing.T) {
 		h.addLabel(parent.ID, "branch:z")
 
 		parentID := parent.ID
-		childIssues, err := s.SearchIssues(ctx, "", types.IssueFilter{ParentID: &parentID})
+		childIssues, err := s.SearchIssues(ctx, "", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{ParentID: &parentID}})
 		if err != nil {
 			t.Fatalf("failed to search children: %v", err)
 		}

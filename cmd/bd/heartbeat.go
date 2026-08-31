@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -9,12 +10,13 @@ import (
 	"github.com/jonbaldie/beads/internal/ui"
 )
 
-var heartbeatCmd = &cobra.Command{
-	Use:     "heartbeat <id>",
-	Aliases: []string{"hb"},
-	GroupID: "issues",
-	Short:   "Refresh the lease on an issue you hold in_progress",
-	Long: `Refresh the lease on an issue you currently hold in_progress.
+func newHeartbeatCmd() *cobra.Command {
+	heartbeatCmd := &cobra.Command{
+		Use:     "heartbeat <id>",
+		Aliases: []string{"hb"},
+		GroupID: "issues",
+		Short:   "Refresh the lease on an issue you hold in_progress",
+		Long: `Refresh the lease on an issue you currently hold in_progress.
 
 A claim carries a lease that expires after a TTL. A worker keeps its claim alive
 by heartbeating faster than the TTL; once it stops (because it died), the lease
@@ -32,57 +34,44 @@ rides the issue's status and assignee, which do commit.
 Examples:
   bd heartbeat bd-123
   bd hb bd-123`,
-	Args:          cobra.ExactArgs(1),
-	SilenceUsage:  true,
-	SilenceErrors: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		CheckReadonly("heartbeat")
+		Args:          cobra.ExactArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE:          runHeartbeat,
+	}
+	heartbeatCmd.ValidArgsFunction = issueIDCompletion
+	return heartbeatCmd
+}
 
-		evt := metrics.NewCommandEvent("heartbeat")
-		defer func() {
-			if c := metrics.Global(); c != nil {
-				c.CloseEventAndAdd(evt)
-			}
-		}()
-
-		ctx := rootCtx
-		id := args[0]
-
-		if usesProxiedServer() {
-			return runHeartbeatProxiedServer(ctx, id)
+func runHeartbeat(_ *cobra.Command, args []string) error {
+	if err := CheckReadonly("heartbeat"); err != nil {
+		return err
+	}
+	evt := metrics.NewCommandEvent("heartbeat")
+	defer func() {
+		if c := metrics.Global(); c != nil {
+			c.CloseEventAndAdd(evt)
 		}
+	}()
+	if usesProxiedServer() {
+		return runHeartbeatProxiedServer(getRootContext(), args[0])
+	}
+	return withMutationIssue(getRootContext(), getStore(), args[0], func(result *RoutedResult) error {
+		return applyHeartbeat(getRootContext(), result)
+	})
+}
 
-		result, err := resolveAndGetIssueForMutation(ctx, store, id)
-		if err != nil {
-			if result != nil {
-				result.Close()
-			}
-			return HandleErrorRespectJSON("resolving %s: %v", id, err)
-		}
-		if result == nil || result.Issue == nil {
-			if result != nil {
-				result.Close()
-			}
-			return HandleErrorRespectJSON("issue %s not found", id)
-		}
-		defer result.Close()
-
-		issueStore := result.Store
-		if err := issueStore.HeartbeatIssue(ctx, result.ResolvedID, actor); err != nil {
-			return HandleErrorRespectJSON("heartbeat %s: %v", result.ResolvedID, err)
-		}
-
-		if err := commitPendingIfEmbedded(ctx, issueStore, actor, doltAutoCommitParams{
-			Command:  "heartbeat",
-			IssueIDs: []string{result.ResolvedID},
-		}); err != nil {
-			return HandleErrorRespectJSON("failed to commit: %v", err)
-		}
-
-		SetLastTouchedID(result.ResolvedID)
-
-		return renderHeartbeatSuccess(result.ResolvedID, result.Issue.Title)
-	},
+func applyHeartbeat(ctx context.Context, result *RoutedResult) error {
+	if err := result.Store.HeartbeatIssue(ctx, result.ResolvedID, getActor()); err != nil {
+		return HandleErrorRespectJSON("heartbeat %s: %v", result.ResolvedID, err)
+	}
+	if err := commitPendingIfEmbedded(ctx, result.Store, getActor(), doltAutoCommitParams{
+		Command: "heartbeat", IssueIDs: []string{result.ResolvedID},
+	}); err != nil {
+		return HandleErrorRespectJSON("failed to commit: %v", err)
+	}
+	SetLastTouchedID(result.ResolvedID)
+	return renderHeartbeatSuccess(result.ResolvedID, result.Issue.Title)
 }
 
 // renderHeartbeatSuccess prints the success shape both storage routes share —
@@ -90,11 +79,11 @@ Examples:
 // call exactly this code, so the --json contract workers parse
 // ({"id","status":"heartbeat","owner"}) cannot drift between modes.
 func renderHeartbeatSuccess(id, title string) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(map[string]string{
 			"id":     id,
 			"status": "heartbeat",
-			"owner":  actor,
+			"owner":  getActor(),
 		})
 	}
 	fmt.Printf("%s Heartbeat %s (lease refreshed)\n", ui.RenderPass("✓"), formatFeedbackID(id, title))
@@ -102,6 +91,5 @@ func renderHeartbeatSuccess(id, title string) error {
 }
 
 func init() {
-	heartbeatCmd.ValidArgsFunction = issueIDCompletion
-	rootCmd.AddCommand(heartbeatCmd)
+	rootCmd.AddCommand(newHeartbeatCmd())
 }

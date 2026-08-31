@@ -62,24 +62,24 @@ Examples:
 		strict, _ := cmd.Flags().GetBool("strict")
 
 		if usesProxiedServer() {
-			return runLintProxiedServer(rootCtx, args, typeFilter, statusFilter, strict)
+			return runLintProxiedServer(getRootContext(), args, typeFilter, statusFilter, strict)
 		}
 
-		ctx := rootCtx
-		if store == nil {
+		ctx := getRootContext()
+		if getStore() == nil {
 			return HandleErrorWithHint("database not initialized", diagHint())
 		}
 
 		var issues []*types.Issue
 		if len(args) > 0 {
-			issues = lintCollectByIDs(ctx, args, store.GetIssue)
+			issues = lintCollectByIDs(ctx, args, getStore().GetIssue)
 		} else {
 			// Lint all matching issues (env-only cap; designer §4 doctor family).
 			filter := buildLintFilter(typeFilter, statusFilter)
 			filter.MaxRows, filter.MaxRowsSource = resolveMaxRowsEnvOnly()
 
 			var err error
-			issues, err = store.SearchIssues(ctx, "", filter)
+			issues, err = getStore().SearchIssues(ctx, "", filter)
 			if err != nil {
 				if capErr := handleMaxRowsError(err); capErr != nil {
 					return capErr
@@ -133,55 +133,59 @@ func runLint(issues []*types.Issue, strict bool) error {
 	totalWarnings := 0
 
 	for _, issue := range issues {
-		err := validation.LintIssue(issue)
-		if err == nil {
-			continue
+		if result, ok := lintResult(issue); ok {
+			results = append(results, result)
+			totalWarnings += result.Warnings
 		}
-
-		templateErr, ok := err.(*validation.TemplateError)
-		if !ok {
-			continue
-		}
-
-		missing := make([]string, len(templateErr.Missing))
-		for i, m := range templateErr.Missing {
-			missing[i] = m.Heading
-		}
-
-		result := LintResult{
-			ID:       issue.ID,
-			Title:    issue.Title,
-			Type:     string(issue.IssueType),
-			Missing:  missing,
-			Warnings: len(missing),
-		}
-		results = append(results, result)
-		totalWarnings += len(missing)
 	}
+	return renderLintResults(issues, results, totalWarnings, strict)
+}
 
-	if jsonOutput {
-		output := struct {
-			Total   int          `json:"total"`
-			Issues  int          `json:"issues"`
-			Results []LintResult `json:"results"`
-		}{
-			Total:   totalWarnings,
-			Issues:  len(results),
-			Results: results,
-		}
-		data, _ := json.MarshalIndent(output, "", "  ")
-		fmt.Println(string(data))
-		if strict && totalWarnings > 0 {
-			return SilentExit()
-		}
-		return nil
+func lintResult(issue *types.Issue) (LintResult, bool) {
+	err := validation.LintIssue(issue)
+	if err == nil {
+		return LintResult{}, false
 	}
+	templateErr, ok := err.(*validation.TemplateError)
+	if !ok {
+		return LintResult{}, false
+	}
+	missing := make([]string, len(templateErr.Missing))
+	for i, m := range templateErr.Missing {
+		missing[i] = m.Heading
+	}
+	return LintResult{
+		ID: issue.ID, Title: issue.Title, Type: string(issue.IssueType),
+		Missing: missing, Warnings: len(missing),
+	}, true
+}
 
+func renderLintResults(issues []*types.Issue, results []LintResult, totalWarnings int, strict bool) error {
+	if isJSONOutput() {
+		return renderLintJSON(results, totalWarnings, strict)
+	}
 	if len(results) == 0 {
 		fmt.Printf("✓ No template warnings found (%d issues checked)\n", len(issues))
 		return nil
 	}
+	return renderLintText(results, totalWarnings, strict)
+}
 
+func renderLintJSON(results []LintResult, totalWarnings int, strict bool) error {
+	output := struct {
+		Total   int          `json:"total"`
+		Issues  int          `json:"issues"`
+		Results []LintResult `json:"results"`
+	}{Total: totalWarnings, Issues: len(results), Results: results}
+	data, _ := json.MarshalIndent(output, "", "  ")
+	fmt.Println(string(data))
+	if strict && totalWarnings > 0 {
+		return SilentExit()
+	}
+	return nil
+}
+
+func renderLintText(results []LintResult, totalWarnings int, strict bool) error {
 	fmt.Printf("Template warnings (%d issues, %d warnings):\n\n", len(results), totalWarnings)
 	for _, r := range results {
 		fmt.Printf("%s [%s]: %s\n", r.ID, r.Type, r.Title)

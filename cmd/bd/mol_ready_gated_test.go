@@ -64,20 +64,36 @@ func TestFindGateReadyMolecules_NoGates(t *testing.T) {
 
 	// Create a regular molecule (no gates)
 	mol := &types.Issue{
-		ID:        "test-mol-001",
-		Title:     "Test Molecule",
-		IssueType: types.TypeEpic,
-		Status:    types.StatusInProgress,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "test-mol-001",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Test Molecule",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeEpic,
+			Status:    types.StatusInProgress,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
 	}
 	step := &types.Issue{
-		ID:        "test-mol-001.step1",
-		Title:     "Step 1",
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "test-mol-001.step1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Step 1",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
 	}
 
 	if err := store.CreateIssue(ctx, mol, "test"); err != nil {
@@ -119,30 +135,57 @@ func TestFindGateReadyMolecules_ClosedGate(t *testing.T) {
 	//   └── step1 (blocked by gate-await-ci, should become ready)
 
 	mol := &types.Issue{
-		ID:        "test-mol-002",
-		Title:     "Test Molecule with Gate",
-		IssueType: types.TypeEpic,
-		Status:    types.StatusInProgress,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "test-mol-002",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Test Molecule with Gate",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeEpic,
+			Status:    types.StatusInProgress,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
 	}
 	gate := &types.Issue{
-		ID:        "test-mol-002.gate-await-ci",
-		Title:     "Gate: gh:run ci-workflow",
-		IssueType: "gate",
-		Status:    types.StatusClosed, // Gate has closed
-		AwaitType: "gh:run",
-		AwaitID:   "ci-workflow",
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "test-mol-002.gate-await-ci",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Gate: gh:run ci-workflow",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: "gate",
+			Status:    types.StatusClosed,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
+		IssueCoord: types.IssueCoord{
+			// Gate has closed
+			AwaitType: "gh:run",
+			AwaitID:   "ci-workflow",
+		},
 	}
 	step := &types.Issue{
-		ID:        "test-mol-002.step1",
-		Title:     "Deploy after CI",
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "test-mol-002.step1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Deploy after CI",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
 	}
 
 	if err := store.CreateIssue(ctx, mol, "test"); err != nil {
@@ -214,30 +257,57 @@ func TestFindGateReadyMolecules_OpenGate(t *testing.T) {
 
 	// Create molecule with OPEN gate
 	mol := &types.Issue{
-		ID:        "test-mol-003",
-		Title:     "Test Molecule with Open Gate",
-		IssueType: types.TypeEpic,
-		Status:    types.StatusInProgress,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "test-mol-003",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Test Molecule with Open Gate",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeEpic,
+			Status:    types.StatusInProgress,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
 	}
 	gate := &types.Issue{
-		ID:        "test-mol-003.gate-await-ci",
-		Title:     "Gate: gh:run ci-workflow",
-		IssueType: "gate",
-		Status:    types.StatusOpen, // Gate is still open
-		AwaitType: "gh:run",
-		AwaitID:   "ci-workflow",
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "test-mol-003.gate-await-ci",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Gate: gh:run ci-workflow",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: "gate",
+			Status:    types.StatusOpen,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
+		IssueCoord: types.IssueCoord{
+			// Gate is still open
+			AwaitType: "gh:run",
+			AwaitID:   "ci-workflow",
+		},
 	}
 	step := &types.Issue{
-		ID:        "test-mol-003.step1",
-		Title:     "Deploy after CI",
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "test-mol-003.step1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Deploy after CI",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
 	}
 
 	if err := store.CreateIssue(ctx, mol, "test"); err != nil {
@@ -294,30 +364,57 @@ func TestFindGateReadyMolecules_HookedMolecule(t *testing.T) {
 
 	// Create molecule with closed gate, but molecule is hooked
 	mol := &types.Issue{
-		ID:        "test-mol-004",
-		Title:     "Test Hooked Molecule",
-		IssueType: types.TypeEpic,
-		Status:    types.StatusHooked, // Already hooked by an agent
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "test-mol-004",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Test Hooked Molecule",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeEpic,
+			Status:    types.StatusHooked,
+		},
+		IssueTimes: types.IssueTimes{
+			// Already hooked by an agent
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
 	}
 	gate := &types.Issue{
-		ID:        "test-mol-004.gate-await-ci",
-		Title:     "Gate: gh:run ci-workflow",
-		IssueType: "gate",
-		Status:    types.StatusClosed,
-		AwaitType: "gh:run",
-		AwaitID:   "ci-workflow",
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "test-mol-004.gate-await-ci",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Gate: gh:run ci-workflow",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: "gate",
+			Status:    types.StatusClosed,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
+		IssueCoord: types.IssueCoord{
+			AwaitType: "gh:run",
+			AwaitID:   "ci-workflow",
+		},
 	}
 	step := &types.Issue{
-		ID:        "test-mol-004.step1",
-		Title:     "Deploy after CI",
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "test-mol-004.step1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Deploy after CI",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
 	}
 
 	if err := store.CreateIssue(ctx, mol, "test"); err != nil {
@@ -376,29 +473,55 @@ func TestFindGateReadyMolecules_MultipleGates(t *testing.T) {
 	for i := 1; i <= 2; i++ {
 		molID := fmt.Sprintf("test-multi-%d", i)
 		mol := &types.Issue{
-			ID:        molID,
-			Title:     fmt.Sprintf("Multi Gate Mol %d", i),
-			IssueType: types.TypeEpic,
-			Status:    types.StatusInProgress,
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
+			IssueID: types.IssueID{
+				ID: molID,
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Multi Gate Mol %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				IssueType: types.TypeEpic,
+				Status:    types.StatusInProgress,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			},
 		}
 		gate := &types.Issue{
-			ID:        fmt.Sprintf("%s.gate", molID),
-			Title:     "Gate: gh:run",
-			IssueType: "gate",
-			Status:    types.StatusClosed,
-			AwaitType: "gh:run",
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("%s.gate", molID),
+			},
+			IssueContent: types.IssueContent{
+				Title: "Gate: gh:run",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				IssueType: "gate",
+				Status:    types.StatusClosed,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			},
+			IssueCoord: types.IssueCoord{
+				AwaitType: "gh:run",
+			},
 		}
 		step := &types.Issue{
-			ID:        fmt.Sprintf("%s.step1", molID),
-			Title:     "Step 1",
-			IssueType: types.TypeTask,
-			Status:    types.StatusOpen,
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("%s.step1", molID),
+			},
+			IssueContent: types.IssueContent{
+				Title: "Step 1",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				IssueType: types.TypeTask,
+				Status:    types.StatusOpen,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			},
 		}
 
 		if err := store.CreateIssue(ctx, mol, "test"); err != nil {

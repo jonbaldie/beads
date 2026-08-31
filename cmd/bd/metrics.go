@@ -256,21 +256,13 @@ func showQueuedEvents(out interface{ Write([]byte) (int, error) }) int {
 	if err != nil {
 		return 0
 	}
-	entries, err := os.ReadDir(dir)
+	files, err := queuedEventFiles(dir)
 	if err != nil {
 		return 0
-	}
-	files := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
-			continue
-		}
-		files = append(files, e.Name())
 	}
 	if len(files) == 0 {
 		return 0
 	}
-	sort.Strings(files)
 	const maxShow = 3
 	fmt.Fprintf(out, "Currently queued on this machine (%s) — %d batch file(s); showing up to %d:\n\n", dir, len(files), maxShow)
 	shown := 0
@@ -278,26 +270,47 @@ func showQueuedEvents(out interface{ Write([]byte) (int, error) }) int {
 		if shown >= maxShow {
 			break
 		}
-		// #nosec G304 -- dir is bd's own metrics data dir and name comes from os.ReadDir of that same dir, not user input
-		raw, err := os.ReadFile(filepath.Join(dir, name))
-		if err != nil {
-			continue
+		if showQueuedEventFile(out, dir, name) {
+			shown++
 		}
-		var pretty json.RawMessage
-		if json.Unmarshal(raw, &pretty) != nil {
-			continue
-		}
-		buf, err := marshalIndentNoEscape(pretty)
-		if err != nil {
-			continue
-		}
-		fmt.Fprintf(out, "  %s\n\n", buf)
-		shown++
 	}
 	if len(files) > shown {
 		fmt.Fprintf(out, "  ... and %d more batch file(s).\n", len(files)-shown)
 	}
 	return shown
+}
+
+func queuedEventFiles(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	files := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
+			files = append(files, entry.Name())
+		}
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
+func showQueuedEventFile(out interface{ Write([]byte) (int, error) }, dir, name string) bool {
+	// #nosec G304 -- dir is bd's own metrics data dir and name comes from os.ReadDir of that same dir, not user input
+	raw, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		return false
+	}
+	var pretty json.RawMessage
+	if json.Unmarshal(raw, &pretty) != nil {
+		return false
+	}
+	buf, err := marshalIndentNoEscape(pretty)
+	if err != nil {
+		return false
+	}
+	fmt.Fprintf(out, "  %s\n\n", buf)
+	return true
 }
 
 // isMetricsCommandContext reports whether cmd is `bd metrics` or one of its
@@ -362,37 +375,24 @@ func commandBoolFlag(cmd *cobra.Command, name string) bool {
 // command itself, hook/protocol/completion/shell-init commands, the root
 // --version/-V probe, stealth init, and init --quiet / --non-interactive.
 func firstRunNoticeSuppressedByContext(cmd *cobra.Command) bool {
-	if jsonOutput || quietFlag || primeHookJSONMode {
+	if firstRunOutputSuppressed(cmd) || firstRunInitSuppressed(cmd) {
 		return true
 	}
-	// Init has its own local --quiet / --non-interactive flags that do not set
-	// the root persistent quietFlag. Agent init is `bd init --quiet --non-interactive`.
-	if commandBoolFlag(cmd, "quiet") || commandBoolFlag(cmd, "non-interactive") {
-		return true
-	}
-	if os.Getenv("BD_GIT_HOOK") == "1" {
-		return true
-	}
-	if isMetricsCommandContext(cmd) {
+	if os.Getenv("BD_GIT_HOOK") == "1" || isMetricsCommandContext(cmd) {
 		return true
 	}
 	if firstRunNoticeSuppressedCommands[topLevelCommandName(cmd)] {
 		return true
 	}
-	// `bd --version` / `bd -V` is a version probe just like the `version`
-	// subcommand, so it must not emit (or mark shown) the one-time consent notice.
-	// The root flag path has top-level command name "bd" and so slips past the
-	// suppressed-command map above; check the flag directly. GetBool errors for
-	// commands that do not define a "version" flag, which the err guard ignores.
-	if v, err := cmd.Flags().GetBool("version"); err == nil && v {
-		return true
-	}
-	// `bd init --stealth` configures invisible per-repository usage; a visible
-	// consent notice on stderr would contradict that, so suppress it there.
-	if stealth, err := cmd.Flags().GetBool("stealth"); err == nil && stealth {
-		return true
-	}
-	return false
+	return commandBoolFlag(cmd, "version") || commandBoolFlag(cmd, "stealth")
+}
+
+func firstRunOutputSuppressed(cmd *cobra.Command) bool {
+	return isJSONOutput() || isQuiet() || commandBoolFlag(cmd, "hook-json")
+}
+
+func firstRunInitSuppressed(cmd *cobra.Command) bool {
+	return commandBoolFlag(cmd, "quiet") || commandBoolFlag(cmd, "non-interactive")
 }
 
 // maybeShowMetricsFirstRunNotice prints a one-time, friendly heads-up the first

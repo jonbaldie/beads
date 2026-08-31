@@ -51,9 +51,9 @@ func formatPrettyIssue(issue *types.Issue) string {
 	typeBadge := ""
 	switch issue.IssueType {
 	case "epic":
-		typeBadge = ui.TypeEpicStyle.Render("[epic]") + " "
+		typeBadge = ui.TypeEpicStyle().Render("[epic]") + " "
 	case "bug":
-		typeBadge = ui.TypeBugStyle.Render("[bug]") + " "
+		typeBadge = ui.TypeBugStyle().Render("[bug]") + " "
 	}
 
 	// Format: STATUS_ICON ID PRIORITY [Type] Title
@@ -83,6 +83,17 @@ func formatPrettyIssueWithContext(issue *types.Issue, parentEpic string) string 
 // When labelsSkipped is true (AD-02 --skip-labels), the Labels: line shows
 // "(suppressed by --skip-labels)" instead of the (empty) hydration result.
 func formatIssueLong(buf *strings.Builder, issue *types.Issue, labels []string, labelsSkipped bool) {
+	writeLongIssueHeader(buf, issue)
+	if issue.Assignee != "" {
+		buf.WriteString(fmt.Sprintf("  Assignee: %s\n", issue.Assignee))
+	}
+	writeLongIssueDescription(buf, issue)
+	writeLongIssueLabels(buf, labels, labelsSkipped)
+	writeLongIssueMetadata(buf, issue)
+	buf.WriteString("\n")
+}
+
+func writeLongIssueHeader(buf *strings.Builder, issue *types.Issue) {
 	status := string(issue.Status)
 	if status == "closed" {
 		line := fmt.Sprintf("%s%s [P%d] [%s] %s\n  %s",
@@ -90,18 +101,18 @@ func formatIssueLong(buf *strings.Builder, issue *types.Issue, labels []string, 
 			issue.IssueType, status, issue.Title)
 		buf.WriteString(ui.RenderClosedLine(line))
 		buf.WriteString("\n")
-	} else {
-		buf.WriteString(fmt.Sprintf("%s%s [%s] [%s] %s\n",
-			pinIndicator(issue),
-			ui.RenderID(issue.ID),
-			ui.RenderPriority(issue.Priority),
-			ui.RenderType(string(issue.IssueType)),
-			ui.RenderStatus(status)))
-		buf.WriteString(fmt.Sprintf("  %s\n", issue.Title))
+		return
 	}
-	if issue.Assignee != "" {
-		buf.WriteString(fmt.Sprintf("  Assignee: %s\n", issue.Assignee))
-	}
+	buf.WriteString(fmt.Sprintf("%s%s [%s] [%s] %s\n",
+		pinIndicator(issue),
+		ui.RenderID(issue.ID),
+		ui.RenderPriority(issue.Priority),
+		ui.RenderType(string(issue.IssueType)),
+		ui.RenderStatus(status)))
+	buf.WriteString(fmt.Sprintf("  %s\n", issue.Title))
+}
+
+func writeLongIssueDescription(buf *strings.Builder, issue *types.Issue) {
 	// This is the one text rendering in the tree that prints a field --brief
 	// drops, so it is the one that has to say so. Keyed off the ROW, not off
 	// the flag: IsLitePartial travels with the issue, so a row that arrived
@@ -116,11 +127,17 @@ func formatIssueLong(buf *strings.Builder, issue *types.Issue, labels []string, 
 			buf.WriteString(fmt.Sprintf("    %s\n", line))
 		}
 	}
+}
+
+func writeLongIssueLabels(buf *strings.Builder, labels []string, labelsSkipped bool) {
 	if labelsSkipped {
 		buf.WriteString("  Labels: (suppressed by --skip-labels)\n")
 	} else if len(labels) > 0 {
 		buf.WriteString(fmt.Sprintf("  Labels: %v\n", labels))
 	}
+}
+
+func writeLongIssueMetadata(buf *strings.Builder, issue *types.Issue) {
 	if hasCustomMetadata(issue) {
 		if n := countMetadataKeys(issue); n > 0 {
 			buf.WriteString(fmt.Sprintf("  Metadata: %d keys\n", n))
@@ -128,7 +145,6 @@ func formatIssueLong(buf *strings.Builder, issue *types.Issue, labels []string, 
 			buf.WriteString("  Metadata: set\n")
 		}
 	}
-	buf.WriteString("\n")
 }
 
 // formatAgentIssue formats a single issue in ultra-compact agent mode format

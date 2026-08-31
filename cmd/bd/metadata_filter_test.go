@@ -22,57 +22,152 @@ func TestMetadataFilterSuite(t *testing.T) {
 
 	// --- MetadataFieldMatch data ---
 	mfm1 := &types.Issue{
-		ID: "mfm-1", Title: "Platform issue (mfm)", Priority: 2,
-		IssueType: types.TypeTask, Status: types.StatusOpen,
-		Metadata: json.RawMessage(`{"mfm_team":"platform","mfm_sprint":"Q1"}`),
+		IssueID: types.IssueID{
+			ID: "mfm-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Platform issue (mfm)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"mfm_team":"platform","mfm_sprint":"Q1"}`),
+		},
 	}
 	mfm2 := &types.Issue{
-		ID: "mfm-2", Title: "Frontend issue (mfm)", Priority: 2,
-		IssueType: types.TypeTask, Status: types.StatusOpen,
-		Metadata: json.RawMessage(`{"mfm_team":"frontend","mfm_sprint":"Q1"}`),
+		IssueID: types.IssueID{
+			ID: "mfm-2",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Frontend issue (mfm)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"mfm_team":"frontend","mfm_sprint":"Q1"}`),
+		},
 	}
 
 	// --- HasMetadataKey data ---
 	hmk1 := &types.Issue{
-		ID: "hmk-1", Title: "Has team key (hmk)", Priority: 2,
-		IssueType: types.TypeTask, Status: types.StatusOpen,
-		Metadata: json.RawMessage(`{"hmk_team":"platform"}`),
+		IssueID: types.IssueID{
+			ID: "hmk-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Has team key (hmk)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"hmk_team":"platform"}`),
+		},
 	}
 	hmk2 := &types.Issue{
-		ID: "hmk-2", Title: "No metadata (hmk)", Priority: 2,
-		IssueType: types.TypeTask, Status: types.StatusOpen,
+		IssueID: types.IssueID{
+			ID: "hmk-2",
+		},
+		IssueContent: types.IssueContent{
+			Title: "No metadata (hmk)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
 	}
 
 	// --- MultipleMetadataFieldsANDed data ---
 	and1 := &types.Issue{
-		ID: "and-1", Title: "Both match (and)", Priority: 2,
-		IssueType: types.TypeTask, Status: types.StatusOpen,
-		Metadata: json.RawMessage(`{"and_team":"platform","and_sprint":"Q1"}`),
+		IssueID: types.IssueID{
+			ID: "and-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Both match (and)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"and_team":"platform","and_sprint":"Q1"}`),
+		},
 	}
 	and2 := &types.Issue{
-		ID: "and-2", Title: "Partial match (and)", Priority: 2,
-		IssueType: types.TypeTask, Status: types.StatusOpen,
-		Metadata: json.RawMessage(`{"and_team":"platform","and_sprint":"Q2"}`),
+		IssueID: types.IssueID{
+			ID: "and-2",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Partial match (and)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"and_team":"platform","and_sprint":"Q2"}`),
+		},
 	}
 
 	// --- NoMetadataDoesNotMatch data ---
 	nometa := &types.Issue{
-		ID: "nometa-1", Title: "No metadata (nometa)", Priority: 2,
-		IssueType: types.TypeTask, Status: types.StatusOpen,
+		IssueID: types.IssueID{
+			ID: "nometa-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "No metadata (nometa)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
 	}
 
 	// --- CreateIssue_WithMetadata data ---
 	withmeta := &types.Issue{
-		ID: "withmeta-1", Title: "Issue with metadata (withmeta)", Priority: 2,
-		IssueType: types.TypeTask, Status: types.StatusOpen,
-		Metadata: json.RawMessage(`{"wm_team":"platform","wm_sprint":"Q1","wm_points":5}`),
+		IssueID: types.IssueID{
+			ID: "withmeta-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Issue with metadata (withmeta)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"wm_team":"platform","wm_sprint":"Q1","wm_points":5}`),
+		},
 	}
 
 	// --- CreateIssue_WithMetadata_Queryable data ---
 	queryable := &types.Issue{
-		ID: "queryable-1", Title: "Queryable metadata (queryable)", Priority: 2,
-		IssueType: types.TypeTask, Status: types.StatusOpen,
-		Metadata: json.RawMessage(`{"qm_team":"backend"}`),
+		IssueID: types.IssueID{
+			ID: "queryable-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Queryable metadata (queryable)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"qm_team":"backend"}`),
+		},
 	}
 
 	// --- SlashKey data ---
@@ -82,14 +177,36 @@ func TestMetadataFilterSuite(t *testing.T) {
 	// the real Dolt/go-mysql-server JSON path parser, not just a unit test
 	// of the path string.
 	slash1 := &types.Issue{
-		ID: "slash-1", Title: "Slash key match (slash)", Priority: 2,
-		IssueType: types.TypeTask, Status: types.StatusOpen,
-		Metadata: json.RawMessage(`{"jira/sprint":"Q1"}`),
+		IssueID: types.IssueID{
+			ID: "slash-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Slash key match (slash)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"jira/sprint":"Q1"}`),
+		},
 	}
 	slash2 := &types.Issue{
-		ID: "slash-2", Title: "Slash key no match (slash)", Priority: 2,
-		IssueType: types.TypeTask, Status: types.StatusOpen,
-		Metadata: json.RawMessage(`{"jira/sprint":"Q2"}`),
+		IssueID: types.IssueID{
+			ID: "slash-2",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Slash key no match (slash)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"jira/sprint":"Q2"}`),
+		},
 	}
 
 	// --- MixedCaseKey data ---
@@ -98,14 +215,36 @@ func TestMetadataFilterSuite(t *testing.T) {
 	// preserves case end-to-end (parser, JSONMetadataPath, and the JSON
 	// engine's own key comparison) rather than only at the parser layer.
 	mixedcase1 := &types.Issue{
-		ID: "mixedcase-1", Title: "Mixed-case key match (mixedcase)", Priority: 2,
-		IssueType: types.TypeTask, Status: types.StatusOpen,
-		Metadata: json.RawMessage(`{"McTeam":"platform"}`),
+		IssueID: types.IssueID{
+			ID: "mixedcase-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Mixed-case key match (mixedcase)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"McTeam":"platform"}`),
+		},
 	}
 	mixedcase2 := &types.Issue{
-		ID: "mixedcase-2", Title: "Different-case key no match (mixedcase)", Priority: 2,
-		IssueType: types.TypeTask, Status: types.StatusOpen,
-		Metadata: json.RawMessage(`{"mcteam":"platform"}`),
+		IssueID: types.IssueID{
+			ID: "mixedcase-2",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Different-case key no match (mixedcase)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"mcteam":"platform"}`),
+		},
 	}
 
 	// Bulk create all issues
@@ -121,7 +260,9 @@ func TestMetadataFilterSuite(t *testing.T) {
 
 	t.Run("MetadataFieldMatch", func(t *testing.T) {
 		results, err := store.SearchIssues(ctx, "", types.IssueFilter{
-			MetadataFields: map[string]string{"mfm_team": "platform"},
+			IssueFilterHydrate: types.IssueFilterHydrate{
+				MetadataFields: map[string]string{"mfm_team": "platform"},
+			},
 		})
 		if err != nil {
 			t.Fatalf("SearchIssues: %v", err)
@@ -136,7 +277,9 @@ func TestMetadataFilterSuite(t *testing.T) {
 
 	t.Run("MetadataFieldNoMatch", func(t *testing.T) {
 		results, err := store.SearchIssues(ctx, "", types.IssueFilter{
-			MetadataFields: map[string]string{"mfm_team": "backend"},
+			IssueFilterHydrate: types.IssueFilterHydrate{
+				MetadataFields: map[string]string{"mfm_team": "backend"},
+			},
 		})
 		if err != nil {
 			t.Fatalf("SearchIssues: %v", err)
@@ -148,7 +291,9 @@ func TestMetadataFilterSuite(t *testing.T) {
 
 	t.Run("HasMetadataKey", func(t *testing.T) {
 		results, err := store.SearchIssues(ctx, "", types.IssueFilter{
-			HasMetadataKey: "hmk_team",
+			IssueFilterHydrate: types.IssueFilterHydrate{
+				HasMetadataKey: "hmk_team",
+			},
 		})
 		if err != nil {
 			t.Fatalf("SearchIssues: %v", err)
@@ -163,9 +308,11 @@ func TestMetadataFilterSuite(t *testing.T) {
 
 	t.Run("MultipleMetadataFieldsANDed", func(t *testing.T) {
 		results, err := store.SearchIssues(ctx, "", types.IssueFilter{
-			MetadataFields: map[string]string{
-				"and_team":   "platform",
-				"and_sprint": "Q1",
+			IssueFilterHydrate: types.IssueFilterHydrate{
+				MetadataFields: map[string]string{
+					"and_team":   "platform",
+					"and_sprint": "Q1",
+				},
 			},
 		})
 		if err != nil {
@@ -181,7 +328,9 @@ func TestMetadataFilterSuite(t *testing.T) {
 
 	t.Run("MetadataFieldInvalidKey", func(t *testing.T) {
 		_, err := store.SearchIssues(ctx, "", types.IssueFilter{
-			MetadataFields: map[string]string{"'; DROP TABLE issues; --": "val"},
+			IssueFilterHydrate: types.IssueFilterHydrate{
+				MetadataFields: map[string]string{"'; DROP TABLE issues; --": "val"},
+			},
 		})
 		if err == nil {
 			t.Fatal("expected error for invalid metadata key, got nil")
@@ -190,7 +339,9 @@ func TestMetadataFilterSuite(t *testing.T) {
 
 	t.Run("HasMetadataKeyInvalidKey", func(t *testing.T) {
 		_, err := store.SearchIssues(ctx, "", types.IssueFilter{
-			HasMetadataKey: "bad key!",
+			IssueFilterHydrate: types.IssueFilterHydrate{
+				HasMetadataKey: "bad key!",
+			},
 		})
 		if err == nil {
 			t.Fatal("expected error for invalid metadata key, got nil")
@@ -200,7 +351,9 @@ func TestMetadataFilterSuite(t *testing.T) {
 	t.Run("NoMetadataDoesNotMatch", func(t *testing.T) {
 		// Search for a key that no issue has (unique to this test)
 		results, err := store.SearchIssues(ctx, "", types.IssueFilter{
-			MetadataFields: map[string]string{"nometa_team": "platform"},
+			IssueFilterHydrate: types.IssueFilterHydrate{
+				MetadataFields: map[string]string{"nometa_team": "platform"},
+			},
 		})
 		if err != nil {
 			t.Fatalf("SearchIssues: %v", err)
@@ -237,7 +390,9 @@ func TestMetadataFilterSuite(t *testing.T) {
 
 	t.Run("CreateIssue_WithMetadata_Queryable", func(t *testing.T) {
 		results, err := store.SearchIssues(ctx, "", types.IssueFilter{
-			MetadataFields: map[string]string{"qm_team": "backend"},
+			IssueFilterHydrate: types.IssueFilterHydrate{
+				MetadataFields: map[string]string{"qm_team": "backend"},
+			},
 		})
 		if err != nil {
 			t.Fatalf("SearchIssues: %v", err)
@@ -252,7 +407,9 @@ func TestMetadataFilterSuite(t *testing.T) {
 
 	t.Run("MetadataFieldMatchSlashKey", func(t *testing.T) {
 		results, err := store.SearchIssues(ctx, "", types.IssueFilter{
-			MetadataFields: map[string]string{"jira/sprint": "Q1"},
+			IssueFilterHydrate: types.IssueFilterHydrate{
+				MetadataFields: map[string]string{"jira/sprint": "Q1"},
+			},
 		})
 		if err != nil {
 			t.Fatalf("SearchIssues: %v", err)
@@ -267,7 +424,9 @@ func TestMetadataFilterSuite(t *testing.T) {
 
 	t.Run("MetadataFieldMatchMixedCaseKey", func(t *testing.T) {
 		results, err := store.SearchIssues(ctx, "", types.IssueFilter{
-			MetadataFields: map[string]string{"McTeam": "platform"},
+			IssueFilterHydrate: types.IssueFilterHydrate{
+				MetadataFields: map[string]string{"McTeam": "platform"},
+			},
 		})
 		if err != nil {
 			t.Fatalf("SearchIssues: %v", err)
@@ -283,7 +442,9 @@ func TestMetadataFilterSuite(t *testing.T) {
 		// JSON object keys are case-sensitive, so querying the lowercase
 		// variant must match only mixedcase2.
 		lower, err := store.SearchIssues(ctx, "", types.IssueFilter{
-			MetadataFields: map[string]string{"mcteam": "platform"},
+			IssueFilterHydrate: types.IssueFilterHydrate{
+				MetadataFields: map[string]string{"mcteam": "platform"},
+			},
 		})
 		if err != nil {
 			t.Fatalf("SearchIssues: %v", err)

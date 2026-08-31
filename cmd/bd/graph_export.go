@@ -25,44 +25,55 @@ func renderGraphDOT(out io.Writer, layout *GraphLayout, subgraph *TemplateSubgra
 	w.println("  edge [color=\"#666666\"];")
 	w.println()
 
-	// Emit nodes grouped by layer using subgraph clusters for rank alignment
-	for layerIdx, layer := range layout.Layers {
-		w.printf("  subgraph cluster_layer_%d {\n", layerIdx)
-		w.println("    style=invis;")
-		w.printf("    rank=same;\n")
-		for _, id := range layer {
-			node := layout.Nodes[id]
-			if node == nil {
-				continue
-			}
-			label, fillColor, fontColor := dotNodeAttrs(node)
-			// Escape quotes in label
-			label = strings.ReplaceAll(label, "\"", "\\\"")
-			w.printf("    \"%s\" [label=\"%s\", fillcolor=\"%s\", fontcolor=\"%s\"];\n",
-				dotEscapeID(id), label, fillColor, fontColor)
-		}
-		w.println("  }")
-	}
+	writeDOTLayers(w, layout)
 	w.println()
 
-	// Emit edges
+	writeDOTEdges(w, layout, subgraph)
+
+	w.println("}")
+	return w.wrapError("DOT")
+}
+
+func writeDOTLayers(w *graphExportWriter, layout *GraphLayout) {
+	// Emit nodes grouped by layer using subgraph clusters for rank alignment.
+	for layerIdx, layer := range layout.Layers {
+		writeDOTLayer(w, layout, layerIdx, layer)
+	}
+}
+
+func writeDOTLayer(w *graphExportWriter, layout *GraphLayout, layerIdx int, layer []string) {
+	w.printf("  subgraph cluster_layer_%d {\n", layerIdx)
+	w.println("    style=invis;")
+	w.printf("    rank=same;\n")
+	for _, id := range layer {
+		node := layout.Nodes[id]
+		if node == nil {
+			continue
+		}
+		label, fillColor, fontColor := dotNodeAttrs(node)
+		// Escape quotes in label.
+		label = strings.ReplaceAll(label, "\"", "\\\"")
+		w.printf("    \"%s\" [label=\"%s\", fillcolor=\"%s\", fontcolor=\"%s\"];\n",
+			dotEscapeID(id), label, fillColor, fontColor)
+	}
+	w.println("  }")
+}
+
+func writeDOTEdges(w *graphExportWriter, layout *GraphLayout, subgraph *TemplateSubgraph) {
+	// Emit edges, retaining only blocking dependencies whose endpoints are in
+	// the rendered subgraph.
 	for _, dep := range subgraph.Dependencies {
-		// Only include blocking dependencies in the graph
 		if dep.Type != types.DepBlocks && dep.Type != types.DepParentChild {
 			continue
 		}
-		// Ensure both endpoints exist in the subgraph
 		if layout.Nodes[dep.IssueID] == nil || layout.Nodes[dep.DependsOnID] == nil {
 			continue
 		}
 		edgeStyle := dotEdgeStyle(dep.Type)
-		// dep.DependsOnID -> dep.IssueID (blocker points to blocked)
+		// dep.DependsOnID -> dep.IssueID (blocker points to blocked).
 		w.printf("  \"%s\" -> \"%s\"%s;\n",
 			dotEscapeID(dep.DependsOnID), dotEscapeID(dep.IssueID), edgeStyle)
 	}
-
-	w.println("}")
-	return w.wrapError("DOT")
 }
 
 // graphExportWriter records the first output failure and suppresses later

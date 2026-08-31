@@ -61,8 +61,8 @@ func (w *recordingMolWriter) ClaimStepIfOpen(context.Context, string, string) er
 // create makes the disagreement unrepresentable rather than unlikely.
 func TestBondProtoProtoLabelsTheCompoundAtCreation(t *testing.T) {
 	w := &recordingMolWriter{}
-	protoA := &types.Issue{ID: "bd-a", Title: "Proto A", Priority: 2}
-	protoB := &types.Issue{ID: "bd-b", Title: "Proto B", Priority: 1}
+	protoA := &types.Issue{IssueID: types.IssueID{ID: "bd-a"}, IssueContent: types.IssueContent{Title: "Proto A"}, IssueWorkflow: types.IssueWorkflow{Priority: 2}}
+	protoB := &types.Issue{IssueID: types.IssueID{ID: "bd-b"}, IssueContent: types.IssueContent{Title: "Proto B"}, IssueWorkflow: types.IssueWorkflow{Priority: 1}}
 
 	result, err := bondProtoProtoInto(context.Background(), w, protoA, protoB, types.BondTypeSequential, "", "tester")
 	if err != nil {

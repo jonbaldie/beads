@@ -80,12 +80,12 @@ func annotateListBlocking(ctx context.Context, store storage.DoltStorage, ids []
 // proxiedBlockingAnnotator hands back the guarded blocking-decoration surface
 // for the proxied-server provider, through the provider's own accessor.
 func proxiedBlockingAnnotator() (issueops.BlockingAnnotator, error) {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return nil, errors.New("proxied-server UOW provider not initialized")
 	}
-	src, ok := uowProvider.(uow.BlockingAnnotatorSource)
+	src, ok := getUOWProvider().(uow.BlockingAnnotatorSource)
 	if !ok {
-		return nil, fmt.Errorf("proxied-server provider %T does not offer the blocking-decoration surface", uowProvider)
+		return nil, fmt.Errorf("proxied-server provider %T does not offer the blocking-decoration surface", getUOWProvider())
 	}
 	return src.BlockingAnnotator()
 }

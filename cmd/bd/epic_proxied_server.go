@@ -7,6 +7,7 @@ import (
 
 	"github.com/jonbaldie/beads/internal/storage/domain"
 	"github.com/jonbaldie/beads/internal/storage/uow"
+	"github.com/jonbaldie/beads/internal/types"
 )
 
 func runEpicStatusProxiedServer(ctx context.Context, eligibleOnly bool) error {
@@ -24,18 +25,10 @@ func runEpicStatusProxiedServer(ctx context.Context, eligibleOnly bool) error {
 }
 
 func runCloseEligibleEpicsProxiedServer(ctx context.Context, dryRun bool, reason string) error {
-	uw, err := openProxiedListUOW(ctx)
+	eligibleEpics, err := loadEligibleEpics(ctx)
 	if err != nil {
-		return HandleError("%v", err)
+		return err
 	}
-	epics, err := uw.IssueUseCase().GetEpicsEligibleForClosure(ctx)
-	if err != nil {
-		uw.Close(ctx)
-		return HandleErrorRespectJSON("getting eligible epics: %v", err)
-	}
-	eligibleEpics := filterEligibleEpics(epics)
-	uw.Close(ctx)
-
 	if len(eligibleEpics) == 0 {
 		return outputNoEligibleEpics(reason)
 	}
@@ -43,25 +36,10 @@ func runCloseEligibleEpicsProxiedServer(ctx context.Context, dryRun bool, reason
 		return outputCloseEligibleDryRun(eligibleEpics, reason)
 	}
 
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return HandleError("proxied-server UOW provider not initialized")
 	}
-
-	closedIDs, err := uow.RunTxResult(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) ([]string, string, error) {
-		epics, err := uw.IssueUseCase().GetEpicsEligibleForClosure(ctx)
-		if err != nil {
-			return nil, "", err
-		}
-		var closed []string
-		for _, epicStatus := range filterEligibleEpics(epics) {
-			if _, err := uw.IssueUseCase().CloseIssue(ctx, epicStatus.Epic.ID, domain.CloseIssueParams{Reason: reason}, "system"); err != nil {
-				fmt.Fprintf(os.Stderr, "Error closing %s: %v\n", epicStatus.Epic.ID, err)
-				continue
-			}
-			closed = append(closed, epicStatus.Epic.ID)
-		}
-		return closed, "epic: close eligible", nil
-	})
+	closedIDs, err := closeEligibleEpics(ctx, reason)
 	if err != nil {
 		return HandleErrorRespectJSON("%v", err)
 	}
@@ -69,4 +47,39 @@ func runCloseEligibleEpicsProxiedServer(ctx context.Context, dryRun bool, reason
 		commandDidWrite.Store(true)
 	}
 	return outputCloseEligibleResult(closedIDs, reason)
+}
+
+func loadEligibleEpics(ctx context.Context) ([]*types.EpicStatus, error) {
+	uw, err := openProxiedListUOW(ctx)
+	if err != nil {
+		return nil, HandleError("%v", err)
+	}
+	defer uw.Close(ctx)
+	epics, err := uw.IssueUseCase().GetEpicsEligibleForClosure(ctx)
+	if err != nil {
+		return nil, HandleErrorRespectJSON("getting eligible epics: %v", err)
+	}
+	return filterEligibleEpics(epics), nil
+}
+
+func closeEligibleEpics(ctx context.Context, reason string) ([]string, error) {
+	return uow.RunTxResult(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) ([]string, string, error) {
+		epics, err := uw.IssueUseCase().GetEpicsEligibleForClosure(ctx)
+		if err != nil {
+			return nil, "", err
+		}
+		return closeEpicStatuses(ctx, uw, filterEligibleEpics(epics), reason), "epic: close eligible", nil
+	})
+}
+
+func closeEpicStatuses(ctx context.Context, uw uow.UnitOfWork, epics []*types.EpicStatus, reason string) []string {
+	var closed []string
+	for _, epicStatus := range epics {
+		if _, err := uw.IssueUseCase().CloseIssue(ctx, epicStatus.Epic.ID, domain.CloseIssueParams{Reason: reason}, "system"); err != nil {
+			fmt.Fprintf(os.Stderr, "Error closing %s: %v\n", epicStatus.Epic.ID, err)
+			continue
+		}
+		closed = append(closed, epicStatus.Epic.ID)
+	}
+	return closed
 }

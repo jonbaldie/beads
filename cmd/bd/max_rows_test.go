@@ -715,7 +715,7 @@ func TestEmbeddedMaxRowsList(t *testing.T) {
 // still over-fetches by one row (restoring len(results) > effectiveLimit
 // detection) while EnforceMaxRowsCap doesn't trip on that extra row.
 func TestWithFetchOneExtra_LimitEqualsCap_BumpsBothForTruncationProbe(t *testing.T) {
-	got := workapi.WithFetchOneExtra(types.IssueFilter{Limit: 5, MaxRows: 5, MaxRowsSource: "--max-rows"})
+	got := workapi.WithFetchOneExtra(types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 5}, IssueFilterPage: types.IssueFilterPage{MaxRows: 5, MaxRowsSource: "--max-rows"}})
 	if got.Limit != 6 {
 		t.Errorf("Limit == MaxRows: Limit = %d, want 6 (bumped so the query still fetches the truncation-detection probe row)", got.Limit)
 	}
@@ -732,7 +732,7 @@ func TestWithFetchOneExtra_LimitEqualsCap_BumpsBothForTruncationProbe(t *testing
 // bump, or a genuine cap violation would report the wrong Cap value (N+1
 // instead of the user's true --max-rows=N) in the error message.
 func TestWithFetchOneExtra_LimitOverCap_OnlyBumpsLimit(t *testing.T) {
-	got := workapi.WithFetchOneExtra(types.IssueFilter{Limit: 100, MaxRows: 5})
+	got := workapi.WithFetchOneExtra(types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 100}, IssueFilterPage: types.IssueFilterPage{MaxRows: 5}})
 	if got.Limit != 101 {
 		t.Errorf("Limit = %d, want 101", got.Limit)
 	}
@@ -746,7 +746,7 @@ func TestWithFetchOneExtra_LimitOverCap_OnlyBumpsLimit(t *testing.T) {
 // probe-row bump alone never crosses EffectiveSearchLimit's `limit >
 // maxRows` branch here, so no MaxRows adjustment is needed.
 func TestWithFetchOneExtra_LimitUnderCap_OnlyBumpsLimit(t *testing.T) {
-	got := workapi.WithFetchOneExtra(types.IssueFilter{Limit: 5, MaxRows: 100})
+	got := workapi.WithFetchOneExtra(types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 5}, IssueFilterPage: types.IssueFilterPage{MaxRows: 100}})
 	if got.Limit != 6 {
 		t.Errorf("Limit = %d, want 6", got.Limit)
 	}
@@ -758,7 +758,7 @@ func TestWithFetchOneExtra_LimitUnderCap_OnlyBumpsLimit(t *testing.T) {
 // TestWithFetchOneExtra_NoLimit_Unaffected covers the unlimited case
 // (Limit == 0): workapi.WithFetchOneExtra is a no-op regardless of MaxRows.
 func TestWithFetchOneExtra_NoLimit_Unaffected(t *testing.T) {
-	got := workapi.WithFetchOneExtra(types.IssueFilter{Limit: 0, MaxRows: 5})
+	got := workapi.WithFetchOneExtra(types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 0}, IssueFilterPage: types.IssueFilterPage{MaxRows: 5}})
 	if got.Limit != 0 || got.MaxRows != 5 {
 		t.Errorf("unlimited Limit must pass through unchanged, got Limit=%d MaxRows=%d", got.Limit, got.MaxRows)
 	}

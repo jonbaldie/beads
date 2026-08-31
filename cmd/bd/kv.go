@@ -37,12 +37,11 @@ func validateKVKey(key string) error {
 	if strings.HasPrefix(key, kvkeys.MemoryPrefix) {
 		return fmt.Errorf("key cannot start with %q (reserved for persistent memories; use 'bd remember' / 'bd forget')", kvkeys.MemoryPrefix)
 	}
-	// Prevent keys that look like internal config
-	if strings.HasPrefix(key, "sync.") || strings.HasPrefix(key, "conflict.") ||
-		strings.HasPrefix(key, "federation.") || strings.HasPrefix(key, "jira.") ||
-		strings.HasPrefix(key, "linear.") || strings.HasPrefix(key, "export.") ||
-		strings.HasPrefix(key, "import.") {
-		return fmt.Errorf("key cannot start with reserved prefix %q", strings.Split(key, ".")[0]+".")
+	// Prevent keys that look like internal config.
+	for _, prefix := range []string{"sync.", "conflict.", "federation.", "jira.", "linear.", "export.", "import."} {
+		if strings.HasPrefix(key, prefix) {
+			return fmt.Errorf("key cannot start with reserved prefix %q", strings.Split(key, ".")[0]+".")
+		}
 	}
 	return nil
 }
@@ -50,7 +49,7 @@ func validateKVKey(key string) error {
 // printKVSetResult renders the `bd kv set` success output. Shared by the
 // classic and proxied-server paths so the output shape cannot drift.
 func printKVSetResult(key, value string) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(map[string]string{
 			"key":   key,
 			"value": value,
@@ -63,7 +62,7 @@ func printKVSetResult(key, value string) error {
 // printKVGetResult renders the `bd kv get` output (including the not-found
 // SilentExit contract). Shared by the classic and proxied-server paths.
 func printKVGetResult(key, value string) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		if jerr := outputJSON(map[string]interface{}{
 			"key":   key,
 			"value": value,
@@ -87,7 +86,7 @@ func printKVGetResult(key, value string) error {
 // printKVClearResult renders the `bd kv clear` success output. Shared by the
 // classic and proxied-server paths.
 func printKVClearResult(key string) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(map[string]string{
 			"key":     key,
 			"deleted": "true",
@@ -114,7 +113,7 @@ func kvPairsFromConfig(allConfig map[string]string) map[string]string {
 // and proxied-server paths (a mail client parses the --json shape; keep it
 // byte-identical across modes).
 func printKVListResult(kvPairs map[string]string) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(kvPairs)
 	}
 
@@ -170,7 +169,9 @@ Examples:
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		CheckReadonly("kv set")
+		if err := CheckReadonly("kv set"); err != nil {
+			return err
+		}
 
 		evt := metrics.NewCommandEvent("kv-set")
 		defer func() {
@@ -186,7 +187,7 @@ Examples:
 		value := args[1]
 
 		if usesProxiedServer() {
-			return runKVSetProxiedServer(rootCtx, key, value)
+			return runKVSetProxiedServer(getRootContext(), key, value)
 		}
 
 		if err := ensureDirectMode("kv set requires direct database access"); err != nil {
@@ -195,8 +196,8 @@ Examples:
 
 		storageKey := kvPrefix + key
 
-		ctx := rootCtx
-		if err := store.SetConfig(ctx, storageKey, value); err != nil {
+		ctx := getRootContext()
+		if err := getStore().SetConfig(ctx, storageKey, value); err != nil {
 			return HandleErrorRespectJSON("setting key: %v", err)
 		}
 
@@ -227,7 +228,7 @@ Examples:
 		key := args[0]
 
 		if usesProxiedServer() {
-			return runKVGetProxiedServer(rootCtx, key)
+			return runKVGetProxiedServer(getRootContext(), key)
 		}
 
 		if err := ensureDirectMode("kv get requires direct database access"); err != nil {
@@ -236,8 +237,8 @@ Examples:
 
 		storageKey := kvPrefix + key
 
-		ctx := rootCtx
-		value, err := store.GetConfig(ctx, storageKey)
+		ctx := getRootContext()
+		value, err := getStore().GetConfig(ctx, storageKey)
 		if err != nil {
 			return HandleErrorRespectJSON("getting key: %v", err)
 		}
@@ -259,7 +260,9 @@ Examples:
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		CheckReadonly("kv clear")
+		if err := CheckReadonly("kv clear"); err != nil {
+			return err
+		}
 
 		evt := metrics.NewCommandEvent("kv-clear")
 		defer func() {
@@ -274,7 +277,7 @@ Examples:
 		}
 
 		if usesProxiedServer() {
-			return runKVClearProxiedServer(rootCtx, key)
+			return runKVClearProxiedServer(getRootContext(), key)
 		}
 
 		if err := ensureDirectMode("kv clear requires direct database access"); err != nil {
@@ -283,8 +286,8 @@ Examples:
 
 		storageKey := kvPrefix + key
 
-		ctx := rootCtx
-		if err := store.DeleteConfig(ctx, storageKey); err != nil {
+		ctx := getRootContext()
+		if err := getStore().DeleteConfig(ctx, storageKey); err != nil {
 			return HandleErrorRespectJSON("deleting key: %v", err)
 		}
 
@@ -312,15 +315,15 @@ Examples:
 		}()
 
 		if usesProxiedServer() {
-			return runKVListProxiedServer(rootCtx)
+			return runKVListProxiedServer(getRootContext())
 		}
 
 		if err := ensureDirectMode("kv list requires direct database access"); err != nil {
 			return HandleError("%v", err)
 		}
 
-		ctx := rootCtx
-		allConfig, err := store.GetAllConfig(ctx)
+		ctx := getRootContext()
+		allConfig, err := getStore().GetAllConfig(ctx)
 		if err != nil {
 			return HandleErrorRespectJSON("listing keys: %v", err)
 		}

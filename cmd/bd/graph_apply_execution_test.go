@@ -81,11 +81,17 @@ func TestExecuteGraphApplyRejectsMixedLocalExternalBlockingCycle(t *testing.T) {
 	ctx, _ := withGraphApplyTestStore(t)
 
 	existing := &types.Issue{
-		ID:        "ga-existing",
-		Title:     "Existing",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "ga-existing",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Existing",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, existing, actor); err != nil {
 		t.Fatalf("CreateIssue(existing): %v", err)
@@ -119,18 +125,30 @@ func TestExecuteGraphApplyRejectsStoredPrefixParentBlockingPath(t *testing.T) {
 	ctx, db := withGraphApplyTestStore(t)
 
 	parent := &types.Issue{
-		ID:        "ga-parent",
-		Title:     "Existing Parent",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "ga-parent",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Existing Parent",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	mid := &types.Issue{
-		ID:        "ga-existing-mid",
-		Title:     "Existing Middle",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "ga-existing-mid",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Existing Middle",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	for _, issue := range []*types.Issue{parent, mid} {
 		if err := store.CreateIssue(ctx, issue, actor); err != nil {

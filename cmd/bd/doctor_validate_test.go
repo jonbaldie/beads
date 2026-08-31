@@ -34,8 +34,8 @@ func TestValidateCheck_AllClean(t *testing.T) {
 	ctx := context.Background()
 
 	issues := []*types.Issue{
-		{Title: "Fix login bug", Description: "Login fails", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeBug},
-		{Title: "Add search", Description: "Full-text search", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+		{IssueContent: types.IssueContent{Title: "Fix login bug", Description: "Login fails"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeBug}},
+		{IssueContent: types.IssueContent{Title: "Add search", Description: "Full-text search"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
 	}
 	for _, issue := range issues {
 		if err := store.CreateIssue(ctx, issue, "val"); err != nil {
@@ -68,11 +68,15 @@ func TestValidateCheck_DetectsDuplicates(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		issue := &types.Issue{
-			Title:       "Duplicate task",
-			Description: "Same description",
-			Status:      types.StatusOpen,
-			Priority:    2,
-			IssueType:   types.TypeTask,
+			IssueContent: types.IssueContent{
+				Title:       "Duplicate task",
+				Description: "Same description",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatalf("Failed to create issue: %v", err)
@@ -98,10 +102,14 @@ func TestValidateCheck_DetectsOrphanedDeps(t *testing.T) {
 	ctx := context.Background()
 
 	issue := &types.Issue{
-		Title:     "Real issue",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Real issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 		t.Fatalf("Failed to create issue: %v", err)
@@ -151,10 +159,14 @@ func TestValidateCheck_GitConflicts_DoltClean(t *testing.T) {
 	ctx := context.Background()
 
 	issue := &types.Issue{
-		Title:     "Clean issue",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Clean issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "val"); err != nil {
 		t.Fatalf("Failed to create issue: %v", err)
@@ -179,8 +191,8 @@ func TestValidateCheck_DetectsTestPollution(t *testing.T) {
 	ctx := context.Background()
 
 	testIssues := []*types.Issue{
-		{Title: "test-pollution-check", Description: "A test issue", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{Title: "Test Issue 1", Description: "Another test", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+		{IssueContent: types.IssueContent{Title: "test-pollution-check", Description: "A test issue"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueContent: types.IssueContent{Title: "Test Issue 1", Description: "Another test"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
 	}
 	for _, issue := range testIssues {
 		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
@@ -222,10 +234,14 @@ func TestValidateCheck_FixOrphanedDeps(t *testing.T) {
 	ctx := context.Background()
 
 	issue := &types.Issue{
-		Title:     "Real issue",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Real issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 		t.Fatalf("Failed to create issue: %v", err)

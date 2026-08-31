@@ -2557,12 +2557,16 @@ func TestInitDatabaseAdoptsExistingProjectID(t *testing.T) {
 
 	doltNewMutex.Lock()
 	firstStore, err := dolt.New(ctx, &dolt.Config{
-		Path:            filepath.Join(firstBeadsDir, "dolt"),
-		BeadsDir:        firstBeadsDir,
-		ServerHost:      "127.0.0.1",
-		ServerPort:      testDoltServerPort,
-		Database:        database,
-		CreateIfMissing: true,
+		Path:     filepath.Join(firstBeadsDir, "dolt"),
+		BeadsDir: firstBeadsDir,
+		ServerOptions: dolt.ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: testDoltServerPort,
+		},
+		Database: database,
+		RemoteOptions: dolt.RemoteOptions{
+			CreateIfMissing: true,
+		},
 	})
 	doltNewMutex.Unlock()
 	if err != nil {

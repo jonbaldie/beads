@@ -285,11 +285,17 @@ func withGraphApplyFakeStore(t *testing.T) (context.Context, *graphApplyFakeStor
 func TestExecuteGraphApplyUnitRejectsMixedLocalExternalBlockingCycle(t *testing.T) {
 	ctx, fakeStore := withGraphApplyFakeStore(t)
 	if err := fakeStore.CreateIssue(ctx, &types.Issue{
-		ID:        "ga-existing",
-		Title:     "Existing",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "ga-existing",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Existing",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}, actor); err != nil {
 		t.Fatalf("CreateIssue(existing): %v", err)
 	}
@@ -318,11 +324,17 @@ func TestExecuteGraphApplyUnitRejectsMixedLocalExternalBlockingCycle(t *testing.
 func TestExecuteGraphApplyUnitKeepsStorageCycleChecksAfterGraphPreflight(t *testing.T) {
 	ctx, fakeStore := withGraphApplyFakeStore(t)
 	if err := fakeStore.CreateIssue(ctx, &types.Issue{
-		ID:        "ga-existing",
-		Title:     "Existing",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "ga-existing",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Existing",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}, actor); err != nil {
 		t.Fatalf("CreateIssue(existing): %v", err)
 	}
@@ -359,11 +371,17 @@ func TestExecuteGraphApplyUnitRejectsBlockingThroughExistingParentChild(t *testi
 	ctx, fakeStore := withGraphApplyFakeStore(t)
 	for _, id := range []string{"ga-parent", "ga-child"} {
 		if err := fakeStore.CreateIssue(ctx, &types.Issue{
-			ID:        id,
-			Title:     id,
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}, actor); err != nil {
 			t.Fatalf("CreateIssue(%s): %v", id, err)
 		}
@@ -445,11 +463,17 @@ func TestExecuteGraphApplyUnitRejectsBlockingThroughExistingBlocking(t *testing.
 	ctx, fakeStore := withGraphApplyFakeStore(t)
 	for _, id := range []string{"ga-x", "ga-y"} {
 		if err := fakeStore.CreateIssue(ctx, &types.Issue{
-			ID:        id,
-			Title:     id,
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}, actor); err != nil {
 			t.Fatalf("CreateIssue(%s): %v", id, err)
 		}
@@ -520,11 +544,17 @@ func TestExecuteGraphApplyUnitRejectsReverseParentToChildBlockingEdge(t *testing
 			edge := GraphApplyEdge{FromKey: "root", ToKey: "child", Type: tt.depType}
 			if tt.externalID {
 				if err := fakeStore.CreateIssue(ctx, &types.Issue{
-					ID:        "ga-parent",
-					Title:     "Existing Parent",
-					Status:    types.StatusOpen,
-					Priority:  2,
-					IssueType: types.TypeEpic,
+					IssueID: types.IssueID{
+						ID: "ga-parent",
+					},
+					IssueContent: types.IssueContent{
+						Title: "Existing Parent",
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Status:    types.StatusOpen,
+						Priority:  2,
+						IssueType: types.TypeEpic,
+					},
 				}, actor); err != nil {
 					t.Fatalf("CreateIssue(existing parent): %v", err)
 				}
@@ -553,11 +583,17 @@ func TestExecuteGraphApplyUnitRejectsReverseParentToChildBlockingEdge(t *testing
 func TestExecuteGraphApplyUnitRejectsExternalParentTransitiveBlockingPath(t *testing.T) {
 	ctx, fakeStore := withGraphApplyFakeStore(t)
 	if err := fakeStore.CreateIssue(ctx, &types.Issue{
-		ID:        "ga-parent",
-		Title:     "Existing Parent",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "ga-parent",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Existing Parent",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeEpic,
+		},
 	}, actor); err != nil {
 		t.Fatalf("CreateIssue(existing parent): %v", err)
 	}
@@ -589,18 +625,30 @@ func TestExecuteGraphApplyUnitRejectsStoredPrefixParentBlockingPath(t *testing.T
 	ctx, fakeStore := withGraphApplyFakeStore(t)
 	for _, issue := range []*types.Issue{
 		{
-			ID:        "ga-parent",
-			Title:     "Existing Parent",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "ga-parent",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Existing Parent",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		},
 		{
-			ID:        "ga-existing-mid",
-			Title:     "Existing Middle",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "ga-existing-mid",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Existing Middle",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		},
 	} {
 		if err := fakeStore.CreateIssue(ctx, issue, actor); err != nil {
@@ -637,11 +685,17 @@ func TestExecuteGraphApplyUnitRejectsStoredPrefixParentBlockingPath(t *testing.T
 func TestExecuteGraphApplyUnitRejectsTransitiveParentChainBlockingCycle(t *testing.T) {
 	ctx, fakeStore := withGraphApplyFakeStore(t)
 	if err := fakeStore.CreateIssue(ctx, &types.Issue{
-		ID:        "ga-existing-parent",
-		Title:     "Existing Parent",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "ga-existing-parent",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Existing Parent",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeEpic,
+		},
 	}, actor); err != nil {
 		t.Fatalf("CreateIssue(existing parent): %v", err)
 	}

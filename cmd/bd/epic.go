@@ -36,10 +36,10 @@ var epicStatusCmd = &cobra.Command{
 		eligibleOnly, _ := cmd.Flags().GetBool("eligible-only")
 
 		if usesProxiedServer() {
-			return runEpicStatusProxiedServer(rootCtx, eligibleOnly)
+			return runEpicStatusProxiedServer(getRootContext(), eligibleOnly)
 		}
 
-		epics, err := store.GetEpicsEligibleForClosure(rootCtx)
+		epics, err := getStore().GetEpicsEligibleForClosure(getRootContext())
 		if err != nil {
 			return HandleErrorRespectJSON("getting epic status: %v", err)
 		}
@@ -51,7 +51,7 @@ func renderEpicStatus(epics []*types.EpicStatus, eligibleOnly bool) error {
 	if eligibleOnly {
 		epics = filterEligibleEpics(epics)
 	}
-	if jsonOutput {
+	if isJSONOutput() {
 		if epics == nil {
 			epics = []*types.EpicStatus{}
 		}
@@ -62,28 +62,39 @@ func renderEpicStatus(epics []*types.EpicStatus, eligibleOnly bool) error {
 		return nil
 	}
 	for _, epicStatus := range epics {
-		epic := epicStatus.Epic
-		percentage := 0
-		if epicStatus.TotalChildren > 0 {
-			percentage = (epicStatus.ClosedChildren * 100) / epicStatus.TotalChildren
-		}
-		statusIcon := ""
-		if epicStatus.EligibleForClose {
-			statusIcon = ui.RenderPass("✓")
-		} else if percentage > 0 {
-			statusIcon = ui.RenderWarn("○")
-		} else {
-			statusIcon = "○"
-		}
-		fmt.Printf("%s %s %s\n", statusIcon, ui.RenderAccent(epic.ID), ui.RenderBold(epic.Title))
-		fmt.Printf("   Progress: %d/%d children closed (%d%%)\n",
-			epicStatus.ClosedChildren, epicStatus.TotalChildren, percentage)
-		if epicStatus.EligibleForClose {
-			fmt.Printf("   %s\n", ui.RenderPass("Eligible for closure"))
-		}
-		fmt.Println()
+		renderEpicStatusLine(epicStatus)
 	}
 	return nil
+}
+
+func renderEpicStatusLine(epicStatus *types.EpicStatus) {
+	epic := epicStatus.Epic
+	percentage := epicCompletionPercentage(epicStatus)
+	statusIcon := epicStatusIcon(epicStatus.EligibleForClose, percentage)
+	fmt.Printf("%s %s %s\n", statusIcon, ui.RenderAccent(epic.ID), ui.RenderBold(epic.Title))
+	fmt.Printf("   Progress: %d/%d children closed (%d%%)\n",
+		epicStatus.ClosedChildren, epicStatus.TotalChildren, percentage)
+	if epicStatus.EligibleForClose {
+		fmt.Printf("   %s\n", ui.RenderPass("Eligible for closure"))
+	}
+	fmt.Println()
+}
+
+func epicCompletionPercentage(epicStatus *types.EpicStatus) int {
+	if epicStatus.TotalChildren == 0 {
+		return 0
+	}
+	return (epicStatus.ClosedChildren * 100) / epicStatus.TotalChildren
+}
+
+func epicStatusIcon(eligible bool, percentage int) string {
+	if eligible {
+		return ui.RenderPass("✓")
+	}
+	if percentage > 0 {
+		return ui.RenderWarn("○")
+	}
+	return "○"
 }
 
 func filterEligibleEpics(epics []*types.EpicStatus) []*types.EpicStatus {
@@ -125,13 +136,15 @@ var closeEligibleEpicsCmd = &cobra.Command{
 		}
 
 		if usesProxiedServer() {
-			return runCloseEligibleEpicsProxiedServer(rootCtx, dryRun, reason)
+			return runCloseEligibleEpicsProxiedServer(getRootContext(), dryRun, reason)
 		}
 
 		if !dryRun {
-			CheckReadonly("epic close-eligible")
+			if err := CheckReadonly("epic close-eligible"); err != nil {
+				return err
+			}
 		}
-		epics, err := store.GetEpicsEligibleForClosure(rootCtx)
+		epics, err := getStore().GetEpicsEligibleForClosure(getRootContext())
 		if err != nil {
 			return HandleErrorRespectJSON("getting eligible epics: %v", err)
 		}
@@ -144,7 +157,7 @@ var closeEligibleEpicsCmd = &cobra.Command{
 		}
 		closedIDs := []string{}
 		for _, epicStatus := range eligibleEpics {
-			err := store.CloseIssue(rootCtx, epicStatus.Epic.ID, reason, "system", "")
+			err := getStore().CloseIssue(getRootContext(), epicStatus.Epic.ID, reason, "system", "")
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error closing %s: %v\n", epicStatus.Epic.ID, err)
 				continue
@@ -159,7 +172,7 @@ var closeEligibleEpicsCmd = &cobra.Command{
 }
 
 func outputNoEligibleEpics(reason string) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(map[string]interface{}{
 			"closed": []string{},
 			"count":  0,
@@ -171,7 +184,7 @@ func outputNoEligibleEpics(reason string) error {
 }
 
 func outputCloseEligibleDryRun(eligibleEpics []*types.EpicStatus, reason string) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(eligibleEpics)
 	}
 	fmt.Printf("Would close %d epic(s) with reason %q:\n", len(eligibleEpics), reason)
@@ -182,7 +195,7 @@ func outputCloseEligibleDryRun(eligibleEpics []*types.EpicStatus, reason string)
 }
 
 func outputCloseEligibleResult(closedIDs []string, reason string) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(map[string]interface{}{
 			"closed": closedIDs,
 			"count":  len(closedIDs),

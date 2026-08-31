@@ -61,30 +61,50 @@ func TestEpicSuite(t *testing.T) {
 
 	t.Run("MixedChildrenNotEligible", func(t *testing.T) {
 		epic := &types.Issue{
-			ID:          "test-epic-1",
-			Title:       "Test Epic",
-			Description: "Epic description",
-			Status:      types.StatusOpen,
-			Priority:    1,
-			IssueType:   types.TypeEpic,
-			CreatedAt:   time.Now(),
+			IssueID: types.IssueID{
+				ID: "test-epic-1",
+			},
+			IssueContent: types.IssueContent{
+				Title:       "Test Epic",
+				Description: "Epic description",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeEpic,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 		h.createIssue(t, epic)
 
 		child1 := &types.Issue{
-			Title:     "Child Task 1",
-			Status:    types.StatusClosed,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
-			ClosedAt:  ptrTime(time.Now()),
+			IssueContent: types.IssueContent{
+				Title: "Child Task 1",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusClosed,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+				ClosedAt:  ptrTime(time.Now()),
+			},
 		}
 		child2 := &types.Issue{
-			Title:     "Child Task 2",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Child Task 2",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 		h.createIssue(t, child1)
 		h.createIssue(t, child2)
@@ -118,31 +138,53 @@ func TestEpicSuite(t *testing.T) {
 
 	t.Run("OpenWispChildNotEligible", func(t *testing.T) {
 		epic := &types.Issue{
-			ID:          "test-epic-wisp",
-			Title:       "Epic with wisp child",
-			Description: "Tests that wisp children are counted for closure eligibility",
-			Status:      types.StatusOpen,
-			Priority:    1,
-			IssueType:   types.TypeEpic,
-			CreatedAt:   time.Now(),
+			IssueID: types.IssueID{
+				ID: "test-epic-wisp",
+			},
+			IssueContent: types.IssueContent{
+				Title:       "Epic with wisp child",
+				Description: "Tests that wisp children are counted for closure eligibility",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeEpic,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 		h.createIssue(t, epic)
 
 		regularChild := &types.Issue{
-			Title:     "Regular child",
-			Status:    types.StatusClosed,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
-			ClosedAt:  ptrTime(time.Now()),
+			IssueContent: types.IssueContent{
+				Title: "Regular child",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusClosed,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+				ClosedAt:  ptrTime(time.Now()),
+			},
 		}
 		wispChild := &types.Issue{
-			Title:     "Wisp child",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Ephemeral: true,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Wisp child",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		}
 		h.createIssue(t, regularChild)
 		h.createIssue(t, wispChild)
@@ -175,24 +217,38 @@ func TestEpicSuite(t *testing.T) {
 
 	t.Run("AllChildrenClosedEligible", func(t *testing.T) {
 		epic := &types.Issue{
-			ID:          "test-epic-2",
-			Title:       "Fully Completed Epic",
-			Description: "Epic description",
-			Status:      types.StatusOpen,
-			Priority:    1,
-			IssueType:   types.TypeEpic,
-			CreatedAt:   time.Now(),
+			IssueID: types.IssueID{
+				ID: "test-epic-2",
+			},
+			IssueContent: types.IssueContent{
+				Title:       "Fully Completed Epic",
+				Description: "Epic description",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeEpic,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 		h.createIssue(t, epic)
 
 		for i := 1; i <= 3; i++ {
 			child := &types.Issue{
-				Title:     fmt.Sprintf("Child Task %d", i),
-				Status:    types.StatusClosed,
-				Priority:  2,
-				IssueType: types.TypeTask,
-				CreatedAt: time.Now(),
-				ClosedAt:  ptrTime(time.Now()),
+				IssueContent: types.IssueContent{
+					Title: fmt.Sprintf("Child Task %d", i),
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusClosed,
+					Priority:  2,
+					IssueType: types.TypeTask,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: time.Now(),
+					ClosedAt:  ptrTime(time.Now()),
+				},
 			}
 			h.createIssue(t, child)
 			h.addDependency(t, &types.Dependency{

@@ -98,8 +98,8 @@ func findMailDelegate() string {
 
 	// Check bd config (requires database)
 	// This works even without a database connection since we use direct mode
-	if store != nil {
-		if delegate, err := store.GetConfig(rootCtx, "mail.delegate"); err == nil && delegate != "" {
+	if getStore() != nil {
+		if delegate, err := getStore().GetConfig(getRootContext(), "mail.delegate"); err == nil && delegate != "" {
 			return delegate
 		}
 	}

@@ -113,13 +113,23 @@ func TestGitLabPushHooksMilestoneContentEqualSkipsOlderRemote(t *testing.T) {
 	now := time.Now().UTC()
 	ref := "https://gitlab.example.com/group/project/-/milestones/4"
 	local := &types.Issue{
-		ID:          "bd-epic",
-		Title:       "Live milestone",
-		Description: "already synced\n",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeEpic,
-		ExternalRef: &ref,
-		UpdatedAt:   now,
+		IssueID: types.IssueID{
+			ID: "bd-epic",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Live milestone",
+			Description: "already synced\n",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeEpic,
+		},
+		IssueTimes: types.IssueTimes{
+			UpdatedAt: now,
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: &ref,
+		},
 	}
 	remote := &tracker.TrackerIssue{
 		Identifier:  "35",
@@ -142,12 +152,20 @@ func TestGitLabPushHooksMilestoneContentEqualSkipsOlderRemote(t *testing.T) {
 func TestGitLabPushHooksMilestoneContentChangeDoesNotSkipOlderRemote(t *testing.T) {
 	now := time.Now().UTC()
 	local := &types.Issue{
-		ID:          "bd-epic",
-		Title:       "Live milestone",
-		Description: "local change",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeEpic,
-		UpdatedAt:   now,
+		IssueID: types.IssueID{
+			ID: "bd-epic",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Live milestone",
+			Description: "local change",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeEpic,
+		},
+		IssueTimes: types.IssueTimes{
+			UpdatedAt: now,
+		},
 	}
 	remote := &tracker.TrackerIssue{
 		Identifier:  "35",
@@ -166,11 +184,19 @@ func TestGitLabPushHooksMilestoneContentChangeDoesNotSkipOlderRemote(t *testing.
 func TestGitLabPushHooksPreserveTimestampSkipForIssues(t *testing.T) {
 	now := time.Now().UTC()
 	local := &types.Issue{
-		ID:        "bd-task",
-		Title:     "Task",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
-		UpdatedAt: now,
+		IssueID: types.IssueID{
+			ID: "bd-task",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			UpdatedAt: now,
+		},
 	}
 	remote := &tracker.TrackerIssue{
 		Identifier: "42",
@@ -422,18 +448,7 @@ func TestGitLabCmdRegistration(t *testing.T) {
 
 // TestBuildCLIFilter_NoFlags verifies nil when no flags set.
 func TestBuildCLIFilter_NoFlags(t *testing.T) {
-	// Save and restore global flag state
-	savedLabel, savedProject, savedMilestone, savedAssignee := gitlabFilterLabel, gitlabFilterProject, gitlabFilterMilestone, gitlabFilterAssignee
-	t.Cleanup(func() {
-		gitlabFilterLabel, gitlabFilterProject, gitlabFilterMilestone, gitlabFilterAssignee = savedLabel, savedProject, savedMilestone, savedAssignee
-	})
-
-	gitlabFilterLabel = ""
-	gitlabFilterProject = ""
-	gitlabFilterMilestone = ""
-	gitlabFilterAssignee = ""
-
-	filter := buildCLIFilter()
+	filter := buildCLIFilter(gitLabSyncFlags{})
 	if filter != nil {
 		t.Errorf("buildCLIFilter() = %+v, want nil when no flags set", filter)
 	}
@@ -441,17 +456,12 @@ func TestBuildCLIFilter_NoFlags(t *testing.T) {
 
 // TestBuildCLIFilter_WithFlags verifies filter is built from flags.
 func TestBuildCLIFilter_WithFlags(t *testing.T) {
-	savedLabel, savedProject, savedMilestone, savedAssignee := gitlabFilterLabel, gitlabFilterProject, gitlabFilterMilestone, gitlabFilterAssignee
-	t.Cleanup(func() {
-		gitlabFilterLabel, gitlabFilterProject, gitlabFilterMilestone, gitlabFilterAssignee = savedLabel, savedProject, savedMilestone, savedAssignee
+	filter := buildCLIFilter(gitLabSyncFlags{
+		filterLabel:     "bug,backend",
+		filterProject:   "42",
+		filterMilestone: "Sprint 1",
+		filterAssignee:  "kyriakos",
 	})
-
-	gitlabFilterLabel = "bug,backend"
-	gitlabFilterProject = "42"
-	gitlabFilterMilestone = "Sprint 1"
-	gitlabFilterAssignee = "kyriakos"
-
-	filter := buildCLIFilter()
 	if filter == nil {
 		t.Fatal("buildCLIFilter() = nil, want non-nil")
 	}
@@ -471,17 +481,7 @@ func TestBuildCLIFilter_WithFlags(t *testing.T) {
 
 // TestBuildCLIFilter_PartialFlags verifies filter works with some flags.
 func TestBuildCLIFilter_PartialFlags(t *testing.T) {
-	savedLabel, savedProject, savedMilestone, savedAssignee := gitlabFilterLabel, gitlabFilterProject, gitlabFilterMilestone, gitlabFilterAssignee
-	t.Cleanup(func() {
-		gitlabFilterLabel, gitlabFilterProject, gitlabFilterMilestone, gitlabFilterAssignee = savedLabel, savedProject, savedMilestone, savedAssignee
-	})
-
-	gitlabFilterLabel = "frontend"
-	gitlabFilterProject = ""
-	gitlabFilterMilestone = ""
-	gitlabFilterAssignee = ""
-
-	filter := buildCLIFilter()
+	filter := buildCLIFilter(gitLabSyncFlags{filterLabel: "frontend"})
 	if filter == nil {
 		t.Fatal("buildCLIFilter() = nil, want non-nil")
 	}
@@ -536,11 +536,11 @@ func TestNoEphemeralDefaultTrue(t *testing.T) {
 
 func TestFilterGitLabLinkScopedIssues(t *testing.T) {
 	issues := []*types.Issue{
-		{ID: "bd-parent", IssueType: types.TypeFeature, Status: types.StatusOpen},
-		{ID: "bd-child", IssueType: types.TypeTask, Status: types.StatusOpen},
-		{ID: "bd-other", IssueType: types.TypeTask, Status: types.StatusOpen},
-		{ID: "bd-mol", IssueType: types.TypeMolecule, Status: types.StatusOpen},
-		{ID: "bd-wisp", IssueType: types.TypeTask, Status: types.StatusOpen, Ephemeral: true},
+		{IssueID: types.IssueID{ID: "bd-parent"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeFeature, Status: types.StatusOpen}},
+		{IssueID: types.IssueID{ID: "bd-child"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}},
+		{IssueID: types.IssueID{ID: "bd-other"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}},
+		{IssueID: types.IssueID{ID: "bd-mol"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeMolecule, Status: types.StatusOpen}},
+		{IssueID: types.IssueID{ID: "bd-wisp"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}, IssueWisp: types.IssueWisp{Ephemeral: true}},
 	}
 
 	t.Run("issues flag limits dependency owners", func(t *testing.T) {
@@ -621,9 +621,7 @@ func TestCollectGitLabLinkSyncDataScopesEndpoints(t *testing.T) {
 	})
 
 	t.Run("parent excludes targets outside subtree", func(t *testing.T) {
-		data, warnings := collectGitLabLinkSyncData(context.Background(), st, tracker.SyncOptions{
-			ParentID: parent.ID,
-		})
+		data, warnings := collectGitLabLinkSyncData(context.Background(), st, tracker.SyncOptions{ParentID: parent.ID})
 		if len(warnings) != 0 {
 			t.Fatalf("warnings = %v", warnings)
 		}
@@ -710,9 +708,13 @@ func (s *gitLabSyncFakeStore) GetDependentsWithMetadata(_ context.Context, issue
 
 func gitLabSyncIssue(id, ref string, issueType types.IssueType) *types.Issue {
 	issue := &types.Issue{
-		ID:        id,
-		IssueType: issueType,
-		Status:    types.StatusOpen,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: issueType,
+			Status:    types.StatusOpen,
+		},
 	}
 	if ref != "" {
 		issue.ExternalRef = &ref

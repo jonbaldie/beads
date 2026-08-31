@@ -287,7 +287,7 @@ type currentIssueSearcher interface {
 // resolveCurrentIssueID determines the current active issue for the agent.
 // Priority: in-progress assigned to actor > hooked > last touched.
 func resolveCurrentIssueID(ctx context.Context) string {
-	return resolveCurrentIssueIDFrom(ctx, store, getActorWithGit, GetLastTouchedID)
+	return resolveCurrentIssueIDFrom(ctx, getStore(), getActorWithGit, GetLastTouchedID)
 }
 
 func resolveCurrentIssueIDFrom(ctx context.Context, searcher currentIssueSearcher, currentActor func() string, fallback func() string) string {
@@ -302,8 +302,10 @@ func resolveCurrentIssueIDFrom(ctx context.Context, searcher currentIssueSearche
 	for _, status := range []types.Status{types.StatusInProgress, types.StatusHooked} {
 		status := status
 		filter := types.IssueFilter{
-			Status:   &status,
-			Assignee: &actor,
+			IssueFilterCore: types.IssueFilterCore{
+				Status:   &status,
+				Assignee: &actor,
+			},
 		}
 		issues, err := searcher.SearchIssues(ctx, "", filter)
 		if err == nil && len(issues) > 0 {
@@ -321,7 +323,7 @@ func resolveCurrentIssueIDProxied(ctx context.Context, uw uow.UnitOfWork) string
 	}
 	for _, status := range []types.Status{types.StatusInProgress, types.StatusHooked} {
 		st := status
-		filter := types.IssueFilter{Status: &st, Assignee: &currentActor}
+		filter := types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Status: &st, Assignee: &currentActor}}
 		page, err := uw.IssueUseCase().SearchIssues(ctx, "", filter)
 		if err == nil && len(page.Items) > 0 {
 			return page.Items[0].ID

@@ -63,8 +63,8 @@ func TestEmbeddedImport(t *testing.T) {
 		jsonlPath := filepath.Join(t.TempDir(), "import.jsonl")
 		now := time.Now().UTC()
 		writeJSONLFile(t, jsonlPath, []types.Issue{
-			{ID: "imfile-aaa", Title: "Import A", Status: types.StatusOpen, IssueType: types.TypeTask, CreatedAt: now, UpdatedAt: now},
-			{ID: "imfile-bbb", Title: "Import B", Status: types.StatusOpen, IssueType: types.TypeBug, CreatedAt: now, UpdatedAt: now},
+			{IssueID: types.IssueID{ID: "imfile-aaa"}, IssueContent: types.IssueContent{Title: "Import A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask}, IssueTimes: types.IssueTimes{CreatedAt: now, UpdatedAt: now}},
+			{IssueID: types.IssueID{ID: "imfile-bbb"}, IssueContent: types.IssueContent{Title: "Import B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeBug}, IssueTimes: types.IssueTimes{CreatedAt: now, UpdatedAt: now}},
 		})
 
 		out := bdImport(t, bd, dir, jsonlPath)
@@ -80,7 +80,7 @@ func TestEmbeddedImport(t *testing.T) {
 		jsonlPath := filepath.Join(dir, ".beads", "issues.jsonl")
 		now := time.Now().UTC()
 		writeJSONLFile(t, jsonlPath, []types.Issue{
-			{ID: "imdef-xxx", Title: "Default Path Issue", Status: types.StatusOpen, IssueType: types.TypeTask, CreatedAt: now, UpdatedAt: now},
+			{IssueID: types.IssueID{ID: "imdef-xxx"}, IssueContent: types.IssueContent{Title: "Default Path Issue"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask}, IssueTimes: types.IssueTimes{CreatedAt: now, UpdatedAt: now}},
 		})
 
 		out := bdImport(t, bd, dir)
@@ -102,7 +102,7 @@ func TestEmbeddedImport(t *testing.T) {
 		jsonlPath := filepath.Join(dir, ".beads", "beads.jsonl")
 		now := time.Now().UTC()
 		writeJSONLFile(t, jsonlPath, []types.Issue{
-			{ID: "imcfg-xxx", Title: "Configured Import Path Issue", Status: types.StatusOpen, IssueType: types.TypeTask, CreatedAt: now, UpdatedAt: now},
+			{IssueID: types.IssueID{ID: "imcfg-xxx"}, IssueContent: types.IssueContent{Title: "Configured Import Path Issue"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask}, IssueTimes: types.IssueTimes{CreatedAt: now, UpdatedAt: now}},
 		})
 
 		out := bdImport(t, bd, dir)
@@ -117,7 +117,7 @@ func TestEmbeddedImport(t *testing.T) {
 		jsonlPath := filepath.Join(dir, ".beads", "issues.jsonl")
 		now := time.Now().UTC()
 		writeJSONLFile(t, jsonlPath, []types.Issue{
-			{ID: "imdry-qqq", Title: "Dry Run Issue", Status: types.StatusOpen, IssueType: types.TypeTask, CreatedAt: now, UpdatedAt: now},
+			{IssueID: types.IssueID{ID: "imdry-qqq"}, IssueContent: types.IssueContent{Title: "Dry Run Issue"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask}, IssueTimes: types.IssueTimes{CreatedAt: now, UpdatedAt: now}},
 		})
 
 		out := bdImport(t, bd, dir, "--dry-run")
@@ -141,9 +141,20 @@ func TestEmbeddedImport(t *testing.T) {
 		jsonlPath := filepath.Join(t.TempDir(), "import-memories.jsonl")
 		now := time.Now().UTC()
 		issue := types.Issue{
-			ID: "immem-aaa", Title: "Memory Test Issue",
-			Status: types.StatusOpen, IssueType: types.TypeTask,
-			CreatedAt: now, UpdatedAt: now,
+			IssueID: types.IssueID{
+				ID: "immem-aaa",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Memory Test Issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
 		}
 		issueLine, _ := json.Marshal(issue)
 		memoryLine, _ := json.Marshal(map[string]string{
@@ -191,7 +202,7 @@ func TestEmbeddedImport(t *testing.T) {
 		jsonlPath := filepath.Join(t.TempDir(), "upsert.jsonl")
 		now := time.Now().UTC().Add(time.Hour)
 		writeJSONLFile(t, jsonlPath, []types.Issue{
-			{ID: id, Title: "Updated Title", Status: types.StatusOpen, IssueType: types.TypeTask, CreatedAt: now, UpdatedAt: now},
+			{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: "Updated Title"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask}, IssueTimes: types.IssueTimes{CreatedAt: now, UpdatedAt: now}},
 		})
 
 		bdImport(t, bd, dir, jsonlPath)
@@ -222,7 +233,7 @@ func TestEmbeddedImport(t *testing.T) {
 		jsonlPath := filepath.Join(t.TempDir(), "prefix-sync.jsonl")
 		now := time.Now().UTC()
 		writeJSONLFile(t, jsonlPath, []types.Issue{
-			{ID: "bd-sync1", Title: "Prefix Sync Issue", Status: types.StatusOpen, IssueType: types.TypeTask, CreatedAt: now, UpdatedAt: now},
+			{IssueID: types.IssueID{ID: "bd-sync1"}, IssueContent: types.IssueContent{Title: "Prefix Sync Issue"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask}, IssueTimes: types.IssueTimes{CreatedAt: now, UpdatedAt: now}},
 		})
 
 		bdImport(t, bd, dir, jsonlPath)
@@ -244,7 +255,7 @@ func TestEmbeddedImport(t *testing.T) {
 		jsonlPath := filepath.Join(t.TempDir(), "prefix-sync-no-key.jsonl")
 		now := time.Now().UTC()
 		writeJSONLFile(t, jsonlPath, []types.Issue{
-			{ID: "bd-nokey1", Title: "No Prefix Key Issue", Status: types.StatusOpen, IssueType: types.TypeTask, CreatedAt: now, UpdatedAt: now},
+			{IssueID: types.IssueID{ID: "bd-nokey1"}, IssueContent: types.IssueContent{Title: "No Prefix Key Issue"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask}, IssueTimes: types.IssueTimes{CreatedAt: now, UpdatedAt: now}},
 		})
 
 		bdImport(t, bd, dir, jsonlPath)
@@ -285,12 +296,20 @@ func TestEmbeddedImportConcurrent(t *testing.T) {
 			var issues []types.Issue
 			for i := 0; i < 3; i++ {
 				issues = append(issues, types.Issue{
-					ID:        fmt.Sprintf("imconc-w%d-%d", worker, i),
-					Title:     fmt.Sprintf("Worker %d Issue %d", worker, i),
-					Status:    types.StatusOpen,
-					IssueType: types.TypeTask,
-					CreatedAt: now,
-					UpdatedAt: now,
+					IssueID: types.IssueID{
+						ID: fmt.Sprintf("imconc-w%d-%d", worker, i),
+					},
+					IssueContent: types.IssueContent{
+						Title: fmt.Sprintf("Worker %d Issue %d", worker, i),
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Status:    types.StatusOpen,
+						IssueType: types.TypeTask,
+					},
+					IssueTimes: types.IssueTimes{
+						CreatedAt: now,
+						UpdatedAt: now,
+					},
 				})
 			}
 			var lines []string

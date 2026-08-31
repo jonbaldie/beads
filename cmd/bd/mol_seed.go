@@ -59,7 +59,7 @@ func runMolSeed(cmd *cobra.Command, args []string) error {
 		return HandleErrorRespectJSON("%v", err)
 	}
 
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(map[string]interface{}{
 			"status":  "ok",
 			"formula": formulaName,

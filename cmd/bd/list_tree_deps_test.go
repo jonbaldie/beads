@@ -32,8 +32,8 @@ func indexOf(ids []string, id string) int {
 func TestOrderSiblingsByDeps_DependencyBeatsPriority(t *testing.T) {
 	// B is higher priority (P0) than A (P2) but B depends on A, so A must sort
 	// first — dependency order overrides priority.
-	a := &types.Issue{ID: "pa-a", Priority: 2}
-	b := &types.Issue{ID: "pa-b", Priority: 0}
+	a := &types.Issue{IssueID: types.IssueID{ID: "pa-a"}, IssueWorkflow: types.IssueWorkflow{Priority: 2}}
+	b := &types.Issue{IssueID: types.IssueID{ID: "pa-b"}, IssueWorkflow: types.IssueWorkflow{Priority: 0}}
 	deps := map[string][]*types.Dependency{"pa-b": {schedDep("pa-b", "pa-a")}}
 
 	got := idsOf(orderSiblingsByDeps([]*types.Issue{b, a}, deps))
@@ -44,9 +44,9 @@ func TestOrderSiblingsByDeps_DependencyBeatsPriority(t *testing.T) {
 
 func TestOrderSiblingsByDeps_ChainIsTopological(t *testing.T) {
 	// c -> b -> a (c depends on b depends on a). Expect a, b, c.
-	a := &types.Issue{ID: "pa-a", Priority: 1}
-	b := &types.Issue{ID: "pa-b", Priority: 1}
-	c := &types.Issue{ID: "pa-c", Priority: 1}
+	a := &types.Issue{IssueID: types.IssueID{ID: "pa-a"}, IssueWorkflow: types.IssueWorkflow{Priority: 1}}
+	b := &types.Issue{IssueID: types.IssueID{ID: "pa-b"}, IssueWorkflow: types.IssueWorkflow{Priority: 1}}
+	c := &types.Issue{IssueID: types.IssueID{ID: "pa-c"}, IssueWorkflow: types.IssueWorkflow{Priority: 1}}
 	deps := map[string][]*types.Dependency{
 		"pa-c": {schedDep("pa-c", "pa-b")},
 		"pa-b": {schedDep("pa-b", "pa-a")},
@@ -59,8 +59,8 @@ func TestOrderSiblingsByDeps_ChainIsTopological(t *testing.T) {
 
 func TestOrderSiblingsByDeps_CycleFallsBackWithoutDropping(t *testing.T) {
 	// a <-> b cycle: must not hang and must not drop either node.
-	a := &types.Issue{ID: "pa-a", Priority: 1}
-	b := &types.Issue{ID: "pa-b", Priority: 1}
+	a := &types.Issue{IssueID: types.IssueID{ID: "pa-a"}, IssueWorkflow: types.IssueWorkflow{Priority: 1}}
+	b := &types.Issue{IssueID: types.IssueID{ID: "pa-b"}, IssueWorkflow: types.IssueWorkflow{Priority: 1}}
 	deps := map[string][]*types.Dependency{
 		"pa-a": {schedDep("pa-a", "pa-b")},
 		"pa-b": {schedDep("pa-b", "pa-a")},
@@ -73,8 +73,8 @@ func TestOrderSiblingsByDeps_CycleFallsBackWithoutDropping(t *testing.T) {
 
 func TestOrderSiblingsByDeps_OutOfGroupEdgeIgnored(t *testing.T) {
 	// A depends on something outside the sibling group: no reordering, no panic.
-	a := &types.Issue{ID: "pa-a", Priority: 2}
-	b := &types.Issue{ID: "pa-b", Priority: 1}
+	a := &types.Issue{IssueID: types.IssueID{ID: "pa-a"}, IssueWorkflow: types.IssueWorkflow{Priority: 2}}
+	b := &types.Issue{IssueID: types.IssueID{ID: "pa-b"}, IssueWorkflow: types.IssueWorkflow{Priority: 1}}
 	deps := map[string][]*types.Dependency{"pa-a": {schedDep("pa-a", "pa-external")}}
 	got := idsOf(orderSiblingsByDeps([]*types.Issue{a, b}, deps))
 	// Falls back to priority: b (P1) before a (P2).
@@ -118,8 +118,8 @@ func TestAnnotationsFor_InViewRowsAndOutOfViewSummary(t *testing.T) {
 	// pa-x: one in-view dep (pa-a) + five out-of-view deps. The in-view edge is a
 	// full row; the five out-of-view collapse to one summary naming four + "1 more".
 	inView := map[string]*types.Issue{
-		"pa-x": {ID: "pa-x"},
-		"pa-a": {ID: "pa-a", Title: "Alpha"},
+		"pa-x": {IssueID: types.IssueID{ID: "pa-x"}},
+		"pa-a": {IssueID: types.IssueID{ID: "pa-a"}, IssueContent: types.IssueContent{Title: "Alpha"}},
 	}
 	deps := map[string][]*types.Dependency{"pa-x": {
 		schedDep("pa-x", "pa-a"),
@@ -147,8 +147,8 @@ func TestAnnotationsFor_InViewRowsAndOutOfViewSummary(t *testing.T) {
 
 func TestAnnotationsFor_ModeFiltersKnowledgeGraph(t *testing.T) {
 	inView := map[string]*types.Issue{
-		"pa-x": {ID: "pa-x"},
-		"pa-r": {ID: "pa-r", Title: "Related thing"},
+		"pa-x": {IssueID: types.IssueID{ID: "pa-x"}},
+		"pa-r": {IssueID: types.IssueID{ID: "pa-r"}, IssueContent: types.IssueContent{Title: "Related thing"}},
 	}
 	deps := map[string][]*types.Dependency{"pa-x": {
 		{IssueID: "pa-x", DependsOnID: "pa-r", Type: types.DepRelated},

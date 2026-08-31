@@ -33,7 +33,9 @@ func migrateToProxiedRunE(metricName, checkName string, shared bool) func(*cobra
 
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		if !dryRun {
-			CheckReadonly(checkName)
+			if err := CheckReadonly(checkName); err != nil {
+				return err
+			}
 		}
 
 		idleTimeout, err := resolveMigrateIdleTimeout(cmd)
@@ -55,7 +57,9 @@ func migrateFromProxiedRunE(metricName, checkName string, shared bool) func(*cob
 
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		if !dryRun {
-			CheckReadonly(checkName)
+			if err := CheckReadonly(checkName); err != nil {
+				return err
+			}
 		}
 		return runMigrateFromProxiedServer(dryRun, shared)
 	}
@@ -232,18 +236,11 @@ func runMigrateToProxiedServer(dryRun bool, idleTimeout time.Duration, shared bo
 	if err != nil {
 		return err
 	}
-	if !dryRun {
-		releaseGates, err := acquireMigrateGates(beadsDir, shared, "bd migrate to proxied-server")
-		if err != nil {
-			return err
-		}
-		defer releaseGates()
-		releaseMigrateLock, err := acquireMigrateLock(beadsDir)
-		if err != nil {
-			return err
-		}
-		defer releaseMigrateLock()
+	release, err := maybeAcquireMigrateLocks(beadsDir, shared, dryRun, "bd migrate to proxied-server")
+	if err != nil {
+		return err
 	}
+	defer release()
 	cfg, err := loadMigrateModeConfig(beadsDir)
 	if err != nil {
 		return err
@@ -252,51 +249,97 @@ func runMigrateToProxiedServer(dryRun bool, idleTimeout time.Duration, shared bo
 		fmt.Printf("%s\n", ui.RenderPass("✓ Already in proxied-server mode"))
 		return nil
 	}
-
-	var rootPath string
-	if shared {
-		if !doltserver.IsSharedServerMode() {
-			return HandleError("repo is not in shared-server mode; this command only migrates shared-server repos")
-		}
-		rootPath, err = doltserver.SharedDoltDir()
-		if err != nil {
-			return HandleError("failed to resolve shared dolt directory: %v", err)
-		}
-	} else {
-		if !cfg.IsDoltServerMode() {
-			return HandleError("repo is not in server mode (dolt_mode=%q); this command only migrates server-mode repos", cfg.GetDoltMode())
-		}
-		// This migration only re-points the proxy at the LOCAL Dolt root;
-		// it does not copy data. A workspace whose server mode comes from a
-		// remote host (GH#3545 inference or explicit config) would silently
-		// switch from the remote data to an empty/stale local database.
-		if host := cfg.GetDoltServerHost(); !configfile.IsLocalHostString(host) {
-			return HandleError("the configured Dolt server host is remote (%s); this migration only re-points the proxy at the local Dolt root and would abandon the remote data.\nMigrate on the server host itself, or clear dolt_server_host / dolt.host / BEADS_DOLT_SERVER_HOST first", host)
-		}
-		if doltserver.IsSharedServerMode() {
-			return HandleErrorWithHint("repo is in shared-server mode", "use 'bd migrate from-shared-server-to-proxied-server'")
-		}
+	rootPath, serverDir, err := prepareMigrateToProxied(beadsDir, cfg, shared)
+	if err != nil {
+		return err
 	}
-
-	serverDir := doltserver.ResolveServerDir(beadsDir)
-	if state, _ := doltserver.IsRunning(serverDir); state != nil && state.Running {
-		return HandleErrorWithHint("dolt server is still running", "stop it first: bd dolt stop")
-	}
-
 	if dryRun {
-		fmt.Println("Dry run mode - no changes will be made")
-		fmt.Printf("Would set dolt_mode: %s → %s\n", configfile.DoltModeServer, configfile.DoltModeProxiedServer)
-		if shared {
-			fmt.Println("Would disable dolt.shared-server")
-			fmt.Printf("Would root the proxy at %s\n", rootPath)
-		}
-		fmt.Printf("Would write %s\n", configfile.ProxiedServerClientInfoFileName)
-		for _, p := range doltserver.StateFilePaths(serverDir) {
-			fmt.Printf("Would remove %s\n", p)
-		}
+		printMigrateToProxiedDryRun(rootPath, serverDir, shared)
 		return nil
 	}
+	return runMigrateToProxiedWrite(beadsDir, cfg, rootPath, serverDir, idleTimeout, shared)
+}
 
+func maybeAcquireMigrateLocks(beadsDir string, shared, dryRun bool, action string) (func(), error) {
+	if dryRun {
+		return func() {}, nil
+	}
+	releaseGates, err := acquireMigrateGates(beadsDir, shared, action)
+	if err != nil {
+		return nil, err
+	}
+	releaseMigrateLock, err := acquireMigrateLock(beadsDir)
+	if err != nil {
+		releaseGates()
+		return nil, err
+	}
+	return func() {
+		releaseMigrateLock()
+		releaseGates()
+	}, nil
+}
+
+func prepareMigrateToProxied(beadsDir string, cfg *configfile.Config, shared bool) (rootPath, serverDir string, err error) {
+	rootPath, err = migrateToProxiedRoot(cfg, shared)
+	if err != nil {
+		return "", "", err
+	}
+	serverDir = doltserver.ResolveServerDir(beadsDir)
+	if state, _ := doltserver.IsRunning(serverDir); state != nil && state.Running {
+		return "", "", HandleErrorWithHint("dolt server is still running", "stop it first: bd dolt stop")
+	}
+	return rootPath, serverDir, nil
+}
+
+func migrateToProxiedRoot(cfg *configfile.Config, shared bool) (string, error) {
+	if shared {
+		return migrateToProxiedSharedRoot()
+	}
+	return migrateToProxiedLocalRoot(cfg)
+}
+
+func migrateToProxiedSharedRoot() (string, error) {
+	if !doltserver.IsSharedServerMode() {
+		return "", HandleError("repo is not in shared-server mode; this command only migrates shared-server repos")
+	}
+	rootPath, err := doltserver.SharedDoltDir()
+	if err != nil {
+		return "", HandleError("failed to resolve shared dolt directory: %v", err)
+	}
+	return rootPath, nil
+}
+
+func migrateToProxiedLocalRoot(cfg *configfile.Config) (string, error) {
+	if !cfg.IsDoltServerMode() {
+		return "", HandleError("repo is not in server mode (dolt_mode=%q); this command only migrates server-mode repos", cfg.GetDoltMode())
+	}
+	// This migration only re-points the proxy at the LOCAL Dolt root;
+	// it does not copy data. A workspace whose server mode comes from a
+	// remote host (GH#3545 inference or explicit config) would silently
+	// switch from the remote data to an empty/stale local database.
+	if host := cfg.GetDoltServerHost(); !configfile.IsLocalHostString(host) {
+		return "", HandleError("the configured Dolt server host is remote (%s); this migration only re-points the proxy at the local Dolt root and would abandon the remote data.\nMigrate on the server host itself, or clear dolt_server_host / dolt.host / BEADS_DOLT_SERVER_HOST first", host)
+	}
+	if doltserver.IsSharedServerMode() {
+		return "", HandleErrorWithHint("repo is in shared-server mode", "use 'bd migrate from-shared-server-to-proxied-server'")
+	}
+	return "", nil
+}
+
+func printMigrateToProxiedDryRun(rootPath, serverDir string, shared bool) {
+	fmt.Println("Dry run mode - no changes will be made")
+	fmt.Printf("Would set dolt_mode: %s → %s\n", configfile.DoltModeServer, configfile.DoltModeProxiedServer)
+	if shared {
+		fmt.Println("Would disable dolt.shared-server")
+		fmt.Printf("Would root the proxy at %s\n", rootPath)
+	}
+	fmt.Printf("Would write %s\n", configfile.ProxiedServerClientInfoFileName)
+	for _, p := range doltserver.StateFilePaths(serverDir) {
+		fmt.Printf("Would remove %s\n", p)
+	}
+}
+
+func runMigrateToProxiedWrite(beadsDir string, cfg *configfile.Config, rootPath, serverDir string, idleTimeout time.Duration, shared bool) error {
 	cfg.DoltMode = configfile.DoltModeProxiedServer
 	if err := cfg.Save(beadsDir); err != nil {
 		return HandleError("failed to save metadata.json: %v", err)
@@ -331,46 +374,72 @@ func runMigrateFromProxiedServer(dryRun bool, shared bool) error {
 	if err != nil {
 		return err
 	}
-	if !dryRun {
-		releaseGates, err := acquireMigrateGates(beadsDir, shared, "bd migrate from proxied-server")
-		if err != nil {
-			return err
-		}
-		defer releaseGates()
-		releaseMigrateLock, err := acquireMigrateLock(beadsDir)
-		if err != nil {
-			return err
-		}
-		defer releaseMigrateLock()
+	release, err := maybeAcquireMigrateLocks(beadsDir, shared, dryRun, "bd migrate from proxied-server")
+	if err != nil {
+		return err
 	}
+	defer release()
 	cfg, err := loadMigrateModeConfig(beadsDir)
 	if err != nil {
 		return err
 	}
+	if migrateFromProxiedAlreadyDone(cfg, shared) {
+		return nil
+	}
+	rootDir, logAssets, err := prepareMigrateFromProxied(beadsDir, cfg, shared)
+	if err != nil {
+		return err
+	}
+	if dryRun {
+		printMigrateFromProxiedDryRun(rootDir, logAssets, shared)
+		return nil
+	}
+	return runMigrateFromProxiedWrite(beadsDir, cfg, rootDir, logAssets, shared)
+}
+
+func migrateFromProxiedAlreadyDone(cfg *configfile.Config, shared bool) bool {
 	if shared {
 		if doltserver.IsSharedServerMode() {
 			fmt.Printf("%s\n", ui.RenderPass("✓ Already in shared-server mode"))
-			return nil
+			return true
 		}
-	} else if cfg.IsDoltServerMode() && !doltserver.IsSharedServerMode() {
-		fmt.Printf("%s\n", ui.RenderPass("✓ Already in server mode"))
-		return nil
+		return false
 	}
+	if cfg.IsDoltServerMode() && !doltserver.IsSharedServerMode() {
+		fmt.Printf("%s\n", ui.RenderPass("✓ Already in server mode"))
+		return true
+	}
+	return false
+}
+
+func prepareMigrateFromProxied(beadsDir string, cfg *configfile.Config, shared bool) (string, []string, error) {
 	if !cfg.IsDoltProxiedServerMode() {
-		return HandleError("repo is not in proxied-server mode (dolt_mode=%q); this command only migrates proxied-server repos", cfg.GetDoltMode())
+		return "", nil, HandleError("repo is not in proxied-server mode (dolt_mode=%q); this command only migrates proxied-server repos", cfg.GetDoltMode())
 	}
 	// Leaving proxied mode would make dolt_team_server inert and resume
 	// bd-driven schema migrations on the bts-owned database.
 	if cfg.DoltTeamServer {
-		return HandleErrorWithHint("workspace is team-server managed (dolt_team_server in metadata.json); the shared database's schema is owned by beads-team-server",
+		return "", nil, HandleErrorWithHint("workspace is team-server managed (dolt_team_server in metadata.json); the shared database's schema is owned by beads-team-server",
 			"if the database is no longer bts-managed, remove dolt_team_server from .beads/metadata.json first")
 	}
-
 	rootDir, err := resolveProxiedServerRootPath(beadsDir)
 	if err != nil {
-		return HandleError("%v", err)
+		return "", nil, HandleError("%v", err)
 	}
+	if err := checkMigrateFromProxiedRoot(rootDir, shared); err != nil {
+		return "", nil, err
+	}
+	if running, _ := proxy.IsRunning(rootDir); running {
+		return "", nil, HandleErrorWithHint("proxied-server is still running", "stop it first: bd dolt stop")
+	}
+	logAssets, err := proxiedLogAssets(beadsDir)
+	if err != nil {
+		return "", nil, HandleError("%v", err)
+	}
+	return rootDir, logAssets, nil
+}
 
+func checkMigrateFromProxiedRoot(rootDir string, shared bool) error {
 	sharedDolt, sharedErr := doltserver.SharedDoltDir()
 	if shared {
 		if sharedErr != nil {
@@ -379,61 +448,77 @@ func runMigrateFromProxiedServer(dryRun bool, shared bool) error {
 		if rootDir != sharedDolt {
 			return HandleErrorWithHint(fmt.Sprintf("proxied-server root %s is not the shared dolt directory", rootDir), "use 'bd migrate from-proxied-server-to-server'")
 		}
-	} else if sharedErr == nil && rootDir == sharedDolt {
-		return HandleErrorWithHint("proxied-server is rooted at the shared dolt directory", "use 'bd migrate from-proxied-server-to-shared-server'")
-	}
-
-	if running, _ := proxy.IsRunning(rootDir); running {
-		return HandleErrorWithHint("proxied-server is still running", "stop it first: bd dolt stop")
-	}
-
-	logAssets, err := proxiedLogAssets(beadsDir)
-	if err != nil {
-		return HandleError("%v", err)
-	}
-
-	if dryRun {
-		fmt.Println("Dry run mode - no changes will be made")
-		fmt.Printf("Would set dolt_mode: %s → %s\n", configfile.DoltModeProxiedServer, configfile.DoltModeServer)
-		if shared {
-			fmt.Println("Would enable dolt.shared-server")
-		}
-		fmt.Printf("Would remove %s\n", configfile.ProxiedServerClientInfoFileName)
-		for _, p := range proxy.ControlFilePaths(rootDir) {
-			fmt.Printf("Would remove %s\n", p)
-		}
-		for _, p := range logAssets {
-			fmt.Printf("Would remove %s\n", p)
-		}
 		return nil
 	}
-
-	serverStateDir := beadsDir
-	if shared {
-		serverStateDir, err = doltserver.SharedServerDir()
-		if err != nil {
-			return HandleError("failed to resolve shared server directory: %v", err)
-		}
+	if sharedErr == nil && rootDir == sharedDolt {
+		return HandleErrorWithHint("proxied-server is rooted at the shared dolt directory", "use 'bd migrate from-proxied-server-to-shared-server'")
 	}
+	return nil
+}
 
+func printMigrateFromProxiedDryRun(rootDir string, logAssets []string, shared bool) {
+	fmt.Println("Dry run mode - no changes will be made")
+	fmt.Printf("Would set dolt_mode: %s → %s\n", configfile.DoltModeProxiedServer, configfile.DoltModeServer)
+	if shared {
+		fmt.Println("Would enable dolt.shared-server")
+	}
+	fmt.Printf("Would remove %s\n", configfile.ProxiedServerClientInfoFileName)
+	for _, p := range proxy.ControlFilePaths(rootDir) {
+		fmt.Printf("Would remove %s\n", p)
+	}
+	for _, p := range logAssets {
+		fmt.Printf("Would remove %s\n", p)
+	}
+}
+
+func runMigrateFromProxiedWrite(beadsDir string, cfg *configfile.Config, rootDir string, logAssets []string, shared bool) error {
+	serverStateDir, err := migrateFromServerStateDir(beadsDir, shared)
+	if err != nil {
+		return err
+	}
+	unlock, err := acquireMigrateFromRuntimeLocks(rootDir, serverStateDir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return applyMigrateFromProxied(beadsDir, cfg, rootDir, logAssets, shared)
+}
+
+func migrateFromServerStateDir(beadsDir string, shared bool) (string, error) {
+	if !shared {
+		return beadsDir, nil
+	}
+	serverStateDir, err := doltserver.SharedServerDir()
+	if err != nil {
+		return "", HandleError("failed to resolve shared server directory: %v", err)
+	}
+	return serverStateDir, nil
+}
+
+func acquireMigrateFromRuntimeLocks(rootDir, serverStateDir string) (func(), error) {
 	proxyLock, err := util.TryLock(filepath.Join(rootDir, proxy.LockFileName))
 	if err != nil {
-		return migrateLockErr("proxy", err)
+		return nil, migrateLockErr("proxy", err)
 	}
-	defer proxyLock.Unlock()
-
 	childLock, err := util.TryLock(filepath.Join(rootDir, server.LockFileName))
 	if err != nil {
-		return migrateLockErr("proxied dolt sql-server", err)
+		proxyLock.Unlock()
+		return nil, migrateLockErr("proxied dolt sql-server", err)
 	}
-	defer childLock.Unlock()
-
 	serverLock, err := util.TryLock(doltserver.LockPath(serverStateDir))
 	if err != nil {
-		return migrateLockErr("dolt sql-server", err)
+		childLock.Unlock()
+		proxyLock.Unlock()
+		return nil, migrateLockErr("dolt sql-server", err)
 	}
-	defer serverLock.Unlock()
+	return func() {
+		serverLock.Unlock()
+		childLock.Unlock()
+		proxyLock.Unlock()
+	}, nil
+}
 
+func applyMigrateFromProxied(beadsDir string, cfg *configfile.Config, rootDir string, logAssets []string, shared bool) error {
 	if err := doltserver.MarkDoltDirCompatible(rootDir); err != nil {
 		return HandleError("failed to mark dolt directory compatible: %v", err)
 	}

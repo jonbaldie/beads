@@ -221,13 +221,21 @@ func TestImportFromLocalJSONL(t *testing.T) {
 		createdAt := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 		localUpdatedAt := createdAt.Add(2 * time.Hour)
 		local := &types.Issue{
-			ID:        "test-stale-import",
-			Title:     "newer local title",
-			Status:    types.StatusInProgress,
-			IssueType: types.TypeTask,
-			Priority:  1,
-			CreatedAt: createdAt,
-			UpdatedAt: localUpdatedAt,
+			IssueID: types.IssueID{
+				ID: "test-stale-import",
+			},
+			IssueContent: types.IssueContent{
+				Title: "newer local title",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusInProgress,
+				IssueType: types.TypeTask,
+				Priority:  1,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: createdAt,
+				UpdatedAt: localUpdatedAt,
+			},
 		}
 		if err := store.CreateIssue(ctx, local, "test"); err != nil {
 			t.Fatalf("CreateIssue local: %v", err)
@@ -325,43 +333,73 @@ func TestImportFromLocalJSONL(t *testing.T) {
 		now := time.Now().UTC()
 		issues := []*types.Issue{
 			{
-				ID:        "test-cycle-a",
-				Title:     "Cycle A",
-				Status:    types.StatusOpen,
-				IssueType: types.TypeTask,
-				Priority:  2,
-				CreatedAt: now,
-				UpdatedAt: now,
-				Dependencies: []*types.Dependency{{
-					DependsOnID: "test-cycle-b",
-					Type:        types.DepBlocks,
-				}},
+				IssueID: types.IssueID{
+					ID: "test-cycle-a",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Cycle A",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					IssueType: types.TypeTask,
+					Priority:  2,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: now,
+					UpdatedAt: now,
+				},
+				IssueGraph: types.IssueGraph{
+					Dependencies: []*types.Dependency{{
+						DependsOnID: "test-cycle-b",
+						Type:        types.DepBlocks,
+					}},
+				},
 			},
 			{
-				ID:        "test-cycle-b",
-				Title:     "Cycle B",
-				Status:    types.StatusOpen,
-				IssueType: types.TypeTask,
-				Priority:  2,
-				CreatedAt: now,
-				UpdatedAt: now,
-				Dependencies: []*types.Dependency{{
-					DependsOnID: "test-cycle-a",
-					Type:        types.DepBlocks,
-				}},
+				IssueID: types.IssueID{
+					ID: "test-cycle-b",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Cycle B",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					IssueType: types.TypeTask,
+					Priority:  2,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: now,
+					UpdatedAt: now,
+				},
+				IssueGraph: types.IssueGraph{
+					Dependencies: []*types.Dependency{{
+						DependsOnID: "test-cycle-a",
+						Type:        types.DepBlocks,
+					}},
+				},
 			},
 			{
-				ID:        "test-self",
-				Title:     "Self dependency",
-				Status:    types.StatusOpen,
-				IssueType: types.TypeTask,
-				Priority:  2,
-				CreatedAt: now,
-				UpdatedAt: now,
-				Dependencies: []*types.Dependency{{
-					DependsOnID: "test-self",
-					Type:        types.DepBlocks,
-				}},
+				IssueID: types.IssueID{
+					ID: "test-self",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Self dependency",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					IssueType: types.TypeTask,
+					Priority:  2,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: now,
+					UpdatedAt: now,
+				},
+				IssueGraph: types.IssueGraph{
+					Dependencies: []*types.Dependency{{
+						DependsOnID: "test-self",
+						Type:        types.DepBlocks,
+					}},
+				},
 			},
 		}
 
@@ -409,27 +447,47 @@ func TestImportFromLocalJSONL(t *testing.T) {
 		now := time.Now().UTC()
 		issues := []*types.Issue{
 			{
-				ID:        "test-mixed-regular",
-				Title:     "Regular source",
-				Status:    types.StatusOpen,
-				IssueType: types.TypeTask,
-				Priority:  2,
-				CreatedAt: now,
-				UpdatedAt: now,
-				Dependencies: []*types.Dependency{{
-					DependsOnID: "test-mixed-wisp",
-					Type:        types.DepBlocks,
-				}},
+				IssueID: types.IssueID{
+					ID: "test-mixed-regular",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Regular source",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					IssueType: types.TypeTask,
+					Priority:  2,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: now,
+					UpdatedAt: now,
+				},
+				IssueGraph: types.IssueGraph{
+					Dependencies: []*types.Dependency{{
+						DependsOnID: "test-mixed-wisp",
+						Type:        types.DepBlocks,
+					}},
+				},
 			},
 			{
-				ID:        "test-mixed-wisp",
-				Title:     "Wisp target",
-				Status:    types.StatusOpen,
-				IssueType: types.TypeTask,
-				Priority:  2,
-				CreatedAt: now,
-				UpdatedAt: now,
-				Ephemeral: true,
+				IssueID: types.IssueID{
+					ID: "test-mixed-wisp",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Wisp target",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					IssueType: types.TypeTask,
+					Priority:  2,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: now,
+					UpdatedAt: now,
+				},
+				IssueWisp: types.IssueWisp{
+					Ephemeral: true,
+				},
 			},
 		}
 

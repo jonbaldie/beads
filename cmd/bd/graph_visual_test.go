@@ -57,7 +57,7 @@ func TestRenderGraphVisual(t *testing.T) {
 func TestRenderGraphVisual_Empty(t *testing.T) {
 	t.Parallel()
 	emptySubgraph := &TemplateSubgraph{
-		Root:     &types.Issue{ID: "empty"},
+		Root:     &types.Issue{IssueID: types.IssueID{ID: "empty"}},
 		Issues:   []*types.Issue{},
 		IssueMap: map[string]*types.Issue{},
 	}
@@ -78,8 +78,17 @@ func TestRenderGraphVisual_Empty(t *testing.T) {
 func TestRenderGraphVisual_SingleNode(t *testing.T) {
 	t.Parallel()
 	issue := &types.Issue{
-		ID: "solo-1", Title: "Solo issue", Status: types.StatusOpen,
-		Priority: 0, IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "solo-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Solo issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  0,
+			IssueType: types.TypeTask,
+		},
 	}
 	subgraph := &TemplateSubgraph{
 		Root:     issue,
@@ -108,8 +117,17 @@ func TestDAGNodeLine(t *testing.T) {
 	t.Parallel()
 	node := &GraphNode{
 		Issue: &types.Issue{
-			ID: "test-1", Title: "Test Node", Status: types.StatusOpen,
-			Priority: 2, IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "test-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Test Node",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		},
 	}
 	nodeW := 20
@@ -271,10 +289,10 @@ func TestCollectGutterEdges_SkipLayers(t *testing.T) {
 	// A(L0,row0) -> B(L1,row0) -> D(L2)
 	// A(L0,row0) -> C(L1,row1) -> D(L2)
 	// The edge routing should handle multiple layers correctly.
-	issueA := &types.Issue{ID: "a", Title: "A", Status: types.StatusOpen, IssueType: types.TypeTask}
-	issueB := &types.Issue{ID: "b", Title: "B", Status: types.StatusOpen, IssueType: types.TypeTask}
-	issueC := &types.Issue{ID: "c", Title: "C", Status: types.StatusOpen, IssueType: types.TypeTask}
-	issueD := &types.Issue{ID: "d", Title: "D", Status: types.StatusOpen, IssueType: types.TypeTask}
+	issueA := &types.Issue{IssueID: types.IssueID{ID: "a"}, IssueContent: types.IssueContent{Title: "A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask}}
+	issueB := &types.Issue{IssueID: types.IssueID{ID: "b"}, IssueContent: types.IssueContent{Title: "B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask}}
+	issueC := &types.Issue{IssueID: types.IssueID{ID: "c"}, IssueContent: types.IssueContent{Title: "C"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask}}
+	issueD := &types.Issue{IssueID: types.IssueID{ID: "d"}, IssueContent: types.IssueContent{Title: "D"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask}}
 
 	subgraph := &TemplateSubgraph{
 		Root:   issueA,

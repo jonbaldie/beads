@@ -408,8 +408,19 @@ func TestFormatIssueLongMarksAProjectedRow(t *testing.T) {
 
 	t.Run("projected row says so", func(t *testing.T) {
 		out := render(&types.Issue{
-			ID: "be-abc", Title: "t", Status: types.StatusOpen,
-			IssueType: types.TypeTask, IsLitePartial: true,
+			IssueID: types.IssueID{
+				ID: "be-abc",
+			},
+			IssueContent: types.IssueContent{
+				Title: "t",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
+			IssueEvent: types.IssueEvent{
+				IsLitePartial: true,
+			},
 		})
 		if !strings.Contains(out, "Description: (omitted by --brief)") {
 			t.Errorf("long format did not mark the projection:\n%s", out)
@@ -418,8 +429,17 @@ func TestFormatIssueLongMarksAProjectedRow(t *testing.T) {
 
 	t.Run("whole row with a description prints it", func(t *testing.T) {
 		out := render(&types.Issue{
-			ID: "be-abc", Title: "t", Status: types.StatusOpen,
-			IssueType: types.TypeTask, Description: "the body",
+			IssueID: types.IssueID{
+				ID: "be-abc",
+			},
+			IssueContent: types.IssueContent{
+				Title:       "t",
+				Description: "the body",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
 		})
 		if strings.Contains(out, "omitted by --brief") {
 			t.Errorf("long format marked an unprojected row:\n%s", out)
@@ -431,8 +451,16 @@ func TestFormatIssueLongMarksAProjectedRow(t *testing.T) {
 
 	t.Run("whole row with no description stays silent", func(t *testing.T) {
 		out := render(&types.Issue{
-			ID: "be-abc", Title: "t", Status: types.StatusOpen,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "be-abc",
+			},
+			IssueContent: types.IssueContent{
+				Title: "t",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
 		})
 		if strings.Contains(out, "Description") {
 			t.Errorf("long format invented a Description line for a textless row:\n%s", out)

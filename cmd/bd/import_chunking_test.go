@@ -80,9 +80,15 @@ func chunkTestIssues(n int) []*types.Issue {
 	issues := make([]*types.Issue, n)
 	for i := range issues {
 		issues[i] = &types.Issue{
-			ID:        fmt.Sprintf("bd-chunk%02d", i+1),
-			Title:     fmt.Sprintf("chunk issue %d", i+1),
-			UpdatedAt: base,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("bd-chunk%02d", i+1),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("chunk issue %d", i+1),
+			},
+			IssueTimes: types.IssueTimes{
+				UpdatedAt: base,
+			},
 		}
 		issues[i].SetDefaults()
 	}

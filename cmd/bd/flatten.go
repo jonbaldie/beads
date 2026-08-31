@@ -9,11 +9,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	flattenDryRun bool
-	flattenForce  bool
-)
-
 var flattenCmd = &cobra.Command{
 	Use:     "flatten",
 	GroupID: "maint",
@@ -43,7 +38,9 @@ Examples:
   bd flatten --force --json          # JSON output`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
-	RunE: func(_ *cobra.Command, _ []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		flattenDryRun, _ := cmd.Flags().GetBool("dry-run")
+		flattenForce, _ := cmd.Flags().GetBool("force")
 		if usesProxiedServer() {
 			return HandleErrorRespectJSON("flatten is not supported in proxied-server mode")
 		}
@@ -55,17 +52,19 @@ Examples:
 		}()
 
 		if !flattenDryRun {
-			CheckReadonly("flatten")
+			if err := CheckReadonly("flatten"); err != nil {
+				return err
+			}
 		}
-		ctx := rootCtx
+		ctx := getRootContext()
 		start := time.Now()
 
-		flattener, ok := storage.UnwrapStore(store).(storage.Flattener)
+		flattener, ok := storage.UnwrapStore(getStore()).(storage.Flattener)
 		if !ok {
 			return HandleErrorRespectJSON("storage backend does not support flatten")
 		}
 
-		logEntries, logErr := store.Log(ctx, 0)
+		logEntries, logErr := getStore().Log(ctx, 0)
 		if logErr != nil {
 			return HandleErrorRespectJSON("failed to read commit log: %v", logErr)
 		}
@@ -78,7 +77,7 @@ Examples:
 
 		if flattenDryRun {
 			remoteRefs, tags := listRemoteRefsAndTags(ctx)
-			if jsonOutput {
+			if isJSONOutput() {
 				result := map[string]interface{}{
 					"dry_run":       true,
 					"commit_count":  commitCount,
@@ -109,7 +108,7 @@ Examples:
 		}
 
 		if commitCount <= 1 {
-			if jsonOutput {
+			if isJSONOutput() {
 				return outputJSON(map[string]interface{}{
 					"success":      true,
 					"message":      "already flat",
@@ -126,7 +125,7 @@ Examples:
 				"Use --force to confirm or --dry-run to preview.")
 		}
 
-		if !jsonOutput {
+		if !isJSONOutput() {
 			fmt.Printf("Flattening %d commits...\n", commitCount)
 		}
 
@@ -139,11 +138,11 @@ Examples:
 		// workspace that has ever pushed or fetched (bd-agctw).
 		sizeBefore := storeSizeBytes(ctx)
 		pruned, tags := pruneRemoteRefsForGC(ctx)
-		if !jsonOutput {
+		if !isJSONOutput() {
 			printPruneReport(pruned, tags)
 		}
 
-		if gc, ok := storage.UnwrapStore(store).(storage.GarbageCollector); ok {
+		if gc, ok := storage.UnwrapStore(getStore()).(storage.GarbageCollector); ok {
 			if err := gc.DoltGC(ctx); err != nil {
 				WarnError("dolt gc after flatten failed: %v", err)
 			}
@@ -152,7 +151,7 @@ Examples:
 
 		elapsed := time.Since(start)
 
-		if jsonOutput {
+		if isJSONOutput() {
 			result := map[string]interface{}{
 				"success":            true,
 				"commits_before":     commitCount,
@@ -174,8 +173,8 @@ Examples:
 }
 
 func init() {
-	flattenCmd.Flags().BoolVar(&flattenDryRun, "dry-run", false, "Preview without making changes")
-	flattenCmd.Flags().BoolVarP(&flattenForce, "force", "f", false, "Confirm irreversible history squash")
+	flattenCmd.Flags().Bool("dry-run", false, "Preview without making changes")
+	flattenCmd.Flags().BoolP("force", "f", false, "Confirm irreversible history squash")
 
 	rootCmd.AddCommand(flattenCmd)
 }

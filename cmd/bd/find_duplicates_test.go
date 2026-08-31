@@ -180,19 +180,31 @@ func TestCosineSimilarity(t *testing.T) {
 func TestFindMechanicalDuplicates(t *testing.T) {
 	issues := []*types.Issue{
 		{
-			ID:          "bd-001",
-			Title:       "Fix authentication bug in login flow",
-			Description: "The login page fails when using SSO authentication",
+			IssueID: types.IssueID{
+				ID: "bd-001",
+			},
+			IssueContent: types.IssueContent{
+				Title:       "Fix authentication bug in login flow",
+				Description: "The login page fails when using SSO authentication",
+			},
 		},
 		{
-			ID:          "bd-002",
-			Title:       "Authentication login bug fix",
-			Description: "SSO authentication fails on the login page",
+			IssueID: types.IssueID{
+				ID: "bd-002",
+			},
+			IssueContent: types.IssueContent{
+				Title:       "Authentication login bug fix",
+				Description: "SSO authentication fails on the login page",
+			},
 		},
 		{
-			ID:          "bd-003",
-			Title:       "Add dark mode support",
-			Description: "Implement dark mode theme for the application",
+			IssueID: types.IssueID{
+				ID: "bd-003",
+			},
+			IssueContent: types.IssueContent{
+				Title:       "Add dark mode support",
+				Description: "Implement dark mode theme for the application",
+			},
 		},
 	}
 
@@ -223,8 +235,8 @@ func TestFindMechanicalDuplicates(t *testing.T) {
 
 func TestFindMechanicalDuplicatesHighThreshold(t *testing.T) {
 	issues := []*types.Issue{
-		{ID: "bd-001", Title: "Fix bug A", Description: "Something completely different"},
-		{ID: "bd-002", Title: "Add feature B", Description: "Totally unrelated content"},
+		{IssueID: types.IssueID{ID: "bd-001"}, IssueContent: types.IssueContent{Title: "Fix bug A", Description: "Something completely different"}},
+		{IssueID: types.IssueID{ID: "bd-002"}, IssueContent: types.IssueContent{Title: "Add feature B", Description: "Totally unrelated content"}},
 	}
 
 	pairs := findMechanicalDuplicates(issues, 0.9)
@@ -236,7 +248,7 @@ func TestFindMechanicalDuplicatesHighThreshold(t *testing.T) {
 func TestFindMechanicalDuplicatesMinIssues(t *testing.T) {
 	// Single issue - no pairs possible
 	issues := []*types.Issue{
-		{ID: "bd-001", Title: "Only issue"},
+		{IssueID: types.IssueID{ID: "bd-001"}, IssueContent: types.IssueContent{Title: "Only issue"}},
 	}
 	pairs := findMechanicalDuplicates(issues, 0.1)
 	if len(pairs) != 0 {
@@ -246,8 +258,10 @@ func TestFindMechanicalDuplicatesMinIssues(t *testing.T) {
 
 func TestIssueText(t *testing.T) {
 	issue := &types.Issue{
-		Title:       "Fix bug",
-		Description: "detailed description",
+		IssueContent: types.IssueContent{
+			Title:       "Fix bug",
+			Description: "detailed description",
+		},
 	}
 	text := issueText(issue)
 	if text != "Fix bug detailed description" {
@@ -255,7 +269,7 @@ func TestIssueText(t *testing.T) {
 	}
 
 	// No description
-	issue2 := &types.Issue{Title: "Just title"}
+	issue2 := &types.Issue{IssueContent: types.IssueContent{Title: "Just title"}}
 	text2 := issueText(issue2)
 	if text2 != "Just title" {
 		t.Errorf("issueText() = %q, want %q", text2, "Just title")

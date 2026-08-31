@@ -35,86 +35,95 @@ func addAgentsInstructions(agentFile string, verbose bool, templatePath string, 
 // If the file already has a full profile and a minimal profile is requested, the full
 // profile is preserved to avoid information loss.
 func updateAgentFile(filename string, verbose bool, templatePath string, profile agents.Profile, opts agents.RenderOpts) error {
-	// Check if file exists
 	//nolint:gosec // G304: filename validated by config.ValidateAgentsFile or defaulted to AGENTS.md
 	content, err := os.ReadFile(filename)
 	if os.IsNotExist(err) {
-		// File doesn't exist - create from template
-		var newContent string
-		if templatePath != "" {
-			//nolint:gosec // G304: templatePath comes from --agents-template flag
-			data, readErr := os.ReadFile(templatePath)
-			if readErr != nil {
-				return fmt.Errorf("failed to read template %s: %w", templatePath, readErr)
-			}
-			newContent = string(data)
-		} else {
-			newContent = agents.EmbeddedDefault()
-		}
-
-		// Replace the beads section with the requested profile.
-		// EmbeddedDefault() ships with profile:full; swap to the requested profile
-		// (which defaults to minimal). Also handles legacy markers without profile metadata.
-		if strings.Contains(newContent, "BEGIN BEADS INTEGRATION") {
-			if replaced, changed, err := agents.ReplaceSectionWithOpts(newContent, profile, opts); err == nil && changed {
-				newContent = replaced
-			}
-		}
-
-		// #nosec G306 - markdown needs to be readable
-		if err := os.WriteFile(filename, []byte(newContent), 0644); err != nil {
-			return fmt.Errorf("failed to create %s: %w", filename, err)
-		}
-		if verbose {
-			fmt.Printf("  %s Created %s with agent instructions\n", ui.RenderPass("✓"), filename)
-		}
-		return nil
-	} else if err != nil {
+		return createAgentFile(filename, verbose, templatePath, profile, opts)
+	}
+	if err != nil {
 		return fmt.Errorf("failed to read %s: %w", filename, err)
 	}
-
-	// File exists - check if it already has our sections
 	contentStr := string(content)
-	hasBeads := strings.Contains(contentStr, "BEGIN BEADS INTEGRATION")
+	if strings.Contains(contentStr, "BEGIN BEADS INTEGRATION") {
+		return refreshAgentFile(filename, contentStr, verbose, profile, opts)
+	}
+	return appendAgentSection(filename, contentStr, verbose, profile, opts)
+}
 
-	if hasBeads {
-		// Preserve existing full profile when minimal is requested (avoid information loss)
-		effectiveProfile := profile
-		existingMeta := agents.ParseMarker(contentStr[strings.Index(contentStr, "<!-- BEGIN BEADS INTEGRATION"):])
-		if existingMeta != nil && existingMeta.Profile == agents.ProfileFull && profile == agents.ProfileMinimal {
-			effectiveProfile = agents.ProfileFull
-			if verbose {
-				fmt.Printf("  ℹ %s already has full profile; preserving (higher-information) content\n", filename)
-			}
+func createAgentFile(filename string, verbose bool, templatePath string, profile agents.Profile, opts agents.RenderOpts) error {
+	newContent, err := agentFileTemplate(templatePath)
+	if err != nil {
+		return err
+	}
+	// Replace the beads section with the requested profile.
+	// EmbeddedDefault() ships with profile:full; swap to the requested profile
+	// (which defaults to minimal). Also handles legacy markers without profile metadata.
+	if strings.Contains(newContent, "BEGIN BEADS INTEGRATION") {
+		if replaced, changed, err := agents.ReplaceSectionWithOpts(newContent, profile, opts); err == nil && changed {
+			newContent = replaced
 		}
+	}
+	// #nosec G306 - markdown needs to be readable
+	if err := os.WriteFile(filename, []byte(newContent), 0644); err != nil {
+		return fmt.Errorf("failed to create %s: %w", filename, err)
+	}
+	if verbose {
+		fmt.Printf("  %s Created %s with agent instructions\n", ui.RenderPass("✓"), filename)
+	}
+	return nil
+}
 
-		// Update existing section to latest versioned format (upgrades legacy markers)
-		updated, changed, replaceErr := agents.ReplaceSectionWithOpts(contentStr, effectiveProfile, opts)
-		if replaceErr != nil {
-			return fmt.Errorf("failed to update beads section in %s: %w", filename, replaceErr)
-		}
-		if changed {
-			// #nosec G306 - markdown needs to be readable
-			if err := os.WriteFile(filename, []byte(updated), 0644); err != nil {
-				return fmt.Errorf("failed to update %s: %w", filename, err)
-			}
-			if verbose {
-				fmt.Printf("  %s Updated beads section in %s to latest format\n", ui.RenderPass("✓"), filename)
-			}
-		} else if verbose {
+func agentFileTemplate(templatePath string) (string, error) {
+	if templatePath == "" {
+		return agents.EmbeddedDefault(), nil
+	}
+	//nolint:gosec // G304: templatePath comes from --agents-template flag
+	data, err := os.ReadFile(templatePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read template %s: %w", templatePath, err)
+	}
+	return string(data), nil
+}
+
+func refreshAgentFile(filename, contentStr string, verbose bool, profile agents.Profile, opts agents.RenderOpts) error {
+	effectiveProfile := preserveAgentProfile(filename, contentStr, verbose, profile)
+	updated, changed, replaceErr := agents.ReplaceSectionWithOpts(contentStr, effectiveProfile, opts)
+	if replaceErr != nil {
+		return fmt.Errorf("failed to update beads section in %s: %w", filename, replaceErr)
+	}
+	if !changed {
+		if verbose {
 			fmt.Printf("  %s already has current agent instructions\n", filename)
 		}
 		return nil
 	}
+	// #nosec G306 - markdown needs to be readable
+	if err := os.WriteFile(filename, []byte(updated), 0644); err != nil {
+		return fmt.Errorf("failed to update %s: %w", filename, err)
+	}
+	if verbose {
+		fmt.Printf("  %s Updated beads section in %s to latest format\n", ui.RenderPass("✓"), filename)
+	}
+	return nil
+}
 
-	// Append beads section with profile metadata
+func preserveAgentProfile(filename, contentStr string, verbose bool, profile agents.Profile) agents.Profile {
+	existingMeta := agents.ParseMarker(contentStr[strings.Index(contentStr, "<!-- BEGIN BEADS INTEGRATION"):])
+	if existingMeta == nil || existingMeta.Profile != agents.ProfileFull || profile != agents.ProfileMinimal {
+		return profile
+	}
+	if verbose {
+		fmt.Printf("  ℹ %s already has full profile; preserving (higher-information) content\n", filename)
+	}
+	return agents.ProfileFull
+}
+
+func appendAgentSection(filename, contentStr string, verbose bool, profile agents.Profile, opts agents.RenderOpts) error {
 	newContent := contentStr
 	if !strings.HasSuffix(newContent, "\n") {
 		newContent += "\n"
 	}
-
 	newContent += "\n" + agents.RenderSectionWithOpts(profile, opts)
-
 	// #nosec G306 - markdown needs to be readable
 	if err := os.WriteFile(filename, []byte(newContent), 0644); err != nil {
 		return fmt.Errorf("failed to update %s: %w", filename, err)
@@ -127,73 +136,69 @@ func updateAgentFile(filename string, verbose bool, templatePath string, profile
 
 // setupClaudeSettings creates or updates .claude/settings.local.json with onboard instruction
 func setupClaudeSettings(verbose bool) error {
-	claudeDir := ".claude"
-	settingsPath := filepath.Join(claudeDir, "settings.local.json")
-
-	// Create .claude directory if it doesn't exist
-	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+	settingsPath := filepath.Join(".claude", "settings.local.json")
+	if err := os.MkdirAll(".claude", 0755); err != nil {
 		return fmt.Errorf("failed to create .claude directory: %w", err)
 	}
-
-	// Check if settings.local.json already exists
-	var existingSettings map[string]interface{}
-	// #nosec G304 - user config path
-	if content, err := os.ReadFile(settingsPath); err == nil {
-		if err := json.Unmarshal(content, &existingSettings); err != nil {
-			// Don't silently overwrite - the user has a file with invalid JSON
-			// that likely contains important settings they don't want to lose
-			return fmt.Errorf("existing %s contains invalid JSON: %w\nPlease fix the JSON syntax manually before running bd init", settingsPath, err)
-		}
-	} else if !os.IsNotExist(err) {
-		// File exists but couldn't be read (permissions issue, etc.)
-		return fmt.Errorf("failed to read existing %s: %w", settingsPath, err)
-	} else {
-		// File doesn't exist - create new empty settings
-		existingSettings = make(map[string]interface{})
+	existingSettings, err := loadClaudeSettings(settingsPath)
+	if err != nil {
+		return err
 	}
-
-	// Add or update the prompt with prime instruction
-	primePrompt := "Before starting any work, run 'bd prime' to understand the current project state and available issues."
-
-	// Check if prompt already contains prime or onboard instruction
-	if promptValue, exists := existingSettings["prompt"]; exists {
-		if promptStr, ok := promptValue.(string); ok {
-			if strings.Contains(promptStr, "bd prime") {
-				if verbose {
-					fmt.Printf("Claude settings already configured with bd prime instruction\n")
-				}
-				return nil
-			}
-			// Migrate legacy "bd onboard" references to "bd prime"
-			if strings.Contains(promptStr, "bd onboard") {
-				existingSettings["prompt"] = strings.ReplaceAll(promptStr, "bd onboard", "bd prime")
-			} else {
-				// Update existing prompt to include prime instruction
-				existingSettings["prompt"] = promptStr + "\n\n" + primePrompt
-			}
-		} else {
-			// Existing prompt is not a string, replace it
-			existingSettings["prompt"] = primePrompt
-		}
-	} else {
-		// Add new prompt with prime instruction
-		existingSettings["prompt"] = primePrompt
+	if applyClaudePrimePrompt(existingSettings, verbose) {
+		return nil
 	}
-
-	// Write updated settings
 	updatedContent, err := json.MarshalIndent(existingSettings, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal settings JSON: %w", err)
 	}
-
 	// #nosec G306 - config file needs 0644
 	if err := os.WriteFile(settingsPath, updatedContent, 0644); err != nil {
 		return fmt.Errorf("failed to write claude settings: %w", err)
 	}
-
 	if verbose {
 		fmt.Printf("Configured Claude settings with bd prime instruction\n")
 	}
-
 	return nil
+}
+
+func loadClaudeSettings(settingsPath string) (map[string]interface{}, error) {
+	// #nosec G304 - user config path
+	content, err := os.ReadFile(settingsPath)
+	if os.IsNotExist(err) {
+		return make(map[string]interface{}), nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read existing %s: %w", settingsPath, err)
+	}
+	var existingSettings map[string]interface{}
+	if err := json.Unmarshal(content, &existingSettings); err != nil {
+		return nil, fmt.Errorf("existing %s contains invalid JSON: %w\nPlease fix the JSON syntax manually before running bd init", settingsPath, err)
+	}
+	return existingSettings, nil
+}
+
+func applyClaudePrimePrompt(existingSettings map[string]interface{}, verbose bool) bool {
+	primePrompt := "Before starting any work, run 'bd prime' to understand the current project state and available issues."
+	promptValue, exists := existingSettings["prompt"]
+	if !exists {
+		existingSettings["prompt"] = primePrompt
+		return false
+	}
+	promptStr, ok := promptValue.(string)
+	if !ok {
+		existingSettings["prompt"] = primePrompt
+		return false
+	}
+	if strings.Contains(promptStr, "bd prime") {
+		if verbose {
+			fmt.Printf("Claude settings already configured with bd prime instruction\n")
+		}
+		return true
+	}
+	if strings.Contains(promptStr, "bd onboard") {
+		existingSettings["prompt"] = strings.ReplaceAll(promptStr, "bd onboard", "bd prime")
+		return false
+	}
+	existingSettings["prompt"] = promptStr + "\n\n" + primePrompt
+	return false
 }

@@ -23,86 +23,18 @@ func runTeamWizard(ctx context.Context, store storage.DoltStorage) error {
 	}
 	reader := bufio.NewReader(os.Stdin)
 
-	// Step 1: Check if we're in a git repository
-	fmt.Printf("%s Detecting git repository setup...\n", ui.RenderAccent("▶"))
-
-	if !isGitRepo() {
-		fmt.Printf("%s Not in a git repository\n", ui.RenderWarn("⚠"))
-		fmt.Println("\n  Initialize git first:")
-		fmt.Println("  git init")
-		fmt.Println()
-		return fmt.Errorf("not in a git repository")
-	}
-
-	// Get current branch
-	currentBranch, err := getGitBranch()
+	currentBranch, err := detectTeamWizardRepo()
 	if err != nil {
-		return fmt.Errorf("failed to get current branch: %w", err)
+		return err
 	}
-
-	fmt.Printf("%s Current branch: %s\n", ui.RenderPass("✓"), currentBranch)
-
-	// Step 2: Check for protected main branch
-	fmt.Printf("\n%s Checking branch configuration...\n", ui.RenderAccent("▶"))
-
-	fmt.Println("\nIs your main branch protected (prevents direct commits)?")
-	fmt.Println("  GitHub: Settings → Branches → Branch protection rules")
-	fmt.Println("  GitLab: Settings → Repository → Protected branches")
-	fmt.Print("\nProtected main branch? [y/N]: ")
-
-	response, err := readLineWithContext(ctx, reader, os.Stdin)
+	protectedMain, err := promptTeamWizardProtectedMain(ctx, reader)
 	if err != nil {
-		if isCanceled(err) {
-			return err
-		}
-		response = ""
+		return err
 	}
-	response = strings.TrimSpace(strings.ToLower(response))
 
-	protectedMain := (response == "y" || response == "yes")
-
-	var syncBranch string
-
-	if protectedMain {
-		fmt.Printf("\n%s Protected main detected\n", ui.RenderPass("✓"))
-		fmt.Println("\n  Beads will commit issue updates to a separate branch.")
-		fmt.Printf("  Default sync branch: %s\n", ui.RenderAccent("beads-metadata"))
-		fmt.Print("\n  Sync branch name [press Enter for default]: ")
-
-		branchName, err := readLineWithContext(ctx, reader, os.Stdin)
-		if err != nil {
-			if isCanceled(err) {
-				return err
-			}
-			branchName = ""
-		}
-		branchName = strings.TrimSpace(branchName)
-
-		if branchName == "" {
-			syncBranch = "beads-metadata"
-		} else {
-			syncBranch = branchName
-		}
-
-		fmt.Printf("\n%s Sync branch set to: %s\n", ui.RenderPass("✓"), syncBranch)
-
-		if err := store.SetConfig(ctx, "sync.branch", syncBranch); err != nil {
-			return fmt.Errorf("failed to set sync branch: %w", err)
-		}
-
-		// Create the sync branch if it doesn't exist
-		fmt.Printf("\n%s Creating sync branch...\n", ui.RenderAccent("▶"))
-
-		if err := createSyncBranch(syncBranch); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to create sync branch: %v\n", err)
-			fmt.Println("  You can create it manually: git checkout -b", syncBranch)
-		} else {
-			fmt.Printf("%s Sync branch created\n", ui.RenderPass("✓"))
-		}
-
-	} else {
-		fmt.Printf("%s Direct commits to %s\n", ui.RenderPass("✓"), currentBranch)
-		syncBranch = currentBranch
+	syncBranch, err := configureTeamWizardSyncBranch(ctx, store, reader, currentBranch, protectedMain)
+	if err != nil {
+		return err
 	}
 
 	// Step 3: Configure team settings
@@ -120,7 +52,86 @@ func runTeamWizard(ctx context.Context, store storage.DoltStorage) error {
 
 	fmt.Printf("%s Team mode enabled\n", ui.RenderPass("✓"))
 
-	// Step 4: Summary
+	printTeamWizardSummary(currentBranch, syncBranch, protectedMain)
+	return nil
+}
+
+func detectTeamWizardRepo() (string, error) {
+	fmt.Printf("%s Detecting git repository setup...\n", ui.RenderAccent("▶"))
+	if !isGitRepo() {
+		fmt.Printf("%s Not in a git repository\n", ui.RenderWarn("⚠"))
+		fmt.Println("\n  Initialize git first:")
+		fmt.Println("  git init")
+		fmt.Println()
+		return "", fmt.Errorf("not in a git repository")
+	}
+	currentBranch, err := getGitBranch()
+	if err != nil {
+		return "", fmt.Errorf("failed to get current branch: %w", err)
+	}
+	fmt.Printf("%s Current branch: %s\n", ui.RenderPass("✓"), currentBranch)
+	return currentBranch, nil
+}
+
+func promptTeamWizardProtectedMain(ctx context.Context, reader *bufio.Reader) (bool, error) {
+	fmt.Printf("\n%s Checking branch configuration...\n", ui.RenderAccent("▶"))
+	fmt.Println("\nIs your main branch protected (prevents direct commits)?")
+	fmt.Println("  GitHub: Settings → Branches → Branch protection rules")
+	fmt.Println("  GitLab: Settings → Repository → Protected branches")
+	fmt.Print("\nProtected main branch? [y/N]: ")
+	response, err := readLineWithContext(ctx, reader, os.Stdin)
+	if err != nil {
+		if isCanceled(err) {
+			return false, err
+		}
+		response = ""
+	}
+	response = strings.TrimSpace(strings.ToLower(response))
+	return response == "y" || response == "yes", nil
+}
+
+func configureTeamWizardSyncBranch(ctx context.Context, store storage.DoltStorage, reader *bufio.Reader, currentBranch string, protectedMain bool) (string, error) {
+	if !protectedMain {
+		fmt.Printf("%s Direct commits to %s\n", ui.RenderPass("✓"), currentBranch)
+		return currentBranch, nil
+	}
+
+	fmt.Printf("\n%s Protected main detected\n", ui.RenderPass("✓"))
+	fmt.Println("\n  Beads will commit issue updates to a separate branch.")
+	fmt.Printf("  Default sync branch: %s\n", ui.RenderAccent("beads-metadata"))
+	fmt.Print("\n  Sync branch name [press Enter for default]: ")
+
+	branchName, err := readLineWithContext(ctx, reader, os.Stdin)
+	if err != nil {
+		if isCanceled(err) {
+			return "", err
+		}
+		branchName = ""
+	}
+	branchName = strings.TrimSpace(branchName)
+
+	syncBranch := branchName
+	if syncBranch == "" {
+		syncBranch = "beads-metadata"
+	}
+
+	fmt.Printf("\n%s Sync branch set to: %s\n", ui.RenderPass("✓"), syncBranch)
+
+	if err := store.SetConfig(ctx, "sync.branch", syncBranch); err != nil {
+		return "", fmt.Errorf("failed to set sync branch: %w", err)
+	}
+
+	fmt.Printf("\n%s Creating sync branch...\n", ui.RenderAccent("▶"))
+	if err := createSyncBranch(syncBranch); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to create sync branch: %v\n", err)
+		fmt.Println("  You can create it manually: git checkout -b", syncBranch)
+	} else {
+		fmt.Printf("%s Sync branch created\n", ui.RenderPass("✓"))
+	}
+	return syncBranch, nil
+}
+
+func printTeamWizardSummary(currentBranch, syncBranch string, protectedMain bool) {
 	fmt.Printf("\n%s %s\n\n", ui.RenderPass("✓"), ui.RenderBold("Team setup complete!"))
 
 	fmt.Println("Configuration:")
@@ -157,8 +168,6 @@ func runTeamWizard(ctx context.Context, store storage.DoltStorage) error {
 		fmt.Printf("  3. %s\n", "Periodically: merge "+syncBranch+" to main via PR")
 		fmt.Println()
 	}
-
-	return nil
 }
 
 // getGitBranch returns the current git branch name

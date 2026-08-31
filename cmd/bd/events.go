@@ -126,7 +126,7 @@ to continue with a known gap, or rebuild from a full export.`,
 		if since < 0 {
 			return HandleErrorRespectJSON("--since must be zero or a positive sequence number (got %d); use 0 to read from the beginning", since)
 		}
-		return runEventsTail(rootCtx, since, limit, follow)
+		return runEventsTail(getRootContext(), since, limit, follow)
 	},
 }
 
@@ -141,7 +141,7 @@ present a pruned journal's surviving suffix as a complete history.`,
 	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		limit, _ := cmd.Flags().GetInt("limit")
-		return runEventsTail(rootCtx, 0, limit, false)
+		return runEventsTail(getRootContext(), 0, limit, false)
 	},
 }
 
@@ -183,7 +183,7 @@ state that ordinary Dolt commits never garbage-collect.`,
 		if before <= 0 {
 			return HandleErrorRespectJSON("--before must be a positive sequence number")
 		}
-		return runEventsPrune(rootCtx, before)
+		return runEventsPrune(getRootContext(), before)
 	},
 }
 
@@ -217,7 +217,7 @@ func reportEventsTruncated(err error, streaming bool) error {
 	if !errors.As(err, &trunc) {
 		return HandleErrorRespectJSON("reading events journal: %v", err)
 	}
-	if jsonOutput {
+	if isJSONOutput() {
 		payload := map[string]any{
 			"error": trunc.Error(),
 			"code":  storage.EventsJournalTruncatedCode,
@@ -242,29 +242,33 @@ func reportEventsTruncated(err error, streaming bool) error {
 
 func runEventsTail(ctx context.Context, since int64, limit int, follow bool) error {
 	enc := json.NewEncoder(os.Stdout)
-	emit := func(from int64) (int64, error) {
-		rows, err := readJournal(ctx, from, limit)
-		if err != nil {
-			return from, err
-		}
-		for _, r := range rows {
-			if err := enc.Encode(r); err != nil {
-				return from, err
-			}
-			if r.Seq > from {
-				from = r.Seq
-			}
-		}
-		return from, nil
-	}
-
-	last, err := emit(since)
+	last, err := emitEventRows(ctx, since, limit, enc)
 	if err != nil {
 		return reportEventsTruncated(err, false)
 	}
 	if !follow {
 		return nil
 	}
+	return followEvents(ctx, last, limit, enc)
+}
+
+func emitEventRows(ctx context.Context, from int64, limit int, enc *json.Encoder) (int64, error) {
+	rows, err := readJournal(ctx, from, limit)
+	if err != nil {
+		return from, err
+	}
+	for _, r := range rows {
+		if err := enc.Encode(r); err != nil {
+			return from, err
+		}
+		if r.Seq > from {
+			from = r.Seq
+		}
+	}
+	return from, nil
+}
+
+func followEvents(ctx context.Context, last int64, limit int, enc *json.Encoder) error {
 	// Follow: poll for rows with seq beyond the last one emitted. The journal is
 	// a local table read, so a modest poll cadence is cheap. Stop on Ctrl-C
 	// (rootCtx is signal-aware), reporting no error for a clean interruption.
@@ -275,7 +279,8 @@ func runEventsTail(ctx context.Context, since int64, limit int, follow bool) err
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			if last, err = emit(last); err != nil {
+			var err error
+			if last, err = emitEventRows(ctx, last, limit, enc); err != nil {
 				return reportEventsTruncated(err, true)
 			}
 		}
@@ -293,7 +298,7 @@ func runEventsPrune(ctx context.Context, before int64) error {
 }
 
 func reportEventsPruned(n, before int64) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(map[string]any{"pruned": n})
 	}
 	fmt.Printf("Pruned %d events journal record(s) below seq %d\n", n, before)
@@ -304,10 +309,10 @@ func reportEventsPruned(n, before int64) error {
 // embedded store and the server-mode store both provide it (via their own
 // transaction machinery); a backend that does not is reported as unsupported.
 func journalAccessor() (storage.EventsJournalAccessor, error) {
-	if store == nil {
+	if getStore() == nil {
 		return nil, fmt.Errorf("no database connection available (%s)", diagHint())
 	}
-	acc, ok := storage.UnwrapStore(store).(storage.EventsJournalAccessor)
+	acc, ok := storage.UnwrapStore(getStore()).(storage.EventsJournalAccessor)
 	if !ok {
 		return nil, fmt.Errorf("storage backend does not support the events journal")
 	}
@@ -324,10 +329,10 @@ func journalAccessor() (storage.EventsJournalAccessor, error) {
 func readJournal(ctx context.Context, since int64, limit int) ([]eventsjournal.Record, error) {
 	var rows []storage.EventsJournalRow
 	if usesProxiedServer() {
-		if uowProvider == nil {
+		if getUOWProvider() == nil {
 			return nil, fmt.Errorf("no proxied-server unit-of-work provider available")
 		}
-		uw, err := uowProvider.NewUOW(ctx)
+		uw, err := getUOWProvider().NewUOW(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -352,13 +357,13 @@ func readJournal(ctx context.Context, since int64, limit int) ([]eventsjournal.R
 // pruneJournal deletes records below before honoring the retain floors.
 func pruneJournal(ctx context.Context, before int64, retainDays, retainRows int) (int64, error) {
 	if usesProxiedServer() {
-		if uowProvider == nil {
+		if getUOWProvider() == nil {
 			return 0, fmt.Errorf("no proxied-server unit-of-work provider available")
 		}
 		// The journal table is dolt_ignored, so the delete must persist into the
 		// working set WITHOUT minting a Dolt commit — the same ephemeral commit
 		// discipline lease writes use.
-		return uow.RunTxEphemeral(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (int64, error) {
+		return uow.RunTxEphemeral(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (int64, error) {
 			return uw.EventsJournalUseCase().Prune(ctx, before, retainDays, retainRows)
 		})
 	}

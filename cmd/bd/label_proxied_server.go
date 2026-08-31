@@ -48,12 +48,18 @@ func runLabelListAllProxiedServer(ctx context.Context) error {
 		return err
 	}
 	defer uw.Close(ctx)
+	labelCounts, err := collectProxiedLabelCounts(ctx, uw)
+	if err != nil {
+		return err
+	}
+	return printLabelCounts(labelCounts)
+}
 
+func collectProxiedLabelCounts(ctx context.Context, uw uow.UnitOfWork) (map[string]int, error) {
 	page, err := uw.IssueUseCase().SearchIssues(ctx, "", types.IssueFilter{})
 	if err != nil {
-		return HandleErrorRespectJSON("%v", err)
+		return nil, HandleErrorRespectJSON("%v", err)
 	}
-
 	var permIDs, wispIDs []string
 	for _, issue := range page.Items {
 		if issue.Ephemeral {
@@ -62,55 +68,73 @@ func runLabelListAllProxiedServer(ctx context.Context) error {
 			permIDs = append(permIDs, issue.ID)
 		}
 	}
-
 	labelCounts := make(map[string]int)
-	accumulate := func(byIssue map[string][]string) {
-		for _, labels := range byIssue {
-			for _, label := range labels {
-				labelCounts[label]++
-			}
-		}
-	}
 	// THE QUESTION HAS NO ROLE, which is the reason ga-26w10 left `list-all`
 	// behind and the reason it is still here: no issueops surface answers
 	// "every distinct label in this workspace, with a count". Reader.Get is one
 	// detail view per call, so asking it would be one round trip per bead to
 	// build a histogram. A label-vocabulary role is the follow-up
 	// (ga-2ltro.12).
-	if len(permIDs) > 0 {
-		byIssue, err := uw.LabelUseCase().GetLabelsForIssues(ctx, permIDs) //nolint:forbidigo // label histogram; no role answers the workspace's label vocabulary
-		if err != nil {
-			return HandleErrorRespectJSON("getting labels: %v", err)
-		}
-		accumulate(byIssue)
+	if err := accumulateIssueLabels(ctx, uw, permIDs, labelCounts); err != nil {
+		return nil, err
 	}
-	if len(wispIDs) > 0 {
-		byWisp, err := uw.LabelUseCase().GetLabelsForWisps(ctx, wispIDs) //nolint:forbidigo // label histogram; see GetLabelsForIssues above
-		if err != nil {
-			return HandleErrorRespectJSON("getting labels: %v", err)
-		}
-		accumulate(byWisp)
+	if err := accumulateWispLabels(ctx, uw, wispIDs, labelCounts); err != nil {
+		return nil, err
 	}
+	return labelCounts, nil
+}
 
-	type labelInfo struct {
-		Label string `json:"label"`
-		Count int    `json:"count"`
+func accumulateIssueLabels(ctx context.Context, uw uow.UnitOfWork, ids []string, labelCounts map[string]int) error {
+	if len(ids) == 0 {
+		return nil
 	}
+	byIssue, err := uw.LabelUseCase().GetLabelsForIssues(ctx, ids) //nolint:forbidigo // label histogram; no role answers the workspace's label vocabulary
+	if err != nil {
+		return HandleErrorRespectJSON("getting labels: %v", err)
+	}
+	accumulateLabelCounts(labelCounts, byIssue)
+	return nil
+}
+
+func accumulateWispLabels(ctx context.Context, uw uow.UnitOfWork, ids []string, labelCounts map[string]int) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	byWisp, err := uw.LabelUseCase().GetLabelsForWisps(ctx, ids) //nolint:forbidigo // label histogram; see GetLabelsForIssues above
+	if err != nil {
+		return HandleErrorRespectJSON("getting labels: %v", err)
+	}
+	accumulateLabelCounts(labelCounts, byWisp)
+	return nil
+}
+
+func accumulateLabelCounts(labelCounts map[string]int, byIssue map[string][]string) {
+	for _, labels := range byIssue {
+		for _, label := range labels {
+			labelCounts[label]++
+		}
+	}
+}
+
+type labelInfo struct {
+	Label string `json:"label"`
+	Count int    `json:"count"`
+}
+
+func printLabelCounts(labelCounts map[string]int) error {
 	if len(labelCounts) == 0 {
-		if jsonOutput {
+		if isJSONOutput() {
 			return outputJSON([]labelInfo{})
 		}
 		fmt.Println("\nNo labels found in database")
 		return nil
 	}
-
 	labels := make([]string, 0, len(labelCounts))
 	for label := range labelCounts {
 		labels = append(labels, label)
 	}
 	sort.Strings(labels)
-
-	if jsonOutput {
+	if isJSONOutput() {
 		result := make([]labelInfo, 0, len(labels))
 		for _, label := range labels {
 			result = append(result, labelInfo{Label: label, Count: labelCounts[label]})
@@ -125,86 +149,111 @@ func runLabelListAllProxiedServer(ctx context.Context) error {
 		}
 	}
 	for _, label := range labels {
-		padding := strings.Repeat(" ", maxLen-len(label))
-		fmt.Printf("  %s%s  (%d issues)\n", label, padding, labelCounts[label])
+		fmt.Printf("  %s%s  (%d issues)\n", label, strings.Repeat(" ", maxLen-len(label)), labelCounts[label])
 	}
 	fmt.Println()
 	return nil
 }
 
 func runLabelPropagateProxiedServer(ctx context.Context, args []string) error {
-	label := strings.TrimSpace(args[1])
-	if label == "" {
-		return HandleErrorRespectJSON("label cannot be empty")
+	label, err := validatePropagateLabel(args[1])
+	if err != nil {
+		return err
 	}
-	if strings.HasPrefix(label, "provides:") {
-		return HandleErrorRespectJSON("'provides:' labels are reserved for cross-project capabilities. Hint: use 'bd ship %s' instead", strings.TrimPrefix(label, "provides:"))
-	}
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return HandleError("proxied-server UOW provider not initialized")
 	}
-
-	var (
-		children []*types.Issue
-		parentID string
-	)
-	err := uow.RunTx(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (string, error) {
-		parent, _, rerr := workapi.GetIssueOrWisp(ctx, workapi.NewUOWDetailSource(uw), args[0])
-		if errors.Is(rerr, storage.ErrNotFound) {
-			return "", fmt.Errorf("resolving parent %q: not found", args[0])
-		}
-		if rerr != nil {
-			return "", fmt.Errorf("resolving parent %q: %w", args[0], rerr)
-		}
-		parentID = parent.ID
-
-		page, err := uw.IssueUseCase().SearchIssues(ctx, "", types.IssueFilter{ParentID: &parentID})
-		if err != nil {
-			return "", fmt.Errorf("searching children of %s: %w", parentID, err)
-		}
-		children = page.Items
-		if len(children) == 0 {
-			return "", nil
-		}
-		// THE ONE SURVIVING WISP SWITCH, and it is named rather than hidden.
-		// This is the same four-way shape ga-26w10 deleted from `bd label` and
-		// ga-2ltro.12 deleted from `bd tag`, `bd set-state` and the molecule
-		// port — the branch a front door can get backwards and put a wisp's
-		// label in the durable table. It survives because propagate is a search
-		// plus a fan-out that must land as ONE transaction over N children, and
-		// a per-child Lifecycle.Update is N transactions: the atomicity this
-		// command has today would be the price of the migration. The shape that
-		// keeps both is issueops.BatchApplier.ApplyBatch with one ItemUpdate per
-		// child carrying this same label patch, and it is blocked on a cmd/bd
-		// accessor for that role. That is the follow-up this waiver names
-		// (ga-2ltro.12); it is the last one on this list that WRITES.
-		for _, child := range children {
-			var e error
-			if child.Ephemeral {
-				e = uw.LabelUseCase().AddWispLabel(ctx, child.ID, label, actor) //nolint:forbidigo // atomic N-child fan-out; awaits a BatchApplier accessor
-			} else {
-				e = uw.LabelUseCase().AddLabel(ctx, child.ID, label, actor) //nolint:forbidigo // atomic N-child fan-out; awaits a BatchApplier accessor
-			}
-			if e != nil {
-				return "", fmt.Errorf("add label '%s' on %s: %w", label, child.ID, e)
-			}
-		}
-		return fmt.Sprintf("bd: propagate label '%s' from %s to %d children", label, parentID, len(children)), nil
-	})
+	children, parentID, err := propagateLabelTx(ctx, args[0], label)
 	if err != nil {
 		return HandleErrorRespectJSON("label propagate: %v", err)
 	}
+	return printLabelPropagateResult(children, parentID, label)
+}
 
+func validatePropagateLabel(raw string) (string, error) {
+	label := strings.TrimSpace(raw)
+	if label == "" {
+		return "", HandleErrorRespectJSON("label cannot be empty")
+	}
+	if strings.HasPrefix(label, "provides:") {
+		return "", HandleErrorRespectJSON("'provides:' labels are reserved for cross-project capabilities. Hint: use 'bd ship %s' instead", strings.TrimPrefix(label, "provides:"))
+	}
+	return label, nil
+}
+
+func propagateLabelTx(ctx context.Context, parentArg, label string) ([]*types.Issue, string, error) {
+	var children []*types.Issue
+	var parentID string
+	err := uow.RunTx(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (string, error) {
+		var err error
+		children, parentID, err = propagateLabelInTx(ctx, uw, parentArg, label)
+		if err != nil {
+			return "", err
+		}
+		if len(children) == 0 {
+			return "", nil
+		}
+		return fmt.Sprintf("bd: propagate label '%s' from %s to %d children", label, parentID, len(children)), nil
+	})
+	return children, parentID, err
+}
+
+func propagateLabelInTx(ctx context.Context, uw uow.UnitOfWork, parentArg, label string) ([]*types.Issue, string, error) {
+	parent, _, rerr := workapi.GetIssueOrWisp(ctx, workapi.NewUOWDetailSource(uw), parentArg)
+	if errors.Is(rerr, storage.ErrNotFound) {
+		return nil, "", fmt.Errorf("resolving parent %q: not found", parentArg)
+	}
+	if rerr != nil {
+		return nil, "", fmt.Errorf("resolving parent %q: %w", parentArg, rerr)
+	}
+	parentID := parent.ID
+	page, err := uw.IssueUseCase().SearchIssues(ctx, "", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{ParentID: &parentID}})
+	if err != nil {
+		return nil, "", fmt.Errorf("searching children of %s: %w", parentID, err)
+	}
+	if err := addLabelToChildren(ctx, uw, page.Items, label); err != nil {
+		return nil, "", err
+	}
+	return page.Items, parentID, nil
+}
+
+func addLabelToChildren(ctx context.Context, uw uow.UnitOfWork, children []*types.Issue, label string) error {
+	// THE ONE SURVIVING WISP SWITCH, and it is named rather than hidden.
+	// This is the same four-way shape ga-26w10 deleted from `bd label` and
+	// ga-2ltro.12 deleted from `bd tag`, `bd set-state` and the molecule
+	// port — the branch a front door can get backwards and put a wisp's
+	// label in the durable table. It survives because propagate is a search
+	// plus a fan-out that must land as ONE transaction over N children, and
+	// a per-child Lifecycle.Update is N transactions: the atomicity this
+	// command has today would be the price of the migration. The shape that
+	// keeps both is issueops.BatchApplier.ApplyBatch with one ItemUpdate per
+	// child carrying this same label patch, and it is blocked on a cmd/bd
+	// accessor for that role. That is the follow-up this waiver names
+	// (ga-2ltro.12); it is the last one on this list that WRITES.
+	for _, child := range children {
+		var e error
+		if child.Ephemeral {
+			e = uw.LabelUseCase().AddWispLabel(ctx, child.ID, label, getActor()) //nolint:forbidigo // atomic N-child fan-out; awaits a BatchApplier accessor
+		} else {
+			e = uw.LabelUseCase().AddLabel(ctx, child.ID, label, getActor()) //nolint:forbidigo // atomic N-child fan-out; awaits a BatchApplier accessor
+		}
+		if e != nil {
+			return fmt.Errorf("add label '%s' on %s: %w", label, child.ID, e)
+		}
+	}
+	return nil
+}
+
+func printLabelPropagateResult(children []*types.Issue, parentID, label string) error {
 	if len(children) == 0 {
-		if jsonOutput {
+		if isJSONOutput() {
 			return outputJSON([]map[string]interface{}{})
 		}
 		fmt.Printf("No children found for %s\n", parentID)
 		return nil
 	}
 	commandDidWrite.Store(true)
-
-	if jsonOutput {
+	if isJSONOutput() {
 		results := make([]map[string]interface{}, 0, len(children))
 		for _, child := range children {
 			results = append(results, map[string]interface{}{

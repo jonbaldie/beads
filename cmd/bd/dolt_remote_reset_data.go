@@ -185,8 +185,6 @@ func clearDoltFileStore(dir string) error {
 	return nil
 }
 
-var doltRemoteResetDataYes bool
-
 var doltRemoteResetDataCmd = &cobra.Command{
 	Use:   "reset-data <name>",
 	Short: "Replace a remote's data plane in place after a history squash",
@@ -221,7 +219,10 @@ Examples:
 	SilenceErrors: true,
 	Args:          cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		CheckReadonly("dolt remote reset-data")
+		yes, _ := cmd.Flags().GetBool("yes")
+		if err := CheckReadonly("dolt remote reset-data"); err != nil {
+			return err
+		}
 		name := args[0]
 
 		if usesProxiedServer() {
@@ -233,7 +234,7 @@ Examples:
 			return SilentExit()
 		}
 
-		ctx := rootCtx
+		ctx := getRootContext()
 		st := getStore()
 		if st == nil {
 			return HandleError("no store available")
@@ -283,7 +284,7 @@ Examples:
 					"  bd dolt push --force", name, name))
 		}
 
-		if !doltRemoteResetDataYes {
+		if !yes {
 			if !term.IsTerminal(int(os.Stdin.Fd())) {
 				return HandleErrorWithHint(
 					fmt.Sprintf("reset-data replaces all Dolt data stored on remote %q (%s)", name, url),
@@ -339,7 +340,7 @@ Examples:
 			return HandleError("push after reset failed (the remote's data refs were already removed — re-run 'bd dolt push --force --remote %s' once the cause is fixed): %v", name, perr)
 		}
 
-		if jsonOutput {
+		if isJSONOutput() {
 			return outputJSON(map[string]interface{}{
 				"remote":        name,
 				"url":           url,

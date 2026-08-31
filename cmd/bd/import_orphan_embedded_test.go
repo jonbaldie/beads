@@ -82,13 +82,21 @@ func TestEmbeddedImportClosedChildWhoseParentWasDeleted(t *testing.T) {
 	// counter because GetNextChildID scans existing direct child IDs.
 	now := time.Now().UTC()
 	if err := store.CreateIssue(ctx, &types.Issue{
-		ID:        "test-deleted-parent",
-		Title:     "Recreated parent",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
-		CreatedAt: now,
-		UpdatedAt: now,
+		IssueID: types.IssueID{
+			ID: "test-deleted-parent",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Recreated parent",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
 	}, "tester"); err != nil {
 		t.Fatalf("recreate parent: %v", err)
 	}

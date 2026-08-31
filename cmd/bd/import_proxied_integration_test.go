@@ -94,22 +94,63 @@ func TestProxiedServerImport(t *testing.T) {
 	fixtureIssues := func(prefix string) []*types.Issue {
 		return []*types.Issue{
 			{
-				ID: prefix + "-r1", Title: "Round-trip one", Status: types.StatusOpen,
-				IssueType: types.TypeTask, Priority: 2,
-				Labels:    []string{"lane:test", "imported"},
-				Comments:  []*types.Comment{{ID: prefix + "-r1-c1", Author: "fixture", Text: "carried comment", CreatedAt: when}},
-				CreatedAt: when, UpdatedAt: when,
+				IssueID: types.IssueID{
+					ID: prefix + "-r1",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Round-trip one",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					IssueType: types.TypeTask,
+					Priority:  2,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: when,
+					UpdatedAt: when,
+				},
+				IssueGraph: types.IssueGraph{
+					Labels:   []string{"lane:test", "imported"},
+					Comments: []*types.Comment{{ID: prefix + "-r1-c1", Author: "fixture", Text: "carried comment", CreatedAt: when}},
+				},
 			},
 			{
-				ID: prefix + "-r2", Title: "Round-trip two", Status: types.StatusOpen,
-				IssueType: types.TypeBug, Priority: 1,
-				Dependencies: []*types.Dependency{{IssueID: prefix + "-r2", DependsOnID: prefix + "-r1", Type: types.DepBlocks}},
-				CreatedAt:    when, UpdatedAt: when,
+				IssueID: types.IssueID{
+					ID: prefix + "-r2",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Round-trip two",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					IssueType: types.TypeBug,
+					Priority:  1,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: when,
+					UpdatedAt: when,
+				},
+				IssueGraph: types.IssueGraph{
+					Dependencies: []*types.Dependency{{IssueID: prefix + "-r2", DependsOnID: prefix + "-r1", Type: types.DepBlocks}},
+				},
 			},
 			{
-				ID: prefix + "-r3", Title: "Round-trip three", Status: types.StatusClosed,
-				IssueType: types.TypeChore, Priority: 3, CloseReason: "done in fixture",
-				CreatedAt: when, UpdatedAt: when,
+				IssueID: types.IssueID{
+					ID: prefix + "-r3",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Round-trip three",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusClosed,
+					IssueType: types.TypeChore,
+					Priority:  3,
+				},
+				IssueTimes: types.IssueTimes{
+					CloseReason: "done in fixture",
+					CreatedAt:   when,
+					UpdatedAt:   when,
+				},
 			},
 		}
 	}
@@ -241,15 +282,44 @@ func TestProxiedServerImport(t *testing.T) {
 
 		fixture := importFixtureJSONL(t, []*types.Issue{
 			{
-				ID: "impw-wisp-promo", Title: "Promoted no-history wisp", Status: types.StatusOpen,
-				IssueType: types.TypeTask, Priority: 2, NoHistory: true,
-				CreatedAt: when, UpdatedAt: when,
+				IssueID: types.IssueID{
+					ID: "impw-wisp-promo",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Promoted no-history wisp",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					IssueType: types.TypeTask,
+					Priority:  2,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: when,
+					UpdatedAt: when,
+				},
+				IssueWisp: types.IssueWisp{
+					NoHistory: true,
+				},
 			},
 			{
-				ID: "impw-frend", Title: "Durable friend", Status: types.StatusOpen,
-				IssueType: types.TypeTask, Priority: 2,
-				Dependencies: []*types.Dependency{{IssueID: "impw-frend", DependsOnID: "impw-wisp-promo", Type: types.DepBlocks}},
-				CreatedAt:    when, UpdatedAt: when,
+				IssueID: types.IssueID{
+					ID: "impw-frend",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Durable friend",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					IssueType: types.TypeTask,
+					Priority:  2,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: when,
+					UpdatedAt: when,
+				},
+				IssueGraph: types.IssueGraph{
+					Dependencies: []*types.Dependency{{IssueID: "impw-frend", DependsOnID: "impw-wisp-promo", Type: types.DepBlocks}},
+				},
 			},
 		},
 			// A genuine unpromoted no-history wisp: same flags, but carrying
@@ -292,8 +362,21 @@ func TestProxiedServerImport(t *testing.T) {
 		db := openProxiedDB(t, p)
 
 		fixture := importFixtureJSONL(t, []*types.Issue{{
-			ID: "impb-s1", Title: "From stdin", Status: types.StatusOpen,
-			IssueType: types.TypeTask, Priority: 2, CreatedAt: when, UpdatedAt: when,
+			IssueID: types.IssueID{
+				ID: "impb-s1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "From stdin",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+				Priority:  2,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: when,
+				UpdatedAt: when,
+			},
 		}})
 
 		// bd import - reads the piped stream.
@@ -330,8 +413,21 @@ func TestProxiedServerImport(t *testing.T) {
 		// An older snapshot of that row is stale-skipped: local state wins.
 		old := when.Add(-30 * 24 * time.Hour)
 		staleFixture := importFixtureJSONL(t, []*types.Issue{{
-			ID: created.ID, Title: "Older snapshot title", Status: types.StatusOpen,
-			IssueType: types.TypeTask, Priority: 4, CreatedAt: old, UpdatedAt: old,
+			IssueID: types.IssueID{
+				ID: created.ID,
+			},
+			IssueContent: types.IssueContent{
+				Title: "Older snapshot title",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+				Priority:  4,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: old,
+				UpdatedAt: old,
+			},
 		}})
 		stalePath := filepath.Join(p.dir, "stale.jsonl")
 		if err := os.WriteFile(stalePath, []byte(staleFixture), 0o644); err != nil {
@@ -354,8 +450,21 @@ func TestProxiedServerImport(t *testing.T) {
 		// A strictly-newer row upserts and the report names the change.
 		newer := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
 		newerFixture := importFixtureJSONL(t, []*types.Issue{{
-			ID: created.ID, Title: "Newer imported title", Status: types.StatusOpen,
-			IssueType: types.TypeTask, Priority: 1, CreatedAt: old, UpdatedAt: newer,
+			IssueID: types.IssueID{
+				ID: created.ID,
+			},
+			IssueContent: types.IssueContent{
+				Title: "Newer imported title",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+				Priority:  1,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: old,
+				UpdatedAt: newer,
+			},
 		}})
 		newerPath := filepath.Join(p.dir, "newer.jsonl")
 		if err := os.WriteFile(newerPath, []byte(newerFixture), 0o644); err != nil {
@@ -422,12 +531,38 @@ func TestProxiedServerImport(t *testing.T) {
 
 		fixture := importFixtureJSONL(t, []*types.Issue{
 			{
-				ID: "impe-d1", Title: "Duplicate title", Status: types.StatusOpen,
-				IssueType: types.TypeTask, Priority: 2, CreatedAt: when, UpdatedAt: when,
+				IssueID: types.IssueID{
+					ID: "impe-d1",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Duplicate title",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					IssueType: types.TypeTask,
+					Priority:  2,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: when,
+					UpdatedAt: when,
+				},
 			},
 			{
-				ID: "impe-d2", Title: "Fresh title", Status: types.StatusOpen,
-				IssueType: types.TypeTask, Priority: 2, CreatedAt: when, UpdatedAt: when,
+				IssueID: types.IssueID{
+					ID: "impe-d2",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Fresh title",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					IssueType: types.TypeTask,
+					Priority:  2,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: when,
+					UpdatedAt: when,
+				},
 			},
 		})
 		path := filepath.Join(p.dir, "dedup.jsonl")
@@ -456,8 +591,21 @@ func TestProxiedServerImport(t *testing.T) {
 		// Import IS the sanctioned upsert door: the occupied ID upserts.
 		newer := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
 		fixture := importFixtureJSONL(t, []*types.Issue{{
-			ID: created.ID, Title: "Upserted through the door", Status: types.StatusOpen,
-			IssueType: types.TypeTask, Priority: 2, CreatedAt: when, UpdatedAt: newer,
+			IssueID: types.IssueID{
+				ID: created.ID,
+			},
+			IssueContent: types.IssueContent{
+				Title: "Upserted through the door",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+				Priority:  2,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: when,
+				UpdatedAt: newer,
+			},
 		}})
 		path := filepath.Join(p.dir, "door.jsonl")
 		if err := os.WriteFile(path, []byte(fixture), 0o644); err != nil {

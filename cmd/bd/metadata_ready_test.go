@@ -19,17 +19,73 @@ func TestGetReadyWork_MetadataSuite(t *testing.T) {
 	// Create all test data up front with unique metadata keys per subtest.
 	allIssues := []*types.Issue{
 		// --- FieldMatch data ---
-		{ID: "mr-fm-1", Title: "Platform task (fm)", Priority: 2, IssueType: types.TypeTask, Status: types.StatusOpen,
-			Metadata: json.RawMessage(`{"mr_fm_team":"platform"}`)},
-		{ID: "mr-fm-2", Title: "Frontend task (fm)", Priority: 2, IssueType: types.TypeTask, Status: types.StatusOpen,
-			Metadata: json.RawMessage(`{"mr_fm_team":"frontend"}`)},
+		{
+			IssueID: types.IssueID{
+				ID: "mr-fm-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Platform task (fm)",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				IssueType: types.TypeTask,
+				Status:    types.StatusOpen,
+			},
+			IssueMeta: types.IssueMeta{
+				Metadata: json.RawMessage(`{"mr_fm_team":"platform"}`),
+			},
+		},
+		{
+			IssueID: types.IssueID{
+				ID: "mr-fm-2",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Frontend task (fm)",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				IssueType: types.TypeTask,
+				Status:    types.StatusOpen,
+			},
+			IssueMeta: types.IssueMeta{
+				Metadata: json.RawMessage(`{"mr_fm_team":"frontend"}`),
+			},
+		},
 		// --- HasMetadataKey data ---
-		{ID: "mr-hmk-1", Title: "Has team (hmk)", Priority: 2, IssueType: types.TypeTask, Status: types.StatusOpen,
-			Metadata: json.RawMessage(`{"mr_hmk_team":"platform"}`)},
-		{ID: "mr-hmk-2", Title: "No metadata (hmk)", Priority: 2, IssueType: types.TypeTask, Status: types.StatusOpen},
+		{
+			IssueID: types.IssueID{
+				ID: "mr-hmk-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Has team (hmk)",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				IssueType: types.TypeTask,
+				Status:    types.StatusOpen,
+			},
+			IssueMeta: types.IssueMeta{
+				Metadata: json.RawMessage(`{"mr_hmk_team":"platform"}`),
+			},
+		},
+		{IssueID: types.IssueID{ID: "mr-hmk-2"}, IssueContent: types.IssueContent{Title: "No metadata (hmk)"}, IssueWorkflow: types.IssueWorkflow{Priority: 2, IssueType: types.TypeTask, Status: types.StatusOpen}},
 		// --- NoMatch data ---
-		{ID: "mr-nm-1", Title: "Platform task (nm)", Priority: 2, IssueType: types.TypeTask, Status: types.StatusOpen,
-			Metadata: json.RawMessage(`{"mr_nm_team":"platform"}`)},
+		{
+			IssueID: types.IssueID{
+				ID: "mr-nm-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Platform task (nm)",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				IssueType: types.TypeTask,
+				Status:    types.StatusOpen,
+			},
+			IssueMeta: types.IssueMeta{
+				Metadata: json.RawMessage(`{"mr_nm_team":"platform"}`),
+			},
+		},
 	}
 	for _, issue := range allIssues {
 		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
@@ -39,8 +95,12 @@ func TestGetReadyWork_MetadataSuite(t *testing.T) {
 
 	t.Run("FieldMatch", func(t *testing.T) {
 		results, err := store.GetReadyWork(ctx, types.WorkFilter{
-			Status:         "open",
-			MetadataFields: map[string]string{"mr_fm_team": "platform"},
+			WorkFilterCore: types.WorkFilterCore{
+				Status: "open",
+			},
+			WorkFilterExtra: types.WorkFilterExtra{
+				MetadataFields: map[string]string{"mr_fm_team": "platform"},
+			},
 		})
 		if err != nil {
 			t.Fatalf("GetReadyWork: %v", err)
@@ -55,8 +115,12 @@ func TestGetReadyWork_MetadataSuite(t *testing.T) {
 
 	t.Run("HasMetadataKey", func(t *testing.T) {
 		results, err := store.GetReadyWork(ctx, types.WorkFilter{
-			Status:         "open",
-			HasMetadataKey: "mr_hmk_team",
+			WorkFilterCore: types.WorkFilterCore{
+				Status: "open",
+			},
+			WorkFilterExtra: types.WorkFilterExtra{
+				HasMetadataKey: "mr_hmk_team",
+			},
 		})
 		if err != nil {
 			t.Fatalf("GetReadyWork: %v", err)
@@ -71,8 +135,12 @@ func TestGetReadyWork_MetadataSuite(t *testing.T) {
 
 	t.Run("FieldNoMatch", func(t *testing.T) {
 		results, err := store.GetReadyWork(ctx, types.WorkFilter{
-			Status:         "open",
-			MetadataFields: map[string]string{"mr_nm_team": "backend"},
+			WorkFilterCore: types.WorkFilterCore{
+				Status: "open",
+			},
+			WorkFilterExtra: types.WorkFilterExtra{
+				MetadataFields: map[string]string{"mr_nm_team": "backend"},
+			},
 		})
 		if err != nil {
 			t.Fatalf("GetReadyWork: %v", err)
@@ -84,8 +152,12 @@ func TestGetReadyWork_MetadataSuite(t *testing.T) {
 
 	t.Run("FieldInvalidKey", func(t *testing.T) {
 		_, err := store.GetReadyWork(ctx, types.WorkFilter{
-			Status:         "open",
-			MetadataFields: map[string]string{"'; DROP TABLE issues; --": "val"},
+			WorkFilterCore: types.WorkFilterCore{
+				Status: "open",
+			},
+			WorkFilterExtra: types.WorkFilterExtra{
+				MetadataFields: map[string]string{"'; DROP TABLE issues; --": "val"},
+			},
 		})
 		if err == nil {
 			t.Fatal("expected error for invalid metadata key, got nil")
@@ -102,39 +174,69 @@ func TestGetReadyWork_IncludeEphemeralAssigneeIsSuperset(t *testing.T) {
 
 	issues := []*types.Issue{
 		{
-			ID:        "mr-assignee-persistent",
-			Title:     "Persistent assigned task",
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Status:    types.StatusOpen,
-			Assignee:  worker,
+			IssueID: types.IssueID{
+				ID: "mr-assignee-persistent",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Persistent assigned task",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				IssueType: types.TypeTask,
+				Status:    types.StatusOpen,
+				Assignee:  worker,
+			},
 		},
 		{
-			ID:        "mr-assignee-no-history",
-			Title:     "No-history assigned task",
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Status:    types.StatusOpen,
-			Assignee:  worker,
-			NoHistory: true,
+			IssueID: types.IssueID{
+				ID: "mr-assignee-no-history",
+			},
+			IssueContent: types.IssueContent{
+				Title: "No-history assigned task",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				IssueType: types.TypeTask,
+				Status:    types.StatusOpen,
+				Assignee:  worker,
+			},
+			IssueWisp: types.IssueWisp{
+				NoHistory: true,
+			},
 		},
 		{
-			ID:        "mr-assignee-ephemeral",
-			Title:     "Ephemeral assigned task",
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Status:    types.StatusOpen,
-			Assignee:  worker,
-			Ephemeral: true,
+			IssueID: types.IssueID{
+				ID: "mr-assignee-ephemeral",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Ephemeral assigned task",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				IssueType: types.TypeTask,
+				Status:    types.StatusOpen,
+				Assignee:  worker,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		},
 		{
-			ID:        "mr-assignee-other",
-			Title:     "Other assigned task",
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Status:    types.StatusOpen,
-			Assignee:  "someone-else",
-			Ephemeral: true,
+			IssueID: types.IssueID{
+				ID: "mr-assignee-other",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Other assigned task",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				IssueType: types.TypeTask,
+				Status:    types.StatusOpen,
+				Assignee:  "someone-else",
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		},
 	}
 	for _, issue := range issues {
@@ -144,8 +246,10 @@ func TestGetReadyWork_IncludeEphemeralAssigneeIsSuperset(t *testing.T) {
 	}
 
 	defaultResults, err := store.GetReadyWork(ctx, types.WorkFilter{
-		Status:   types.StatusOpen,
-		Assignee: &worker,
+		WorkFilterCore: types.WorkFilterCore{
+			Status:   types.StatusOpen,
+			Assignee: &worker,
+		},
 	})
 	if err != nil {
 		t.Fatalf("GetReadyWork default: %v", err)
@@ -155,9 +259,13 @@ func TestGetReadyWork_IncludeEphemeralAssigneeIsSuperset(t *testing.T) {
 	}
 
 	allResults, err := store.GetReadyWork(ctx, types.WorkFilter{
-		Status:           types.StatusOpen,
-		Assignee:         &worker,
-		IncludeEphemeral: true,
+		WorkFilterCore: types.WorkFilterCore{
+			Status:   types.StatusOpen,
+			Assignee: &worker,
+		},
+		WorkFilterExtra: types.WorkFilterExtra{
+			IncludeEphemeral: true,
+		},
 	})
 	if err != nil {
 		t.Fatalf("GetReadyWork include ephemeral: %v", err)

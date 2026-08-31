@@ -93,15 +93,15 @@ func TestExport_FilterHasZeroMaxRows(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	exportOutput = filepath.Join(tmpDir, "out.jsonl")
-	exportAll = false
-	exportIncludeInfra = false
-	exportScrub = false
-	exportIncludeMemories = false
-	exportNoMemories = false
-	t.Cleanup(func() { exportOutput = "" })
+	exportTestOptions.output = filepath.Join(tmpDir, "out.jsonl")
+	exportTestOptions.all = false
+	exportTestOptions.includeInfra = false
+	exportTestOptions.scrub = false
+	exportTestOptions.includeMemories = false
+	exportTestOptions.noMemories = false
+	t.Cleanup(func() { exportTestOptions.output = "" })
 
-	if err := runExport(nil, nil); err != nil {
+	if err := runExportForTest(); err != nil {
 		t.Fatalf("runExport: %v", err)
 	}
 
@@ -188,15 +188,15 @@ func TestExport_BypassesBeadsMaxRows(t *testing.T) {
 	}
 
 	exportFile := filepath.Join(tmpDir, "bypass-out.jsonl")
-	exportOutput = exportFile
-	exportAll = false
-	exportIncludeInfra = false
-	exportScrub = false
-	exportIncludeMemories = false
-	exportNoMemories = false
-	t.Cleanup(func() { exportOutput = "" })
+	exportTestOptions.output = exportFile
+	exportTestOptions.all = false
+	exportTestOptions.includeInfra = false
+	exportTestOptions.scrub = false
+	exportTestOptions.includeMemories = false
+	exportTestOptions.noMemories = false
+	t.Cleanup(func() { exportTestOptions.output = "" })
 
-	if err := runExport(nil, nil); err != nil {
+	if err := runExportForTest(); err != nil {
 		t.Fatalf("runExport: %v", err)
 	}
 

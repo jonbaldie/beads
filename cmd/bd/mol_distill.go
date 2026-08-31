@@ -10,15 +10,17 @@ import (
 
 	"github.com/jonbaldie/beads/internal/formula"
 	"github.com/jonbaldie/beads/internal/metrics"
+	"github.com/jonbaldie/beads/internal/types"
 	"github.com/jonbaldie/beads/internal/ui"
 	"github.com/jonbaldie/beads/internal/utils"
 	"github.com/spf13/cobra"
 )
 
-var molDistillCmd = &cobra.Command{
-	Use:   "distill <epic-id> [formula-name]",
-	Short: "Extract a formula from an existing epic",
-	Long: `Distill a molecule by extracting a reusable formula from an existing epic.
+func newMolDistillCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "distill <epic-id> [formula-name]",
+		Short: "Extract a formula from an existing epic",
+		Long: `Distill a molecule by extracting a reusable formula from an existing epic.
 
 This is the reverse of pour: instead of formula → molecule, it's molecule → formula.
 
@@ -44,10 +46,15 @@ Output locations (first writable wins):
 Examples:
   bd mol distill bd-o5xe my-workflow
   bd mol distill bd-abc release-workflow --var feature_name=auth-refactor`,
-	Args:          cobra.RangeArgs(1, 2),
-	SilenceUsage:  true,
-	SilenceErrors: true,
-	RunE:          runMolDistill,
+		Args:          cobra.RangeArgs(1, 2),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE:          runMolDistill,
+	}
+	cmd.Flags().StringArray("var", []string{}, "Replace value with {{variable}} placeholder (variable=value)")
+	cmd.Flags().Bool("dry-run", false, "Preview what would be created")
+	cmd.Flags().String("output", "", "Output directory for formula file")
+	return cmd
 }
 
 // DistillResult holds the result of a distill operation
@@ -76,14 +83,12 @@ func collectSubgraphText(subgraph *MoleculeSubgraph) string {
 // Returns (findText, varName, error).
 func parseDistillVar(varFlag, searchableText string) (string, string, error) {
 	parts := strings.SplitN(varFlag, "=", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+	if !validDistillVarParts(parts) {
 		return "", "", fmt.Errorf("invalid format '%s', expected 'variable=value' or 'value=variable'", varFlag)
 	}
-
 	left, right := parts[0], parts[1]
 	leftFound := strings.Contains(searchableText, left)
 	rightFound := strings.Contains(searchableText, right)
-
 	switch {
 	case rightFound && !leftFound:
 		// spawn-style: --var branch=feature-auth
@@ -100,6 +105,10 @@ func parseDistillVar(varFlag, searchableText string) (string, string, error) {
 	default:
 		return "", "", fmt.Errorf("neither '%s' nor '%s' found in epic text", left, right)
 	}
+}
+
+func validDistillVarParts(parts []string) bool {
+	return len(parts) == 2 && parts[0] != "" && parts[1] != ""
 }
 
 type molDistillInput struct {
@@ -132,21 +141,21 @@ func runMolDistill(cmd *cobra.Command, args []string) error {
 	in := gatherMolDistillInput(cmd, args)
 
 	if usesProxiedServer() {
-		return runMolDistillProxiedServer(rootCtx, in)
+		return runMolDistillProxiedServer(getRootContext(), in)
 	}
 
-	ctx := rootCtx
+	ctx := getRootContext()
 
-	if store == nil {
+	if getStore() == nil {
 		return HandleErrorRespectJSON("no database connection")
 	}
 
-	epicID, err := utils.ResolvePartialID(ctx, store, in.epicID)
+	epicID, err := utils.ResolvePartialID(ctx, getStore(), in.epicID)
 	if err != nil {
 		return HandleErrorRespectJSON("'%s' not found", in.epicID)
 	}
 
-	subgraph, err := loadTemplateSubgraph(ctx, store, epicID)
+	subgraph, err := loadTemplateSubgraph(ctx, getStore(), epicID)
 	if err != nil {
 		return HandleErrorRespectJSON("loading epic: %v", err)
 	}
@@ -163,64 +172,22 @@ func distillSubgraph(epicID string, subgraph *TemplateSubgraph, in molDistillInp
 		formulaName = sanitizeFormulaName(subgraph.Root.Title)
 	}
 
-	replacements := make(map[string]string)
-	if len(in.varFlags) > 0 {
-		searchableText := collectSubgraphText(subgraph)
-		for _, v := range in.varFlags {
-			findText, varName, err := parseDistillVar(v, searchableText)
-			if err != nil {
-				return HandleErrorRespectJSON("%v", err)
-			}
-			replacements[findText] = varName
-		}
+	replacements, err := distillReplacements(subgraph, in.varFlags)
+	if err != nil {
+		return err
 	}
-
 	f := subgraphToFormula(subgraph, formulaName, replacements)
-
-	outputPath := ""
-	if in.outputDir != "" {
-		outputPath = filepath.Join(in.outputDir, formulaName+formula.FormulaExt)
-	} else {
-		outputPath = findWritableFormulaDir(formulaName)
-		if outputPath == "" {
-			hint := "Try creating one of the formula search paths"
-			if searchPaths := getFormulaSearchPaths(); len(searchPaths) > 0 {
-				hint = fmt.Sprintf("Try: mkdir -p %s", searchPaths[0])
-			}
-			return HandleErrorWithHint("no writable formula directory found", hint)
-		}
+	outputPath, err := distillOutputPath(formulaName, in.outputDir)
+	if err != nil {
+		return err
 	}
-
 	if in.dryRun {
-		fmt.Printf("\nDry run: would distill %d steps from %s into formula\n\n", countSteps(f.Steps), epicID)
-		fmt.Printf("Formula: %s\n", formulaName)
-		fmt.Printf("Output: %s\n", outputPath)
-		if len(replacements) > 0 {
-			fmt.Printf("\nVariables:\n")
-			for value, varName := range replacements {
-				fmt.Printf("  %s: \"%s\" → {{%s}}\n", varName, value, varName)
-			}
-		}
-		fmt.Printf("\nStructure:\n")
-		printFormulaStepsTree(f.Steps, "")
+		renderDistillDryRun(epicID, formulaName, outputPath, replacements, f)
 		return nil
 	}
-
-	dir := filepath.Dir(outputPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return HandleErrorRespectJSON("creating directory %s: %v", dir, err)
+	if err := writeDistilledFormula(outputPath, f); err != nil {
+		return err
 	}
-
-	data, err := json.MarshalIndent(f, "", "  ")
-	if err != nil {
-		return HandleErrorRespectJSON("encoding formula: %v", err)
-	}
-
-	// #nosec G306 -- Formula files are not sensitive
-	if err := os.WriteFile(outputPath, data, 0644); err != nil {
-		return HandleErrorRespectJSON("writing formula: %v", err)
-	}
-
 	result := &DistillResult{
 		FormulaName: formulaName,
 		FormulaPath: outputPath,
@@ -228,10 +195,69 @@ func distillSubgraph(epicID string, subgraph *TemplateSubgraph, in molDistillInp
 		Variables:   getVarNames(replacements),
 	}
 
-	if jsonOutput {
+	return renderDistillResult(result)
+}
+
+func distillReplacements(subgraph *TemplateSubgraph, flags []string) (map[string]string, error) {
+	replacements := make(map[string]string)
+	searchableText := collectSubgraphText(subgraph)
+	for _, flag := range flags {
+		findText, varName, err := parseDistillVar(flag, searchableText)
+		if err != nil {
+			return nil, HandleErrorRespectJSON("%v", err)
+		}
+		replacements[findText] = varName
+	}
+	return replacements, nil
+}
+
+func distillOutputPath(formulaName, outputDir string) (string, error) {
+	if outputDir != "" {
+		return filepath.Join(outputDir, formulaName+formula.FormulaExt), nil
+	}
+	if outputPath := findWritableFormulaDir(formulaName); outputPath != "" {
+		return outputPath, nil
+	}
+	hint := "Try creating one of the formula search paths"
+	if searchPaths := getFormulaSearchPaths(); len(searchPaths) > 0 {
+		hint = fmt.Sprintf("Try: mkdir -p %s", searchPaths[0])
+	}
+	return "", HandleErrorWithHint("no writable formula directory found", hint)
+}
+
+func renderDistillDryRun(epicID, formulaName, outputPath string, replacements map[string]string, f *formula.Formula) {
+	fmt.Printf("\nDry run: would distill %d steps from %s into formula\n\n", countSteps(f.Steps), epicID)
+	fmt.Printf("Formula: %s\nOutput: %s\n", formulaName, outputPath)
+	if len(replacements) > 0 {
+		fmt.Printf("\nVariables:\n")
+		for value, varName := range replacements {
+			fmt.Printf("  %s: \"%s\" → {{%s}}\n", varName, value, varName)
+		}
+	}
+	fmt.Printf("\nStructure:\n")
+	printFormulaStepsTree(f.Steps, "")
+}
+
+func writeDistilledFormula(outputPath string, f *formula.Formula) error {
+	dir := filepath.Dir(outputPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return HandleErrorRespectJSON("creating directory %s: %v", dir, err)
+	}
+	data, err := json.MarshalIndent(f, "", "  ")
+	if err != nil {
+		return HandleErrorRespectJSON("encoding formula: %v", err)
+	}
+	// #nosec G306 -- Formula files are not sensitive
+	if err := os.WriteFile(outputPath, data, 0644); err != nil {
+		return HandleErrorRespectJSON("writing formula: %v", err)
+	}
+	return nil
+}
+
+func renderDistillResult(result *DistillResult) error {
+	if isJSONOutput() {
 		return outputJSON(result)
 	}
-
 	fmt.Printf("%s Distilled formula: %d steps\n", ui.RenderPass("✓"), result.Steps)
 	fmt.Printf("  Formula: %s\n", result.FormulaName)
 	fmt.Printf("  Path: %s\n", result.FormulaPath)
@@ -290,99 +316,101 @@ func getVarNames(replacements map[string]string) []string {
 
 // subgraphToFormula converts a molecule subgraph to a formula
 func subgraphToFormula(subgraph *TemplateSubgraph, name string, replacements map[string]string) *formula.Formula {
-	// Helper to apply replacements. Uses word-boundary regex to avoid
-	// substring corruption (e.g., "4" matching inside "404").
-	applyReplacements := func(text string) string {
-		result := text
-		for value, varName := range replacements {
-			pattern := regexp.MustCompile(`\b` + regexp.QuoteMeta(value) + `\b`)
-			result = pattern.ReplaceAllString(result, "{{"+varName+"}}")
-		}
-		return result
-	}
-
-	// Build ID mapping for step references
-	idToStepID := make(map[string]string)
-	for _, issue := range subgraph.Issues {
-		// Create a sanitized step ID from the issue ID
-		stepID := sanitizeFormulaName(issue.Title)
-		if stepID == "" {
-			stepID = issue.ID
-		}
-		idToStepID[issue.ID] = stepID
-	}
-
-	// Build dependency map (issue ID -> list of depends-on IDs)
-	depsByIssue := make(map[string][]string)
-	for _, dep := range subgraph.Dependencies {
-		depsByIssue[dep.IssueID] = append(depsByIssue[dep.IssueID], dep.DependsOnID)
-	}
-
-	// Convert issues to steps
+	idToStepID := formulaStepIDs(subgraph)
+	depsByIssue := formulaDependencies(subgraph)
 	var steps []*formula.Step
 	for _, issue := range subgraph.Issues {
 		if issue.ID == subgraph.Root.ID {
-			continue // Root becomes the formula itself
+			continue
 		}
-
-		step := &formula.Step{
-			ID:          idToStepID[issue.ID],
-			Title:       applyReplacements(issue.Title),
-			Description: applyReplacements(issue.Description),
-			Type:        string(issue.IssueType),
-		}
-
-		// Copy priority if set
-		if issue.Priority > 0 {
-			p := issue.Priority
-			step.Priority = &p
-		}
-
-		// Copy labels (excluding internal ones)
-		for _, label := range issue.Labels {
-			if label != MoleculeLabel && !strings.HasPrefix(label, "mol:") {
-				step.Labels = append(step.Labels, label)
-			}
-		}
-
-		// Convert dependencies to depends_on (skip root)
-		if deps, ok := depsByIssue[issue.ID]; ok {
-			for _, depID := range deps {
-				if depID == subgraph.Root.ID {
-					continue // Skip dependency on root (becomes formula itself)
-				}
-				if stepID, ok := idToStepID[depID]; ok {
-					step.DependsOn = append(step.DependsOn, stepID)
-				}
-			}
-		}
-
-		steps = append(steps, step)
+		steps = append(steps, issueToFormulaStep(issue, subgraph.Root.ID, idToStepID, depsByIssue, replacements))
 	}
-
-	// Build variable definitions
-	vars := make(map[string]*formula.VarDef)
-	for _, varName := range replacements {
-		vars[varName] = &formula.VarDef{
-			Description: fmt.Sprintf("Value for %s", varName),
-			Required:    true,
-		}
-	}
-
 	return &formula.Formula{
 		Formula:     name,
-		Description: applyReplacements(subgraph.Root.Description),
+		Description: replaceFormulaVars(subgraph.Root.Description, replacements),
 		Version:     1,
 		Type:        formula.TypeWorkflow,
-		Vars:        vars,
+		Vars:        formulaVariables(replacements),
 		Steps:       steps,
 	}
 }
 
-func init() {
-	molDistillCmd.Flags().StringArray("var", []string{}, "Replace value with {{variable}} placeholder (variable=value)")
-	molDistillCmd.Flags().Bool("dry-run", false, "Preview what would be created")
-	molDistillCmd.Flags().String("output", "", "Output directory for formula file")
+func replaceFormulaVars(text string, replacements map[string]string) string {
+	result := text
+	for value, varName := range replacements {
+		pattern := regexp.MustCompile(`\b` + regexp.QuoteMeta(value) + `\b`)
+		result = pattern.ReplaceAllString(result, "{{"+varName+"}}")
+	}
+	return result
+}
 
-	molCmd.AddCommand(molDistillCmd)
+func formulaStepIDs(subgraph *TemplateSubgraph) map[string]string {
+	ids := make(map[string]string, len(subgraph.Issues))
+	for _, issue := range subgraph.Issues {
+		stepID := sanitizeFormulaName(issue.Title)
+		if stepID == "" {
+			stepID = issue.ID
+		}
+		ids[issue.ID] = stepID
+	}
+	return ids
+}
+
+func formulaDependencies(subgraph *TemplateSubgraph) map[string][]string {
+	dependencies := make(map[string][]string)
+	for _, dep := range subgraph.Dependencies {
+		dependencies[dep.IssueID] = append(dependencies[dep.IssueID], dep.DependsOnID)
+	}
+	return dependencies
+}
+
+func issueToFormulaStep(issue *types.Issue, rootID string, stepIDs map[string]string, dependencies map[string][]string, replacements map[string]string) *formula.Step {
+	step := &formula.Step{
+		ID:          stepIDs[issue.ID],
+		Title:       replaceFormulaVars(issue.Title, replacements),
+		Description: replaceFormulaVars(issue.Description, replacements),
+		Type:        string(issue.IssueType),
+	}
+	if issue.Priority > 0 {
+		priority := issue.Priority
+		step.Priority = &priority
+	}
+	step.Labels = formulaLabels(issue.Labels)
+	step.DependsOn = distilledStepDependencies(dependencies[issue.ID], rootID, stepIDs)
+	return step
+}
+
+func formulaLabels(labels []string) []string {
+	var result []string
+	for _, label := range labels {
+		if label != MoleculeLabel && !strings.HasPrefix(label, "mol:") {
+			result = append(result, label)
+		}
+	}
+	return result
+}
+
+func distilledStepDependencies(dependencies []string, rootID string, stepIDs map[string]string) []string {
+	var result []string
+	for _, dependencyID := range dependencies {
+		if dependencyID == rootID {
+			continue
+		}
+		if stepID, ok := stepIDs[dependencyID]; ok {
+			result = append(result, stepID)
+		}
+	}
+	return result
+}
+
+func formulaVariables(replacements map[string]string) map[string]*formula.VarDef {
+	variables := make(map[string]*formula.VarDef, len(replacements))
+	for _, name := range replacements {
+		variables[name] = &formula.VarDef{Description: fmt.Sprintf("Value for %s", name), Required: true}
+	}
+	return variables
+}
+
+func init() {
+	molCmd.AddCommand(newMolDistillCmd())
 }

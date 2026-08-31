@@ -37,26 +37,26 @@ Examples:
 		}()
 
 		if usesProxiedServer() {
-			return runMolLastActivityProxiedServer(rootCtx, args[0])
+			return runMolLastActivityProxiedServer(getRootContext(), args[0])
 		}
 
-		ctx := rootCtx
+		ctx := getRootContext()
 
-		if store == nil {
+		if getStore() == nil {
 			return HandleErrorRespectJSON("no database connection")
 		}
 
-		moleculeID, err := utils.ResolvePartialID(ctx, store, args[0])
+		moleculeID, err := utils.ResolvePartialID(ctx, getStore(), args[0])
 		if err != nil {
 			return HandleErrorRespectJSON("molecule '%s' not found", args[0])
 		}
 
-		activity, err := store.GetMoleculeLastActivity(ctx, moleculeID)
+		activity, err := getStore().GetMoleculeLastActivity(ctx, moleculeID)
 		if err != nil {
 			return HandleErrorRespectJSON("%v", err)
 		}
 
-		if jsonOutput {
+		if isJSONOutput() {
 			return outputJSON(activity)
 		}
 

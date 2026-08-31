@@ -109,7 +109,7 @@ func TestIssueTitleOrEmpty(t *testing.T) {
 	})
 
 	t.Run("non-nil issue returns title", func(t *testing.T) {
-		issue := &types.Issue{Title: "Fix bug"}
+		issue := &types.Issue{IssueContent: types.IssueContent{Title: "Fix bug"}}
 		got := issueTitleOrEmpty(issue)
 		if got != "Fix bug" {
 			t.Errorf("got %q, want %q", got, "Fix bug")

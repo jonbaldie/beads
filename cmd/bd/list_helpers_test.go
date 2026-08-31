@@ -58,16 +58,16 @@ func TestListParseTimeFlag(t *testing.T) {
 }
 
 func TestListPinIndicator(t *testing.T) {
-	if pinIndicator(&types.Issue{Pinned: true}) == "" {
+	if pinIndicator(&types.Issue{IssueWisp: types.IssueWisp{Pinned: true}}) == "" {
 		t.Fatalf("expected pin indicator")
 	}
-	if pinIndicator(&types.Issue{Pinned: false}) != "" {
+	if pinIndicator(&types.Issue{IssueWisp: types.IssueWisp{Pinned: false}}) != "" {
 		t.Fatalf("expected empty pin indicator")
 	}
 }
 
 func TestListFormatPrettyIssue_BadgesAndDefaults(t *testing.T) {
-	iss := &types.Issue{ID: "bd-1", Title: "Hello", Status: "wat", Priority: 99, IssueType: "bug"}
+	iss := &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueContent: types.IssueContent{Title: "Hello"}, IssueWorkflow: types.IssueWorkflow{Status: "wat", Priority: 99, IssueType: "bug"}}
 	out := formatPrettyIssue(iss)
 	if !strings.Contains(out, "bd-1") || !strings.Contains(out, "Hello") {
 		t.Fatalf("unexpected output: %q", out)
@@ -78,9 +78,9 @@ func TestListFormatPrettyIssue_BadgesAndDefaults(t *testing.T) {
 }
 
 func TestListBuildIssueTree_ParentChildByDotID(t *testing.T) {
-	parent := &types.Issue{ID: "bd-1", Title: "Parent", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
-	child := &types.Issue{ID: "bd-1.1", Title: "Child", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
-	orphan := &types.Issue{ID: "bd-2.1", Title: "Orphan", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	parent := &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueContent: types.IssueContent{Title: "Parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
+	child := &types.Issue{IssueID: types.IssueID{ID: "bd-1.1"}, IssueContent: types.IssueContent{Title: "Child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
+	orphan := &types.Issue{IssueID: types.IssueID{ID: "bd-2.1"}, IssueContent: types.IssueContent{Title: "Orphan"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 
 	roots, children := buildIssueTree([]*types.Issue{child, parent, orphan})
 	if len(children["bd-1"]) != 1 || children["bd-1"][0].ID != "bd-1.1" {
@@ -96,8 +96,8 @@ func TestListBuildIssueTree_ParentChildByDotID(t *testing.T) {
 // issues under each other in `bd list` — and a bidirectional relates-to between
 // two epics must not collapse both subtrees out of the root set.
 func TestListBuildIssueTree_RelatesToDoesNotNestEpics(t *testing.T) {
-	epicA := &types.Issue{ID: "bd-a", Title: "Epic A", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}
-	epicB := &types.Issue{ID: "bd-b", Title: "Epic B", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}
+	epicA := &types.Issue{IssueID: types.IssueID{ID: "bd-a"}, IssueContent: types.IssueContent{Title: "Epic A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}}
+	epicB := &types.Issue{IssueID: types.IssueID{ID: "bd-b"}, IssueContent: types.IssueContent{Title: "Epic B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}}
 
 	t.Run("OneDirection", func(t *testing.T) {
 		allDeps := map[string][]*types.Dependency{
@@ -133,8 +133,8 @@ func TestListBuildIssueTree_RelatesToDoesNotNestEpics(t *testing.T) {
 // Regression test for https://github.com/jonbaldie/beads/issues/1446
 // A task with multiple dependencies on the same epic should only appear once.
 func TestListBuildIssueTree_NoDuplicateChildrenFromMultipleDeps(t *testing.T) {
-	epic := &types.Issue{ID: "bd-epic", Title: "Epic", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}
-	task := &types.Issue{ID: "bd-task", Title: "Task", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	epic := &types.Issue{IssueID: types.IssueID{ID: "bd-epic"}, IssueContent: types.IssueContent{Title: "Epic"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}}
+	task := &types.Issue{IssueID: types.IssueID{ID: "bd-task"}, IssueContent: types.IssueContent{Title: "Task"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 
 	// The task has two different dependency types pointing at the same epic
 	allDeps := map[string][]*types.Dependency{
@@ -164,7 +164,7 @@ func TestListBuildIssueTree_NoDuplicateChildrenFromMultipleDeps(t *testing.T) {
 // a mere blocker as a child made 2-layer parent trees render as 6+ level tangles
 // and triggered false "the hierarchy is broken" conclusions during grooming.
 func TestListBuildIssueTree_NonParentChildDepOnEpicDoesNotNest(t *testing.T) {
-	epic := &types.Issue{ID: "bd-epic", Title: "Epic", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}
+	epic := &types.Issue{IssueID: types.IssueID{ID: "bd-epic"}, IssueContent: types.IssueContent{Title: "Epic"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}}
 
 	// Each non-parent-child edge type that AffectsReadyWork or is otherwise a
 	// legitimate cross-cutting link to an epic — none of these imply parenthood.
@@ -176,7 +176,7 @@ func TestListBuildIssueTree_NonParentChildDepOnEpicDoesNotNest(t *testing.T) {
 		types.DepRelated,
 	} {
 		t.Run(string(depType), func(t *testing.T) {
-			task := &types.Issue{ID: "bd-task", Title: "Task", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+			task := &types.Issue{IssueID: types.IssueID{ID: "bd-task"}, IssueContent: types.IssueContent{Title: "Task"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 			allDeps := map[string][]*types.Dependency{
 				"bd-task": {
 					{IssueID: "bd-task", DependsOnID: "bd-epic", Type: depType},
@@ -199,11 +199,17 @@ func TestFormatPrettyIssueWithContext(t *testing.T) {
 	t.Parallel()
 
 	issue := &types.Issue{
-		ID:        "bd-42",
-		Title:     "Implement feature",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "bd-42",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Implement feature",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	t.Run("WithoutParentEpic", func(t *testing.T) {
@@ -232,8 +238,8 @@ func TestDisplayReadyList(t *testing.T) {
 	t.Parallel()
 
 	issues := []*types.Issue{
-		{ID: "bd-1", Title: "Task A", Status: types.StatusOpen, Priority: 0, IssueType: types.TypeTask},
-		{ID: "bd-2", Title: "Task B", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeBug},
+		{IssueID: types.IssueID{ID: "bd-1"}, IssueContent: types.IssueContent{Title: "Task A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 0, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "bd-2"}, IssueContent: types.IssueContent{Title: "Task B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeBug}},
 	}
 
 	t.Run("WithParentEpics", func(t *testing.T) {
@@ -271,9 +277,9 @@ func TestListSortIssues_ClosedNilLast(t *testing.T) {
 	t1 := time.Now().Add(-2 * time.Hour)
 	t2 := time.Now().Add(-1 * time.Hour)
 
-	closedOld := &types.Issue{ID: "bd-1", ClosedAt: &t1}
-	closedNew := &types.Issue{ID: "bd-2", ClosedAt: &t2}
-	open := &types.Issue{ID: "bd-3", ClosedAt: nil}
+	closedOld := &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueTimes: types.IssueTimes{ClosedAt: &t1}}
+	closedNew := &types.Issue{IssueID: types.IssueID{ID: "bd-2"}, IssueTimes: types.IssueTimes{ClosedAt: &t2}}
+	open := &types.Issue{IssueID: types.IssueID{ID: "bd-3"}, IssueTimes: types.IssueTimes{ClosedAt: nil}}
 
 	issues := []*types.Issue{open, closedOld, closedNew}
 	workapi.SortIssues(issues, "closed", false)
@@ -292,9 +298,9 @@ func TestListDisplayPrettyList(t *testing.T) {
 	}
 
 	issues := []*types.Issue{
-		{ID: "bd-1", Title: "A", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: "bd-2", Title: "B", Status: types.StatusInProgress, Priority: 1, IssueType: types.TypeFeature},
-		{ID: "bd-1.1", Title: "C", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+		{IssueID: types.IssueID{ID: "bd-1"}, IssueContent: types.IssueContent{Title: "A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "bd-2"}, IssueContent: types.IssueContent{Title: "B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress, Priority: 1, IssueType: types.TypeFeature}},
+		{IssueID: types.IssueID{ID: "bd-1.1"}, IssueContent: types.IssueContent{Title: "C"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
 	}
 
 	out = captureStdout(t, func() error {
@@ -312,8 +318,8 @@ func TestListDisplayPrettyList(t *testing.T) {
 // GH#5362: a page cut by --limit must not label the page size as Total.
 func TestListDisplayPrettyList_TruncatedSummary(t *testing.T) {
 	issues := []*types.Issue{
-		{ID: "bd-1", Title: "A", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: "bd-2", Title: "B", Status: types.StatusInProgress, Priority: 1, IssueType: types.TypeFeature},
+		{IssueID: types.IssueID{ID: "bd-1"}, IssueContent: types.IssueContent{Title: "A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "bd-2"}, IssueContent: types.IssueContent{Title: "B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress, Priority: 1, IssueType: types.TypeFeature}},
 	}
 
 	out := captureStdout(t, func() error {
@@ -332,8 +338,8 @@ func TestListDisplayPrettyList_TruncatedSummary(t *testing.T) {
 }
 
 func TestDisplayWatchedIssueList_UsesDependencyHierarchy(t *testing.T) {
-	parent := &types.Issue{ID: "bd-zparent", Title: "Parent", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic}
-	child := &types.Issue{ID: "bd-achild", Title: "Child", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
+	parent := &types.Issue{IssueID: types.IssueID{ID: "bd-zparent"}, IssueContent: types.IssueContent{Title: "Parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic}}
+	child := &types.Issue{IssueID: types.IssueID{ID: "bd-achild"}, IssueContent: types.IssueContent{Title: "Child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}}
 	store := watchListDependencyStoreStub{
 		allDeps: map[string][]*types.Dependency{
 			child.ID: {
@@ -368,10 +374,14 @@ func TestLoadWatchedIssues_WithParentIncludesHierarchyAndStableOrder(t *testing.
 
 	createIssue := func(title string, issueType types.IssueType) *types.Issue {
 		issue := &types.Issue{
-			Title:     title,
-			Priority:  2,
-			IssueType: issueType,
-			Status:    types.StatusOpen,
+			IssueContent: types.IssueContent{
+				Title: title,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				IssueType: issueType,
+				Status:    types.StatusOpen,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test-user"); err != nil {
 			t.Fatalf("Failed to create issue %s: %v", title, err)
@@ -398,7 +408,7 @@ func TestLoadWatchedIssues_WithParentIncludesHierarchyAndStableOrder(t *testing.
 	addParentChild(child, parent)
 	addParentChild(grandchild, child)
 
-	filter := types.IssueFilter{ParentID: &parent.ID}
+	filter := types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{ParentID: &parent.ID}}
 	first, err := loadWatchedIssues(ctx, store, filter, false, parent.ID, "", false)
 	if err != nil {
 		t.Fatalf("loadWatchedIssues first call failed: %v", err)
@@ -433,10 +443,14 @@ func TestLoadWatchedIssues_ReadyWithParentPreservesReadySemantics(t *testing.T) 
 
 	createIssue := func(title string, issueType types.IssueType) *types.Issue {
 		issue := &types.Issue{
-			Title:     title,
-			Priority:  2,
-			IssueType: issueType,
-			Status:    types.StatusOpen,
+			IssueContent: types.IssueContent{
+				Title: title,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				IssueType: issueType,
+				Status:    types.StatusOpen,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test-user"); err != nil {
 			t.Fatalf("Failed to create issue %s: %v", title, err)
@@ -464,7 +478,7 @@ func TestLoadWatchedIssues_ReadyWithParentPreservesReadySemantics(t *testing.T) 
 	addDep(blockedChild, parent, types.DepParentChild)
 	addDep(blockedChild, blocker, types.DepBlocks)
 
-	filter := types.IssueFilter{ParentID: &parent.ID}
+	filter := types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{ParentID: &parent.ID}}
 	issues, err := loadWatchedIssues(ctx, store, filter, true, parent.ID, "", false)
 	if err != nil {
 		t.Fatalf("loadWatchedIssues ready parent failed: %v", err)
@@ -489,10 +503,14 @@ func TestGetHierarchicalChildrenIncludesDescendantsBeyondDepthTen(t *testing.T) 
 	store := newTestStore(t, testDB)
 
 	root := &types.Issue{
-		Title:     "Deep tree root",
-		Priority:  2,
-		IssueType: types.TypeEpic,
-		Status:    types.StatusOpen,
+		IssueContent: types.IssueContent{
+			Title: "Deep tree root",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeEpic,
+			Status:    types.StatusOpen,
+		},
 	}
 	if err := store.CreateIssue(ctx, root, "test-user"); err != nil {
 		t.Fatalf("Failed to create root: %v", err)
@@ -503,10 +521,14 @@ func TestGetHierarchicalChildrenIncludesDescendantsBeyondDepthTen(t *testing.T) 
 	const depth = 12
 	for i := 1; i <= depth; i++ {
 		child := &types.Issue{
-			Title:     "Deep tree child",
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Status:    types.StatusOpen,
+			IssueContent: types.IssueContent{
+				Title: "Deep tree child",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				IssueType: types.TypeTask,
+				Status:    types.StatusOpen,
+			},
 		}
 		if err := store.CreateIssue(ctx, child, "test-user"); err != nil {
 			t.Fatalf("Failed to create child at depth %d: %v", i, err)

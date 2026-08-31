@@ -4,7 +4,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/jonbaldie/beads/internal/metrics"
@@ -16,12 +15,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var labelCmd = &cobra.Command{
-	Use:     "label",
-	GroupID: "issues",
-	Short:   "Manage issue labels",
-}
-
 // openIssueLifecycle hands back the guarded write role for whichever route this
 // invocation is on, each through its own capability accessor. Neither branch
 // opens a unit of work, names a use case or composes a transaction: the label
@@ -30,7 +23,7 @@ func openIssueLifecycle() (issueops.Lifecycle, error) {
 	if usesProxiedServer() {
 		return proxiedIssueLifecycle()
 	}
-	return store.IssueLifecycle()
+	return getStore().IssueLifecycle()
 }
 
 // openIssueReader hands back the read role the same way. `bd label list` is a
@@ -41,7 +34,7 @@ func openIssueReader() (issueops.Reader, error) {
 	if usesProxiedServer() {
 		return proxiedIssueReader()
 	}
-	return store.IssueReader()
+	return getStore().IssueReader()
 }
 
 // resolveLabelTarget turns one positional argument into the EXACT id the roles
@@ -56,7 +49,7 @@ func resolveLabelTarget(ctx context.Context, id string) (string, error) {
 	if usesProxiedServer() {
 		return resolveLabelTargetProxied(ctx, id)
 	}
-	return utils.ResolvePartialID(ctx, store, id)
+	return utils.ResolvePartialID(ctx, getStore(), id)
 }
 
 // applyLabelEdit applies ONE label patch to each named issue through
@@ -129,7 +122,7 @@ func applyLabelEdit(ctx context.Context, issueIDs []string, labels []string, ope
 	}
 	for _, issueID := range issueIDs {
 		if _, uerr := lifecycle.Update(ctx, issueops.UpdateRequest{
-			Actor:   actor,
+			Actor:   getActor(),
 			IssueID: issueID,
 			Patch:   patch,
 		}); uerr != nil {
@@ -141,7 +134,7 @@ func applyLabelEdit(ctx context.Context, issueIDs []string, labels []string, ope
 		// written its first two and the deferred commit has to know about them.
 		commandDidWrite.Store(true)
 	}
-	return reportLabelEdit(issueIDs, labels, operation, jsonOutput)
+	return reportLabelEdit(issueIDs, labels, operation, isJSONOutput())
 }
 
 // The two label edits this command performs, spelled once. They are the words
@@ -237,64 +230,75 @@ func resolveLabelIssueIDs(ctx context.Context, subcommand string, issueIDs []str
 }
 
 //nolint:dupl // labelAddCmd and labelRemoveCmd are similar but serve different operations
-var labelAddCmd = &cobra.Command{
-	Use:           "add [issue-id...] [label[,label...]]",
-	Short:         "Add one or more labels to one or more issues",
-	Long:          "Add labels to issues. Issue IDs come first; the final argument is the label. Pass multiple labels comma-separated: bd label add bd-123 label1,label2",
-	Args:          cobra.MinimumNArgs(2),
-	SilenceUsage:  true,
-	SilenceErrors: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		CheckReadonly("label add")
-
-		evt := metrics.NewCommandEvent("label-add")
-		defer func() {
-			if c := metrics.Global(); c != nil {
-				c.CloseEventAndAdd(evt)
+func newLabelAddCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:           "add [issue-id...] [label[,label...]]",
+		Short:         "Add one or more labels to one or more issues",
+		Long:          "Add labels to issues. Issue IDs come first; the final argument is the label. Pass multiple labels comma-separated: bd label add bd-123 label1,label2",
+		Args:          cobra.MinimumNArgs(2),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := CheckReadonly("label add"); err != nil {
+				return err
 			}
-		}()
 
-		return runLabelAdd(rootCtx, args)
-	},
+			evt := metrics.NewCommandEvent("label-add")
+			defer func() {
+				if c := metrics.Global(); c != nil {
+					c.CloseEventAndAdd(evt)
+				}
+			}()
+
+			return runLabelAdd(getRootContext(), args)
+		},
+	}
 }
 
 //nolint:dupl // labelRemoveCmd and labelAddCmd are similar but serve different operations
-var labelRemoveCmd = &cobra.Command{
-	Use:           "remove [issue-id...] [label[,label...]]",
-	Short:         "Remove one or more labels from one or more issues",
-	Long:          "Remove labels from issues. Issue IDs come first; the final argument is the label. Pass multiple labels comma-separated: bd label remove bd-123 label1,label2",
-	Args:          cobra.MinimumNArgs(2),
-	SilenceUsage:  true,
-	SilenceErrors: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		CheckReadonly("label remove")
-
-		evt := metrics.NewCommandEvent("label-remove")
-		defer func() {
-			if c := metrics.Global(); c != nil {
-				c.CloseEventAndAdd(evt)
+func newLabelRemoveCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:           "remove [issue-id...] [label[,label...]]",
+		Short:         "Remove one or more labels from one or more issues",
+		Long:          "Remove labels from issues. Issue IDs come first; the final argument is the label. Pass multiple labels comma-separated: bd label remove bd-123 label1,label2",
+		Args:          cobra.MinimumNArgs(2),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := CheckReadonly("label remove"); err != nil {
+				return err
 			}
-		}()
 
-		return runLabelRemove(rootCtx, args)
-	},
+			evt := metrics.NewCommandEvent("label-remove")
+			defer func() {
+				if c := metrics.Global(); c != nil {
+					c.CloseEventAndAdd(evt)
+				}
+			}()
+
+			return runLabelRemove(getRootContext(), args)
+		},
+	}
 }
-var labelListCmd = &cobra.Command{
-	Use:           "list [issue-id]",
-	Short:         "List labels for an issue",
-	Args:          cobra.ExactArgs(1),
-	SilenceUsage:  true,
-	SilenceErrors: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		evt := metrics.NewCommandEvent("label-list")
-		defer func() {
-			if c := metrics.Global(); c != nil {
-				c.CloseEventAndAdd(evt)
-			}
-		}()
 
-		return runLabelList(rootCtx, args)
-	},
+func newLabelListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:           "list [issue-id]",
+		Short:         "List labels for an issue",
+		Args:          cobra.ExactArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			evt := metrics.NewCommandEvent("label-list")
+			defer func() {
+				if c := metrics.Global(); c != nil {
+					c.CloseEventAndAdd(evt)
+				}
+			}()
+
+			return runLabelList(getRootContext(), args)
+		},
+	}
 }
 
 // labelListAllSearcher is the whole storage surface `bd label list-all`
@@ -319,150 +323,140 @@ func countLabelsAcrossIssues(ctx context.Context, s labelListAllSearcher) (map[s
 	return labelCounts, nil
 }
 
-var labelListAllCmd = &cobra.Command{
-	Use:           "list-all",
-	Short:         "List all unique labels in the database",
-	SilenceUsage:  true,
-	SilenceErrors: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		evt := metrics.NewCommandEvent("label-list-all")
-		defer func() {
-			if c := metrics.Global(); c != nil {
-				c.CloseEventAndAdd(evt)
-			}
-		}()
-
-		if usesProxiedServer() {
-			return runLabelListAllProxiedServer(rootCtx)
-		}
-
-		labelCounts, err := countLabelsAcrossIssues(rootCtx, store)
-		if err != nil {
-			return HandleErrorRespectJSON("%v", err)
-		}
-		type labelInfo struct {
-			Label string `json:"label"`
-			Count int    `json:"count"`
-		}
-		if len(labelCounts) == 0 {
-			if jsonOutput {
-				return outputJSON([]labelInfo{})
-			}
-			fmt.Println("\nNo labels found in database")
-			return nil
-		}
-		labels := make([]string, 0, len(labelCounts))
-		for label := range labelCounts {
-			labels = append(labels, label)
-		}
-		sort.Strings(labels)
-		if jsonOutput {
-			result := make([]labelInfo, 0, len(labels))
-			for _, label := range labels {
-				result = append(result, labelInfo{
-					Label: label,
-					Count: labelCounts[label],
-				})
-			}
-			return outputJSON(result)
-		}
-		fmt.Printf("\n%s All labels (%d unique):\n", ui.RenderAccent("🏷"), len(labels))
-		maxLen := 0
-		for _, label := range labels {
-			if len(label) > maxLen {
-				maxLen = len(label)
-			}
-		}
-		for _, label := range labels {
-			padding := strings.Repeat(" ", maxLen-len(label))
-			fmt.Printf("  %s%s  (%d issues)\n", label, padding, labelCounts[label])
-		}
-		fmt.Println()
-		return nil
-	},
+func newLabelListAllCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:           "list-all",
+		Short:         "List all unique labels in the database",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE:          runLabelListAll,
+	}
 }
 
-var labelPropagateCmd = &cobra.Command{
-	Use:           "propagate [parent-id] [label]",
-	Short:         "Propagate a label from a parent issue to all its children",
-	Long:          "Push a label from a parent down to all direct children that don't already have it. Useful for applying branch: labels across an epic's subtasks.",
-	Args:          cobra.ExactArgs(2),
-	SilenceUsage:  true,
-	SilenceErrors: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		CheckReadonly("label propagate")
+func newLabelPropagateCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:           "propagate [parent-id] [label]",
+		Short:         "Propagate a label from a parent issue to all its children",
+		Long:          "Push a label from a parent down to all direct children that don't already have it. Useful for applying branch: labels across an epic's subtasks.",
+		Args:          cobra.ExactArgs(2),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE:          runLabelPropagate,
+	}
+}
 
-		evt := metrics.NewCommandEvent("label-propagate")
-		defer func() {
-			if c := metrics.Global(); c != nil {
-				c.CloseEventAndAdd(evt)
-			}
-		}()
-
-		if usesProxiedServer() {
-			return runLabelPropagateProxiedServer(rootCtx, args)
+func runLabelListAll(_ *cobra.Command, _ []string) error {
+	evt := metrics.NewCommandEvent("label-list-all")
+	defer func() {
+		if c := metrics.Global(); c != nil {
+			c.CloseEventAndAdd(evt)
 		}
+	}()
+	if usesProxiedServer() {
+		return runLabelListAllProxiedServer(getRootContext())
+	}
+	labelCounts, err := countLabelsAcrossIssues(getRootContext(), getStore())
+	if err != nil {
+		return HandleErrorRespectJSON("%v", err)
+	}
+	return printLabelCounts(labelCounts)
+}
 
-		ctx := rootCtx
+func runLabelPropagate(_ *cobra.Command, args []string) error {
+	if err := CheckReadonly("label propagate"); err != nil {
+		return err
+	}
+	evt := metrics.NewCommandEvent("label-propagate")
+	defer func() {
+		if c := metrics.Global(); c != nil {
+			c.CloseEventAndAdd(evt)
+		}
+	}()
+	if usesProxiedServer() {
+		return runLabelPropagateProxiedServer(getRootContext(), args)
+	}
+	return runLabelPropagateDirect(args[0], args[1])
+}
 
-		parentID, err := utils.ResolvePartialID(ctx, store, args[0])
-		if err != nil {
-			return HandleErrorRespectJSON("resolving parent %s: %v", args[0], err)
-		}
-		label := strings.TrimSpace(args[1])
-		if label == "" {
-			return HandleErrorRespectJSON("label cannot be empty")
-		}
+func runLabelPropagateDirect(parentArg, labelArg string) error {
+	parentID, err := utils.ResolvePartialID(getRootContext(), getStore(), parentArg)
+	if err != nil {
+		return HandleErrorRespectJSON("resolving parent %s: %v", parentArg, err)
+	}
+	label, err := validatePropagatedLabel(labelArg)
+	if err != nil {
+		return err
+	}
+	children, err := getStore().SearchIssues(getRootContext(), "", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{ParentID: &parentID}})
+	if err != nil {
+		return HandleErrorRespectJSON("searching children of %s: %v", parentID, err)
+	}
+	if len(children) == 0 {
+		return reportNoLabelChildren(parentID)
+	}
+	if err := propagateLabel(parentID, label, children); err != nil {
+		return HandleErrorRespectJSON("label propagate: %v", err)
+	}
+	return reportPropagatedLabel(label, children)
+}
 
-		if strings.HasPrefix(label, "provides:") {
-			return HandleErrorRespectJSON("'provides:' labels are reserved for cross-project capabilities. Hint: use 'bd ship %s' instead", strings.TrimPrefix(label, "provides:"))
-		}
+func validatePropagatedLabel(labelArg string) (string, error) {
+	label := strings.TrimSpace(labelArg)
+	if label == "" {
+		return "", HandleErrorRespectJSON("label cannot be empty")
+	}
+	if strings.HasPrefix(label, "provides:") {
+		return "", HandleErrorRespectJSON("'provides:' labels are reserved for cross-project capabilities. Hint: use 'bd ship %s' instead", strings.TrimPrefix(label, "provides:"))
+	}
+	return label, nil
+}
 
-		children, err := store.SearchIssues(ctx, "", types.IssueFilter{ParentID: &parentID})
-		if err != nil {
-			return HandleErrorRespectJSON("searching children of %s: %v", parentID, err)
-		}
+func reportNoLabelChildren(parentID string) error {
+	if isJSONOutput() {
+		return outputJSON([]map[string]interface{}{})
+	}
+	fmt.Printf("No children found for %s\n", parentID)
+	return nil
+}
 
-		if len(children) == 0 {
-			if jsonOutput {
-				return outputJSON([]map[string]interface{}{})
-			}
-			fmt.Printf("No children found for %s\n", parentID)
-			return nil
-		}
-
-		commitMsg := fmt.Sprintf("bd: propagate label '%s' from %s to %d children", label, parentID, len(children))
-		err = transactHonoringAutoCommit(ctx, store, commitMsg, func(tx storage.Transaction) error {
-			for _, child := range children {
-				if err := tx.AddLabel(ctx, child.ID, label, actor); err != nil {
-					return fmt.Errorf("add label '%s' on %s: %w", label, child.ID, err)
-				}
-			}
-			return nil
-		})
-		if err != nil {
-			return HandleErrorRespectJSON("label propagate: %v", err)
-		}
-
-		if jsonOutput {
-			results := make([]map[string]interface{}, 0, len(children))
-			for _, child := range children {
-				results = append(results, map[string]interface{}{
-					"status":   "propagated",
-					"issue_id": child.ID,
-					"label":    label,
-				})
-			}
-			return outputJSON(results)
-		}
+func propagateLabel(parentID, label string, children []*types.Issue) error {
+	commitMsg := fmt.Sprintf("bd: propagate label '%s' from %s to %d children", label, parentID, len(children))
+	return transactHonoringAutoCommit(getRootContext(), getStore(), commitMsg, func(tx storage.Transaction) error {
 		for _, child := range children {
-			fmt.Printf("%s Propagated label '%s' to %s\n", ui.RenderPass("✓"), label, child.ID)
+			if err := tx.AddLabel(getRootContext(), child.ID, label, getActor()); err != nil {
+				return fmt.Errorf("add label '%s' on %s: %w", label, child.ID, err)
+			}
 		}
 		return nil
-	},
+	})
 }
 
-func init() {
+func reportPropagatedLabel(label string, children []*types.Issue) error {
+	if isJSONOutput() {
+		results := make([]map[string]interface{}, 0, len(children))
+		for _, child := range children {
+			results = append(results, map[string]interface{}{"status": "propagated", "issue_id": child.ID, "label": label})
+		}
+		return outputJSON(results)
+	}
+	for _, child := range children {
+		fmt.Printf("%s Propagated label '%s' to %s\n", ui.RenderPass("✓"), label, child.ID)
+	}
+	return nil
+}
+
+func newLabelCmd() *cobra.Command {
+	labelCmd := &cobra.Command{
+		Use:     "label",
+		GroupID: "issues",
+		Short:   "Manage issue labels",
+	}
+	labelAddCmd := newLabelAddCmd()
+	labelRemoveCmd := newLabelRemoveCmd()
+	labelListCmd := newLabelListCmd()
+	labelListAllCmd := newLabelListAllCmd()
+	labelPropagateCmd := newLabelPropagateCmd()
+
 	// Issue ID completions
 	labelAddCmd.ValidArgsFunction = issueIDCompletion
 	labelRemoveCmd.ValidArgsFunction = issueIDCompletion
@@ -474,7 +468,11 @@ func init() {
 	labelCmd.AddCommand(labelListCmd)
 	labelCmd.AddCommand(labelListAllCmd)
 	labelCmd.AddCommand(labelPropagateCmd)
-	rootCmd.AddCommand(labelCmd)
+	return labelCmd
+}
+
+func init() {
+	rootCmd.AddCommand(newLabelCmd())
 }
 
 // runLabelAdd, runLabelRemove and runLabelList are ONE body each, for both
@@ -537,7 +535,7 @@ func runLabelList(ctx context.Context, args []string) error {
 		return HandleErrorRespectJSON("%v", err)
 	}
 	labels := details.Labels
-	if jsonOutput {
+	if isJSONOutput() {
 		if labels == nil {
 			labels = []string{}
 		}

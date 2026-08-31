@@ -30,15 +30,23 @@ func TestCloseIssueSetsClosedAt(t *testing.T) {
 
 	// Step 1: Create an open issue in the database
 	openIssue := &types.Issue{
-		ID:          "bd-transition-1",
-		Title:       "Test transition",
-		Description: "This will be closed",
-		Status:      types.StatusOpen,
-		Priority:    1,
-		IssueType:   types.TypeBug,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-		ClosedAt:    nil,
+		IssueID: types.IssueID{
+			ID: "bd-transition-1",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Test transition",
+			Description: "This will be closed",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeBug,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+			ClosedAt:  nil,
+		},
 	}
 
 	if err := testStore.CreateIssue(ctx, openIssue, "test"); err != nil {
@@ -78,15 +86,23 @@ func TestReopenIssueClearsClosedAt(t *testing.T) {
 	// Step 1: Create a closed issue in the database
 	closedTime := time.Now()
 	closedIssue := &types.Issue{
-		ID:          "bd-transition-2",
-		Title:       "Test reopening",
-		Description: "This will be reopened",
-		Status:      types.StatusClosed,
-		Priority:    1,
-		IssueType:   types.TypeBug,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   closedTime,
-		ClosedAt:    &closedTime,
+		IssueID: types.IssueID{
+			ID: "bd-transition-2",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Test reopening",
+			Description: "This will be reopened",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  1,
+			IssueType: types.TypeBug,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+			UpdatedAt: closedTime,
+			ClosedAt:  &closedTime,
+		},
 	}
 
 	if err := testStore.CreateIssue(ctx, closedIssue, "test"); err != nil {
@@ -196,12 +212,16 @@ func TestListUsesRepoBeadsDirWhenDoltDataDirEscapesDotBeads(t *testing.T) {
 
 	ctx := context.Background()
 	testStore, err := dolt.New(ctx, &dolt.Config{
-		Path:            externalDoltDir,
-		BeadsDir:        beadsDir,
-		ServerHost:      "127.0.0.1",
-		ServerPort:      testDoltServerPort,
-		Database:        database,
-		CreateIfMissing: true,
+		Path:     externalDoltDir,
+		BeadsDir: beadsDir,
+		ServerOptions: dolt.ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: testDoltServerPort,
+		},
+		Database: database,
+		RemoteOptions: dolt.RemoteOptions{
+			CreateIfMissing: true,
+		},
 	})
 	if err != nil {
 		t.Fatalf("create test store: %v", err)
@@ -220,14 +240,22 @@ func TestListUsesRepoBeadsDirWhenDoltDataDirEscapesDotBeads(t *testing.T) {
 
 	now := time.Now()
 	issue := &types.Issue{
-		ID:          "test-port-proof-1",
-		Title:       "Port-proof issue",
-		Description: "Verifies bd list uses the repo's .beads config even with external dolt data",
-		Status:      types.StatusOpen,
-		Priority:    1,
-		IssueType:   types.TypeBug,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		IssueID: types.IssueID{
+			ID: "test-port-proof-1",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Port-proof issue",
+			Description: "Verifies bd list uses the repo's .beads config even with external dolt data",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeBug,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
 	}
 	if err := testStore.CreateIssue(ctx, issue, "test-user"); err != nil {
 		t.Fatalf("create issue: %v", err)
@@ -283,12 +311,12 @@ func TestSharedServerEmbeddedMismatchDoesNotRewriteMetadata(t *testing.T) {
 	t.Setenv("BEADS_DOLT_SHARED_SERVER", "1")
 	t.Setenv("BEADS_DOLT_SERVER_MODE", "")
 
-	oldServerMode, oldWarned := serverMode, sharedServerEmbeddedMismatchWarned
+	oldServerMode, oldWarned := serverMode, sharedServerEmbeddedMismatchWarned.Load()
 	defer func() {
 		serverMode = oldServerMode
-		sharedServerEmbeddedMismatchWarned = oldWarned
+		sharedServerEmbeddedMismatchWarned.Store(oldWarned)
 	}()
-	sharedServerEmbeddedMismatchWarned = false
+	sharedServerEmbeddedMismatchWarned.Store(false)
 
 	captureStderr := func(fn func()) string {
 		r, w, pipeErr := os.Pipe()

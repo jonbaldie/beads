@@ -20,61 +20,62 @@ import (
 // Respects hints.doctor config setting.
 func runCheckHealth(path string) error {
 	beadsDir := doctor.ResolveBeadsDirForRepo(path)
-
 	if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
 		return nil
 	}
-
 	cfg, err := configfile.Load(beadsDir)
 	if err != nil || cfg == nil {
-		if issue := doctor.CheckHooksQuick(Version); issue != "" {
-			return printCheckHealthHint([]string{issue})
-		}
-		return nil
+		return checkHooksHealthHint()
 	}
-
-	host := cfg.GetDoltServerHost()
 	port := doltserver.DefaultConfig(beadsDir).Port
 	if port == 0 {
-		if issue := doctor.CheckHooksQuick(Version); issue != "" {
-			return printCheckHealthHint([]string{issue})
-		}
+		return checkHooksHealthHint()
+	}
+	issues, disabled := checkDatabaseHealth(cfg, port)
+	if disabled {
 		return nil
 	}
-	database := cfg.GetDoltDatabase()
-
-	var issues []string
-
-	dsn := doltutil.ServerDSN{
-		Host:     host,
-		Port:     port,
-		User:     cfg.GetDoltServerUser(),
-		Password: cfg.GetDoltServerPasswordForPort(port),
-		Database: database,
-		Timeout:  2 * time.Second,
-		TLS:      cfg.GetDoltServerTLS(),
-	}.String()
-	db, err := sql.Open("mysql", dsn)
-	if err == nil {
-		defer db.Close()
-		if pingErr := db.Ping(); pingErr == nil {
-			if hintsDisabledDB(db) {
-				return nil
-			}
-			if issue := checkVersionMismatchDB(db); issue != "" {
-				issues = append(issues, issue)
-			}
-		}
-	}
-
 	if issue := doctor.CheckHooksQuick(Version); issue != "" {
 		issues = append(issues, issue)
 	}
-
 	if len(issues) > 0 {
 		return printCheckHealthHint(issues)
 	}
 	return nil
+}
+
+func checkHooksHealthHint() error {
+	if issue := doctor.CheckHooksQuick(Version); issue != "" {
+		return printCheckHealthHint([]string{issue})
+	}
+	return nil
+}
+
+func checkDatabaseHealth(cfg *configfile.Config, port int) ([]string, bool) {
+	dsn := doltutil.ServerDSN{
+		Host:     cfg.GetDoltServerHost(),
+		Port:     port,
+		User:     cfg.GetDoltServerUser(),
+		Password: cfg.GetDoltServerPasswordForPort(port),
+		Database: cfg.GetDoltDatabase(),
+		Timeout:  2 * time.Second,
+		TLS:      cfg.GetDoltServerTLS(),
+	}.String()
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return nil, false
+	}
+	defer db.Close()
+	if db.Ping() != nil {
+		return nil, false
+	}
+	if hintsDisabledDB(db) {
+		return nil, true
+	}
+	if issue := checkVersionMismatchDB(db); issue != "" {
+		return []string{issue}, false
+	}
+	return nil, false
 }
 
 // runDeepValidation runs full graph integrity validation
@@ -84,7 +85,7 @@ func runDeepValidation(path string) error {
 
 	result := doctor.RunDeepValidation(path)
 
-	if jsonOutput {
+	if isJSONOutput() {
 		jsonBytes, err := doctor.DeepValidationResultJSON(result)
 		if err != nil {
 			return HandleError("%v", err)
@@ -104,7 +105,7 @@ func runDeepValidation(path string) error {
 func runServerHealth(path string) error {
 	result := doctor.RunServerHealthChecks(path)
 
-	if jsonOutput {
+	if isJSONOutput() {
 		jsonBytes, err := json.Marshal(result)
 		if err != nil {
 			return HandleError("failed to marshal health check result: %v", err)
@@ -124,51 +125,53 @@ func runServerHealth(path string) error {
 
 // printServerHealthResult prints the server health check results
 func printServerHealthResult(result doctor.ServerHealthResult) {
-	var passCount, warnCount, failCount int
-	var warnings []doctor.DoctorCheck
-
+	counts := serverHealthCounts{}
 	for _, check := range result.Checks {
-		var statusIcon string
-		switch check.Status {
-		case statusOK:
-			statusIcon = ui.RenderPassIcon()
-			passCount++
-		case statusWarning:
-			statusIcon = ui.RenderWarnIcon()
-			warnCount++
-			warnings = append(warnings, check)
-		case statusError:
-			statusIcon = ui.RenderFailIcon()
-			failCount++
-			warnings = append(warnings, check)
-		}
-
-		fmt.Printf("  %s  %s", statusIcon, check.Name)
-		if check.Message != "" {
-			fmt.Printf("%s", ui.RenderMuted(" "+check.Message))
-		}
-		fmt.Println()
-
-		if check.Detail != "" {
-			// Indent detail lines
-			for _, line := range strings.Split(check.Detail, "\n") {
-				fmt.Printf("     %s%s\n", ui.MutedStyle.Render(ui.TreeLast), ui.RenderMuted(line))
-			}
-		}
+		printServerHealthCheck(check, &counts)
 	}
-
 	fmt.Println()
-
-	// Summary line
 	fmt.Println(ui.RenderSeparator())
 	summary := fmt.Sprintf("%s %d passed  %s %d warnings  %s %d failed",
-		ui.RenderPassIcon(), passCount,
-		ui.RenderWarnIcon(), warnCount,
-		ui.RenderFailIcon(), failCount,
+		ui.RenderPassIcon(), counts.passed,
+		ui.RenderWarnIcon(), counts.warned,
+		ui.RenderFailIcon(), counts.failed,
 	)
 	fmt.Println(summary)
+	printServerHealthFixes(counts.warnings, result.OverallOK)
+}
 
-	// Print fixes for any errors/warnings
+type serverHealthCounts struct {
+	passed, warned, failed int
+	warnings               []doctor.DoctorCheck
+}
+
+func printServerHealthCheck(check doctor.DoctorCheck, counts *serverHealthCounts) {
+	statusIcon := ui.RenderPassIcon()
+	switch check.Status {
+	case statusOK:
+		counts.passed++
+	case statusWarning:
+		statusIcon = ui.RenderWarnIcon()
+		counts.warned++
+		counts.warnings = append(counts.warnings, check)
+	case statusError:
+		statusIcon = ui.RenderFailIcon()
+		counts.failed++
+		counts.warnings = append(counts.warnings, check)
+	}
+	fmt.Printf("  %s  %s", statusIcon, check.Name)
+	if check.Message != "" {
+		fmt.Printf("%s", ui.RenderMuted(" "+check.Message))
+	}
+	fmt.Println()
+	if check.Detail != "" {
+		for _, line := range strings.Split(check.Detail, "\n") {
+			fmt.Printf("     %s%s\n", ui.MutedStyle().Render(ui.TreeLast), ui.RenderMuted(line))
+		}
+	}
+}
+
+func printServerHealthFixes(warnings []doctor.DoctorCheck, overallOK bool) {
 	if len(warnings) > 0 {
 		fmt.Println()
 		fmt.Println(ui.RenderWarn(ui.IconWarn + "  FIXES NEEDED"))
@@ -182,9 +185,9 @@ func printServerHealthResult(result doctor.ServerHealthResult) {
 			} else {
 				fmt.Printf("  %s  %s %s\n", ui.RenderWarnIcon(), ui.RenderWarn(fmt.Sprintf("%d.", i+1)), line)
 			}
-			fmt.Printf("        %s%s\n", ui.MutedStyle.Render(ui.TreeLast), check.Fix)
+			fmt.Printf("        %s%s\n", ui.MutedStyle().Render(ui.TreeLast), check.Fix)
 		}
-	} else if result.OverallOK {
+	} else if overallOK {
 		fmt.Println()
 		fmt.Printf("%s\n", ui.RenderPass("✓ All server health checks passed"))
 	}

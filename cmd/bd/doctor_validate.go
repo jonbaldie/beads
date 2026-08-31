@@ -17,7 +17,11 @@ type validateCheckResult struct {
 }
 
 func runValidateCheck(path string) error {
-	ok, err := runValidateCheckInner(path)
+	return runValidateCheckWithOptions(path, defaultDoctorOptions())
+}
+
+func runValidateCheckWithOptions(path string, opts doctorOptions) error {
+	ok, err := runValidateCheckInnerWithOptions(path, opts)
 	if err != nil {
 		return err
 	}
@@ -28,30 +32,23 @@ func runValidateCheck(path string) error {
 }
 
 func runValidateCheckInner(path string) (bool, error) {
-	checks := collectValidateChecks(path)
+	return runValidateCheckInnerWithOptions(path, defaultDoctorOptions())
+}
+
+func runValidateCheckInnerWithOptions(path string, opts doctorOptions) (bool, error) {
+	checks := collectValidateChecksWithOptions(path, opts)
 
 	// Apply fixes if --fix is set, then re-check to reflect post-fix state
-	if doctorFix {
-		applyValidateFixes(path, checks)
-		checks = collectValidateChecks(path)
+	if opts.fix.enabled {
+		applyValidateFixesWithOptions(path, checks, opts)
+		checks = collectValidateChecksWithOptions(path, opts)
 	}
 
 	overallOK := validateOverallOK(checks)
 
 	// JSON output
-	if jsonOutput {
-		result := struct {
-			Path      string        `json:"path"`
-			Checks    []doctorCheck `json:"checks"`
-			OverallOK bool          `json:"overall_ok"`
-		}{
-			Path:      path,
-			OverallOK: overallOK,
-		}
-		for _, cr := range checks {
-			result.Checks = append(result.Checks, cr.check)
-		}
-		if err := outputJSON(result); err != nil {
+	if isJSONOutput() {
+		if err := outputValidateJSON(path, checks, overallOK); err != nil {
 			return overallOK, err
 		}
 		return overallOK, nil
@@ -60,14 +57,8 @@ func runValidateCheckInner(path string) (bool, error) {
 	// Human-readable output
 	printValidateChecks(checks)
 
-	if !doctorFix && !overallOK {
-		// Suggest --fix if there are fixable issues
-		for _, cr := range checks {
-			if cr.fixable && cr.check.Status != statusOK {
-				fmt.Printf("\n%s\n", ui.RenderMuted("Tip: Use 'bd doctor --check=validate --fix' to auto-repair fixable issues"))
-				break
-			}
-		}
+	if !opts.fix.enabled && !overallOK {
+		printValidateFixTip(checks)
 	}
 
 	if overallOK {
@@ -78,11 +69,39 @@ func runValidateCheckInner(path string) (bool, error) {
 	return overallOK, nil
 }
 
+func outputValidateJSON(path string, checks []validateCheckResult, overallOK bool) error {
+	result := struct {
+		Path      string        `json:"path"`
+		Checks    []doctorCheck `json:"checks"`
+		OverallOK bool          `json:"overall_ok"`
+	}{
+		Path:      path,
+		OverallOK: overallOK,
+	}
+	for _, cr := range checks {
+		result.Checks = append(result.Checks, cr.check)
+	}
+	return outputJSON(result)
+}
+
+func printValidateFixTip(checks []validateCheckResult) {
+	for _, cr := range checks {
+		if cr.fixable && cr.check.Status != statusOK {
+			fmt.Printf("\n%s\n", ui.RenderMuted("Tip: Use 'bd doctor --check=validate --fix' to auto-repair fixable issues"))
+			return
+		}
+	}
+}
+
 // collectValidateChecks runs the data-integrity checks.
 func collectValidateChecks(path string) []validateCheckResult {
+	return collectValidateChecksWithOptions(path, defaultDoctorOptions())
+}
+
+func collectValidateChecksWithOptions(path string, opts doctorOptions) []validateCheckResult {
 	return []validateCheckResult{
 		{check: convertDoctorCheck(doctor.CheckCrossTableDuplicates(path)), fixable: true},
-		{check: convertDoctorCheck(doctor.CheckDuplicateIssues(path, doctorOrchestrator, orchestratorDuplicatesThreshold))},
+		{check: convertDoctorCheck(doctor.CheckDuplicateIssues(path, opts.mode.orchestrator, opts.mode.duplicatesLimit))},
 		{check: convertDoctorCheck(doctor.CheckOrphanedDependencies(path)), fixable: true},
 		{check: convertDoctorCheck(doctor.CheckTestPollution(path))},
 		{check: convertDoctorCheck(doctor.CheckGitConflicts(path))},
@@ -123,7 +142,7 @@ func printValidateChecks(checks []validateCheckResult) {
 		}
 		fmt.Println()
 		if cr.check.Detail != "" {
-			fmt.Printf("     %s%s\n", ui.MutedStyle.Render(ui.TreeLast), ui.RenderMuted(cr.check.Detail))
+			fmt.Printf("     %s%s\n", ui.MutedStyle().Render(ui.TreeLast), ui.RenderMuted(cr.check.Detail))
 		}
 	}
 
@@ -140,46 +159,57 @@ func printValidateChecks(checks []validateCheckResult) {
 // Reuses doctor's applyFixList for dispatch (doctor_fix.go), which already
 // handles the "Orphaned Dependencies" case and any future fixable checks.
 func applyValidateFixes(path string, checks []validateCheckResult) {
-	var fixable []doctorCheck
-	for _, cr := range checks {
-		if cr.fixable && cr.check.Status != statusOK {
-			fixable = append(fixable, cr.check)
-		}
-	}
+	applyValidateFixesWithOptions(path, checks, defaultDoctorOptions())
+}
+
+func applyValidateFixesWithOptions(path string, checks []validateCheckResult, opts doctorOptions) {
+	fixable := collectValidateFixableChecks(checks)
 
 	if len(fixable) == 0 {
 		return
 	}
 
 	// Confirm unless --yes (matching doctor's applyFixes pattern)
-	if !doctorYes {
-		// Detect non-interactive stdin (e.g., piped input in CI/automation)
-		isInteractive := term.IsTerminal(int(os.Stdin.Fd()))
-		if !isInteractive {
-			// In non-interactive mode without --yes, skip with helpful message
-			fmt.Fprintf(os.Stderr, "\n%s Running in non-interactive mode\n", ui.RenderWarn("⚠"))
-			fmt.Fprintf(os.Stderr, "  To auto-fix issues without prompting, use: %s\n\n", ui.RenderAccent("bd doctor --validate --yes"))
-			return
-		}
-
-		fmt.Println("\nFixable issues:")
-		for i, check := range fixable {
-			fmt.Printf("  %d. %s: %s\n", i+1, check.Name, check.Message)
-		}
-		fmt.Printf("\nThis will attempt to fix %d issue(s). Continue? (Y/n): ", len(fixable))
-		reader := bufio.NewReader(os.Stdin)
-		response, err := reader.ReadString('\n')
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
-			return
-		}
-		response = strings.TrimSpace(strings.ToLower(response))
-		if response != "" && response != "y" && response != "yes" {
-			fmt.Println("Fix canceled.")
-			return
-		}
+	if !opts.fix.yes && !confirmValidateFixes(fixable) {
+		return
 	}
 
 	fmt.Println("\nApplying fixes...")
-	applyFixList(path, fixable)
+	applyFixListWithOptions(path, fixable, opts)
+}
+
+func collectValidateFixableChecks(checks []validateCheckResult) []doctorCheck {
+	var fixable []doctorCheck
+	for _, cr := range checks {
+		if cr.fixable && cr.check.Status != statusOK {
+			fixable = append(fixable, cr.check)
+		}
+	}
+	return fixable
+}
+
+func confirmValidateFixes(fixable []doctorCheck) bool {
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		fmt.Fprintf(os.Stderr, "\n%s Running in non-interactive mode\n", ui.RenderWarn("⚠"))
+		fmt.Fprintf(os.Stderr, "  To auto-fix issues without prompting, use: %s\n\n", ui.RenderAccent("bd doctor --validate --yes"))
+		return false
+	}
+
+	fmt.Println("\nFixable issues:")
+	for i, check := range fixable {
+		fmt.Printf("  %d. %s: %s\n", i+1, check.Name, check.Message)
+	}
+	fmt.Printf("\nThis will attempt to fix %d issue(s). Continue? (Y/n): ", len(fixable))
+	reader := bufio.NewReader(os.Stdin)
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
+		return false
+	}
+	response = strings.TrimSpace(strings.ToLower(response))
+	if response != "" && response != "y" && response != "yes" {
+		fmt.Println("Fix canceled.")
+		return false
+	}
+	return true
 }

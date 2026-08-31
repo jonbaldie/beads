@@ -55,86 +55,100 @@ EXAMPLES:
 	RunE:    runMigratePersonal,
 }
 
-var migratePersonalYes bool
-
 func init() {
-	migratePersonalCmd.Flags().BoolVarP(&migratePersonalYes, "yes", "y", false, "Skip confirmation prompt")
+	migratePersonalCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt")
 	rootCmd.AddCommand(migratePersonalCmd)
 }
 
-func runMigratePersonal(cmd *cobra.Command, args []string) error {
+func runMigratePersonal(cmd *cobra.Command, _ []string) error {
 	if usesProxiedServer() {
 		return HandleErrorRespectJSON("migrate-personal is not supported in proxied-server mode")
 	}
-	ctx := rootCtx
-
+	ctx := getRootContext()
 	identity := getActorWithGit()
-
-	// Find personal issues in project DB
-	filter := types.IssueFilter{Limit: 0}
-	allIssues, err := store.SearchIssues(ctx, "", filter)
+	personal, err := collectPersonalIssues(ctx, identity)
 	if err != nil {
-		return fmt.Errorf("failed to search issues: %w", err)
+		return err
 	}
+	if len(personal) == 0 {
+		fmt.Printf("Nothing to migrate — no issues in the project database were created by %s\n", ui.RenderAccent(identity))
+		return nil
+	}
+	printPersonalIssues(personal, identity)
+	planningPath, planningBeadsDir, err := resolvePlanningRepo(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Move to planning repo: %s\n\n", ui.RenderAccent(planningPath))
+	yes, _ := cmd.Flags().GetBool("yes")
+	if !confirmMigratePersonal(ctx, len(personal), yes) {
+		return nil
+	}
+	return migratePersonalIssues(ctx, identity, personal, planningPath, planningBeadsDir)
+}
 
+func collectPersonalIssues(ctx context.Context, identity string) ([]*types.Issue, error) {
+	allIssues, err := getStore().SearchIssues(ctx, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 0}})
+	if err != nil {
+		return nil, fmt.Errorf("failed to search issues: %w", err)
+	}
 	var personal []*types.Issue
 	for _, issue := range allIssues {
 		if issue.CreatedBy == identity {
 			personal = append(personal, issue)
 		}
 	}
+	return personal, nil
+}
 
-	if len(personal) == 0 {
-		fmt.Printf("Nothing to migrate — no issues in the project database were created by %s\n", ui.RenderAccent(identity))
-		return nil
-	}
-
-	// Show list
+func printPersonalIssues(personal []*types.Issue, identity string) {
 	fmt.Printf("\n%s personal issues created by %s found in project database:\n\n",
 		ui.RenderBold(fmt.Sprintf("%d", len(personal))), ui.RenderAccent(identity))
 	for _, issue := range personal {
 		fmt.Printf("  %s  %s\n", ui.RenderAccent(issue.ID), issue.Title)
 	}
 	fmt.Println()
+}
 
-	// Get planning repo path
-	planningRaw := getRoutingConfigValue(ctx, store, "routing.contributor")
+func resolvePlanningRepo(ctx context.Context) (string, string, error) {
+	planningRaw := getRoutingConfigValue(ctx, getStore(), "routing.contributor")
 	if planningRaw == "" {
-		// Backward compat
-		planningRaw = getRoutingConfigValue(ctx, store, "contributor.planning_repo")
+		planningRaw = getRoutingConfigValue(ctx, getStore(), "contributor.planning_repo")
 	}
 	if planningRaw == "" {
-		return fmt.Errorf("no planning repository configured; run 'bd init --contributor' or 'bd init' in a fork repo first")
+		return "", "", fmt.Errorf("no planning repository configured; run 'bd init --contributor' or 'bd init' in a fork repo first")
 	}
 	planningPath := routing.ExpandPath(planningRaw)
-
-	// Validate planning DB path before any destructive operation
 	planningBeadsDir := filepath.Join(planningPath, ".beads")
 	if _, err := os.Stat(planningBeadsDir); os.IsNotExist(err) {
-		return fmt.Errorf("planning repo at %s has no .beads directory; initialize it first with 'bd init'", planningPath)
+		return "", "", fmt.Errorf("planning repo at %s has no .beads directory; initialize it first with 'bd init'", planningPath)
 	}
+	return planningPath, planningBeadsDir, nil
+}
 
-	fmt.Printf("Move to planning repo: %s\n\n", ui.RenderAccent(planningPath))
-
-	// Prompt for confirmation
-	if !migratePersonalYes {
-		fmt.Printf("Move %d issues? [Y/n]: ", len(personal))
-		reader := bufio.NewReader(os.Stdin)
-		response, err := readLineWithContext(ctx, reader, os.Stdin)
-		if err != nil {
-			if isCanceled(err) {
-				fmt.Fprintln(os.Stderr, "Aborted.")
-				return nil
-			}
-			response = ""
-		}
-		response = strings.TrimSpace(strings.ToLower(response))
-		if response == "n" || response == "no" {
-			fmt.Println("Aborted — no changes made.")
-			return nil
-		}
+func confirmMigratePersonal(ctx context.Context, count int, yes bool) bool {
+	if yes {
+		return true
 	}
+	fmt.Printf("Move %d issues? [Y/n]: ", count)
+	reader := bufio.NewReader(os.Stdin)
+	response, err := readLineWithContext(ctx, reader, os.Stdin)
+	if err != nil {
+		if isCanceled(err) {
+			fmt.Fprintln(os.Stderr, "Aborted.")
+			return false
+		}
+		response = ""
+	}
+	response = strings.TrimSpace(strings.ToLower(response))
+	if response == "n" || response == "no" {
+		fmt.Println("Aborted — no changes made.")
+		return false
+	}
+	return true
+}
 
+func migratePersonalIssues(ctx context.Context, identity string, personal []*types.Issue, planningPath, planningBeadsDir string) error {
 	// Open planning store (writable). This is a SECOND workspace's store, and
 	// the copy below creates and deletes real beads in it, so it takes the
 	// planning workspace's own events-journal setting — not the launching
@@ -144,7 +158,29 @@ func runMigratePersonal(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to open planning store at %s: %w", planningPath, err)
 	}
 	defer func() { _ = planningStore.Close() }()
+	if err := copyPersonalIssuesToPlanning(ctx, identity, personal, planningStore); err != nil {
+		return err
+	}
+	ids := make([]string, len(personal))
+	for i, issue := range personal {
+		ids[i] = issue.ID
+	}
+	// Phase 2: Delete all from project DB in a single transaction. The planning
+	// copy is complete at this point. If the delete fails, the planning repo
+	// already holds the good copy and the project DB is untouched, so we tell
+	// the user to resolve the duplicate rather than silently losing data.
+	if _, err := getStore().DeleteIssues(ctx, ids, false, false, false); err != nil {
+		return fmt.Errorf("issues copied to planning repo %s but deleting them from the project DB failed; resolve the duplicate manually: %w", planningPath, err)
+	}
+	fmt.Printf("\n%s Moved %d %s to %s\n",
+		ui.RenderPass("✓"),
+		len(personal),
+		pluralIssue(len(personal)),
+		ui.RenderAccent(planningPath))
+	return nil
+}
 
+func copyPersonalIssuesToPlanning(ctx context.Context, identity string, personal []*types.Issue, planningStore storage.DoltStorage) error {
 	// Phase 1: Copy everything to the planning DB before touching the project
 	// DB. The copy is all-or-error — any failed step rolls back the planning-DB
 	// rows we created and aborts without deleting anything from the project DB,
@@ -166,32 +202,12 @@ func runMigratePersonal(cmd *cobra.Command, args []string) error {
 		}
 		created = append(created, issue.ID)
 	}
-
-	// Phase 1b: copy labels, dependency records, and comments for every issue.
 	for _, issue := range personal {
-		if err := copyIssueRelations(ctx, store, planningStore, issue, identity); err != nil {
+		if err := copyIssueRelations(ctx, getStore(), planningStore, issue, identity); err != nil {
 			rollback()
 			return fmt.Errorf("failed to copy %s to planning DB: %w", issue.ID, err)
 		}
 	}
-
-	// Phase 2: Delete all from project DB in a single transaction. The planning
-	// copy is complete at this point. If the delete fails, the planning repo
-	// already holds the good copy and the project DB is untouched, so we tell
-	// the user to resolve the duplicate rather than silently losing data.
-	ids := make([]string, len(personal))
-	for i, issue := range personal {
-		ids[i] = issue.ID
-	}
-	if _, err := store.DeleteIssues(ctx, ids, false, false, false); err != nil {
-		return fmt.Errorf("issues copied to planning repo %s but deleting them from the project DB failed; resolve the duplicate manually: %w", planningPath, err)
-	}
-
-	fmt.Printf("\n%s Moved %d %s to %s\n",
-		ui.RenderPass("✓"),
-		len(personal),
-		pluralIssue(len(personal)),
-		ui.RenderAccent(planningPath))
 	return nil
 }
 
@@ -202,40 +218,55 @@ func runMigratePersonal(cmd *cobra.Command, args []string) error {
 // source data is deleted; a partial copy must never be mistaken for success
 // (maphew review, be-e2nb).
 func copyIssueRelations(ctx context.Context, src, dst storage.DoltStorage, issue *types.Issue, actor string) error {
-	labels, err := src.GetLabels(ctx, issue.ID)
+	if err := copyIssueLabels(ctx, src, dst, issue.ID, actor); err != nil {
+		return err
+	}
+	if err := copyIssueDependencies(ctx, src, dst, issue.ID, actor); err != nil {
+		return err
+	}
+	return copyIssueComments(ctx, src, dst, issue.ID)
+}
+
+func copyIssueLabels(ctx context.Context, src, dst storage.DoltStorage, id, actor string) error {
+	labels, err := src.GetLabels(ctx, id)
 	if err != nil {
-		return fmt.Errorf("read labels for %s: %w", issue.ID, err)
+		return fmt.Errorf("read labels for %s: %w", id, err)
 	}
 	for _, label := range labels {
-		if err := dst.AddLabel(ctx, issue.ID, label, actor); err != nil {
-			return fmt.Errorf("copy label %q for %s: %w", label, issue.ID, err)
+		if err := dst.AddLabel(ctx, id, label, actor); err != nil {
+			return fmt.Errorf("copy label %q for %s: %w", label, id, err)
 		}
 	}
+	return nil
+}
 
-	deps, err := src.GetDependencyRecords(ctx, issue.ID)
+func copyIssueDependencies(ctx context.Context, src, dst storage.DoltStorage, id, actor string) error {
+	deps, err := src.GetDependencyRecords(ctx, id)
 	if err != nil {
-		return fmt.Errorf("read dependencies for %s: %w", issue.ID, err)
+		return fmt.Errorf("read dependencies for %s: %w", id, err)
 	}
 	for _, dep := range deps {
 		if err := dst.AddDependency(ctx, dep, actor); err != nil {
 			return fmt.Errorf("copy dependency %s→%s: %w", dep.IssueID, dep.DependsOnID, err)
 		}
 	}
+	return nil
+}
 
-	comments, err := src.GetIssueComments(ctx, issue.ID)
+func copyIssueComments(ctx context.Context, src, dst storage.DoltStorage, id string) error {
+	comments, err := src.GetIssueComments(ctx, id)
 	if err != nil {
-		return fmt.Errorf("read comments for %s: %w", issue.ID, err)
+		return fmt.Errorf("read comments for %s: %w", id, err)
 	}
 	for _, c := range comments {
 		// ImportIssueComment writes a structured comment row preserving the
 		// original author and created_at. AddComment would instead record an
 		// event-style entry that GetIssueComments never returns, silently
 		// dropping the comment from the migrated issue (maphew review, be-e2nb).
-		if _, err := dst.ImportIssueComment(ctx, issue.ID, c.Author, c.Text, c.CreatedAt); err != nil {
-			return fmt.Errorf("copy comment for %s: %w", issue.ID, err)
+		if _, err := dst.ImportIssueComment(ctx, id, c.Author, c.Text, c.CreatedAt); err != nil {
+			return fmt.Errorf("copy comment for %s: %w", id, err)
 		}
 	}
-
 	return nil
 }
 

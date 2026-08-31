@@ -188,7 +188,7 @@ func TestImportChunkedNoReadyWindowAtAnyFreezePoint(t *testing.T) {
 	if totalCalls < 2 {
 		t.Fatalf("totalCalls = %d, want a chunked import", totalCalls)
 	}
-	ready, err := full.GetReadyWork(ctx, types.WorkFilter{Limit: 50})
+	ready, err := full.GetReadyWork(ctx, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Limit: 50}})
 	if err != nil {
 		t.Fatalf("GetReadyWork: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestImportChunkedNoReadyWindowAtAnyFreezePoint(t *testing.T) {
 		if len(deps) == 0 {
 			t.Fatalf("freeze point %d: bd-chunk01 committed without its blocking edge — ready window", failAt)
 		}
-		ready, err := store.GetReadyWork(ctx, types.WorkFilter{Limit: 50})
+		ready, err := store.GetReadyWork(ctx, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Limit: 50}})
 		if err != nil {
 			t.Fatalf("freeze point %d: GetReadyWork: %v", failAt, err)
 		}
@@ -273,7 +273,7 @@ func TestImportChunkedNoReadyWindowWithReadinessEdgeIntoCycle(t *testing.T) {
 	if len(deps) != 1 || deps[0].ID != "bd-chunk11" {
 		t.Fatalf("bd-chunk01 must be blocked by bd-chunk11 after import, got %#v", deps)
 	}
-	ready, err := full.GetReadyWork(ctx, types.WorkFilter{Limit: 50})
+	ready, err := full.GetReadyWork(ctx, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Limit: 50}})
 	if err != nil {
 		t.Fatalf("GetReadyWork: %v", err)
 	}
@@ -302,7 +302,7 @@ func TestImportChunkedNoReadyWindowWithReadinessEdgeIntoCycle(t *testing.T) {
 		if len(deps) == 0 {
 			t.Fatalf("freeze point %d: bd-chunk01 committed without its blocking edge into the cycle — ready window", failAt)
 		}
-		ready, err := store.GetReadyWork(ctx, types.WorkFilter{Limit: 50})
+		ready, err := store.GetReadyWork(ctx, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Limit: 50}})
 		if err != nil {
 			t.Fatalf("freeze point %d: GetReadyWork: %v", failAt, err)
 		}
@@ -363,7 +363,7 @@ func TestImportChunkedWaitsForChildImportedLaterStaysBlocked(t *testing.T) {
 
 	// The waiter must NOT be ready: its spawner bd-chunk02 has an open child
 	// bd-chunk06, so the waits-for gate keeps bd-chunk01 blocked.
-	ready, err := full.GetReadyWork(ctx, types.WorkFilter{Limit: 50})
+	ready, err := full.GetReadyWork(ctx, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Limit: 50}})
 	if err != nil {
 		t.Fatalf("GetReadyWork: %v", err)
 	}
@@ -528,7 +528,7 @@ func TestImportChunkedStaleRejectedRowKeepsDeferredDepsOut(t *testing.T) {
 
 	// Seed bd-chunk01 with an OLDER snapshot so the incoming row passes the
 	// pre-filter (incoming strictly newer than local at read time).
-	seed := &types.Issue{ID: "bd-chunk01", Title: "seeded", UpdatedAt: base.Add(-time.Hour)}
+	seed := &types.Issue{IssueID: types.IssueID{ID: "bd-chunk01"}, IssueContent: types.IssueContent{Title: "seeded"}, IssueTimes: types.IssueTimes{UpdatedAt: base.Add(-time.Hour)}}
 	seed.SetDefaults()
 	if _, err := importIssuesCore(ctx, "", store, []*types.Issue{seed}, ImportOptions{SkipPrefixValidation: true}); err != nil {
 		t.Fatalf("seed import: %v", err)
@@ -589,7 +589,7 @@ func TestImportChunkedMixedRegularWispCrossBucketFiltering(t *testing.T) {
 
 	base := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	mk := func(id string, wisp bool) *types.Issue {
-		iss := &types.Issue{ID: id, Title: id, UpdatedAt: base, Ephemeral: wisp}
+		iss := &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueTimes: types.IssueTimes{UpdatedAt: base}, IssueWisp: types.IssueWisp{Ephemeral: wisp}}
 		iss.SetDefaults()
 		return iss
 	}

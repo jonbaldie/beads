@@ -62,11 +62,17 @@ func TestMissingJSONLIssueIDsInStore_IgnoresCompactedWisp(t *testing.T) {
 	ctx := context.Background()
 
 	persistent := &types.Issue{
-		ID:        "test-persist-1",
-		Title:     "Persistent issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-persist-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Persistent issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := inner.CreateIssue(ctx, persistent, "test-user"); err != nil {
 		t.Fatalf("seed persistent issue: %v", err)

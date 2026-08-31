@@ -115,9 +115,15 @@ func TestRenderNodeBox(t *testing.T) {
 			name: "open status",
 			node: &GraphNode{
 				Issue: &types.Issue{
-					ID:     "test-1",
-					Title:  "Test Issue",
-					Status: types.StatusOpen,
+					IssueID: types.IssueID{
+						ID: "test-1",
+					},
+					IssueContent: types.IssueContent{
+						Title: "Test Issue",
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Status: types.StatusOpen,
+					},
 				},
 			},
 			width:    20,
@@ -127,9 +133,15 @@ func TestRenderNodeBox(t *testing.T) {
 			name: "in progress status",
 			node: &GraphNode{
 				Issue: &types.Issue{
-					ID:     "test-2",
-					Title:  "In Progress Issue",
-					Status: types.StatusInProgress,
+					IssueID: types.IssueID{
+						ID: "test-2",
+					},
+					IssueContent: types.IssueContent{
+						Title: "In Progress Issue",
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Status: types.StatusInProgress,
+					},
 				},
 			},
 			width:    25,
@@ -139,9 +151,15 @@ func TestRenderNodeBox(t *testing.T) {
 			name: "blocked status",
 			node: &GraphNode{
 				Issue: &types.Issue{
-					ID:     "test-3",
-					Title:  "Blocked Issue",
-					Status: types.StatusBlocked,
+					IssueID: types.IssueID{
+						ID: "test-3",
+					},
+					IssueContent: types.IssueContent{
+						Title: "Blocked Issue",
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Status: types.StatusBlocked,
+					},
 				},
 			},
 			width:    20,
@@ -151,9 +169,15 @@ func TestRenderNodeBox(t *testing.T) {
 			name: "closed status",
 			node: &GraphNode{
 				Issue: &types.Issue{
-					ID:     "test-4",
-					Title:  "Closed Issue",
-					Status: types.StatusClosed,
+					IssueID: types.IssueID{
+						ID: "test-4",
+					},
+					IssueContent: types.IssueContent{
+						Title: "Closed Issue",
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Status: types.StatusClosed,
+					},
 				},
 			},
 			width:    20,
@@ -163,9 +187,15 @@ func TestRenderNodeBox(t *testing.T) {
 			name: "unknown status",
 			node: &GraphNode{
 				Issue: &types.Issue{
-					ID:     "test-5",
-					Title:  "Unknown Status",
-					Status: "unknown",
+					IssueID: types.IssueID{
+						ID: "test-5",
+					},
+					IssueContent: types.IssueContent{
+						Title: "Unknown Status",
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Status: "unknown",
+					},
 				},
 			},
 			width:    20,
@@ -214,7 +244,7 @@ func TestComputeDependencyCounts(t *testing.T) {
 
 	t.Run("empty subgraph", func(t *testing.T) {
 		subgraph := &TemplateSubgraph{
-			Root:         &types.Issue{ID: "root-1"},
+			Root:         &types.Issue{IssueID: types.IssueID{ID: "root-1"}},
 			Issues:       []*types.Issue{},
 			Dependencies: []*types.Dependency{},
 			IssueMap:     make(map[string]*types.Issue),
@@ -230,7 +260,7 @@ func TestComputeDependencyCounts(t *testing.T) {
 
 	t.Run("single blocking dependency", func(t *testing.T) {
 		subgraph := &TemplateSubgraph{
-			Root: &types.Issue{ID: "root-1"},
+			Root: &types.Issue{IssueID: types.IssueID{ID: "root-1"}},
 			Dependencies: []*types.Dependency{
 				{IssueID: "issue-2", DependsOnID: "issue-1", Type: types.DepBlocks},
 			},
@@ -246,7 +276,7 @@ func TestComputeDependencyCounts(t *testing.T) {
 
 	t.Run("multiple dependencies", func(t *testing.T) {
 		subgraph := &TemplateSubgraph{
-			Root: &types.Issue{ID: "root-1"},
+			Root: &types.Issue{IssueID: types.IssueID{ID: "root-1"}},
 			Dependencies: []*types.Dependency{
 				{IssueID: "issue-2", DependsOnID: "issue-1", Type: types.DepBlocks},
 				{IssueID: "issue-3", DependsOnID: "issue-1", Type: types.DepBlocks},
@@ -270,7 +300,7 @@ func TestComputeDependencyCounts(t *testing.T) {
 
 	t.Run("ignores non-blocks dependencies", func(t *testing.T) {
 		subgraph := &TemplateSubgraph{
-			Root: &types.Issue{ID: "root-1"},
+			Root: &types.Issue{IssueID: types.IssueID{ID: "root-1"}},
 			Dependencies: []*types.Dependency{
 				{IssueID: "issue-2", DependsOnID: "issue-1", Type: types.DepParentChild},
 				{IssueID: "issue-3", DependsOnID: "issue-1", Type: types.DepRelatesTo},
@@ -298,7 +328,7 @@ func TestRenderNodeBoxWithDeps(t *testing.T) {
 		{
 			name: "no dependencies",
 			node: &GraphNode{
-				Issue: &types.Issue{ID: "test-1", Title: "Test", Status: types.StatusOpen},
+				Issue: &types.Issue{IssueID: types.IssueID{ID: "test-1"}, IssueContent: types.IssueContent{Title: "Test"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			},
 			width:          20,
 			blocksCount:    0,
@@ -308,7 +338,7 @@ func TestRenderNodeBoxWithDeps(t *testing.T) {
 		{
 			name: "with blocks count",
 			node: &GraphNode{
-				Issue: &types.Issue{ID: "test-2", Title: "Blocker", Status: types.StatusOpen},
+				Issue: &types.Issue{IssueID: types.IssueID{ID: "test-2"}, IssueContent: types.IssueContent{Title: "Blocker"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			},
 			width:          20,
 			blocksCount:    3,
@@ -318,7 +348,7 @@ func TestRenderNodeBoxWithDeps(t *testing.T) {
 		{
 			name: "with needs count",
 			node: &GraphNode{
-				Issue: &types.Issue{ID: "test-3", Title: "Blocked", Status: types.StatusBlocked},
+				Issue: &types.Issue{IssueID: types.IssueID{ID: "test-3"}, IssueContent: types.IssueContent{Title: "Blocked"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusBlocked}},
 			},
 			width:          20,
 			blocksCount:    0,
@@ -328,7 +358,7 @@ func TestRenderNodeBoxWithDeps(t *testing.T) {
 		{
 			name: "with both counts",
 			node: &GraphNode{
-				Issue: &types.Issue{ID: "test-4", Title: "Middle", Status: types.StatusInProgress},
+				Issue: &types.Issue{IssueID: types.IssueID{ID: "test-4"}, IssueContent: types.IssueContent{Title: "Middle"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress}},
 			},
 			width:          25,
 			blocksCount:    1,
@@ -352,7 +382,7 @@ func TestRenderNodeBoxWithDeps(t *testing.T) {
 func TestComputeLayout(t *testing.T) {
 	t.Run("empty subgraph", func(t *testing.T) {
 		subgraph := &TemplateSubgraph{
-			Root:         &types.Issue{ID: "root-1", Title: "Root"},
+			Root:         &types.Issue{IssueID: types.IssueID{ID: "root-1"}, IssueContent: types.IssueContent{Title: "Root"}},
 			Issues:       []*types.Issue{},
 			Dependencies: []*types.Dependency{},
 			IssueMap:     make(map[string]*types.Issue),
@@ -367,7 +397,7 @@ func TestComputeLayout(t *testing.T) {
 	})
 
 	t.Run("single issue", func(t *testing.T) {
-		issue := &types.Issue{ID: "test-1", Title: "Test Issue"}
+		issue := &types.Issue{IssueID: types.IssueID{ID: "test-1"}, IssueContent: types.IssueContent{Title: "Test Issue"}}
 		subgraph := &TemplateSubgraph{
 			Root:         issue,
 			Issues:       []*types.Issue{issue},
@@ -384,8 +414,8 @@ func TestComputeLayout(t *testing.T) {
 	})
 
 	t.Run("with dependencies", func(t *testing.T) {
-		issue1 := &types.Issue{ID: "test-1", Title: "First"}
-		issue2 := &types.Issue{ID: "test-2", Title: "Second"}
+		issue1 := &types.Issue{IssueID: types.IssueID{ID: "test-1"}, IssueContent: types.IssueContent{Title: "First"}}
+		issue2 := &types.Issue{IssueID: types.IssueID{ID: "test-2"}, IssueContent: types.IssueContent{Title: "Second"}}
 		dep := &types.Dependency{
 			IssueID:     "test-2",
 			DependsOnID: "test-1",
@@ -414,10 +444,10 @@ func TestComputeLayout(t *testing.T) {
 	t.Run("children lifted to parent layer (GH#1748)", func(t *testing.T) {
 		// Scenario: epic is blocked by a blocker (layer 1),
 		// children have no blocking deps but should be in the same layer as parent.
-		blocker := &types.Issue{ID: "blocker-1", Title: "Blocker issue"}
-		epic := &types.Issue{ID: "epic-1", Title: "My Epic", IssueType: "epic"}
-		child1 := &types.Issue{ID: "child-1", Title: "Task A"}
-		child2 := &types.Issue{ID: "child-2", Title: "Task B"}
+		blocker := &types.Issue{IssueID: types.IssueID{ID: "blocker-1"}, IssueContent: types.IssueContent{Title: "Blocker issue"}}
+		epic := &types.Issue{IssueID: types.IssueID{ID: "epic-1"}, IssueContent: types.IssueContent{Title: "My Epic"}, IssueWorkflow: types.IssueWorkflow{IssueType: "epic"}}
+		child1 := &types.Issue{IssueID: types.IssueID{ID: "child-1"}, IssueContent: types.IssueContent{Title: "Task A"}}
+		child2 := &types.Issue{IssueID: types.IssueID{ID: "child-2"}, IssueContent: types.IssueContent{Title: "Task B"}}
 		subgraph := &TemplateSubgraph{
 			Root:   blocker,
 			Issues: []*types.Issue{blocker, epic, child1, child2},
@@ -452,9 +482,9 @@ func TestComputeLayout(t *testing.T) {
 	t.Run("child with own blocker stays in higher layer", func(t *testing.T) {
 		// If a child has its own blocking dep putting it higher than the parent,
 		// keep the child's higher layer.
-		blocker := &types.Issue{ID: "blocker-1", Title: "Blocker"}
-		epic := &types.Issue{ID: "epic-1", Title: "Epic", IssueType: "epic"}
-		child := &types.Issue{ID: "child-1", Title: "Child"}
+		blocker := &types.Issue{IssueID: types.IssueID{ID: "blocker-1"}, IssueContent: types.IssueContent{Title: "Blocker"}}
+		epic := &types.Issue{IssueID: types.IssueID{ID: "epic-1"}, IssueContent: types.IssueContent{Title: "Epic"}, IssueWorkflow: types.IssueWorkflow{IssueType: "epic"}}
+		child := &types.Issue{IssueID: types.IssueID{ID: "child-1"}, IssueContent: types.IssueContent{Title: "Child"}}
 		subgraph := &TemplateSubgraph{
 			Root:   blocker,
 			Issues: []*types.Issue{blocker, epic, child},
@@ -478,9 +508,9 @@ func TestComputeLayout(t *testing.T) {
 	t.Run("nil root does not panic", func(t *testing.T) {
 		subgraph := &TemplateSubgraph{
 			Root:         nil,
-			Issues:       []*types.Issue{{ID: "orphan-1", Title: "Orphan"}},
+			Issues:       []*types.Issue{{IssueID: types.IssueID{ID: "orphan-1"}, IssueContent: types.IssueContent{Title: "Orphan"}}},
 			Dependencies: []*types.Dependency{},
-			IssueMap:     map[string]*types.Issue{"orphan-1": {ID: "orphan-1", Title: "Orphan"}},
+			IssueMap:     map[string]*types.Issue{"orphan-1": {IssueID: types.IssueID{ID: "orphan-1"}, IssueContent: types.IssueContent{Title: "Orphan"}}},
 		}
 		layout := computeLayout(subgraph)
 		if layout == nil {
@@ -504,10 +534,10 @@ func TestFilterSubgraphOpen(t *testing.T) {
 
 	t.Run("all closed returns nil", func(t *testing.T) {
 		sg := &TemplateSubgraph{
-			Root:   &types.Issue{ID: "a", Status: types.StatusClosed},
-			Issues: []*types.Issue{{ID: "a", Status: types.StatusClosed}},
+			Root:   &types.Issue{IssueID: types.IssueID{ID: "a"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}},
+			Issues: []*types.Issue{{IssueID: types.IssueID{ID: "a"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}}},
 			IssueMap: map[string]*types.Issue{
-				"a": {ID: "a", Status: types.StatusClosed},
+				"a": {IssueID: types.IssueID{ID: "a"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}},
 			},
 		}
 		if filterSubgraphOpen(sg) != nil {
@@ -516,8 +546,8 @@ func TestFilterSubgraphOpen(t *testing.T) {
 	})
 
 	t.Run("removes closed issues", func(t *testing.T) {
-		open := &types.Issue{ID: "open-1", Title: "Open", Status: types.StatusOpen, Priority: 1}
-		closed := &types.Issue{ID: "closed-1", Title: "Closed", Status: types.StatusClosed, Priority: 0}
+		open := &types.Issue{IssueID: types.IssueID{ID: "open-1"}, IssueContent: types.IssueContent{Title: "Open"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1}}
+		closed := &types.Issue{IssueID: types.IssueID{ID: "closed-1"}, IssueContent: types.IssueContent{Title: "Closed"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed, Priority: 0}}
 		sg := &TemplateSubgraph{
 			Root:   open,
 			Issues: []*types.Issue{open, closed},
@@ -538,8 +568,8 @@ func TestFilterSubgraphOpen(t *testing.T) {
 	})
 
 	t.Run("removes deferred issues", func(t *testing.T) {
-		open := &types.Issue{ID: "open-1", Title: "Open", Status: types.StatusOpen, Priority: 1}
-		deferred := &types.Issue{ID: "def-1", Title: "Deferred", Status: types.StatusDeferred, Priority: 2}
+		open := &types.Issue{IssueID: types.IssueID{ID: "open-1"}, IssueContent: types.IssueContent{Title: "Open"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1}}
+		deferred := &types.Issue{IssueID: types.IssueID{ID: "def-1"}, IssueContent: types.IssueContent{Title: "Deferred"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusDeferred, Priority: 2}}
 		sg := &TemplateSubgraph{
 			Root:   open,
 			Issues: []*types.Issue{open, deferred},
@@ -555,9 +585,9 @@ func TestFilterSubgraphOpen(t *testing.T) {
 
 	t.Run("transitive closure through closed node", func(t *testing.T) {
 		// A(open) blocks B(closed) blocks C(open) → synthetic A blocks C
-		a := &types.Issue{ID: "a", Title: "A", Status: types.StatusOpen, Priority: 1}
-		b := &types.Issue{ID: "b", Title: "B", Status: types.StatusClosed, Priority: 2}
-		c := &types.Issue{ID: "c", Title: "C", Status: types.StatusOpen, Priority: 2}
+		a := &types.Issue{IssueID: types.IssueID{ID: "a"}, IssueContent: types.IssueContent{Title: "A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1}}
+		b := &types.Issue{IssueID: types.IssueID{ID: "b"}, IssueContent: types.IssueContent{Title: "B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed, Priority: 2}}
+		c := &types.Issue{IssueID: types.IssueID{ID: "c"}, IssueContent: types.IssueContent{Title: "C"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2}}
 		sg := &TemplateSubgraph{
 			Root:   a,
 			Issues: []*types.Issue{a, b, c},
@@ -588,8 +618,8 @@ func TestFilterSubgraphOpen(t *testing.T) {
 	})
 
 	t.Run("preserves direct edges between open nodes", func(t *testing.T) {
-		a := &types.Issue{ID: "a", Title: "A", Status: types.StatusOpen, Priority: 1}
-		b := &types.Issue{ID: "b", Title: "B", Status: types.StatusInProgress, Priority: 2}
+		a := &types.Issue{IssueID: types.IssueID{ID: "a"}, IssueContent: types.IssueContent{Title: "A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1}}
+		b := &types.Issue{IssueID: types.IssueID{ID: "b"}, IssueContent: types.IssueContent{Title: "B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress, Priority: 2}}
 		sg := &TemplateSubgraph{
 			Root:   a,
 			Issues: []*types.Issue{a, b},
@@ -605,9 +635,9 @@ func TestFilterSubgraphOpen(t *testing.T) {
 	})
 
 	t.Run("root fallback when root is closed", func(t *testing.T) {
-		root := &types.Issue{ID: "root", Title: "Root", Status: types.StatusClosed, Priority: 0}
-		hi := &types.Issue{ID: "hi", Title: "High", Status: types.StatusOpen, Priority: 1}
-		lo := &types.Issue{ID: "lo", Title: "Low", Status: types.StatusOpen, Priority: 3}
+		root := &types.Issue{IssueID: types.IssueID{ID: "root"}, IssueContent: types.IssueContent{Title: "Root"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed, Priority: 0}}
+		hi := &types.Issue{IssueID: types.IssueID{ID: "hi"}, IssueContent: types.IssueContent{Title: "High"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1}}
+		lo := &types.Issue{IssueID: types.IssueID{ID: "lo"}, IssueContent: types.IssueContent{Title: "Low"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 3}}
 		sg := &TemplateSubgraph{
 			Root:   root,
 			Issues: []*types.Issue{root, hi, lo},
@@ -628,9 +658,9 @@ func TestFilterSubgraphOpen(t *testing.T) {
 	t.Run("no duplicate edges", func(t *testing.T) {
 		// Direct edge a→c exists AND transitive path a→(closed b)→c exists.
 		// Should produce exactly one blocking edge a→c, not two.
-		a := &types.Issue{ID: "a", Title: "A", Status: types.StatusOpen, Priority: 1}
-		b := &types.Issue{ID: "b", Title: "B", Status: types.StatusClosed, Priority: 2}
-		c := &types.Issue{ID: "c", Title: "C", Status: types.StatusOpen, Priority: 2}
+		a := &types.Issue{IssueID: types.IssueID{ID: "a"}, IssueContent: types.IssueContent{Title: "A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1}}
+		b := &types.Issue{IssueID: types.IssueID{ID: "b"}, IssueContent: types.IssueContent{Title: "B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed, Priority: 2}}
+		c := &types.Issue{IssueID: types.IssueID{ID: "c"}, IssueContent: types.IssueContent{Title: "C"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2}}
 		sg := &TemplateSubgraph{
 			Root:   a,
 			Issues: []*types.Issue{a, b, c},
@@ -654,8 +684,8 @@ func TestFilterSubgraphOpen(t *testing.T) {
 	})
 
 	t.Run("preserves non-blocks deps between open nodes", func(t *testing.T) {
-		a := &types.Issue{ID: "a", Title: "A", Status: types.StatusOpen, Priority: 1}
-		b := &types.Issue{ID: "b", Title: "B", Status: types.StatusOpen, Priority: 2}
+		a := &types.Issue{IssueID: types.IssueID{ID: "a"}, IssueContent: types.IssueContent{Title: "A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1}}
+		b := &types.Issue{IssueID: types.IssueID{ID: "b"}, IssueContent: types.IssueContent{Title: "B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2}}
 		sg := &TemplateSubgraph{
 			Root:   a,
 			Issues: []*types.Issue{a, b},

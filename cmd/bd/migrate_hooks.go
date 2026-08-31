@@ -47,7 +47,9 @@ Examples:
 		}
 
 		if mode.RequestedApply {
-			CheckReadonly("migrate hooks")
+			if err := CheckReadonly("migrate hooks"); err != nil {
+				return err
+			}
 		}
 
 		targetPath := "."
@@ -72,13 +74,13 @@ Examples:
 				return HandleErrorRespectJSON("hook migration is blocked:\n- %s", strings.Join(execPlan.BlockingErrors, "\n- "))
 			}
 			if execPlan.operationCount() > 0 {
-				if err := validateHookMigrationApplyConsent(mode.RequestedYes, term.IsTerminal(int(os.Stdin.Fd())), jsonOutput); err != nil {
+				if err := validateHookMigrationApplyConsent(mode.RequestedYes, term.IsTerminal(int(os.Stdin.Fd())), isJSONOutput()); err != nil {
 					return HandleErrorRespectJSON("%v", err)
 				}
 			}
 		}
 
-		if jsonOutput {
+		if isJSONOutput() {
 			if mode.RequestedApply {
 				summary, applied, applyErr := maybeApplyHookMigration(execPlan, mode.RequestedYes)
 				if applyErr != nil {
@@ -162,15 +164,7 @@ func buildHookMigrationJSON(plan doctor.HookMigrationPlan, mode hookMigrationMod
 }
 
 func formatHookMigrationPlan(plan doctor.HookMigrationPlan, mode hookMigrationMode) []string {
-	lines := []string{
-		"Hook migration plan",
-	}
-
-	if mode.RequestedDryRun {
-		lines = append(lines, "Mode: dry-run")
-	} else if mode.RequestedApply {
-		lines = append(lines, "Mode: apply")
-	}
+	lines := formatHookMigrationHeader(mode)
 
 	if !plan.IsGitRepo {
 		lines = append(lines, fmt.Sprintf("Path: %s", plan.Path))
@@ -189,20 +183,38 @@ func formatHookMigrationPlan(plan doctor.HookMigrationPlan, mode hookMigrationMo
 	}
 
 	for _, hook := range plan.Hooks {
-		decision := "no action"
-		if hook.NeedsMigration {
-			decision = "migrate"
-		}
-
-		lines = append(lines, fmt.Sprintf("- %s: %s [%s]", hook.Name, hook.State, decision))
-		if hook.SuggestedAction != "" {
-			lines = append(lines, fmt.Sprintf("  action: %s", hook.SuggestedAction))
-		}
-		if hook.ReadError != "" {
-			lines = append(lines, fmt.Sprintf("  read_error: %s", hook.ReadError))
-		}
+		lines = append(lines, formatHookMigrationHook(hook)...)
 	}
+	return appendHookMigrationNext(lines, plan, mode)
+}
 
+func formatHookMigrationHeader(mode hookMigrationMode) []string {
+	lines := []string{"Hook migration plan"}
+	if mode.RequestedDryRun {
+		return append(lines, "Mode: dry-run")
+	}
+	if mode.RequestedApply {
+		return append(lines, "Mode: apply")
+	}
+	return lines
+}
+
+func formatHookMigrationHook(hook doctor.HookMigrationHookPlan) []string {
+	decision := "no action"
+	if hook.NeedsMigration {
+		decision = "migrate"
+	}
+	lines := []string{fmt.Sprintf("- %s: %s [%s]", hook.Name, hook.State, decision)}
+	if hook.SuggestedAction != "" {
+		lines = append(lines, fmt.Sprintf("  action: %s", hook.SuggestedAction))
+	}
+	if hook.ReadError != "" {
+		lines = append(lines, fmt.Sprintf("  read_error: %s", hook.ReadError))
+	}
+	return lines
+}
+
+func appendHookMigrationNext(lines []string, plan doctor.HookMigrationPlan, mode hookMigrationMode) []string {
 	if plan.NeedsMigrationCount > 0 {
 		if mode.RequestedDryRun {
 			lines = append(lines, "Next: run 'bd migrate hooks --apply' to execute this migration plan.")

@@ -179,11 +179,11 @@ func TestResolveMetricsIgnoresProjectConfigOverride(t *testing.T) {
 // stealth contexts, and must still fire for an ordinary interactive command.
 func TestFirstRunNoticeSuppressedByContext(t *testing.T) {
 	// Save/restore the output-mode globals this decision reads.
-	origJSON, origQuiet, origHookJSON := jsonOutput, quietFlag, primeHookJSONMode
+	origJSON, origQuiet := jsonOutput, quietFlag
 	t.Cleanup(func() {
-		jsonOutput, quietFlag, primeHookJSONMode = origJSON, origQuiet, origHookJSON
+		jsonOutput, quietFlag = origJSON, origQuiet
 	})
-	reset := func() { jsonOutput, quietFlag, primeHookJSONMode = false, false, false }
+	reset := func() { jsonOutput, quietFlag = false, false }
 
 	// Build a command tree rooted at "bd" so topLevelCommandName resolves the
 	// suppressed-subtree names (e.g. `bd hooks run` -> "hooks").
@@ -194,6 +194,9 @@ func TestFirstRunNoticeSuppressedByContext(t *testing.T) {
 		cmds := map[string]*cobra.Command{"root": root}
 		for _, name := range []string{"list", "version", "prime", "codex-hook"} {
 			c := &cobra.Command{Use: name}
+			if name == "list" {
+				c.Flags().Bool("hook-json", false, "")
+			}
 			root.AddCommand(c)
 			cmds[name] = c
 		}
@@ -230,16 +233,17 @@ func TestFirstRunNoticeSuppressedByContext(t *testing.T) {
 
 	for _, mode := range []struct {
 		name string
-		set  func()
+		set  func(*cobra.Command)
 	}{
-		{"json", func() { jsonOutput = true }},
-		{"quiet", func() { quietFlag = true }},
-		{"hook-json", func() { primeHookJSONMode = true }},
+		{"json", func(_ *cobra.Command) { jsonOutput = true }},
+		{"quiet", func(_ *cobra.Command) { quietFlag = true }},
+		{"hook-json", func(cmd *cobra.Command) { _ = cmd.Flags().Set("hook-json", "true") }},
 	} {
 		t.Run(mode.name+" output is suppressed", func(t *testing.T) {
 			reset()
-			mode.set()
-			if !firstRunNoticeSuppressedByContext(newTree()["list"]) {
+			cmd := newTree()["list"]
+			mode.set(cmd)
+			if !firstRunNoticeSuppressedByContext(cmd) {
 				t.Errorf("%s output mode should suppress the first-run notice", mode.name)
 			}
 		})

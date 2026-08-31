@@ -40,15 +40,15 @@ func (f *fakeImportIssueLookupStore) CreateIssuesWithFullOptions(_ context.Conte
 func TestFilterStaleImportIssuesSkipsOlderIncomingRecords(t *testing.T) {
 	base := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
 	incoming := []*types.Issue{
-		{ID: "bd-stale", Title: "stale snapshot", UpdatedAt: base},
-		{ID: "bd-equal", Title: "same snapshot time", UpdatedAt: base},
-		{ID: "bd-newer", Title: "newer snapshot", UpdatedAt: base.Add(2 * time.Hour)},
-		{ID: "bd-new", Title: "new record", UpdatedAt: base},
+		{IssueID: types.IssueID{ID: "bd-stale"}, IssueContent: types.IssueContent{Title: "stale snapshot"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
+		{IssueID: types.IssueID{ID: "bd-equal"}, IssueContent: types.IssueContent{Title: "same snapshot time"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
+		{IssueID: types.IssueID{ID: "bd-newer"}, IssueContent: types.IssueContent{Title: "newer snapshot"}, IssueTimes: types.IssueTimes{UpdatedAt: base.Add(2 * time.Hour)}},
+		{IssueID: types.IssueID{ID: "bd-new"}, IssueContent: types.IssueContent{Title: "new record"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
 	}
 	store := &fakeImportIssueLookupStore{issues: []*types.Issue{
-		{ID: "bd-stale", Title: "stale snapshot", UpdatedAt: base.Add(time.Hour)},
-		{ID: "bd-equal", Title: "same snapshot time", UpdatedAt: base},
-		{ID: "bd-newer", Title: "old title", UpdatedAt: base.Add(time.Hour)},
+		{IssueID: types.IssueID{ID: "bd-stale"}, IssueContent: types.IssueContent{Title: "stale snapshot"}, IssueTimes: types.IssueTimes{UpdatedAt: base.Add(time.Hour)}},
+		{IssueID: types.IssueID{ID: "bd-equal"}, IssueContent: types.IssueContent{Title: "same snapshot time"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
+		{IssueID: types.IssueID{ID: "bd-newer"}, IssueContent: types.IssueContent{Title: "old title"}, IssueTimes: types.IssueTimes{UpdatedAt: base.Add(time.Hour)}},
 	}}
 
 	filtered, skippedIDs, plan, err := filterStaleImportIssues(context.Background(), store, incoming)
@@ -89,14 +89,14 @@ func TestFilterStaleImportIssuesSkipsOlderIncomingRecords(t *testing.T) {
 func TestFilterStaleImportIssuesReportsTieConflicts(t *testing.T) {
 	base := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
 	incoming := []*types.Issue{
-		{ID: "bd-tie", Title: "title", UpdatedAt: base},                                // notes missing
-		{ID: "bd-tie-same", Title: "title", Notes: "kept notes", UpdatedAt: base},      // identical
-		{ID: "bd-subsec", Title: "title", UpdatedAt: base.Add(400 * time.Millisecond)}, // sub-second "newer"
+		{IssueID: types.IssueID{ID: "bd-tie"}, IssueContent: types.IssueContent{Title: "title"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},                                // notes missing
+		{IssueID: types.IssueID{ID: "bd-tie-same"}, IssueContent: types.IssueContent{Title: "title", Notes: "kept notes"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},      // identical
+		{IssueID: types.IssueID{ID: "bd-subsec"}, IssueContent: types.IssueContent{Title: "title"}, IssueTimes: types.IssueTimes{UpdatedAt: base.Add(400 * time.Millisecond)}}, // sub-second "newer"
 	}
 	store := &fakeImportIssueLookupStore{issues: []*types.Issue{
-		{ID: "bd-tie", Title: "title", Notes: "local notes", UpdatedAt: base},
-		{ID: "bd-tie-same", Title: "title", Notes: "kept notes", UpdatedAt: base},
-		{ID: "bd-subsec", Title: "title", Notes: "local notes", UpdatedAt: base},
+		{IssueID: types.IssueID{ID: "bd-tie"}, IssueContent: types.IssueContent{Title: "title", Notes: "local notes"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
+		{IssueID: types.IssueID{ID: "bd-tie-same"}, IssueContent: types.IssueContent{Title: "title", Notes: "kept notes"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
+		{IssueID: types.IssueID{ID: "bd-subsec"}, IssueContent: types.IssueContent{Title: "title", Notes: "local notes"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
 	}}
 
 	filtered, skippedIDs, plan, err := filterStaleImportIssues(context.Background(), store, incoming)
@@ -130,12 +130,12 @@ func TestFilterStaleImportIssuesClassifiesUntimestampedRows(t *testing.T) {
 
 	t.Run("mixed_with_a_local_match", func(t *testing.T) {
 		store := &fakeImportIssueLookupStore{issues: []*types.Issue{
-			{ID: "bd-existing", Title: "old title", UpdatedAt: base},
+			{IssueID: types.IssueID{ID: "bd-existing"}, IssueContent: types.IssueContent{Title: "old title"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
 		}}
 		incoming := []*types.Issue{
-			{Title: "title only, no id"},            // new: no ID to look up
-			{ID: "bd-existing", Title: "new title"}, // zero UpdatedAt, matches local
-			{ID: "bd-brand-new", Title: "zero UpdatedAt, no local match"},
+			{IssueContent: types.IssueContent{Title: "title only, no id"}},                                    // new: no ID to look up
+			{IssueID: types.IssueID{ID: "bd-existing"}, IssueContent: types.IssueContent{Title: "new title"}}, // zero UpdatedAt, matches local
+			{IssueID: types.IssueID{ID: "bd-brand-new"}, IssueContent: types.IssueContent{Title: "zero UpdatedAt, no local match"}},
 		}
 
 		_, _, plan, err := filterStaleImportIssues(context.Background(), store, incoming)
@@ -156,8 +156,8 @@ func TestFilterStaleImportIssuesClassifiesUntimestampedRows(t *testing.T) {
 	t.Run("no_local_matches_at_all", func(t *testing.T) {
 		store := &fakeImportIssueLookupStore{} // empty db: exercises the short-circuit path
 		incoming := []*types.Issue{
-			{Title: "title only, no id"},
-			{ID: "bd-new", Title: "zero UpdatedAt"},
+			{IssueContent: types.IssueContent{Title: "title only, no id"}},
+			{IssueID: types.IssueID{ID: "bd-new"}, IssueContent: types.IssueContent{Title: "zero UpdatedAt"}},
 		}
 		_, _, plan, err := filterStaleImportIssues(context.Background(), store, incoming)
 		if err != nil {
@@ -180,11 +180,11 @@ func TestFilterStaleImportIssuesReportsNewIDs(t *testing.T) {
 
 	t.Run("mixed_new_and_existing", func(t *testing.T) {
 		store := &fakeImportIssueLookupStore{issues: []*types.Issue{
-			{ID: "bd-existing", Title: "t", UpdatedAt: base},
+			{IssueID: types.IssueID{ID: "bd-existing"}, IssueContent: types.IssueContent{Title: "t"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
 		}}
 		incoming := []*types.Issue{
-			{ID: "bd-existing", Title: "t", UpdatedAt: base},
-			{ID: "bd-new", Title: "brand new", UpdatedAt: base},
+			{IssueID: types.IssueID{ID: "bd-existing"}, IssueContent: types.IssueContent{Title: "t"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
+			{IssueID: types.IssueID{ID: "bd-new"}, IssueContent: types.IssueContent{Title: "brand new"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
 		}
 		_, _, plan, err := filterStaleImportIssues(context.Background(), store, incoming)
 		if err != nil {
@@ -198,8 +198,8 @@ func TestFilterStaleImportIssuesReportsNewIDs(t *testing.T) {
 	t.Run("all_new_no_local_matches", func(t *testing.T) {
 		store := &fakeImportIssueLookupStore{} // empty db: nothing matches
 		incoming := []*types.Issue{
-			{ID: "bd-a", Title: "a", UpdatedAt: base},
-			{ID: "bd-b", Title: "b", UpdatedAt: base},
+			{IssueID: types.IssueID{ID: "bd-a"}, IssueContent: types.IssueContent{Title: "a"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
+			{IssueID: types.IssueID{ID: "bd-b"}, IssueContent: types.IssueContent{Title: "b"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
 		}
 		_, _, plan, err := filterStaleImportIssues(context.Background(), store, incoming)
 		if err != nil {
@@ -218,12 +218,12 @@ func TestClassifyDryRunImport(t *testing.T) {
 
 	t.Run("identical_snapshot_reports_zero_creates", func(t *testing.T) {
 		store := &fakeImportIssueLookupStore{issues: []*types.Issue{
-			{ID: "bd-a", Title: "a", Status: types.StatusOpen, UpdatedAt: base},
-			{ID: "bd-b", Title: "b", Status: types.StatusOpen, UpdatedAt: base},
+			{IssueID: types.IssueID{ID: "bd-a"}, IssueContent: types.IssueContent{Title: "a"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
+			{IssueID: types.IssueID{ID: "bd-b"}, IssueContent: types.IssueContent{Title: "b"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
 		}}
 		incoming := []*types.Issue{
-			{ID: "bd-a", Title: "a", Status: types.StatusOpen, UpdatedAt: base},
-			{ID: "bd-b", Title: "b", Status: types.StatusOpen, UpdatedAt: base},
+			{IssueID: types.IssueID{ID: "bd-a"}, IssueContent: types.IssueContent{Title: "a"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
+			{IssueID: types.IssueID{ID: "bd-b"}, IssueContent: types.IssueContent{Title: "b"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
 		}
 		result, err := classifyDryRunImport(context.Background(), store, incoming, false)
 		if err != nil {
@@ -242,15 +242,15 @@ func TestClassifyDryRunImport(t *testing.T) {
 
 	t.Run("distinguishes_create_update_stale_unchanged", func(t *testing.T) {
 		store := &fakeImportIssueLookupStore{issues: []*types.Issue{
-			{ID: "bd-unchanged", Title: "same", Status: types.StatusOpen, UpdatedAt: base},
-			{ID: "bd-updated", Title: "old title", Status: types.StatusOpen, UpdatedAt: base},
-			{ID: "bd-stale", Title: "t", Status: types.StatusOpen, UpdatedAt: base.Add(time.Hour)},
+			{IssueID: types.IssueID{ID: "bd-unchanged"}, IssueContent: types.IssueContent{Title: "same"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
+			{IssueID: types.IssueID{ID: "bd-updated"}, IssueContent: types.IssueContent{Title: "old title"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
+			{IssueID: types.IssueID{ID: "bd-stale"}, IssueContent: types.IssueContent{Title: "t"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueTimes: types.IssueTimes{UpdatedAt: base.Add(time.Hour)}},
 		}}
 		incoming := []*types.Issue{
-			{ID: "bd-unchanged", Title: "same", Status: types.StatusOpen, UpdatedAt: base},
-			{ID: "bd-updated", Title: "new title", Status: types.StatusOpen, UpdatedAt: base.Add(time.Hour)},
-			{ID: "bd-stale", Title: "t", Status: types.StatusOpen, UpdatedAt: base},
-			{ID: "bd-created", Title: "brand new", Status: types.StatusOpen, UpdatedAt: base},
+			{IssueID: types.IssueID{ID: "bd-unchanged"}, IssueContent: types.IssueContent{Title: "same"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
+			{IssueID: types.IssueID{ID: "bd-updated"}, IssueContent: types.IssueContent{Title: "new title"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueTimes: types.IssueTimes{UpdatedAt: base.Add(time.Hour)}},
+			{IssueID: types.IssueID{ID: "bd-stale"}, IssueContent: types.IssueContent{Title: "t"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
+			{IssueID: types.IssueID{ID: "bd-created"}, IssueContent: types.IssueContent{Title: "brand new"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
 		}
 		result, err := classifyDryRunImport(context.Background(), store, incoming, false)
 		if err != nil {
@@ -277,11 +277,11 @@ func TestClassifyDryRunImport(t *testing.T) {
 	// a row whose ID already exists.
 	t.Run("allow_stale_classifies_existing_rows_as_updated", func(t *testing.T) {
 		store := &fakeImportIssueLookupStore{issues: []*types.Issue{
-			{ID: "bd-stale", Title: "t", UpdatedAt: base.Add(time.Hour)},
+			{IssueID: types.IssueID{ID: "bd-stale"}, IssueContent: types.IssueContent{Title: "t"}, IssueTimes: types.IssueTimes{UpdatedAt: base.Add(time.Hour)}},
 		}}
 		incoming := []*types.Issue{
-			{ID: "bd-stale", Title: "restored older snapshot", UpdatedAt: base},
-			{ID: "bd-new", Title: "brand new", UpdatedAt: base},
+			{IssueID: types.IssueID{ID: "bd-stale"}, IssueContent: types.IssueContent{Title: "restored older snapshot"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
+			{IssueID: types.IssueID{ID: "bd-new"}, IssueContent: types.IssueContent{Title: "brand new"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
 		}
 		result, err := classifyDryRunImport(context.Background(), store, incoming, true)
 		if err != nil {
@@ -304,11 +304,11 @@ func TestClassifyDryRunImport(t *testing.T) {
 	// falling through as "unchanged".
 	t.Run("title_only_and_untimestamped_rows_never_unchanged", func(t *testing.T) {
 		store := &fakeImportIssueLookupStore{issues: []*types.Issue{
-			{ID: "bd-existing", Title: "old title", UpdatedAt: base},
+			{IssueID: types.IssueID{ID: "bd-existing"}, IssueContent: types.IssueContent{Title: "old title"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
 		}}
 		incoming := []*types.Issue{
-			{Title: "title only, no id"},            // new: no ID to look up
-			{ID: "bd-existing", Title: "new title"}, // zero UpdatedAt, matches local -> update
+			{IssueContent: types.IssueContent{Title: "title only, no id"}},                                    // new: no ID to look up
+			{IssueID: types.IssueID{ID: "bd-existing"}, IssueContent: types.IssueContent{Title: "new title"}}, // zero UpdatedAt, matches local -> update
 		}
 		result, err := classifyDryRunImport(context.Background(), store, incoming, false)
 		if err != nil {
@@ -332,8 +332,8 @@ func TestClassifyDryRunImport(t *testing.T) {
 	// must still classify every row as created for dry-run reporting.
 	t.Run("all_title_only_rows_report_created", func(t *testing.T) {
 		incoming := []*types.Issue{
-			{Title: "first title-only row"},
-			{Title: "second title-only row"},
+			{IssueContent: types.IssueContent{Title: "first title-only row"}},
+			{IssueContent: types.IssueContent{Title: "second title-only row"}},
 		}
 		result, err := classifyDryRunImport(context.Background(), &fakeImportIssueLookupStore{}, incoming, false)
 		if err != nil {
@@ -356,10 +356,10 @@ func TestClassifyDryRunImport(t *testing.T) {
 	// the three category counts must sum to the rows considered.
 	t.Run("tie_kept_local_counts_as_unchanged_not_updated", func(t *testing.T) {
 		store := &fakeImportIssueLookupStore{issues: []*types.Issue{
-			{ID: "bd-tie", Title: "t", Notes: "local notes", UpdatedAt: base},
+			{IssueID: types.IssueID{ID: "bd-tie"}, IssueContent: types.IssueContent{Title: "t", Notes: "local notes"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
 		}}
 		incoming := []*types.Issue{
-			{ID: "bd-tie", Title: "t", UpdatedAt: base},
+			{IssueID: types.IssueID{ID: "bd-tie"}, IssueContent: types.IssueContent{Title: "t"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
 		}
 		result, err := classifyDryRunImport(context.Background(), store, incoming, false)
 		if err != nil {
@@ -385,8 +385,8 @@ func TestClassifyDryRunImport(t *testing.T) {
 	t.Run("dedupes_new_ids_for_duplicate_incoming_rows", func(t *testing.T) {
 		store := &fakeImportIssueLookupStore{} // empty db: nothing matches
 		incoming := []*types.Issue{
-			{ID: "bd-dup", Title: "first", UpdatedAt: base},
-			{ID: "bd-dup", Title: "second copy of same row", UpdatedAt: base},
+			{IssueID: types.IssueID{ID: "bd-dup"}, IssueContent: types.IssueContent{Title: "first"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
+			{IssueID: types.IssueID{ID: "bd-dup"}, IssueContent: types.IssueContent{Title: "second copy of same row"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
 		}
 		result, err := classifyDryRunImport(context.Background(), store, incoming, false)
 		if err != nil {
@@ -413,12 +413,25 @@ func TestClassifyDryRunImport(t *testing.T) {
 
 func TestImportRowChangeSummary(t *testing.T) {
 	local := &types.Issue{
-		Title: "t", Status: types.StatusClosed, Priority: 1,
-		IssueType: types.TypeBug, Notes: "local notes",
+		IssueContent: types.IssueContent{
+			Title: "t",
+			Notes: "local notes",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  1,
+			IssueType: types.TypeBug,
+		},
 	}
 	incoming := &types.Issue{
-		Title: "t", Status: types.StatusOpen, Priority: 2,
-		IssueType: types.TypeBug,
+		IssueContent: types.IssueContent{
+			Title: "t",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeBug,
+		},
 	}
 	got := importRowChangeSummary(local, incoming)
 	want := "status closed → open, priority 1 → 2, notes cleared"
@@ -433,11 +446,11 @@ func TestImportRowChangeSummary(t *testing.T) {
 func TestImportIssuesCoreReportsStaleSkippedIDs(t *testing.T) {
 	base := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
 	store := &fakeImportIssueLookupStore{issues: []*types.Issue{
-		{ID: "bd-stale", UpdatedAt: base.Add(time.Hour)},
+		{IssueID: types.IssueID{ID: "bd-stale"}, IssueTimes: types.IssueTimes{UpdatedAt: base.Add(time.Hour)}},
 	}}
 
 	result, err := importIssuesCore(context.Background(), "", store, []*types.Issue{
-		{ID: "bd-stale", Title: "stale snapshot", UpdatedAt: base},
+		{IssueID: types.IssueID{ID: "bd-stale"}, IssueContent: types.IssueContent{Title: "stale snapshot"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
 	}, ImportOptions{})
 	if err != nil {
 		t.Fatalf("importIssuesCore: %v", err)
@@ -462,11 +475,11 @@ func TestImportIssuesCoreReportsStaleSkippedIDs(t *testing.T) {
 func TestImportIssuesCoreAllowStaleImportsOlderRows(t *testing.T) {
 	base := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
 	store := &fakeImportIssueLookupStore{issues: []*types.Issue{
-		{ID: "bd-stale", UpdatedAt: base.Add(time.Hour)},
+		{IssueID: types.IssueID{ID: "bd-stale"}, IssueTimes: types.IssueTimes{UpdatedAt: base.Add(time.Hour)}},
 	}}
 
 	result, err := importIssuesCore(context.Background(), "", store, []*types.Issue{
-		{ID: "bd-stale", Title: "stale snapshot", UpdatedAt: base},
+		{IssueID: types.IssueID{ID: "bd-stale"}, IssueContent: types.IssueContent{Title: "stale snapshot"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
 	}, ImportOptions{AllowStale: true})
 	if err != nil {
 		t.Fatalf("importIssuesCore: %v", err)
@@ -490,18 +503,18 @@ func TestImportIssuesCoreReportsUpdatedAndTieKeptIssues(t *testing.T) {
 	base := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
 	store := &fakeImportIssueLookupStore{
 		issues: []*types.Issue{
-			{ID: "bd-upd", Title: "t", Status: types.StatusClosed, UpdatedAt: base},
-			{ID: "bd-tie", Title: "t", Notes: "local notes", UpdatedAt: base},
-			{ID: "bd-raced", Title: "t", Status: types.StatusClosed, UpdatedAt: base},
+			{IssueID: types.IssueID{ID: "bd-upd"}, IssueContent: types.IssueContent{Title: "t"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
+			{IssueID: types.IssueID{ID: "bd-tie"}, IssueContent: types.IssueContent{Title: "t", Notes: "local notes"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
+			{IssueID: types.IssueID{ID: "bd-raced"}, IssueContent: types.IssueContent{Title: "t"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
 		},
 		rejectAsStale: []string{"bd-raced"},
 	}
 
 	result, err := importIssuesCore(context.Background(), "", store, []*types.Issue{
-		{ID: "bd-upd", Title: "t", Status: types.StatusOpen, UpdatedAt: base.Add(time.Hour)},
-		{ID: "bd-tie", Title: "t", UpdatedAt: base},
-		{ID: "bd-raced", Title: "t", Status: types.StatusOpen, UpdatedAt: base.Add(time.Hour)},
-		{ID: "bd-new", Title: "brand new", UpdatedAt: base},
+		{IssueID: types.IssueID{ID: "bd-upd"}, IssueContent: types.IssueContent{Title: "t"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueTimes: types.IssueTimes{UpdatedAt: base.Add(time.Hour)}},
+		{IssueID: types.IssueID{ID: "bd-tie"}, IssueContent: types.IssueContent{Title: "t"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
+		{IssueID: types.IssueID{ID: "bd-raced"}, IssueContent: types.IssueContent{Title: "t"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueTimes: types.IssueTimes{UpdatedAt: base.Add(time.Hour)}},
+		{IssueID: types.IssueID{ID: "bd-new"}, IssueContent: types.IssueContent{Title: "brand new"}, IssueTimes: types.IssueTimes{UpdatedAt: base}},
 	}, ImportOptions{})
 	if err != nil {
 		t.Fatalf("importIssuesCore: %v", err)
@@ -527,7 +540,7 @@ func TestImportIssuesCoreReportsUpdatedAndTieKeptIssues(t *testing.T) {
 func TestImportIssuesCoreArmsTransactionalStaleGuard(t *testing.T) {
 	base := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
 	issue := func() []*types.Issue {
-		return []*types.Issue{{ID: "bd-race", Title: "snapshot", UpdatedAt: base}}
+		return []*types.Issue{{IssueID: types.IssueID{ID: "bd-race"}, IssueContent: types.IssueContent{Title: "snapshot"}, IssueTimes: types.IssueTimes{UpdatedAt: base}}}
 	}
 
 	store := &fakeImportIssueLookupStore{}
@@ -558,7 +571,6 @@ func TestRunImportInnerRejectsRedirectedStdinWithoutSource(t *testing.T) {
 	t.Cleanup(func() {
 		os.Stdin = origStdin
 		store = origStore
-		importInput = ""
 	})
 
 	pipeStdin := func(t *testing.T) {

@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-
-	"github.com/jonbaldie/beads/internal/metrics"
 )
 
 type exitError struct {
@@ -89,7 +87,7 @@ func HandleError(format string, args ...interface{}) error {
 }
 
 func HandleErrorRespectJSON(format string, args ...interface{}) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		jsonStdoutError(fmt.Sprintf(format, args...), "")
 		return &exitError{Code: 1}
 	}
@@ -97,7 +95,7 @@ func HandleErrorRespectJSON(format string, args ...interface{}) error {
 }
 
 func HandleErrorWithHint(message, hint string) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		jsonStderrError(message, hint)
 	} else {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", message) //nolint:gosec // G705: stderr, not a browser context
@@ -107,7 +105,7 @@ func HandleErrorWithHint(message, hint string) error {
 }
 
 func HandleErrorWithHintRespectJSON(message, hint string) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		jsonStdoutError(message, hint)
 	} else {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", message)
@@ -124,16 +122,14 @@ func WarnError(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, "Warning: "+format+"\n", args...)
 }
 
-// CheckReadonly aborts the command when bd is running in read-only mode (the
-// worker-sandbox posture, see readonlyMode). It exits via os.Exit and so cannot
-// run the per-command deferred CloseEventAndAdd — a command blocked here records
-// no cli_command event of its own (it never actually ran). It does flush metrics
-// first, so events already queued earlier in this run are still written and
-// scheduled for upload rather than stranded until the next clean exit.
-func CheckReadonly(operation string) {
-	if readonlyMode {
-		fmt.Fprintf(os.Stderr, "Error: operation '%s' is not allowed in read-only mode\n", operation)
-		metrics.CloseAndFlush()
-		os.Exit(1)
+// CheckReadonly refuses write commands when bd is running in read-only mode
+// (the worker-sandbox posture, see readonlyMode). Callers must return the
+// error so cobra and runMain can flush metrics and exit 1. Returning rather
+// than os.Exit lets per-command deferred CloseEventAndAdd run.
+func CheckReadonly(operation string) error {
+	if !isReadonlyMode() {
+		return nil
 	}
+	fmt.Fprintf(os.Stderr, "Error: operation '%s' is not allowed in read-only mode\n", operation)
+	return &exitError{Code: 1}
 }

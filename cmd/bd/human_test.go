@@ -22,26 +22,26 @@ func TestPrintHumanStats(t *testing.T) {
 		{
 			name: "mixed statuses",
 			issues: []*types.Issue{
-				{ID: "bd-1", Status: "open"},
-				{ID: "bd-2", Status: "in_progress"},
-				{ID: "bd-3", Status: "blocked"},
-				{ID: "bd-4", Status: "closed", CloseReason: "Responded"},
-				{ID: "bd-5", Status: "closed", CloseReason: "Dismissed: not needed"},
-				{ID: "bd-6", Status: "hooked"},
+				{IssueID: types.IssueID{ID: "bd-1"}, IssueWorkflow: types.IssueWorkflow{Status: "open"}},
+				{IssueID: types.IssueID{ID: "bd-2"}, IssueWorkflow: types.IssueWorkflow{Status: "in_progress"}},
+				{IssueID: types.IssueID{ID: "bd-3"}, IssueWorkflow: types.IssueWorkflow{Status: "blocked"}},
+				{IssueID: types.IssueID{ID: "bd-4"}, IssueWorkflow: types.IssueWorkflow{Status: "closed"}, IssueTimes: types.IssueTimes{CloseReason: "Responded"}},
+				{IssueID: types.IssueID{ID: "bd-5"}, IssueWorkflow: types.IssueWorkflow{Status: "closed"}, IssueTimes: types.IssueTimes{CloseReason: "Dismissed: not needed"}},
+				{IssueID: types.IssueID{ID: "bd-6"}, IssueWorkflow: types.IssueWorkflow{Status: "hooked"}},
 			},
 		},
 		{
 			name: "all closed responded",
 			issues: []*types.Issue{
-				{ID: "bd-1", Status: "closed", CloseReason: "Responded"},
-				{ID: "bd-2", Status: "closed", CloseReason: "Responded"},
+				{IssueID: types.IssueID{ID: "bd-1"}, IssueWorkflow: types.IssueWorkflow{Status: "closed"}, IssueTimes: types.IssueTimes{CloseReason: "Responded"}},
+				{IssueID: types.IssueID{ID: "bd-2"}, IssueWorkflow: types.IssueWorkflow{Status: "closed"}, IssueTimes: types.IssueTimes{CloseReason: "Responded"}},
 			},
 		},
 		{
 			name: "all dismissed",
 			issues: []*types.Issue{
-				{ID: "bd-1", Status: "closed", CloseReason: "Dismissed"},
-				{ID: "bd-2", Status: "closed", CloseReason: "Dismissed: stale"},
+				{IssueID: types.IssueID{ID: "bd-1"}, IssueWorkflow: types.IssueWorkflow{Status: "closed"}, IssueTimes: types.IssueTimes{CloseReason: "Dismissed"}},
+				{IssueID: types.IssueID{ID: "bd-2"}, IssueWorkflow: types.IssueWorkflow{Status: "closed"}, IssueTimes: types.IssueTimes{CloseReason: "Dismissed: stale"}},
 			},
 		},
 	}
@@ -66,14 +66,14 @@ func TestPrintHumanList(t *testing.T) {
 		{
 			name: "single issue",
 			issues: []*types.Issue{
-				{ID: "bd-abc", Title: "Need human input", Status: "open", Priority: 1},
+				{IssueID: types.IssueID{ID: "bd-abc"}, IssueContent: types.IssueContent{Title: "Need human input"}, IssueWorkflow: types.IssueWorkflow{Status: "open", Priority: 1}},
 			},
 		},
 		{
 			name: "multiple issues with varied status",
 			issues: []*types.Issue{
-				{ID: "bd-1", Title: "Review needed", Status: "open"},
-				{ID: "bd-2", Title: "Approval required", Status: "blocked", Priority: 0},
+				{IssueID: types.IssueID{ID: "bd-1"}, IssueContent: types.IssueContent{Title: "Review needed"}, IssueWorkflow: types.IssueWorkflow{Status: "open"}},
+				{IssueID: types.IssueID{ID: "bd-2"}, IssueContent: types.IssueContent{Title: "Approval required"}, IssueWorkflow: types.IssueWorkflow{Status: "blocked", Priority: 0}},
 			},
 		},
 	}

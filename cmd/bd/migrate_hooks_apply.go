@@ -95,33 +95,6 @@ type hookMigrationApplySummary struct {
 	SkippedCount     int      `json:"skipped_count"`
 }
 
-func (p hookMigrationExecutionPlan) operationCount() int {
-	return len(p.WriteOps) + len(p.RetireOps)
-}
-
-func (p hookMigrationExecutionPlan) outputOperations() []hookMigrationOutputOperation {
-	ops := make([]hookMigrationOutputOperation, 0, p.operationCount())
-	for _, write := range p.WriteOps {
-		ops = append(ops, hookMigrationOutputOperation{
-			Action:     "write_hook",
-			HookName:   write.HookName,
-			Path:       write.HookPath,
-			SourcePath: write.SourcePath,
-			State:      write.State,
-		})
-	}
-	for _, retire := range p.RetireOps {
-		ops = append(ops, hookMigrationOutputOperation{
-			Action:      "retire_sidecar",
-			HookName:    retire.HookName,
-			Path:        retire.SourcePath,
-			SourcePath:  retire.SourcePath,
-			Destination: retire.DestinationPath,
-		})
-	}
-	return ops
-}
-
 func buildHookMigrationExecutionPlan(plan doctor.HookMigrationPlan) hookMigrationExecutionPlan {
 	execPlan := hookMigrationExecutionPlan{
 		WriteOps:       make([]hookMigrationWriteOp, 0, plan.NeedsMigrationCount),
@@ -131,70 +104,70 @@ func buildHookMigrationExecutionPlan(plan doctor.HookMigrationPlan) hookMigratio
 	}
 
 	for _, hook := range plan.Hooks {
-		switch hook.State {
-		case "marker_managed", "unmanaged_custom", "missing_no_artifacts":
-			execPlan.NoopHooks = append(execPlan.NoopHooks, hook.Name)
-			continue
-		case "read_error":
-			execPlan.BlockingErrors = append(execPlan.BlockingErrors, formatHookMigrationBlockingError(hook))
-			continue
-		case "marker_broken":
-			// Broken markers are fixable: read existing file and re-inject.
-			// injectHookSection handles orphaned/reversed markers while preserving
-			// user content outside the broken markers.
-			execPlan.WriteOps = append(execPlan.WriteOps, hookMigrationWriteOp{
-				HookName:   hook.Name,
-				HookPath:   hook.HookPath,
-				State:      hook.State,
-				SourceKind: hookMigrationWriteFromHookFile,
-				SourcePath: hook.HookPath,
-			})
-			continue
-		}
-
-		// For legacy hooks with sidecars, the migration discards the current hook
-		// file in favor of sidecar content. Check that the user hasn't added custom
-		// logic to the shim — if they have, block migration to avoid silent data loss.
-		if hook.LegacyBDHook && (hook.HasOldSidecar || hook.HasBackupSidecar) {
-			content, readErr := os.ReadFile(hook.HookPath) // #nosec G304 -- path from migration planner
-			if readErr == nil && !doctor.IsUnmodifiedLegacyHook(string(content)) {
-				execPlan.BlockingErrors = append(execPlan.BlockingErrors,
-					fmt.Sprintf("%s: legacy hook appears user-modified; review manually before migration (state: %s)", hook.Name, hook.State))
-				continue
-			}
-		}
-
-		sourceKind, sourcePath, err := chooseHookMigrationWriteSource(hook)
-		if err != nil {
-			execPlan.BlockingErrors = append(execPlan.BlockingErrors, err.Error())
-			continue
-		}
-
-		execPlan.WriteOps = append(execPlan.WriteOps, hookMigrationWriteOp{
-			HookName:   hook.Name,
-			HookPath:   hook.HookPath,
-			State:      hook.State,
-			SourceKind: sourceKind,
-			SourcePath: sourcePath,
-		})
-
-		if hook.HasOldSidecar {
-			execPlan.RetireOps = append(execPlan.RetireOps, hookMigrationRetireOp{
-				HookName:        hook.Name,
-				SourcePath:      hook.HookPath + ".old",
-				DestinationPath: hook.HookPath + ".old.migrated",
-			})
-		}
-		if hook.HasBackupSidecar {
-			execPlan.RetireOps = append(execPlan.RetireOps, hookMigrationRetireOp{
-				HookName:        hook.Name,
-				SourcePath:      hook.HookPath + ".backup",
-				DestinationPath: hook.HookPath + ".backup.migrated",
-			})
-		}
+		appendHookMigrationPlanEntry(&execPlan, hook)
 	}
 
 	return execPlan
+}
+
+func appendHookMigrationPlanEntry(execPlan *hookMigrationExecutionPlan, hook doctor.HookMigrationHookPlan) {
+	switch hook.State {
+	case "marker_managed", "unmanaged_custom", "missing_no_artifacts":
+		execPlan.NoopHooks = append(execPlan.NoopHooks, hook.Name)
+		return
+	case "read_error":
+		execPlan.BlockingErrors = append(execPlan.BlockingErrors, formatHookMigrationBlockingError(hook))
+		return
+	case "marker_broken":
+		execPlan.WriteOps = append(execPlan.WriteOps, hookMigrationWriteOp{
+			HookName: hook.Name, HookPath: hook.HookPath, State: hook.State,
+			SourceKind: hookMigrationWriteFromHookFile, SourcePath: hook.HookPath,
+		})
+		return
+	}
+	if hookMigrationLegacyHookIsModified(execPlan, hook) {
+		return
+	}
+	appendHookMigrationWrite(execPlan, hook)
+}
+
+func hookMigrationLegacyHookIsModified(execPlan *hookMigrationExecutionPlan, hook doctor.HookMigrationHookPlan) bool {
+	if !hook.LegacyBDHook || (!hook.HasOldSidecar && !hook.HasBackupSidecar) {
+		return false
+	}
+	content, err := os.ReadFile(hook.HookPath) // #nosec G304 -- path from migration planner
+	if err != nil || doctor.IsUnmodifiedLegacyHook(string(content)) {
+		return false
+	}
+	execPlan.BlockingErrors = append(execPlan.BlockingErrors,
+		fmt.Sprintf("%s: legacy hook appears user-modified; review manually before migration (state: %s)", hook.Name, hook.State))
+	return true
+}
+
+func appendHookMigrationWrite(execPlan *hookMigrationExecutionPlan, hook doctor.HookMigrationHookPlan) {
+	sourceKind, sourcePath, err := chooseHookMigrationWriteSource(hook)
+	if err != nil {
+		execPlan.BlockingErrors = append(execPlan.BlockingErrors, err.Error())
+		return
+	}
+	execPlan.WriteOps = append(execPlan.WriteOps, hookMigrationWriteOp{
+		HookName: hook.Name, HookPath: hook.HookPath, State: hook.State,
+		SourceKind: sourceKind, SourcePath: sourcePath,
+	})
+	appendHookMigrationRetireOps(execPlan, hook)
+}
+
+func appendHookMigrationRetireOps(execPlan *hookMigrationExecutionPlan, hook doctor.HookMigrationHookPlan) {
+	if hook.HasOldSidecar {
+		execPlan.RetireOps = append(execPlan.RetireOps, hookMigrationRetireOp{
+			HookName: hook.Name, SourcePath: hook.HookPath + ".old", DestinationPath: hook.HookPath + ".old.migrated",
+		})
+	}
+	if hook.HasBackupSidecar {
+		execPlan.RetireOps = append(execPlan.RetireOps, hookMigrationRetireOp{
+			HookName: hook.Name, SourcePath: hook.HookPath + ".backup", DestinationPath: hook.HookPath + ".backup.migrated",
+		})
+	}
 }
 
 func formatHookMigrationBlockingError(hook doctor.HookMigrationHookPlan) string {
@@ -257,12 +230,8 @@ func applyHookMigrationExecution(execPlan hookMigrationExecutionPlan) (hookMigra
 	}
 
 	for _, write := range preparedWrites {
-		if err := guardHookWritePath(write.Path, false); err != nil {
-			return summary, fmt.Errorf("refusing to write migrated hook %s: %w", write.HookName, err)
-		}
-		// #nosec G306 -- git hooks must be executable for Git to run them
-		if err := os.WriteFile(write.Path, write.Content, 0755); err != nil {
-			return summary, fmt.Errorf("writing migrated hook %s: %w", write.Path, err)
+		if err := writePreparedHook(write); err != nil {
+			return summary, err
 		}
 		summary.WrittenHooks = append(summary.WrittenHooks, write.HookName)
 	}
@@ -284,6 +253,17 @@ func applyHookMigrationExecution(execPlan hookMigrationExecutionPlan) (hookMigra
 	summary.SkippedCount = len(summary.SkippedArtifacts)
 
 	return summary, nil
+}
+
+func writePreparedHook(write preparedHookWrite) error {
+	if err := guardHookWritePath(write.Path, false); err != nil {
+		return fmt.Errorf("refusing to write migrated hook %s: %w", write.HookName, err)
+	}
+	// #nosec G306 -- git hooks must be executable for Git to run them
+	if err := os.WriteFile(write.Path, write.Content, 0755); err != nil {
+		return fmt.Errorf("writing migrated hook %s: %w", write.Path, err)
+	}
+	return nil
 }
 
 func prepareHookMigrationWrites(writeOps []hookMigrationWriteOp) ([]preparedHookWrite, error) {

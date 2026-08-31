@@ -153,10 +153,10 @@ func TestShouldCommitCreatePostWritesSkipsServerMode(t *testing.T) {
 	saveStorageMode(t)
 	serverMode = true
 
-	if got, err := shouldCommitCreatePostWrites(&types.Issue{NoHistory: true}, true); err != nil || got {
+	if got, err := shouldCommitCreatePostWrites(&types.Issue{IssueWisp: types.IssueWisp{NoHistory: true}}, true); err != nil || got {
 		t.Fatal("no-history create post-writes should not issue a Dolt commit in server mode")
 	}
-	if got, err := shouldCommitCreatePostWrites(&types.Issue{Ephemeral: true}, true); err != nil || got {
+	if got, err := shouldCommitCreatePostWrites(&types.Issue{IssueWisp: types.IssueWisp{Ephemeral: true}}, true); err != nil || got {
 		t.Fatal("ephemeral create post-writes should not issue a Dolt commit in server mode")
 	}
 	if got, err := shouldCommitCreatePostWrites(&types.Issue{}, true); err != nil || got {
@@ -171,7 +171,7 @@ func TestShouldCommitCreatePostWritesPreservesEmbeddedFlushWhenEnabled(t *testin
 	saveStorageMode(t)
 	serverMode = false
 
-	if got, err := shouldCommitCreatePostWrites(&types.Issue{NoHistory: true}, true); err != nil || !got {
+	if got, err := shouldCommitCreatePostWrites(&types.Issue{IssueWisp: types.IssueWisp{NoHistory: true}}, true); err != nil || !got {
 		t.Fatal("embedded create should still flush pending writes")
 	}
 	if got, err := shouldCommitCreatePostWrites(&types.Issue{}, false); err != nil || !got {

@@ -1100,13 +1100,21 @@ func TestEmbeddedInit(t *testing.T) {
 			t.Fatal(err)
 		}
 		issue := types.Issue{
-			ID:        "jlremote-abc123",
-			Title:     "JSONL authoritative",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
+			IssueID: types.IssueID{
+				ID: "jlremote-abc123",
+			},
+			IssueContent: types.IssueContent{
+				Title: "JSONL authoritative",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			},
 		}
 		line, _ := json.Marshal(issue)
 		if err := os.WriteFile(filepath.Join(beadsDir, "issues.jsonl"), append(line, '\n'), 0644); err != nil {

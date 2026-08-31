@@ -35,7 +35,7 @@ examples/formulas/primitives/ (with a smoke harness that proves they work).`,
 	RunE:          runFormulaSchema,
 }
 
-func runFormulaSchema(cmd *cobra.Command, args []string) error {
+func runFormulaSchema(_ *cobra.Command, args []string) error {
 	if len(args) == 0 {
 		return runFormulaSchemaList()
 	}
@@ -43,7 +43,7 @@ func runFormulaSchema(cmd *cobra.Command, args []string) error {
 }
 
 func runFormulaSchemaList() error {
-	if jsonOutput {
+	if isJSONOutput() {
 		if err := outputJSON(formula.Primitives); err != nil {
 			return HandleError("%v", err)
 		}
@@ -63,36 +63,52 @@ func runFormulaSchemaList() error {
 func runFormulaSchemaShow(name string) error {
 	p := formula.PrimitiveByName(name)
 	if p == nil {
-		fmt.Fprintf(os.Stderr, "Error: unknown primitive %q\n\n", name)
-		fmt.Fprintf(os.Stderr, "Available primitives:\n")
-		for _, prim := range formula.Primitives {
-			fmt.Fprintf(os.Stderr, "  %s\n", prim.Name)
-		}
-		return SilentExit()
+		return printUnknownFormulaPrimitive(name)
 	}
-
-	if jsonOutput {
+	if isJSONOutput() {
 		if err := outputJSON(p); err != nil {
 			return HandleError("%v", err)
 		}
 		return nil
 	}
-
-	fmt.Printf("%s\n", ui.RenderAccent(p.Name))
-	if p.Doc != "" {
-		for _, line := range strings.Split(p.Doc, "\n") {
-			fmt.Printf("  %s\n", line)
-		}
-	}
-
+	printFormulaPrimitiveHeader(p)
 	if len(p.Fields) == 0 {
 		fmt.Printf("\n  %s\n", ui.RenderMuted("(no exposed fields)"))
 		return nil
 	}
+	printFormulaPrimitiveFields(p.Fields)
+	return nil
+}
 
+func printUnknownFormulaPrimitive(name string) error {
+	fmt.Fprintf(os.Stderr, "Error: unknown primitive %q\n\n", name)
+	fmt.Fprintf(os.Stderr, "Available primitives:\n")
+	for _, prim := range formula.Primitives {
+		fmt.Fprintf(os.Stderr, "  %s\n", prim.Name)
+	}
+	return SilentExit()
+}
+
+func printFormulaPrimitiveHeader(p *formula.PrimitiveDoc) {
+	fmt.Printf("%s\n", ui.RenderAccent(p.Name))
+	if p.Doc == "" {
+		return
+	}
+	for _, line := range strings.Split(p.Doc, "\n") {
+		fmt.Printf("  %s\n", line)
+	}
+}
+
+func printFormulaPrimitiveFields(fields []formula.FieldDoc) {
 	fmt.Printf("\nFields:\n")
-	maxName, maxType := 0, 0
-	for _, f := range p.Fields {
+	maxName, maxType := formulaFieldColumnWidths(fields)
+	for _, f := range fields {
+		printFormulaField(f, maxName, maxType)
+	}
+}
+
+func formulaFieldColumnWidths(fields []formula.FieldDoc) (maxName, maxType int) {
+	for _, f := range fields {
 		if n := len(f.JSONName); n > maxName {
 			maxName = n
 		}
@@ -106,24 +122,24 @@ func runFormulaSchemaShow(name string) error {
 	if maxType < 8 {
 		maxType = 8
 	}
+	return maxName, maxType
+}
 
-	for _, f := range p.Fields {
-		req := ""
-		if f.Required {
-			req = " " + ui.RenderFail("required")
-		}
-		fmt.Printf("  %-*s  %-*s%s\n", maxName, f.JSONName, maxType, f.Type, req)
-		if f.Doc != "" {
-			for _, line := range strings.Split(f.Doc, "\n") {
-				fmt.Printf("    %s\n", ui.RenderMuted(line))
-			}
-		}
-		if f.TOMLName != "" && f.TOMLName != f.JSONName {
-			fmt.Printf("    %s\n", ui.RenderMuted(fmt.Sprintf("toml: %s", f.TOMLName)))
-		}
-		fmt.Println()
+func printFormulaField(f formula.FieldDoc, maxName, maxType int) {
+	req := ""
+	if f.Required {
+		req = " " + ui.RenderFail("required")
 	}
-	return nil
+	fmt.Printf("  %-*s  %-*s%s\n", maxName, f.JSONName, maxType, f.Type, req)
+	if f.Doc != "" {
+		for _, line := range strings.Split(f.Doc, "\n") {
+			fmt.Printf("    %s\n", ui.RenderMuted(line))
+		}
+	}
+	if f.TOMLName != "" && f.TOMLName != f.JSONName {
+		fmt.Printf("    %s\n", ui.RenderMuted(fmt.Sprintf("toml: %s", f.TOMLName)))
+	}
+	fmt.Println()
 }
 
 func firstDocLine(doc string) string {

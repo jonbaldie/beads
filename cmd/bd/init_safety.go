@@ -127,11 +127,9 @@ func CheckRemoteSafety(in RemoteSafetyInput) RemoteSafetyDecision {
 	// means the user is not accepting the default bootstrap. DiscardRemote
 	// is treated as override-intent too — naming discard explicitly
 	// implies the user knows the remote has data and wants to replace it.
-	userOverride := in.Force || in.ReinitLocal || in.FromJSONL || in.DiscardRemote
-
 	// Remote has data, user did not override anything. Bootstrap is the
 	// safe adoption path — this is the existing correct behavior.
-	if !userOverride {
+	if !remoteSafetyOverride(in) {
 		return RemoteSafetyDecision{Action: ActionBootstrap, Reason: "bootstrap-from-remote"}
 	}
 
@@ -150,18 +148,24 @@ func CheckRemoteSafety(in RemoteSafetyInput) RemoteSafetyDecision {
 
 	// User authorized. Interactive callers prompt; non-interactive must
 	// supply a matching destroy-token.
-	if !in.IsInteractive {
-		if in.ExpectedToken == "" || in.DestroyToken != in.ExpectedToken {
-			return RemoteSafetyDecision{
-				Action:      ActionRequireDestroyToken,
-				Reason:      "destroy-token-missing-or-wrong",
-				ExitCode:    ExitDestroyTokenMissing,
-				UserMessage: refusalMessageTokenMissing(),
-			}
+	if remoteSafetyTokenMissing(in) {
+		return RemoteSafetyDecision{
+			Action:      ActionRequireDestroyToken,
+			Reason:      "destroy-token-missing-or-wrong",
+			ExitCode:    ExitDestroyTokenMissing,
+			UserMessage: refusalMessageTokenMissing(),
 		}
 	}
 
 	return RemoteSafetyDecision{Action: ActionProceedWithDivergence, Reason: "authorized-divergence"}
+}
+
+func remoteSafetyOverride(in RemoteSafetyInput) bool {
+	return in.Force || in.ReinitLocal || in.FromJSONL || in.DiscardRemote
+}
+
+func remoteSafetyTokenMissing(in RemoteSafetyInput) bool {
+	return !in.IsInteractive && (in.ExpectedToken == "" || in.DestroyToken != in.ExpectedToken)
 }
 
 // refusalMessageDivergence returns the What/Why/Next refusal text for local

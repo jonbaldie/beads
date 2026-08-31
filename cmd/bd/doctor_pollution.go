@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -18,14 +19,16 @@ func runPollutionCheck(_ string, clean bool, yes bool) error {
 		return HandleError("%v", err)
 	}
 
-	ctx := rootCtx
+	ctx := getRootContext()
 
 	// Get all issues (env-only cap via BEADS_MAX_ROWS; designer §4: doctor
 	// family is env opt-in, no operator-facing flag).
 	maxRows, maxRowsSource := resolveMaxRowsEnvOnly()
-	allIssues, err := store.SearchIssues(ctx, "", types.IssueFilter{
-		MaxRows:       maxRows,
-		MaxRowsSource: maxRowsSource,
+	allIssues, err := getStore().SearchIssues(ctx, "", types.IssueFilter{
+		IssueFilterPage: types.IssueFilterPage{
+			MaxRows:       maxRows,
+			MaxRowsSource: maxRowsSource,
+		},
 	})
 	if err != nil {
 		if capErr := handleMaxRowsError(err); capErr != nil {
@@ -37,7 +40,7 @@ func runPollutionCheck(_ string, clean bool, yes bool) error {
 	polluted := detectTestPollution(allIssues)
 
 	if len(polluted) == 0 {
-		if jsonOutput {
+		if isJSONOutput() {
 			return outputJSON(map[string]interface{}{
 				"polluted_count": 0,
 				"issues":         []interface{}{},
@@ -47,77 +50,75 @@ func runPollutionCheck(_ string, clean bool, yes bool) error {
 		return nil
 	}
 
-	// Categorize by confidence
-	highConfidence := []pollutionResult{}
-	mediumConfidence := []pollutionResult{}
+	highConfidence, mediumConfidence := categorizePollutionResults(polluted)
 
-	for _, p := range polluted {
-		if p.score >= 0.9 {
-			highConfidence = append(highConfidence, p)
-		} else {
-			mediumConfidence = append(mediumConfidence, p)
-		}
+	if isJSONOutput() {
+		return outputPollutionJSON(polluted, highConfidence, mediumConfidence)
 	}
 
-	if jsonOutput {
-		result := map[string]interface{}{
-			"polluted_count":    len(polluted),
-			"high_confidence":   len(highConfidence),
-			"medium_confidence": len(mediumConfidence),
-			"issues":            []map[string]interface{}{},
-		}
-
-		for _, p := range polluted {
-			result["issues"] = append(result["issues"].([]map[string]interface{}), map[string]interface{}{
-				"id":         p.issue.ID,
-				"title":      p.issue.Title,
-				"score":      p.score,
-				"reasons":    p.reasons,
-				"created_at": p.issue.CreatedAt,
-			})
-		}
-
-		return outputJSON(result)
-	}
-
-	// Human-readable output
-	fmt.Printf("Found %d potential test issues:\n\n", len(polluted))
-
-	if len(highConfidence) > 0 {
-		fmt.Printf("High Confidence (score ≥ 0.9):\n")
-		for _, p := range highConfidence {
-			fmt.Printf("  %s: %q (score: %.2f)\n", p.issue.ID, p.issue.Title, p.score)
-			for _, reason := range p.reasons {
-				fmt.Printf("    - %s\n", reason)
-			}
-		}
-		fmt.Printf("  (Total: %d issues)\n\n", len(highConfidence))
-	}
-
-	if len(mediumConfidence) > 0 {
-		fmt.Printf("Medium Confidence (score 0.7-0.9):\n")
-		for _, p := range mediumConfidence {
-			fmt.Printf("  %s: %q (score: %.2f)\n", p.issue.ID, p.issue.Title, p.score)
-			for _, reason := range p.reasons {
-				fmt.Printf("    - %s\n", reason)
-			}
-		}
-		fmt.Printf("  (Total: %d issues)\n\n", len(mediumConfidence))
-	}
+	printPollutionResults(polluted, highConfidence, mediumConfidence)
 
 	if !clean {
 		fmt.Printf("Run 'bd doctor --check=pollution --clean' to delete these issues (with confirmation).\n")
 		return nil
 	}
 
-	if !yes {
-		fmt.Printf("\nDelete %d test issues? [y/N] ", len(polluted))
-		var response string
-		_, _ = fmt.Scanln(&response)
-		if strings.ToLower(response) != "y" {
-			fmt.Println("Canceled.")
-			return nil
+	return cleanPollutedIssues(ctx, polluted, yes)
+}
+
+func categorizePollutionResults(polluted []pollutionResult) (high, medium []pollutionResult) {
+	for _, p := range polluted {
+		if p.score >= 0.9 {
+			high = append(high, p)
+		} else {
+			medium = append(medium, p)
 		}
+	}
+	return high, medium
+}
+
+func outputPollutionJSON(polluted, high, medium []pollutionResult) error {
+	issues := make([]map[string]interface{}, 0, len(polluted))
+	for _, p := range polluted {
+		issues = append(issues, map[string]interface{}{
+			"id":         p.issue.ID,
+			"title":      p.issue.Title,
+			"score":      p.score,
+			"reasons":    p.reasons,
+			"created_at": p.issue.CreatedAt,
+		})
+	}
+	return outputJSON(map[string]interface{}{
+		"polluted_count":    len(polluted),
+		"high_confidence":   len(high),
+		"medium_confidence": len(medium),
+		"issues":            issues,
+	})
+}
+
+func printPollutionResults(polluted, high, medium []pollutionResult) {
+	fmt.Printf("Found %d potential test issues:\n\n", len(polluted))
+	printPollutionCategory("High Confidence (score ≥ 0.9):", high)
+	printPollutionCategory("Medium Confidence (score 0.7-0.9):", medium)
+}
+
+func printPollutionCategory(title string, issues []pollutionResult) {
+	if len(issues) == 0 {
+		return
+	}
+	fmt.Printf("%s\n", title)
+	for _, p := range issues {
+		fmt.Printf("  %s: %q (score: %.2f)\n", p.issue.ID, p.issue.Title, p.score)
+		for _, reason := range p.reasons {
+			fmt.Printf("    - %s\n", reason)
+		}
+	}
+	fmt.Printf("  (Total: %d issues)\n\n", len(issues))
+}
+
+func cleanPollutedIssues(ctx context.Context, polluted []pollutionResult, yes bool) error {
+	if !yes && !confirmPollutionCleanup(len(polluted)) {
+		return nil
 	}
 
 	backupPath := ".beads/pollution-backup.jsonl"
@@ -126,6 +127,24 @@ func runPollutionCheck(_ string, clean bool, yes bool) error {
 	}
 	fmt.Printf("Backed up %d issues to %s\n", len(polluted), backupPath)
 
+	deleted := deletePollutedIssues(ctx, polluted)
+	fmt.Printf("%s Deleted %d test issues\n", ui.RenderPass("✓"), deleted)
+	fmt.Printf("\nCleanup complete. To restore, run: bd init --from-jsonl %s\n", backupPath)
+	return nil
+}
+
+func confirmPollutionCleanup(count int) bool {
+	fmt.Printf("\nDelete %d test issues? [y/N] ", count)
+	var response string
+	_, _ = fmt.Scanln(&response)
+	if strings.ToLower(response) != "y" {
+		fmt.Println("Canceled.")
+		return false
+	}
+	return true
+}
+
+func deletePollutedIssues(ctx context.Context, polluted []pollutionResult) int {
 	fmt.Printf("\nDeleting %d issues...\n", len(polluted))
 	deleted := 0
 	for _, p := range polluted {
@@ -135,18 +154,15 @@ func runPollutionCheck(_ string, clean bool, yes bool) error {
 		}
 		deleted++
 	}
-
-	fmt.Printf("%s Deleted %d test issues\n", ui.RenderPass("✓"), deleted)
-	fmt.Printf("\nCleanup complete. To restore, run: bd init --from-jsonl %s\n", backupPath)
-	return nil
+	return deleted
 }
 
 func init() {
 	rootCmd.AddCommand(doctorCmd)
-	doctorCmd.Flags().BoolVar(&perfMode, "perf", false, "Run performance diagnostics and generate CPU profile")
-	doctorCmd.Flags().BoolVar(&checkHealthMode, "check-health", false, "Quick health check for git hooks (silent on success)")
-	doctorCmd.Flags().StringVarP(&doctorOutput, "output", "o", "", "Export diagnostics to JSON file")
-	doctorCmd.Flags().StringVar(&doctorCheckFlag, "check", "", "Run specific check in detail (e.g., 'pollution')")
-	doctorCmd.Flags().BoolVar(&doctorClean, "clean", false, "For pollution check: delete detected test issues")
-	doctorCmd.Flags().BoolVar(&doctorDeep, "deep", false, "Validate full graph integrity")
+	doctorCmd.Flags().Bool("perf", false, "Run performance diagnostics and generate CPU profile")
+	doctorCmd.Flags().Bool("check-health", false, "Quick health check for git hooks (silent on success)")
+	doctorCmd.Flags().StringP("output", "o", "", "Export diagnostics to JSON file")
+	doctorCmd.Flags().String("check", "", "Run specific check in detail (e.g., 'pollution')")
+	doctorCmd.Flags().Bool("clean", false, "For pollution check: delete detected test issues")
+	doctorCmd.Flags().Bool("deep", false, "Validate full graph integrity")
 }

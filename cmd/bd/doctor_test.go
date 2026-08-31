@@ -843,14 +843,6 @@ func TestExportDiagnosticsInvalidPath(t *testing.T) {
 
 // TestDoctor_WithBEADS_DIR tests that doctor respects BEADS_DIR environment variable
 func TestDoctor_WithBEADS_DIR(t *testing.T) {
-	// Reset Cobra flags to avoid interference
-	defer func() {
-		doctorFix = false
-		doctorYes = false
-		doctorInteractive = false
-		doctorDryRun = false
-	}()
-
 	// Create target directory (where BEADS_DIR points)
 	targetDir := t.TempDir()
 	targetBeadsDir := filepath.Join(targetDir, ".beads")

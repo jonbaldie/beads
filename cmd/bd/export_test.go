@@ -78,13 +78,13 @@ func TestExportToFile(t *testing.T) {
 
 	// Export to file
 	exportFile := filepath.Join(tmpDir, "export.jsonl")
-	exportOutput = exportFile
-	exportAll = false
-	exportIncludeInfra = false
-	exportScrub = false
-	t.Cleanup(func() { exportOutput = "" })
+	exportTestOptions.output = exportFile
+	exportTestOptions.all = false
+	exportTestOptions.includeInfra = false
+	exportTestOptions.scrub = false
+	t.Cleanup(func() { exportTestOptions.output = "" })
 
-	if err := runExport(nil, nil); err != nil {
+	if err := runExportForTest(); err != nil {
 		t.Fatalf("runExport: %v", err)
 	}
 
@@ -179,12 +179,12 @@ func TestExportToStdout(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	exportOutput = ""
-	exportAll = false
-	exportIncludeInfra = false
-	exportScrub = false
+	exportTestOptions.output = ""
+	exportTestOptions.all = false
+	exportTestOptions.includeInfra = false
+	exportTestOptions.scrub = false
 
-	err := runExport(nil, nil)
+	err := runExportForTest()
 
 	w.Close()
 	os.Stdout = oldStdout
@@ -267,16 +267,16 @@ func TestExportScrub(t *testing.T) {
 
 	// Export with scrub
 	exportFile := filepath.Join(tmpDir, "scrubbed.jsonl")
-	exportOutput = exportFile
-	exportAll = false
-	exportIncludeInfra = false
-	exportScrub = true
+	exportTestOptions.output = exportFile
+	exportTestOptions.all = false
+	exportTestOptions.includeInfra = false
+	exportTestOptions.scrub = true
 	t.Cleanup(func() {
-		exportOutput = ""
-		exportScrub = false
+		exportTestOptions.output = ""
+		exportTestOptions.scrub = false
 	})
 
-	if err := runExport(nil, nil); err != nil {
+	if err := runExportForTest(); err != nil {
 		t.Fatalf("runExport: %v", err)
 	}
 
@@ -354,13 +354,13 @@ func TestExportImportRoundTrip(t *testing.T) {
 
 	// Export
 	exportFile := filepath.Join(tmpDir, "roundtrip.jsonl")
-	exportOutput = exportFile
-	exportAll = false
-	exportIncludeInfra = false
-	exportScrub = false
-	t.Cleanup(func() { exportOutput = "" })
+	exportTestOptions.output = exportFile
+	exportTestOptions.all = false
+	exportTestOptions.includeInfra = false
+	exportTestOptions.scrub = false
+	t.Cleanup(func() { exportTestOptions.output = "" })
 
-	if err := runExport(nil, nil); err != nil {
+	if err := runExportForTest(); err != nil {
 		t.Fatalf("export: %v", err)
 	}
 
@@ -486,11 +486,17 @@ func TestExportNoHistoryBeadRoundTrip(t *testing.T) {
 
 	// Create a NoHistory bead using the store API (routes to wisps table with no_history=1).
 	noHistoryBead := &types.Issue{
-		Title:     "NoHistory export test bead",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		NoHistory: true,
+		IssueContent: types.IssueContent{
+			Title: "NoHistory export test bead",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			NoHistory: true,
+		},
 	}
 	if err := s.CreateIssue(ctx, noHistoryBead, "test"); err != nil {
 		t.Fatalf("CreateIssue (NoHistory): %v", err)
@@ -504,16 +510,16 @@ func TestExportNoHistoryBeadRoundTrip(t *testing.T) {
 
 	// Export to file.
 	exportFile := filepath.Join(tmpDir, "nohistory_export.jsonl")
-	exportOutput = exportFile
-	exportAll = true // include everything
-	exportIncludeInfra = false
-	exportScrub = false
+	exportTestOptions.output = exportFile
+	exportTestOptions.all = true // include everything
+	exportTestOptions.includeInfra = false
+	exportTestOptions.scrub = false
 	t.Cleanup(func() {
-		exportOutput = ""
-		exportAll = false
+		exportTestOptions.output = ""
+		exportTestOptions.all = false
 	})
 
-	if err := runExport(nil, nil); err != nil {
+	if err := runExportForTest(); err != nil {
 		t.Fatalf("runExport: %v", err)
 	}
 
@@ -628,13 +634,13 @@ func TestExportMemoryDeterminism(t *testing.T) {
 
 	doExport := func(path string) []byte {
 		t.Helper()
-		exportOutput = path
-		exportAll = false
-		exportIncludeInfra = false
-		exportScrub = false
-		exportNoMemories = false
-		exportIncludeMemories = true
-		if err := runExport(nil, nil); err != nil {
+		exportTestOptions.output = path
+		exportTestOptions.all = false
+		exportTestOptions.includeInfra = false
+		exportTestOptions.scrub = false
+		exportTestOptions.noMemories = false
+		exportTestOptions.includeMemories = true
+		if err := runExportForTest(); err != nil {
 			t.Fatalf("runExport(%s): %v", path, err)
 		}
 		data, err := os.ReadFile(path)
@@ -734,11 +740,17 @@ func TestExportByteStabilityAllRecordTypes(t *testing.T) {
 	var issues []*types.Issue
 	for _, title := range titles {
 		issue := &types.Issue{
-			Title:     title,
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			CreatedAt: created,
+			IssueContent: types.IssueContent{
+				Title: title,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: created,
+			},
 		}
 		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatalf("CreateIssue(%q): %v", title, err)
@@ -788,13 +800,13 @@ func TestExportByteStabilityAllRecordTypes(t *testing.T) {
 
 	doExport := func(path string) []byte {
 		t.Helper()
-		exportOutput = path
-		exportAll = false
-		exportIncludeInfra = false
-		exportScrub = false
-		exportNoMemories = false
-		exportIncludeMemories = true
-		if err := runExport(nil, nil); err != nil {
+		exportTestOptions.output = path
+		exportTestOptions.all = false
+		exportTestOptions.includeInfra = false
+		exportTestOptions.scrub = false
+		exportTestOptions.noMemories = false
+		exportTestOptions.includeMemories = true
+		if err := runExportForTest(); err != nil {
 			t.Fatalf("runExport(%s): %v", path, err)
 		}
 		data, err := os.ReadFile(path)
@@ -921,11 +933,17 @@ func TestExportNoDuplicateWisps(t *testing.T) {
 	wispIDs := make(map[string]bool)
 	for i := 1; i <= 3; i++ {
 		wisp := &types.Issue{
-			Title:     fmt.Sprintf("Wisp %d for export dedup", i),
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Ephemeral: true,
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Wisp %d for export dedup", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		}
 		if err := s.CreateIssue(ctx, wisp, "test"); err != nil {
 			t.Fatalf("CreateIssue (wisp %d): %v", i, err)
@@ -935,18 +953,18 @@ func TestExportNoDuplicateWisps(t *testing.T) {
 
 	// Export with --all to include everything.
 	exportFile := filepath.Join(tmpDir, "dedup_export.jsonl")
-	exportOutput = exportFile
-	exportAll = true
-	exportIncludeInfra = false
-	exportScrub = false
-	exportNoMemories = true
+	exportTestOptions.output = exportFile
+	exportTestOptions.all = true
+	exportTestOptions.includeInfra = false
+	exportTestOptions.scrub = false
+	exportTestOptions.noMemories = true
 	t.Cleanup(func() {
-		exportOutput = ""
-		exportAll = false
-		exportNoMemories = false
+		exportTestOptions.output = ""
+		exportTestOptions.all = false
+		exportTestOptions.noMemories = false
 	})
 
-	if err := runExport(nil, nil); err != nil {
+	if err := runExportForTest(); err != nil {
 		t.Fatalf("runExport: %v", err)
 	}
 
@@ -1071,14 +1089,14 @@ func TestExportExcludesMemoriesByDefault(t *testing.T) {
 
 	// Default export: memories must be excluded.
 	defaultFile := filepath.Join(tmpDir, "default_export.jsonl")
-	exportOutput = defaultFile
-	exportAll = false
-	exportIncludeInfra = false
-	exportScrub = false
-	exportNoMemories = false
-	exportIncludeMemories = false
+	exportTestOptions.output = defaultFile
+	exportTestOptions.all = false
+	exportTestOptions.includeInfra = false
+	exportTestOptions.scrub = false
+	exportTestOptions.noMemories = false
+	exportTestOptions.includeMemories = false
 
-	if err := runExport(nil, nil); err != nil {
+	if err := runExportForTest(); err != nil {
 		t.Fatalf("runExport (default): %v", err)
 	}
 	defaultData, err := os.ReadFile(defaultFile)
@@ -1091,9 +1109,9 @@ func TestExportExcludesMemoriesByDefault(t *testing.T) {
 
 	// --include-memories: memories must appear.
 	includeFile := filepath.Join(tmpDir, "include_export.jsonl")
-	exportOutput = includeFile
-	exportIncludeMemories = true
-	if err := runExport(nil, nil); err != nil {
+	exportTestOptions.output = includeFile
+	exportTestOptions.includeMemories = true
+	if err := runExportForTest(); err != nil {
 		t.Fatalf("runExport (--include-memories): %v", err)
 	}
 	includeData, err := os.ReadFile(includeFile)
@@ -1106,10 +1124,10 @@ func TestExportExcludesMemoriesByDefault(t *testing.T) {
 
 	// --all: memories must also appear.
 	allFile := filepath.Join(tmpDir, "all_export.jsonl")
-	exportOutput = allFile
-	exportAll = true
-	exportIncludeMemories = false
-	if err := runExport(nil, nil); err != nil {
+	exportTestOptions.output = allFile
+	exportTestOptions.all = true
+	exportTestOptions.includeMemories = false
+	if err := runExportForTest(); err != nil {
 		t.Fatalf("runExport (--all): %v", err)
 	}
 	allData, err := os.ReadFile(allFile)
@@ -1179,11 +1197,17 @@ func TestExportExcludesWispsByDefault(t *testing.T) {
 	// Create ephemeral wisps via the store API (routes to wisps table).
 	for i := 1; i <= 3; i++ {
 		wisp := &types.Issue{
-			Title:     fmt.Sprintf("Private wisp %d", i),
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Ephemeral: true,
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Private wisp %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		}
 		if err := s.CreateIssue(ctx, wisp, "test"); err != nil {
 			t.Fatalf("CreateIssue (wisp %d): %v", i, err)
@@ -1192,18 +1216,18 @@ func TestExportExcludesWispsByDefault(t *testing.T) {
 
 	// Default export (no --all): wisps must be excluded.
 	exportFile := filepath.Join(tmpDir, "default_export.jsonl")
-	exportOutput = exportFile
-	exportAll = false
-	exportIncludeInfra = false
-	exportScrub = false
-	exportNoMemories = true
+	exportTestOptions.output = exportFile
+	exportTestOptions.all = false
+	exportTestOptions.includeInfra = false
+	exportTestOptions.scrub = false
+	exportTestOptions.noMemories = true
 	t.Cleanup(func() {
-		exportOutput = ""
-		exportAll = false
-		exportNoMemories = false
+		exportTestOptions.output = ""
+		exportTestOptions.all = false
+		exportTestOptions.noMemories = false
 	})
 
-	if err := runExport(nil, nil); err != nil {
+	if err := runExportForTest(); err != nil {
 		t.Fatalf("runExport (default): %v", err)
 	}
 
@@ -1227,9 +1251,9 @@ func TestExportExcludesWispsByDefault(t *testing.T) {
 
 	// --all export: wisps must be included.
 	allFile := filepath.Join(tmpDir, "all_export.jsonl")
-	exportOutput = allFile
-	exportAll = true
-	if err := runExport(nil, nil); err != nil {
+	exportTestOptions.output = allFile
+	exportTestOptions.all = true
+	if err := runExportForTest(); err != nil {
 		t.Fatalf("runExport (--all): %v", err)
 	}
 	allData, err := os.ReadFile(allFile)

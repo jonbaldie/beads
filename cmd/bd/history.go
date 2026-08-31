@@ -13,53 +13,62 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	historyLimit  int
-	historyEvents bool
-)
+type historyOptions struct {
+	limit  int
+	events bool
+}
 
-var historyCmd = &cobra.Command{
-	Use:     "history <id>",
-	GroupID: "views",
-	Short:   "Show version history for an issue",
-	Long: `Show the complete version history of an issue, including all commits
+func historyOptionsFromCommand(cmd *cobra.Command) historyOptions {
+	limit, _ := cmd.Flags().GetInt("limit")
+	events, _ := cmd.Flags().GetBool("events")
+	return historyOptions{limit: limit, events: events}
+}
+
+func newHistoryCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:     "history <id>",
+		GroupID: "views",
+		Short:   "Show version history for an issue",
+		Long: `Show the complete version history of an issue, including all commits
 where the issue was modified.
 
 Examples:
   bd history bd-123           # Show all history for issue bd-123
   bd history bd-123 --limit 5 # Show last 5 changes
   bd history bd-123 --events  # Show database audit events`,
-	Args:          cobra.ExactArgs(1),
-	SilenceUsage:  true,
-	SilenceErrors: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		evt := metrics.NewCommandEvent("history")
-		defer func() {
-			if c := metrics.Global(); c != nil {
-				c.CloseEventAndAdd(evt)
+		Args:          cobra.ExactArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts := historyOptionsFromCommand(cmd)
+			evt := metrics.NewCommandEvent("history")
+			defer func() {
+				if c := metrics.Global(); c != nil {
+					c.CloseEventAndAdd(evt)
+				}
+			}()
+
+			issueID := args[0]
+
+			if usesProxiedServer() {
+				// Proxied mode has no local store to resolve against, so partial-ID
+				// resolution is unavailable here -- pass the raw ID through and let
+				// the proxied server's own lookup handle it.
+				return runHistoryProxiedServer(getRootContext(), issueID, opts.limit, opts.events)
 			}
-		}()
 
-		issueID := args[0]
+			if resolved, err := utils.ResolvePartialID(getRootContext(), getStore(), issueID); err == nil {
+				issueID = resolved
+			} else if errors.Is(err, utils.ErrAmbiguousID) {
+				return HandleErrorRespectJSON("%v", err)
+			}
+			// Not-found IDs fall through unchanged -- the queries below just find
+			// nothing and hit the existing "No history found" path (GH#3502), so we
+			// don't hard-error on an id that never existed.
 
-		if usesProxiedServer() {
-			// Proxied mode has no local store to resolve against, so partial-ID
-			// resolution is unavailable here -- pass the raw ID through and let
-			// the proxied server's own lookup handle it.
-			return runHistoryProxiedServer(rootCtx, issueID, historyLimit, historyEvents)
-		}
-
-		if resolved, err := utils.ResolvePartialID(rootCtx, store, issueID); err == nil {
-			issueID = resolved
-		} else if errors.Is(err, utils.ErrAmbiguousID) {
-			return HandleErrorRespectJSON("%v", err)
-		}
-		// Not-found IDs fall through unchanged -- the queries below just find
-		// nothing and hit the existing "No history found" path (GH#3502), so we
-		// don't hard-error on an id that never existed.
-
-		return runHistory(rootCtx, store, issueID, historyLimit, historyEvents)
-	},
+			return runHistory(getRootContext(), getStore(), issueID, opts.limit, opts.events)
+		},
+	}
 }
 
 type historyBackend interface {
@@ -69,24 +78,31 @@ type historyBackend interface {
 
 func runHistory(ctx context.Context, backend historyBackend, issueID string, limit int, showEvents bool) error {
 	if showEvents {
-		events, err := collectHistoryEvents(ctx, backend, issueID, limit)
-		if err != nil {
-			return HandleErrorRespectJSON("failed to get history events: %v", err)
-		}
-		if jsonOutput {
-			return outputJSON(events)
-		}
-		printHistoryEvents(issueID, events)
-		return nil
+		return runHistoryEvents(ctx, backend, issueID, limit)
 	}
 
 	history, err := backend.History(ctx, issueID)
 	if err != nil {
 		return HandleErrorRespectJSON("failed to get history: %v", err)
 	}
+	return renderHistory(issueID, history, limit)
+}
 
+func runHistoryEvents(ctx context.Context, backend historyBackend, issueID string, limit int) error {
+	events, err := collectHistoryEvents(ctx, backend, issueID, limit)
+	if err != nil {
+		return HandleErrorRespectJSON("failed to get history events: %v", err)
+	}
+	if isJSONOutput() {
+		return outputJSON(events)
+	}
+	printHistoryEvents(issueID, events)
+	return nil
+}
+
+func renderHistory(issueID string, history []*storage.HistoryEntry, limit int) error {
 	if len(history) == 0 {
-		if jsonOutput {
+		if isJSONOutput() {
 			return outputJSON(history)
 		}
 		fmt.Printf("No history found for issue %s\n", issueID)
@@ -97,7 +113,7 @@ func runHistory(ctx context.Context, backend historyBackend, issueID string, lim
 		history = history[:limit]
 	}
 
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(history)
 	}
 
@@ -129,8 +145,9 @@ func runHistory(ctx context.Context, backend historyBackend, issueID string, lim
 }
 
 func init() {
-	historyCmd.Flags().IntVar(&historyLimit, "limit", 0, "Limit number of history entries (0 = all)")
-	historyCmd.Flags().BoolVar(&historyEvents, "events", false, "Show database audit events instead of commit snapshots")
+	historyCmd := newHistoryCommand()
+	historyCmd.Flags().Int("limit", 0, "Limit number of history entries (0 = all)")
+	historyCmd.Flags().Bool("events", false, "Show database audit events instead of commit snapshots")
 	historyCmd.ValidArgsFunction = issueIDCompletion
 	rootCmd.AddCommand(historyCmd)
 }
@@ -168,18 +185,22 @@ func printHistoryEvents(issueID string, events []types.Event) {
 			ui.RenderMuted(event.CreatedAt.Format("2006-01-02 15:04:05")),
 			event.EventType,
 			event.Actor)
-		if event.OldValue != nil && *event.OldValue != "" {
-			fmt.Printf("  Old: %s\n", *event.OldValue)
-		}
-		if event.NewValue != nil && *event.NewValue != "" {
-			fmt.Printf("  New: %s\n", *event.NewValue)
-		}
-		if event.Comment != nil && *event.Comment != "" {
-			fmt.Printf("  Comment: %s\n", *event.Comment)
-		}
+		printHistoryEventDetails(event)
 		if i < len(events)-1 {
 			fmt.Println()
 		}
 	}
 	fmt.Println()
+}
+
+func printHistoryEventDetails(event types.Event) {
+	if event.OldValue != nil && *event.OldValue != "" {
+		fmt.Printf("  Old: %s\n", *event.OldValue)
+	}
+	if event.NewValue != nil && *event.NewValue != "" {
+		fmt.Printf("  New: %s\n", *event.NewValue)
+	}
+	if event.Comment != nil && *event.Comment != "" {
+		fmt.Printf("  Comment: %s\n", *event.Comment)
+	}
 }

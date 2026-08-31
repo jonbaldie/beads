@@ -27,11 +27,11 @@ type heartbeatProxiedOutcome struct {
 // 0 = lease refreshed; nonzero = the lease is gone (wrong owner, not
 // in_progress, closed, reclaimed) and the worker should stop.
 func runHeartbeatProxiedServer(ctx context.Context, id string) error {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return HandleErrorRespectJSON("proxied-server UOW provider not initialized")
 	}
 
-	res, err := uow.RunTxEphemeral(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (heartbeatProxiedOutcome, error) {
+	res, err := uow.RunTxEphemeral(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (heartbeatProxiedOutcome, error) {
 		issue, _, rerr := workapi.GetIssueOrWisp(ctx, workapi.NewUOWDetailSource(uw), id)
 		if errors.Is(rerr, storage.ErrNotFound) {
 			return heartbeatProxiedOutcome{}, fmt.Errorf("issue %s not found", id)
@@ -41,7 +41,7 @@ func runHeartbeatProxiedServer(ctx context.Context, id string) error {
 		}
 		// Wisps resolve here too and are refused below: the repo verb
 		// classifies them ErrNotClaimable ("is ephemeral"), same as classic.
-		if herr := uw.IssueUseCase().Heartbeat(ctx, issue.ID, actor); herr != nil {
+		if herr := uw.IssueUseCase().Heartbeat(ctx, issue.ID, getActor()); herr != nil {
 			return heartbeatProxiedOutcome{}, fmt.Errorf("heartbeat %s: %w", issue.ID, herr)
 		}
 		return heartbeatProxiedOutcome{id: issue.ID, title: issue.Title}, nil

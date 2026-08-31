@@ -38,36 +38,49 @@ func guardLegacyUpgradeWorkspace(beadsDir string) error {
 	if err := validateConfiguredBackend(cfg); err != nil {
 		return err
 	}
+	return guardLegacyDoltWorkspace(beadsDir, cfg)
+}
+
+func guardLegacyDoltWorkspace(beadsDir string, cfg *configfile.Config) error {
 	serverMode := cfg != nil && strings.EqualFold(cfg.DoltMode, configfile.DoltModeServer)
 	if embeddeddolt.HasRepository(beadsDir) && !serverMode {
 		return nil
 	}
 	version, ok := legacyUpgradeVersionWitness(beadsDir)
-	if serverMode && ok && legacyServerVersion(version) {
+	if serverMode {
+		return guardLegacyServerWorkspace(version, ok, hasLegacyDoltRoot(beadsDir))
+	}
+	if !hasLegacyDoltRoot(beadsDir) {
+		return nil
+	}
+	return guardLegacyEmbeddedWorkspace(cfg, version, ok)
+}
+
+func guardLegacyServerWorkspace(version string, ok, hasLocalDoltRoot bool) error {
+	if ok && legacyServerVersion(version) {
 		return legacyUpgradeRefusal(fmt.Sprintf("legacy Dolt server workspace from bd %s", version))
 	}
-	hasLocalDoltRoot := hasLegacyDoltRoot(beadsDir)
 	if !hasLocalDoltRoot {
 		return nil
 	}
-	if serverMode {
-		if currentVersionWitness(version) {
-			return nil
-		}
-		return legacyUpgradeRefusal("legacy Dolt server workspace")
+	if currentVersionWitness(version) {
+		return nil
 	}
-	if cfg == nil || cfg.DoltMode == "" ||
-		strings.EqualFold(cfg.DoltMode, configfile.DoltModeEmbedded) {
-		if doltserver.IsSharedServerMode() && !(ok && legacyServerVersion(version)) {
-			return nil
-		}
-		reason := "legacy Dolt workspace"
-		if _, validVersion := legacyVersionMinor(version); ok && validVersion {
-			reason = fmt.Sprintf("legacy Dolt workspace from bd %s", version)
-		}
-		return legacyUpgradeRefusal(reason)
+	return legacyUpgradeRefusal("legacy Dolt server workspace")
+}
+
+func guardLegacyEmbeddedWorkspace(cfg *configfile.Config, version string, ok bool) error {
+	if cfg != nil && cfg.DoltMode != "" && !strings.EqualFold(cfg.DoltMode, configfile.DoltModeEmbedded) {
+		return nil
 	}
-	return nil
+	if doltserver.IsSharedServerMode() && !(ok && legacyServerVersion(version)) {
+		return nil
+	}
+	reason := "legacy Dolt workspace"
+	if _, validVersion := legacyVersionMinor(version); ok && validVersion {
+		reason = fmt.Sprintf("legacy Dolt workspace from bd %s", version)
+	}
+	return legacyUpgradeRefusal(reason)
 }
 
 func isHistoricalSQLiteWorkspace(beadsDir string, cfg *configfile.Config) bool {

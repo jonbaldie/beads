@@ -95,7 +95,7 @@ func init() {
 	rootCmd.AddCommand(jiraCmd)
 }
 
-func runJiraSync(cmd *cobra.Command, args []string) error {
+func runJiraSync(cmd *cobra.Command, _ []string) error {
 	if usesProxiedServer() {
 		return HandleErrorRespectJSON("jira sync is not supported in proxied-server mode")
 	}
@@ -105,7 +105,37 @@ func runJiraSync(cmd *cobra.Command, args []string) error {
 			c.CloseEventAndAdd(evt)
 		}
 	}()
+	opts, err := gatherJiraSyncOptions(cmd)
+	if err != nil {
+		return err
+	}
+	if !opts.DryRun {
+		if err := CheckReadonly("jira sync"); err != nil {
+			return err
+		}
+	}
+	return executeJiraSync(cmd, opts)
+}
 
+func executeJiraSync(cmd *cobra.Command, opts tracker.SyncOptions) error {
+	if err := ensureStoreActive(); err != nil {
+		return HandleErrorRespectJSON("database not available: %v", err)
+	}
+	if err := validateJiraConfig(); err != nil {
+		return HandleErrorRespectJSON("%v", err)
+	}
+	engine, err := newJiraSyncEngine(cmd, getRootContext())
+	if err != nil {
+		return err
+	}
+	result, err := engine.Sync(getRootContext(), opts)
+	if err != nil {
+		return reportJiraSyncError(result, err)
+	}
+	return printJiraSyncResult(result, opts.DryRun)
+}
+
+func gatherJiraSyncOptions(cmd *cobra.Command) (tracker.SyncOptions, error) {
 	pull, _ := cmd.Flags().GetBool("pull")
 	push, _ := cmd.Flags().GetBool("push")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
@@ -113,72 +143,62 @@ func runJiraSync(cmd *cobra.Command, args []string) error {
 	preferJira, _ := cmd.Flags().GetBool("prefer-jira")
 	createOnly, _ := cmd.Flags().GetBool("create-only")
 	state, _ := cmd.Flags().GetString("state")
-
-	if !dryRun {
-		CheckReadonly("jira sync")
-	}
-
 	if preferLocal && preferJira {
-		return HandleErrorRespectJSON("cannot use both --prefer-local and --prefer-jira")
+		return tracker.SyncOptions{}, HandleErrorRespectJSON("cannot use both --prefer-local and --prefer-jira")
 	}
-
-	if err := ensureStoreActive(); err != nil {
-		return HandleErrorRespectJSON("database not available: %v", err)
+	opts := tracker.SyncOptions{
+		Pull:               pull,
+		Push:               push,
+		DryRun:             dryRun,
+		CreateOnly:         createOnly,
+		State:              state,
+		ConflictResolution: jiraConflictResolution(preferLocal, preferJira),
 	}
-
-	if err := validateJiraConfig(); err != nil {
-		return HandleErrorRespectJSON("%v", err)
+	if err := applySelectiveSyncFlags(cmd, &opts, push); err != nil {
+		return tracker.SyncOptions{}, HandleErrorRespectJSON("%v", err)
 	}
+	return opts, nil
+}
 
-	ctx := rootCtx
+func jiraConflictResolution(preferLocal, preferJira bool) tracker.ConflictResolution {
+	switch {
+	case preferLocal:
+		return tracker.ConflictLocal
+	case preferJira:
+		return tracker.ConflictExternal
+	default:
+		return tracker.ConflictTimestamp
+	}
+}
 
+func newJiraSyncEngine(cmd *cobra.Command, ctx context.Context) (*tracker.Engine, error) {
 	jt := &jira.Tracker{}
 	cliProjects, _ := cmd.Flags().GetStringSlice("project")
 	if len(cliProjects) > 0 {
 		jt.SetProjectKeys(tracker.DeduplicateStrings(cliProjects))
 	}
-	if err := jt.Init(ctx, store); err != nil {
-		return HandleErrorRespectJSON("initializing Jira tracker: %v", err)
+	if err := jt.Init(ctx, getStore()); err != nil {
+		return nil, HandleErrorRespectJSON("initializing Jira tracker: %v", err)
 	}
-
-	engine := tracker.NewEngine(jt, store, actor)
+	engine := tracker.NewEngine(jt, getStore(), getActor())
 	engine.OnMessage = func(msg string) { fmt.Println("  " + msg) }
-	engine.OnWarning = func(msg string) { fmt.Fprintf(os.Stderr, "Warning: %s\n", msg) }
-
+	engine.OnWarning = func(msg string) { fmt.Fprintf(os.Stderr, "Warning: %s\n", msg) } //nolint:gosec // G705: CLI stderr, not HTML.
 	engine.PushHooks = buildJiraPushHooks(ctx)
+	return engine, nil
+}
 
-	opts := tracker.SyncOptions{
-		Pull:       pull,
-		Push:       push,
-		DryRun:     dryRun,
-		CreateOnly: createOnly,
-		State:      state,
-	}
-
-	if err := applySelectiveSyncFlags(cmd, &opts, push); err != nil {
-		return HandleErrorRespectJSON("%v", err)
-	}
-
-	if preferLocal {
-		opts.ConflictResolution = tracker.ConflictLocal
-	} else if preferJira {
-		opts.ConflictResolution = tracker.ConflictExternal
-	} else {
-		opts.ConflictResolution = tracker.ConflictTimestamp
-	}
-
-	result, err := engine.Sync(ctx, opts)
-	if err != nil {
-		if jsonOutput {
-			if jerr := outputJSON(result); jerr != nil {
-				return jerr
-			}
-			return SilentExit()
+func reportJiraSyncError(result *tracker.SyncResult, err error) error {
+	if isJSONOutput() {
+		if jerr := outputJSON(result); jerr != nil {
+			return jerr
 		}
-		return HandleError("%v", err)
+		return SilentExit()
 	}
+	return HandleError("%v", err)
+}
 
-	if jsonOutput {
+func printJiraSyncResult(result *tracker.SyncResult, dryRun bool) error {
+	if isJSONOutput() {
 		return outputJSON(result)
 	}
 	if dryRun {
@@ -209,7 +229,7 @@ func runJiraSync(cmd *cobra.Command, args []string) error {
 func buildJiraPushHooks(ctx context.Context) *tracker.PushHooks {
 	return &tracker.PushHooks{
 		ShouldPush: func(issue *types.Issue) bool {
-			pushPrefix, _ := store.GetConfig(ctx, "jira.push_prefix")
+			pushPrefix, _ := getStore().GetConfig(ctx, "jira.push_prefix")
 			if pushPrefix == "" {
 				return true
 			}
@@ -225,7 +245,7 @@ func buildJiraPushHooks(ctx context.Context) *tracker.PushHooks {
 	}
 }
 
-func runJiraStatus(cmd *cobra.Command, args []string) error {
+func runJiraStatus(_ *cobra.Command, _ []string) error {
 	if usesProxiedServer() {
 		return HandleErrorRespectJSON("jira status is not supported in proxied-server mode")
 	}
@@ -235,34 +255,55 @@ func runJiraStatus(cmd *cobra.Command, args []string) error {
 			c.CloseEventAndAdd(evt)
 		}
 	}()
-
-	ctx := rootCtx
-
 	if err := ensureStoreActive(); err != nil {
 		return HandleErrorRespectJSON("%v", err)
 	}
+	status, err := loadJiraStatus(getRootContext())
+	if err != nil {
+		return err
+	}
+	if isJSONOutput() {
+		return outputJSON(status.json())
+	}
+	printJiraStatus(status)
+	return nil
+}
 
-	jiraURL, _ := store.GetConfig(ctx, "jira.url")
-	lastSync, _ := store.GetConfig(ctx, "jira.last_sync")
+type jiraStatusInfo struct {
+	jiraURL     string
+	lastSync    string
+	projectKeys []string
+	configured  bool
+	allIssues   []*types.Issue
+	withJiraRef int
+	pendingPush int
+}
 
-	pluralProjects, _ := store.GetConfig(ctx, "jira.projects")
-	singularProject, _ := store.GetConfig(ctx, "jira.project")
+func loadJiraStatus(ctx context.Context) (jiraStatusInfo, error) {
+	jiraURL, _ := getStore().GetConfig(ctx, "jira.url")
+	lastSync, _ := getStore().GetConfig(ctx, "jira.last_sync")
+	pluralProjects, _ := getStore().GetConfig(ctx, "jira.projects")
+	singularProject, _ := getStore().GetConfig(ctx, "jira.project")
 	projectKeys := tracker.ResolveProjectIDs(nil, pluralProjects, singularProject)
-
-	configured := jiraURL != "" && len(projectKeys) > 0
-
 	// jira sync is a round-trip path — opt out of BEADS_MAX_ROWS
 	// (designer §4.1) so a misconfigured env doesn't abort partway.
-	allIssues, err := store.SearchIssues(ctx, "", types.IssueFilter{
-		MaxRows:       0,
-		MaxRowsSource: "",
-	})
+	allIssues, err := getStore().SearchIssues(ctx, "", types.IssueFilter{IssueFilterPage: types.IssueFilterPage{MaxRows: 0, MaxRowsSource: ""}})
 	if err != nil {
-		return HandleErrorRespectJSON("%v", err)
+		return jiraStatusInfo{}, HandleErrorRespectJSON("%v", err)
 	}
+	withJiraRef, pendingPush := countJiraRefs(allIssues, jiraURL)
+	return jiraStatusInfo{
+		jiraURL:     jiraURL,
+		lastSync:    lastSync,
+		projectKeys: projectKeys,
+		configured:  jiraURL != "" && len(projectKeys) > 0,
+		allIssues:   allIssues,
+		withJiraRef: withJiraRef,
+		pendingPush: pendingPush,
+	}, nil
+}
 
-	withJiraRef := 0
-	pendingPush := 0
+func countJiraRefs(allIssues []*types.Issue, jiraURL string) (withJiraRef, pendingPush int) {
 	for _, issue := range allIssues {
 		if issue.ExternalRef != nil && jira.IsJiraExternalRef(*issue.ExternalRef, jiraURL) {
 			withJiraRef++
@@ -270,61 +311,64 @@ func runJiraStatus(cmd *cobra.Command, args []string) error {
 			pendingPush++
 		}
 	}
+	return withJiraRef, pendingPush
+}
 
-	if jsonOutput {
-		primaryProject := ""
-		if len(projectKeys) > 0 {
-			primaryProject = projectKeys[0]
-		}
-		return outputJSON(map[string]interface{}{
-			"configured":    configured,
-			"jira_url":      jiraURL,
-			"jira_project":  primaryProject,
-			"jira_projects": projectKeys,
-			"last_sync":     lastSync,
-			"total_issues":  len(allIssues),
-			"with_jira_ref": withJiraRef,
-			"pending_push":  pendingPush,
-		})
+func (s jiraStatusInfo) json() map[string]interface{} {
+	primaryProject := ""
+	if len(s.projectKeys) > 0 {
+		primaryProject = s.projectKeys[0]
 	}
+	return map[string]interface{}{
+		"configured":    s.configured,
+		"jira_url":      s.jiraURL,
+		"jira_project":  primaryProject,
+		"jira_projects": s.projectKeys,
+		"last_sync":     s.lastSync,
+		"total_issues":  len(s.allIssues),
+		"with_jira_ref": s.withJiraRef,
+		"pending_push":  s.pendingPush,
+	}
+}
 
+func printJiraStatus(s jiraStatusInfo) {
 	fmt.Println("Jira Sync Status")
 	fmt.Println("================")
 	fmt.Println()
-
-	if !configured {
-		fmt.Println("Status: Not configured")
-		fmt.Println()
-		fmt.Println("To configure Jira integration:")
-		fmt.Println("  bd config set jira.url \"https://company.atlassian.net\"")
-		fmt.Println("  bd config set jira.project \"PROJ\"")
-		fmt.Println("  bd config set jira.projects \"PROJ1,PROJ2\"  # multiple projects")
-		fmt.Println("  bd config set jira.api_token \"YOUR_TOKEN\"")
-		fmt.Println("  bd config set jira.username \"your@email.com\"")
-		return nil
+	if !s.configured {
+		printJiraUnconfiguredHelp()
+		return
 	}
-
-	fmt.Printf("Jira URL:     %s\n", jiraURL)
-	if len(projectKeys) == 1 {
-		fmt.Printf("Project:      %s\n", projectKeys[0])
+	fmt.Printf("Jira URL:     %s\n", s.jiraURL)
+	if len(s.projectKeys) == 1 {
+		fmt.Printf("Project:      %s\n", s.projectKeys[0])
 	} else {
-		fmt.Printf("Projects:     %s (%d projects)\n", strings.Join(projectKeys, ", "), len(projectKeys))
+		fmt.Printf("Projects:     %s (%d projects)\n", strings.Join(s.projectKeys, ", "), len(s.projectKeys))
 	}
-	if lastSync != "" {
-		fmt.Printf("Last Sync:    %s\n", lastSync)
+	if s.lastSync != "" {
+		fmt.Printf("Last Sync:    %s\n", s.lastSync)
 	} else {
 		fmt.Println("Last Sync:    Never")
 	}
 	fmt.Println()
-	fmt.Printf("Total Issues: %d\n", len(allIssues))
-	fmt.Printf("With Jira:    %d\n", withJiraRef)
-	fmt.Printf("Local Only:   %d\n", pendingPush)
-
-	if pendingPush > 0 {
+	fmt.Printf("Total Issues: %d\n", len(s.allIssues))
+	fmt.Printf("With Jira:    %d\n", s.withJiraRef)
+	fmt.Printf("Local Only:   %d\n", s.pendingPush)
+	if s.pendingPush > 0 {
 		fmt.Println()
-		fmt.Printf("Run 'bd jira sync --push' to push %d local issue(s) to Jira\n", pendingPush)
+		fmt.Printf("Run 'bd jira sync --push' to push %d local issue(s) to Jira\n", s.pendingPush)
 	}
-	return nil
+}
+
+func printJiraUnconfiguredHelp() {
+	fmt.Println("Status: Not configured")
+	fmt.Println()
+	fmt.Println("To configure Jira integration:")
+	fmt.Println("  bd config set jira.url \"https://company.atlassian.net\"")
+	fmt.Println("  bd config set jira.project \"PROJ\"")
+	fmt.Println("  bd config set jira.projects \"PROJ1,PROJ2\"  # multiple projects")
+	fmt.Println("  bd config set jira.api_token \"YOUR_TOKEN\"")
+	fmt.Println("  bd config set jira.username \"your@email.com\"")
 }
 
 // validateJiraConfig checks that required Jira configuration is present.
@@ -333,22 +377,22 @@ func validateJiraConfig() error {
 		return fmt.Errorf("database not available: %w", err)
 	}
 
-	ctx := rootCtx
-	jiraURL, _ := store.GetConfig(ctx, "jira.url")
+	ctx := getRootContext()
+	jiraURL, _ := getStore().GetConfig(ctx, "jira.url")
 
 	if jiraURL == "" {
 		return fmt.Errorf("jira.url not configured\nRun: bd config set jira.url \"https://company.atlassian.net\"")
 	}
 
 	// Check for project configuration (singular or plural).
-	pluralProjects, _ := store.GetConfig(ctx, "jira.projects")
-	singularProject, _ := store.GetConfig(ctx, "jira.project")
+	pluralProjects, _ := getStore().GetConfig(ctx, "jira.projects")
+	singularProject, _ := getStore().GetConfig(ctx, "jira.project")
 	projectKeys := tracker.ResolveProjectIDs(nil, pluralProjects, singularProject)
 	if len(projectKeys) == 0 {
 		return fmt.Errorf("no Jira project configured\nRun: bd config set jira.project \"PROJ\"\nOr:  bd config set jira.projects \"PROJ1,PROJ2\"")
 	}
 
-	apiToken, _ := store.GetConfig(ctx, "jira.api_token")
+	apiToken, _ := getStore().GetConfig(ctx, "jira.api_token")
 	if apiToken == "" && os.Getenv("JIRA_API_TOKEN") == "" {
 		return fmt.Errorf("Jira API token not configured\nRun: bd config set jira.api_token \"YOUR_TOKEN\"\nOr: export JIRA_API_TOKEN=YOUR_TOKEN")
 	}

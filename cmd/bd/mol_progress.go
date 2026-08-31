@@ -41,26 +41,26 @@ Example:
 		}()
 
 		if usesProxiedServer() {
-			return runMolProgressProxiedServer(rootCtx, args)
+			return runMolProgressProxiedServer(getRootContext(), args)
 		}
 
-		ctx := rootCtx
+		ctx := getRootContext()
 
-		if store == nil {
+		if getStore() == nil {
 			return HandleErrorRespectJSON("no database connection")
 		}
 
 		var moleculeID string
 		if len(args) == 1 {
-			resolved, err := utils.ResolvePartialID(ctx, store, args[0])
+			resolved, err := utils.ResolvePartialID(ctx, getStore(), args[0])
 			if err != nil {
 				return HandleErrorRespectJSON("molecule '%s' not found", args[0])
 			}
 			moleculeID = resolved
 		} else {
-			moleculeIDs := findInProgressMoleculeIDs(ctx, store, actor)
+			moleculeIDs := findInProgressMoleculeIDs(ctx, getStore(), getActor())
 			if len(moleculeIDs) == 0 {
-				if jsonOutput {
+				if isJSONOutput() {
 					return outputJSON([]interface{}{})
 				}
 				fmt.Println("No molecules in progress.")
@@ -70,12 +70,12 @@ Example:
 			moleculeID = moleculeIDs[0]
 		}
 
-		stats, err := store.GetMoleculeProgress(ctx, moleculeID)
+		stats, err := getStore().GetMoleculeProgress(ctx, moleculeID)
 		if err != nil {
 			return HandleErrorRespectJSON("%v", err)
 		}
 
-		if jsonOutput {
+		if isJSONOutput() {
 			output := map[string]interface{}{
 				"molecule_id":     stats.MoleculeID,
 				"molecule_title":  stats.MoleculeTitle,
@@ -112,7 +112,7 @@ Example:
 func findInProgressMoleculeIDs(ctx context.Context, s molReader, agent string) []string {
 	// Query for in_progress issues
 	status := types.StatusInProgress
-	filter := types.IssueFilter{Status: &status}
+	filter := types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Status: &status}}
 	if agent != "" {
 		filter.Assignee = &agent
 	}
@@ -144,39 +144,47 @@ func findInProgressMoleculeIDs(ctx context.Context, s molReader, agent string) [
 // printMoleculeProgressStats prints molecule progress in human-readable format
 func printMoleculeProgressStats(stats *types.MoleculeProgressStats) {
 	fmt.Printf("Molecule: %s (%s)\n", ui.RenderAccent(stats.MoleculeID), stats.MoleculeTitle)
+	printMoleculeProgressStatsLine(stats)
+	printMoleculeCurrentStep(stats)
+	printMoleculeRate(stats)
+}
 
-	// Progress bar
-	var percent float64
-	if stats.Total > 0 {
-		percent = float64(stats.Completed) * 100 / float64(stats.Total)
-	}
+func printMoleculeProgressStatsLine(stats *types.MoleculeProgressStats) {
+	percent := moleculeProgressPercent(stats)
 	fmt.Printf("Progress: %s / %s (%.1f%%)\n",
-		formatNumber(stats.Completed),
-		formatNumber(stats.Total),
-		percent)
+		formatNumber(stats.Completed), formatNumber(stats.Total), percent)
+}
 
-	// Current step
+func moleculeProgressPercent(stats *types.MoleculeProgressStats) float64 {
+	if stats.Total == 0 {
+		return 0
+	}
+	return float64(stats.Completed) * 100 / float64(stats.Total)
+}
+
+func printMoleculeCurrentStep(stats *types.MoleculeProgressStats) {
 	if stats.CurrentStepID != "" {
 		fmt.Printf("Current step: %s\n", stats.CurrentStepID)
-	} else if stats.InProgress > 0 {
+		return
+	}
+	if stats.InProgress > 0 {
 		fmt.Printf("In progress: %d step(s)\n", stats.InProgress)
 	}
+}
 
-	// Rate calculation
-	if stats.FirstClosed != nil && stats.LastClosed != nil && stats.Completed > 1 {
-		duration := stats.LastClosed.Sub(*stats.FirstClosed)
-		if duration > 0 {
-			// Rate is (completed - 1) because we need at least 2 points to measure rate
-			rate := float64(stats.Completed-1) / duration.Hours()
-			fmt.Printf("Rate: ~%.0f steps/hour\n", rate)
-
-			// ETA
-			remaining := stats.Total - stats.Completed
-			if rate > 0 && remaining > 0 {
-				etaHours := float64(remaining) / rate
-				fmt.Printf("ETA: %s remaining\n", formatDuration(etaHours))
-			}
-		}
+func printMoleculeRate(stats *types.MoleculeProgressStats) {
+	if stats.FirstClosed == nil || stats.LastClosed == nil || stats.Completed <= 1 {
+		return
+	}
+	duration := stats.LastClosed.Sub(*stats.FirstClosed)
+	if duration <= 0 {
+		return
+	}
+	rate := float64(stats.Completed-1) / duration.Hours()
+	fmt.Printf("Rate: ~%.0f steps/hour\n", rate)
+	remaining := stats.Total - stats.Completed
+	if rate > 0 && remaining > 0 {
+		fmt.Printf("ETA: %s remaining\n", formatDuration(float64(remaining)/rate))
 	}
 }
 

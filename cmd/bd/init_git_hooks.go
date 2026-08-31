@@ -22,58 +22,21 @@ func hooksInstalled() bool {
 	if err != nil {
 		return false
 	}
-	preCommit := filepath.Join(hooksDir, "pre-commit")
-	postMerge := filepath.Join(hooksDir, "post-merge")
+	return beadHookInstalled(filepath.Join(hooksDir, "pre-commit"), "bd (beads) pre-commit hook") &&
+		beadHookInstalled(filepath.Join(hooksDir, "post-merge"), "bd (beads) post-merge hook")
+}
 
-	// Check if both hooks exist
-	_, err1 := os.Stat(preCommit)
-	_, err2 := os.Stat(postMerge)
-
-	if err1 != nil || err2 != nil {
-		return false
-	}
-
-	// Verify they're bd hooks by checking for signature comment or section marker
+func beadHookInstalled(path, signature string) bool {
 	// #nosec G304 - controlled path from git directory
-	preCommitContent, err := os.ReadFile(preCommit)
+	content, err := os.ReadFile(path)
 	if err != nil {
 		return false
 	}
-	preCommitStr := string(preCommitContent)
-	if !strings.Contains(preCommitStr, "bd (beads) pre-commit hook") &&
-		!strings.Contains(preCommitStr, hookSectionBeginPrefix) {
+	if !strings.Contains(string(content), signature) && !strings.Contains(string(content), hookSectionBeginPrefix) {
 		return false
 	}
-
-	// #nosec G304 - controlled path from git directory
-	postMergeContent, err := os.ReadFile(postMerge)
-	if err != nil {
-		return false
-	}
-	postMergeStr := string(postMergeContent)
-	if !strings.Contains(postMergeStr, "bd (beads) post-merge hook") &&
-		!strings.Contains(postMergeStr, hookSectionBeginPrefix) {
-		return false
-	}
-
-	// Verify hooks are executable
-	preCommitInfo, err := os.Stat(preCommit)
-	if err != nil {
-		return false
-	}
-	if preCommitInfo.Mode().Perm()&0111 == 0 {
-		return false // Not executable
-	}
-
-	postMergeInfo, err := os.Stat(postMerge)
-	if err != nil {
-		return false
-	}
-	if postMergeInfo.Mode().Perm()&0111 == 0 {
-		return false // Not executable
-	}
-
-	return true
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().Perm()&0111 != 0
 }
 
 // hooksNeedUpdate checks if installed bd hooks are outdated and need updating.
@@ -140,68 +103,53 @@ func installGitHooks() error {
 		return fmt.Errorf("failed to create hooks directory: %w", err)
 	}
 
-	// Detect existing hooks
 	existingHooks := detectExistingHooks()
-
-	// Check if any non-bd hooks exist
-	hasExistingHooks := false
-	for _, hook := range existingHooks {
-		if hook.exists && !hook.isBdHook {
-			hasExistingHooks = true
-			break
-		}
-	}
-
-	// Default to chaining with existing hooks (no prompting)
-	chainHooks := hasExistingHooks
+	chainHooks := hasUnmanagedHooks(existingHooks)
 	if chainHooks {
-		// Chain mode - rename existing hooks to .old so they can be called
-		for _, hook := range existingHooks {
-			if hook.exists && !hook.isBdHook {
-				oldPath := hook.path + ".old"
-				if err := os.Rename(hook.path, oldPath); err != nil {
-					fmt.Fprintf(os.Stderr, "%s Failed to chain with existing %s hook: %v\n", ui.RenderWarn("⚠"), hook.name, err)
-					if usesSQLServer() {
-						fmt.Fprintf(os.Stderr, "You can resolve this with: %s\n", ui.RenderAccent("bd doctor --fix"))
-					}
-					continue
-				}
-				fmt.Printf("  Chained with existing %s hook\n", hook.name)
-			}
-		}
+		chainExistingHooks(existingHooks)
 	}
-
-	// pre-commit hook
-	preCommitPath := filepath.Join(hooksDir, "pre-commit")
-	preCommitContent := buildPreCommitHook(chainHooks, existingHooks)
-
-	// post-merge hook
-	postMergePath := filepath.Join(hooksDir, "post-merge")
-	postMergeContent := buildPostMergeHook(chainHooks, existingHooks)
-
-	// Normalize line endings to LF — on Windows/NTFS, Go string literals
-	// are fine but concatenated content from other sources may have CRLF.
-	// Git hooks with CRLF fail: /usr/bin/env: 'sh\r': No such file or directory
-	preCommitContent = strings.ReplaceAll(preCommitContent, "\r\n", "\n")
-	postMergeContent = strings.ReplaceAll(postMergeContent, "\r\n", "\n")
-
-	// Write pre-commit hook (executable scripts need 0700)
-	// #nosec G306 - git hooks must be executable
-	if err := os.WriteFile(preCommitPath, []byte(preCommitContent), 0700); err != nil {
+	if err := writeExecutableHook(filepath.Join(hooksDir, "pre-commit"), buildPreCommitHook(chainHooks, existingHooks)); err != nil {
 		return fmt.Errorf("failed to write pre-commit hook: %w", err)
 	}
-
-	// Write post-merge hook (executable scripts need 0700)
-	// #nosec G306 - git hooks must be executable
-	if err := os.WriteFile(postMergePath, []byte(postMergeContent), 0700); err != nil {
+	if err := writeExecutableHook(filepath.Join(hooksDir, "post-merge"), buildPostMergeHook(chainHooks, existingHooks)); err != nil {
 		return fmt.Errorf("failed to write post-merge hook: %w", err)
 	}
-
 	if chainHooks {
 		fmt.Printf("%s Chained bd hooks with existing hooks\n", ui.RenderPass("✓"))
 	}
 
 	return nil
+}
+
+func hasUnmanagedHooks(hooks []hookInfo) bool {
+	for _, hook := range hooks {
+		if hook.exists && !hook.isBdHook {
+			return true
+		}
+	}
+	return false
+}
+
+func chainExistingHooks(hooks []hookInfo) {
+	for _, hook := range hooks {
+		if !hook.exists || hook.isBdHook {
+			continue
+		}
+		if err := os.Rename(hook.path, hook.path+".old"); err != nil {
+			fmt.Fprintf(os.Stderr, "%s Failed to chain with existing %s hook: %v\n", ui.RenderWarn("⚠"), hook.name, err)
+			if usesSQLServer() {
+				fmt.Fprintf(os.Stderr, "You can resolve this with: %s\n", ui.RenderAccent("bd doctor --fix"))
+			}
+			continue
+		}
+		fmt.Printf("  Chained with existing %s hook\n", hook.name)
+	}
+}
+
+func writeExecutableHook(path, content string) error {
+	content = strings.ReplaceAll(content, "\r\n", "\n")
+	// #nosec G306 - git hooks must be executable
+	return os.WriteFile(path, []byte(content), 0700)
 }
 
 // buildPreCommitHook generates the pre-commit hook content using section markers (GH#1380).

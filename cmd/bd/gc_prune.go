@@ -13,7 +13,7 @@ import (
 // back to StoreLocator.Path: both concrete locator paths can contain sibling
 // databases whose activity is unrelated to the current GC operation.
 func storeSizeBytes(ctx context.Context) int64 {
-	return storeSizeBytesForStore(ctx, store)
+	return storeSizeBytesForStore(ctx, getStore())
 }
 
 func storeSizeBytesForStore(ctx context.Context, candidate storage.DoltStorage) int64 {
@@ -35,7 +35,7 @@ func storeSizeBytesForStore(ctx context.Context, candidate storage.DoltStorage) 
 // user-created and therefore only warned about. Failures are warnings: GC
 // still runs, it just reclaims less.
 func pruneRemoteRefsForGC(ctx context.Context) (pruned, tags []string) {
-	pruner, ok := storage.UnwrapStore(store).(storage.RemoteRefPruner)
+	pruner, ok := storage.UnwrapStore(getStore()).(storage.RemoteRefPruner)
 	if !ok {
 		return nil, nil
 	}
@@ -53,7 +53,7 @@ func pruneRemoteRefsForGC(ctx context.Context) (pruned, tags []string) {
 
 // listRemoteRefsAndTags is the read-only companion for dry runs and bd gc.
 func listRemoteRefsAndTags(ctx context.Context) (refs, tags []string) {
-	pruner, ok := storage.UnwrapStore(store).(storage.RemoteRefPruner)
+	pruner, ok := storage.UnwrapStore(getStore()).(storage.RemoteRefPruner)
 	if !ok {
 		return nil, nil
 	}

@@ -315,12 +315,18 @@ func TestLinearRoundTripCoreFields(t *testing.T) {
 	sourceIssueIDs := make([]string, 0, len(seeds))
 	for i, s := range seeds {
 		issue := &types.Issue{
-			ID:          fmt.Sprintf("bd-rt-%d", i),
-			Title:       s.title,
-			Description: s.description,
-			Priority:    s.priority,
-			Status:      s.status,
-			IssueType:   types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("bd-rt-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title:       s.title,
+				Description: s.description,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  s.priority,
+				Status:    s.status,
+				IssueType: types.TypeTask,
+			},
 		}
 		if s.status == types.StatusClosed {
 			now := time.Now()
@@ -333,7 +339,7 @@ func TestLinearRoundTripCoreFields(t *testing.T) {
 	}
 
 	// --- 3. Push to mock Linear ---
-	lt := &linear.Tracker{}
+	lt := linear.NewTracker()
 	lt.SetTeamIDs([]string{teamID})
 	if err := lt.Init(ctx, sourceStore); err != nil {
 		t.Fatalf("Tracker.Init: %v", err)
@@ -382,7 +388,7 @@ func TestLinearRoundTripCoreFields(t *testing.T) {
 	}
 
 	// --- 5. Pull from mock Linear into fresh DB ---
-	lt2 := &linear.Tracker{}
+	lt2 := linear.NewTracker()
 	lt2.SetTeamIDs([]string{teamID})
 	if err := lt2.Init(ctx, targetStore); err != nil {
 		t.Fatalf("Tracker.Init (target): %v", err)
@@ -520,7 +526,7 @@ func TestLinearPullMilestonesCreatesEpicHierarchy(t *testing.T) {
 	}
 	mock.mu.Unlock()
 
-	lt := &linear.Tracker{}
+	lt := linear.NewTracker()
 	lt.SetTeamIDs([]string{teamID})
 	if err := lt.Init(ctx, targetStore); err != nil {
 		t.Fatalf("Tracker.Init: %v", err)
@@ -589,11 +595,17 @@ func TestLinearPullMilestonesCreatesEpicHierarchy(t *testing.T) {
 
 	pushHooks := buildLinearPushHooksForTest(ctx, lt)
 	if !pushHooks.ShouldPush(&types.Issue{
-		Title:       "normal",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
-		ExternalRef: strPtr(""),
+		IssueContent: types.IssueContent{
+			Title: "normal",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: strPtr(""),
+		},
 	}) {
 		t.Fatal("expected normal issue to be pushable")
 	}

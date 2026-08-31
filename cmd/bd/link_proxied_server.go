@@ -26,16 +26,16 @@ func runLinkProxiedServer(cmd *cobra.Command, ctx context.Context, args []string
 		return HandleErrorRespectJSON("invalid dependency type %q: must be non-empty and at most %d characters", depType, types.MaxDependencyTypeLen)
 	}
 
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return HandleErrorRespectJSON("proxied-server UOW provider not initialized")
 	}
 
-	if err := uow.RunTx(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (string, error) {
+	if err := uow.RunTx(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (string, error) {
 		dep := &types.Dependency{IssueID: id1, DependsOnID: id2, Type: dt}
 		// Source-routed, like the direct twin's store.AddDependencyWithOptions:
 		// `bd link` takes whatever id the caller names, and a wisp source has no
 		// row in the issues plane for the edge to hang off.
-		if _, err := uw.DependencyUseCase().AddDependencies(ctx, []*types.Dependency{dep}, actor, domain.BulkAddDepsOpts{}); err != nil {
+		if _, err := uw.DependencyUseCase().AddDependencies(ctx, []*types.Dependency{dep}, getActor(), domain.BulkAddDepsOpts{}); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("bd: link %s %s", id1, id2), nil
@@ -52,7 +52,7 @@ func runLinkProxiedServer(cmd *cobra.Command, ctx context.Context, args []string
 	printCycleDetectionError(res.cycleErr)
 	printCycleWarnings(res.cycles)
 
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(map[string]interface{}{
 			"status":        "added",
 			"issue_id":      id1,

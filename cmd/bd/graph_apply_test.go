@@ -122,11 +122,13 @@ func TestValidateGraphApplyPlanAcceptsNewFields(t *testing.T) {
 	plan := &GraphApplyPlan{
 		Nodes: []GraphApplyNode{
 			{
-				Key:         "epic",
-				Title:       "Epic node",
-				Type:        "epic",
-				Estimate:    &est,
-				ExternalRef: "gh-42",
+				Key:   "epic",
+				Title: "Epic node",
+				Type:  "epic",
+				graphApplyNodeIssueFields: graphApplyNodeIssueFields{
+					Estimate:    &est,
+					ExternalRef: "gh-42",
+				},
 			},
 			{
 				Key:    "child",
@@ -151,7 +153,7 @@ func TestValidateGraphApplyPlanRejectsNegativeEstimate(t *testing.T) {
 	neg := -5
 	plan := &GraphApplyPlan{
 		Nodes: []GraphApplyNode{
-			{Key: "n", Title: "Node", Estimate: &neg},
+			{Key: "n", Title: "Node", graphApplyNodeIssueFields: graphApplyNodeIssueFields{Estimate: &neg}},
 		},
 	}
 	err := validateGraphApplyPlan(plan, nil, nil, GraphApplyOptions{})
@@ -993,9 +995,8 @@ func TestGraphApplyNodeCoversCreateIssueParams(t *testing.T) {
 	}
 
 	nodeType := reflect.TypeOf(GraphApplyNode{})
-	paramsType := reflect.TypeOf(createIssueParams{})
-	for i := 0; i < paramsType.NumField(); i++ {
-		name := paramsType.Field(i).Name
+	for _, field := range flattenCreateIssueParamFields(reflect.TypeOf(createIssueParams{})) {
+		name := field.Name
 		if _, ok := excluded[name]; ok {
 			continue
 		}
@@ -1006,4 +1007,17 @@ func TestGraphApplyNodeCoversCreateIssueParams(t *testing.T) {
 			t.Errorf("createIssueParams field %q is not addressable from graph plans; add it to GraphApplyNode (or the exclusion list with a reason)", name)
 		}
 	}
+}
+
+func flattenCreateIssueParamFields(t reflect.Type) []reflect.StructField {
+	var fields []reflect.StructField
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		if field.Type.Kind() == reflect.Struct && strings.HasPrefix(field.Type.Name(), "createIssue") && field.Type.Name() != "createIssueParams" {
+			fields = append(fields, flattenCreateIssueParamFields(field.Type)...)
+			continue
+		}
+		fields = append(fields, field)
+	}
+	return fields
 }

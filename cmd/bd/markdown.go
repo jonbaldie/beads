@@ -75,18 +75,16 @@ func processIssueSection(issue *IssueTemplate, section, content string) {
 
 	switch strings.ToLower(section) {
 	case "priority":
-		if p := validation.ParsePriority(content); p != -1 {
-			issue.Priority = p
-		}
+		setMarkdownPriority(issue, content)
 	case "type":
-		t, err := validation.ParseIssueType(content)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: invalid issue type '%s' in '%s', using default 'task'\n",
-				strings.TrimSpace(content), issue.Title)
-			issue.IssueType = types.TypeTask
-		} else {
-			issue.IssueType = t
-		}
+		setMarkdownIssueType(issue, content)
+	default:
+		setMarkdownTextSection(issue, section, content)
+	}
+}
+
+func setMarkdownTextSection(issue *IssueTemplate, section, content string) {
+	switch strings.ToLower(section) {
 	case "description":
 		issue.Description = content
 	case "design":
@@ -100,6 +98,23 @@ func processIssueSection(issue *IssueTemplate, section, content string) {
 	case "dependencies", "deps":
 		issue.Dependencies = parseDependencies(content)
 	}
+}
+
+func setMarkdownPriority(issue *IssueTemplate, content string) {
+	if priority := validation.ParsePriority(content); priority != -1 {
+		issue.Priority = priority
+	}
+}
+
+func setMarkdownIssueType(issue *IssueTemplate, content string) {
+	issueType, err := validation.ParseIssueType(content)
+	if err == nil {
+		issue.IssueType = issueType
+		return
+	}
+	fmt.Fprintf(os.Stderr, "Warning: invalid issue type '%s' in '%s', using default 'task'\n",
+		strings.TrimSpace(content), issue.Title)
+	issue.IssueType = types.TypeTask
 }
 
 // validateMarkdownPath validates and cleans a markdown file path to prevent security issues.
@@ -314,13 +329,22 @@ func createIssuesFromMarkdown(ctx context.Context, in createInput) error {
 	if len(templates) == 0 {
 		return HandleError("no issues found in markdown file")
 	}
-	if store == nil {
+	if getStore() == nil {
 		return HandleErrorWithHint("database not initialized", diagHint())
 	}
 	request, err := buildMarkdownBatchRequest(templates, in)
 	if err != nil {
 		return err
 	}
+	result, err := createMarkdownBatch(ctx, request)
+	if err != nil {
+		return err
+	}
+	commitMarkdownBatch(ctx, result.Issues, request)
+	return reportMarkdownBatch(result.Issues, in)
+}
+
+func createMarkdownBatch(ctx context.Context, request issueops.CreateBatchRequest) (issueops.CreateBatchResult, error) {
 	// The role creates its Dolt version commit inside the storage layer, so
 	// `--dolt-auto-commit batch` can only defer it by saying so on the context.
 	// commitPendingIfEmbedded below is the OTHER half and cannot substitute: it
@@ -328,28 +352,31 @@ func createIssuesFromMarkdown(ctx context.Context, in createInput) error {
 	// produces a per-write commit that nothing later suppresses.
 	opsCtx, err := issueOpsContext(ctx)
 	if err != nil {
-		return HandleError("%v", err)
+		return issueops.CreateBatchResult{}, HandleError("%v", err)
 	}
-	creator, err := store.BatchCreator()
+	creator, err := getStore().BatchCreator()
 	if err != nil {
-		return HandleError("%v", err)
+		return issueops.CreateBatchResult{}, HandleError("%v", err)
 	}
 	result, err := creator.CreateBatch(opsCtx, request)
 	if err != nil {
-		return HandleError("creating issues from markdown: %v", err)
+		return issueops.CreateBatchResult{}, HandleError("creating issues from markdown: %v", err)
 	}
-	issueIDs := make([]string, 0, len(result.Issues))
-	for _, issue := range result.Issues {
+	return result, nil
+}
+
+func commitMarkdownBatch(ctx context.Context, issues []*types.Issue, request issueops.CreateBatchRequest) {
+	issueIDs := make([]string, 0, len(issues))
+	for _, issue := range issues {
 		issueIDs = append(issueIDs, issue.ID)
 	}
-	if err := commitPendingIfEmbedded(ctx, store, request.Actor, doltAutoCommitParams{
+	if err := commitPendingIfEmbedded(ctx, getStore(), request.Actor, doltAutoCommitParams{
 		Command:         "create",
 		IssueIDs:        issueIDs,
 		MessageOverride: request.Provenance,
 	}); err != nil {
 		WarnError("failed to commit: %v", err)
 	}
-	return reportMarkdownBatch(result.Issues, in)
 }
 
 // buildMarkdownBatchRequest is the ONE projection of a parsed markdown file
@@ -370,20 +397,32 @@ func buildMarkdownBatchRequest(templates []*IssueTemplate, in createInput) (issu
 		}
 		items = append(items, issueops.BatchCreateItem{
 			Issue: &types.Issue{
-				Title:              template.Title,
-				Description:        template.Description,
-				Design:             template.Design,
-				AcceptanceCriteria: template.AcceptanceCriteria,
-				Status:             types.StatusOpen,
-				Priority:           template.Priority,
-				IssueType:          template.IssueType,
-				Assignee:           template.Assignee,
-				Labels:             template.Labels,
-				Ephemeral:          in.ephemeral,
-				NoHistory:          in.noHistory,
-				MolType:            in.molType,
-				CreatedBy:          in.createdBy,
-				Owner:              in.owner,
+				IssueContent: types.IssueContent{
+					Title:              template.Title,
+					Description:        template.Description,
+					Design:             template.Design,
+					AcceptanceCriteria: template.AcceptanceCriteria,
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  template.Priority,
+					IssueType: template.IssueType,
+					Assignee:  template.Assignee,
+					Owner:     in.owner,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedBy: in.createdBy,
+				},
+				IssueGraph: types.IssueGraph{
+					Labels: template.Labels,
+				},
+				IssueWisp: types.IssueWisp{
+					Ephemeral: in.ephemeral,
+					NoHistory: in.noHistory,
+				},
+				IssueCoord: types.IssueCoord{
+					MolType: in.molType,
+				},
 			},
 			Dependencies: dependencies,
 		})
@@ -405,8 +444,8 @@ func markdownBatchActor(in createInput) string {
 	if in.createdBy != "" {
 		return in.createdBy
 	}
-	if actor != "" {
-		return actor
+	if getActor() != "" {
+		return getActor()
 	}
 	return "bd"
 }
@@ -420,9 +459,13 @@ func lintMarkdownTemplates(templates []*IssueTemplate, in createInput) error {
 	}
 	for _, template := range templates {
 		lintIssue := &types.Issue{
-			IssueType:          template.IssueType,
-			Description:        template.Description,
-			AcceptanceCriteria: template.AcceptanceCriteria,
+			IssueContent: types.IssueContent{
+				Description:        template.Description,
+				AcceptanceCriteria: template.AcceptanceCriteria,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				IssueType: template.IssueType,
+			},
 		}
 		if err := validation.LintIssue(lintIssue); err != nil {
 			if in.validationMode == "error" {

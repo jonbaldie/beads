@@ -139,7 +139,9 @@ func TestShouldCheckGate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			gate := &types.Issue{
-				AwaitType: tt.awaitType,
+				IssueCoord: types.IssueCoord{
+					AwaitType: tt.awaitType,
+				},
 			}
 			got := shouldCheckGate(gate, tt.typeFilter)
 			if got != tt.want {
@@ -208,8 +210,8 @@ func TestCheckBeadGate_LocalBead(t *testing.T) {
 	ctx := context.Background()
 	st := &fakeBeadGateGetter{
 		issues: map[string]*types.Issue{
-			"bd-closed": {ID: "bd-closed", Status: types.StatusClosed},
-			"bd-open":   {ID: "bd-open", Status: types.StatusOpen},
+			"bd-closed": {IssueID: types.IssueID{ID: "bd-closed"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}},
+			"bd-open":   {IssueID: types.IssueID{ID: "bd-open"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 		},
 	}
 
@@ -264,9 +266,13 @@ func TestCheckBeadGate_NilStoreStaysPending(t *testing.T) {
 
 func TestCheckGHPRUsesStateWithoutMergedField(t *testing.T) {
 	resolved, escalated, reason, err := checkGHPRWithRunner(&types.Issue{
-		IssueType: "gate",
-		AwaitType: "gh:pr",
-		AwaitID:   "3488",
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: "gate",
+		},
+		IssueCoord: types.IssueCoord{
+			AwaitType: "gh:pr",
+			AwaitID:   "3488",
+		},
 	}, fakeGHRunner(t,
 		`{"state":"MERGED","title":"Fix gate"}`,
 		"pr", "view", "3488", "--json", "state,title",
@@ -287,10 +293,16 @@ func TestCheckGHPRUsesStateWithoutMergedField(t *testing.T) {
 
 func TestCheckGHPRUsesRepositoryFromMetadata(t *testing.T) {
 	resolved, escalated, reason, err := checkGHPRWithRunner(&types.Issue{
-		IssueType: "gate",
-		AwaitType: "gh:pr",
-		AwaitID:   "608",
-		Metadata:  json.RawMessage(`{"repo":"srobroek/agentic-packages"}`),
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: "gate",
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"repo":"srobroek/agentic-packages"}`),
+		},
+		IssueCoord: types.IssueCoord{
+			AwaitType: "gh:pr",
+			AwaitID:   "608",
+		},
 	}, fakeGHRunner(t,
 		`{"state":"MERGED","title":"Cross-repo gate"}`,
 		"pr", "view", "608", "--json", "state,title", "--repo", "srobroek/agentic-packages",
@@ -305,10 +317,16 @@ func TestCheckGHPRUsesRepositoryFromMetadata(t *testing.T) {
 
 func TestCheckGHRunUsesRepositoryFromMetadata(t *testing.T) {
 	resolved, escalated, reason, err := checkGHRunWithRunner(&types.Issue{
-		IssueType: "gate",
-		AwaitType: "gh:run",
-		AwaitID:   "12345",
-		Metadata:  json.RawMessage(`{"repo":"srobroek/agentic-packages"}`),
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: "gate",
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"repo":"srobroek/agentic-packages"}`),
+		},
+		IssueCoord: types.IssueCoord{
+			AwaitType: "gh:run",
+			AwaitID:   "12345",
+		},
 	}, nil,
 		fakeGHRunner(t,
 			`{"status":"completed","conclusion":"success","name":"CI"}`,
@@ -349,10 +367,16 @@ func TestCheckGHRun_CrossRepoDiscoveryUsesInjectedRunner(t *testing.T) {
 	}
 
 	resolved, escalated, reason, err := checkGHRunWithRunner(&types.Issue{
-		IssueType: "gate",
-		AwaitType: "gh:run",
-		AwaitID:   "release.yml",
-		Metadata:  json.RawMessage(`{"repo":"srobroek/agentic-packages"}`),
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: "gate",
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"repo":"srobroek/agentic-packages"}`),
+		},
+		IssueCoord: types.IssueCoord{
+			AwaitType: "gh:run",
+			AwaitID:   "release.yml",
+		},
 	}, nil, fakeRunner)
 	if err != nil {
 		t.Fatalf("checkGHRun returned error: %v", err)
@@ -412,7 +436,7 @@ func TestGitHubRepoFromIssueRejectsInvalidMetadata(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if repo, err := githubRepoFromIssue(&types.Issue{Metadata: tt.metadata}); err == nil {
+			if repo, err := githubRepoFromIssue(&types.Issue{IssueMeta: types.IssueMeta{Metadata: tt.metadata}}); err == nil {
 				t.Fatalf("githubRepoFromIssue(%s) = %q, nil; want validation error", tt.metadata, repo)
 			}
 		})
@@ -435,7 +459,7 @@ func TestGitHubRepoFromIssueAllowsMissingRepoKey(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			repo, err := githubRepoFromIssue(&types.Issue{Metadata: tt.metadata})
+			repo, err := githubRepoFromIssue(&types.Issue{IssueMeta: types.IssueMeta{Metadata: tt.metadata}})
 			if err != nil {
 				t.Fatalf("githubRepoFromIssue(%s) returned error: %v", tt.metadata, err)
 			}
@@ -456,7 +480,7 @@ func TestRepoMetadataForGateRestrictsToGitHubTypes(t *testing.T) {
 	nonGitHubTypes := []string{"human", "timer", "bead"}
 	for _, gateType := range nonGitHubTypes {
 		t.Run("ignores_bad_repo_metadata_for_"+gateType, func(t *testing.T) {
-			metadata, err := repoMetadataForGate(gateType, &types.Issue{Metadata: badRepoMetadata})
+			metadata, err := repoMetadataForGate(gateType, &types.Issue{IssueMeta: types.IssueMeta{Metadata: badRepoMetadata}})
 			if err != nil {
 				t.Fatalf("repoMetadataForGate(%q) returned error: %v; non-GitHub gates must tolerate arbitrary repo metadata", gateType, err)
 			}
@@ -469,14 +493,16 @@ func TestRepoMetadataForGateRestrictsToGitHubTypes(t *testing.T) {
 	githubTypes := []string{"gh:run", "gh:pr"}
 	for _, gateType := range githubTypes {
 		t.Run("rejects_bad_repo_metadata_for_"+gateType, func(t *testing.T) {
-			if _, err := repoMetadataForGate(gateType, &types.Issue{Metadata: badRepoMetadata}); err == nil {
+			if _, err := repoMetadataForGate(gateType, &types.Issue{IssueMeta: types.IssueMeta{Metadata: badRepoMetadata}}); err == nil {
 				t.Fatalf("repoMetadataForGate(%q) = nil error, want validation error", gateType)
 			}
 		})
 
 		t.Run("inherits_valid_repo_for_"+gateType, func(t *testing.T) {
 			metadata, err := repoMetadataForGate(gateType, &types.Issue{
-				Metadata: json.RawMessage(`{"repo":"srobroek/agentic-packages"}`),
+				IssueMeta: types.IssueMeta{
+					Metadata: json.RawMessage(`{"repo":"srobroek/agentic-packages"}`),
+				},
 			})
 			if err != nil {
 				t.Fatalf("repoMetadataForGate(%q) returned error: %v", gateType, err)
@@ -561,8 +587,10 @@ func TestNeedsDiscovery(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			gate := &types.Issue{
-				AwaitType: tt.awaitType,
-				AwaitID:   tt.awaitID,
+				IssueCoord: types.IssueCoord{
+					AwaitType: tt.awaitType,
+					AwaitID:   tt.awaitID,
+				},
 			}
 			got := needsDiscovery(gate)
 			if got != tt.want {
@@ -588,7 +616,7 @@ func TestGetWorkflowNameHint(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gate := &types.Issue{AwaitID: tt.awaitID}
+			gate := &types.Issue{IssueCoord: types.IssueCoord{AwaitID: tt.awaitID}}
 			got := getWorkflowNameHint(gate)
 			if got != tt.want {
 				t.Errorf("getWorkflowNameHint(%q) = %q, want %q", tt.awaitID, got, tt.want)
@@ -627,8 +655,12 @@ func TestCheckGHRun_DryRunDoesNotPersistDiscoveredRunID(t *testing.T) {
 	}
 
 	resolved, escalated, reason, err := checkGHRun(&types.Issue{
-		ID:      "bd-gate",
-		AwaitID: "release.yml",
+		IssueID: types.IssueID{
+			ID: "bd-gate",
+		},
+		IssueCoord: types.IssueCoord{
+			AwaitID: "release.yml",
+		},
 	}, nil)
 	if err != nil {
 		t.Fatalf("checkGHRun returned error: %v", err)
@@ -682,8 +714,12 @@ func TestCheckGHRun_PersistsDiscoveredRunIDOutsideDryRun(t *testing.T) {
 	}
 
 	resolved, escalated, reason, err := checkGHRun(&types.Issue{
-		ID:      "bd-gate",
-		AwaitID: "release.yml",
+		IssueID: types.IssueID{
+			ID: "bd-gate",
+		},
+		IssueCoord: types.IssueCoord{
+			AwaitID: "release.yml",
+		},
 	}, func(gateID, runID string) error { return updateGateAwaitIDFunc(nil, gateID, runID) })
 	if err != nil {
 		t.Fatalf("checkGHRun returned error: %v", err)
@@ -733,8 +769,12 @@ func TestCheckGHRun_ReturnsErrorWhenPersistingDiscoveredRunIDFails(t *testing.T)
 	}
 
 	resolved, escalated, reason, err := checkGHRun(&types.Issue{
-		ID:      "bd-gate",
-		AwaitID: "release.yml",
+		IssueID: types.IssueID{
+			ID: "bd-gate",
+		},
+		IssueCoord: types.IssueCoord{
+			AwaitID: "release.yml",
+		},
 	}, func(gateID, runID string) error { return updateGateAwaitIDFunc(nil, gateID, runID) })
 	if err == nil {
 		t.Fatal("expected checkGHRun to return an error when await_id persistence fails")
@@ -827,10 +867,16 @@ func TestGateCheck_GHRunWorkflowDiscoveryPersistence(t *testing.T) {
 			fakeStore := &fakeGateCheckStore{
 				issues: []*types.Issue{
 					{
-						ID:        "bd-gate",
-						IssueType: "gate",
-						AwaitType: "gh:run",
-						AwaitID:   "release.yml",
+						IssueID: types.IssueID{
+							ID: "bd-gate",
+						},
+						IssueWorkflow: types.IssueWorkflow{
+							IssueType: "gate",
+						},
+						IssueCoord: types.IssueCoord{
+							AwaitType: "gh:run",
+							AwaitID:   "release.yml",
+						},
 					},
 				},
 			}
@@ -993,7 +1039,7 @@ func TestCheckGHPR_StateHandling(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gate := &types.Issue{AwaitID: "https://github.com/org/repo/pull/1"}
+			gate := &types.Issue{IssueCoord: types.IssueCoord{AwaitID: "https://github.com/org/repo/pull/1"}}
 			resolved, escalated, reason, err := checkGHPRWithRunner(gate, fakeGHRunner(t,
 				tt.ghJSON,
 				"pr", "view", gate.AwaitID, "--json", "state,title",
@@ -1015,7 +1061,7 @@ func TestCheckGHPR_StateHandling(t *testing.T) {
 }
 
 func TestCheckGHPR_NoMergedFieldRequested(t *testing.T) {
-	gate := &types.Issue{AwaitID: "https://github.com/org/repo/pull/99"}
+	gate := &types.Issue{IssueCoord: types.IssueCoord{AwaitID: "https://github.com/org/repo/pull/99"}}
 	resolved, _, reason, err := checkGHPRWithRunner(gate, fakeGHRunner(t,
 		`{"state":"MERGED","title":"Test PR"}`,
 		"pr", "view", gate.AwaitID, "--json", "state,title",
@@ -1081,11 +1127,11 @@ func TestFilterIssueGates(t *testing.T) {
 	gate := types.IssueType("gate")
 	task := types.IssueType("task")
 	deps := []*types.Issue{
-		{ID: "g-open", IssueType: gate, Status: types.StatusOpen},
-		{ID: "g-closed", IssueType: gate, Status: types.StatusClosed},
-		{ID: "t-blocker", IssueType: task, Status: types.StatusOpen}, // not a gate
+		{IssueID: types.IssueID{ID: "g-open"}, IssueWorkflow: types.IssueWorkflow{IssueType: gate, Status: types.StatusOpen}},
+		{IssueID: types.IssueID{ID: "g-closed"}, IssueWorkflow: types.IssueWorkflow{IssueType: gate, Status: types.StatusClosed}},
+		{IssueID: types.IssueID{ID: "t-blocker"}, IssueWorkflow: types.IssueWorkflow{IssueType: task, Status: types.StatusOpen}}, // not a gate
 		nil, // defensive: skipped
-		{ID: "g-open2", IssueType: gate, Status: types.StatusOpen},
+		{IssueID: types.IssueID{ID: "g-open2"}, IssueWorkflow: types.IssueWorkflow{IssueType: gate, Status: types.StatusOpen}},
 	}
 
 	t.Run("open_only_excludes_closed_and_nongates", func(t *testing.T) {

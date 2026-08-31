@@ -94,52 +94,81 @@ type humanCloseResult struct {
 // (uow.NewNotifyingProvider, bd-opisf) — buffered during the transaction and
 // drained after Commit. A hand-wired call here would fire each hook twice.
 func closeHumanProxied(ctx context.Context, id, comment, closeReason, commitVerb string) (humanCloseResult, error) {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return humanCloseResult{}, errors.New("proxied-server UOW provider not initialized")
 	}
-	return uow.RunTxResult(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (humanCloseResult, string, error) {
-		src := workapi.NewUOWDetailSource(uw)
-		issue, isWisp, err := workapi.GetIssueOrWisp(ctx, src, id)
-		if errors.Is(err, storage.ErrNotFound) {
-			return humanCloseResult{}, "", fmt.Errorf("issue not found: %s", id)
-		}
+	return uow.RunTxResult(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (humanCloseResult, string, error) {
+		res, err := closeHumanInTx(ctx, uw, id, comment, closeReason)
 		if err != nil {
-			return humanCloseResult{}, "", fmt.Errorf("resolving issue ID %s: %w", id, err)
+			return humanCloseResult{}, "", err
 		}
-		if issue.Status == types.StatusClosed {
-			return humanCloseResult{}, "", fmt.Errorf("issue %s is already closed", issue.ID)
-		}
-
-		res := humanCloseResult{issue: issue}
-		// Labels feed only the advisory human-label warning, so a failed load
-		// means no warning — not a warning that the label is missing, which
-		// is what ignoring the error used to produce.
-		if labels, lerr := src.Labels(ctx, issue.ID, isWisp); lerr == nil {
-			issue.Labels = labels
-			res.labelsKnown = true
-		}
-
-		if comment != "" {
-			var cerr error
-			if isWisp {
-				_, cerr = uw.CommentUseCase().AddCommentToWisp(ctx, issue.ID, actor, comment)
-			} else {
-				_, cerr = uw.CommentUseCase().AddCommentToIssue(ctx, issue.ID, actor, comment)
-			}
-			if cerr != nil {
-				return humanCloseResult{}, "", fmt.Errorf("adding comment: %w", cerr)
-			}
-		}
-
-		params := domain.CloseIssueParams{Reason: closeReason}
-		if isWisp {
-			_, err = uw.IssueUseCase().CloseWisp(ctx, issue.ID, params, actor)
-		} else {
-			_, err = uw.IssueUseCase().CloseIssue(ctx, issue.ID, params, actor)
-		}
-		if err != nil {
-			return humanCloseResult{}, "", fmt.Errorf("closing bead: %w", err)
-		}
-		return res, fmt.Sprintf("bd: %s %s", commitVerb, issue.ID), nil
+		return res, fmt.Sprintf("bd: %s %s", commitVerb, res.issue.ID), nil
 	})
+}
+
+func closeHumanInTx(ctx context.Context, uw uow.UnitOfWork, id, comment, closeReason string) (humanCloseResult, error) {
+	src := workapi.NewUOWDetailSource(uw)
+	issue, isWisp, err := resolveHumanCloseTarget(ctx, src, id)
+	if err != nil {
+		return humanCloseResult{}, err
+	}
+	res := humanCloseResult{issue: issue}
+	loadHumanLabels(ctx, src, issue, isWisp, &res)
+	if comment != "" {
+		if err := addHumanCloseComment(ctx, uw, issue, isWisp, comment); err != nil {
+			return humanCloseResult{}, err
+		}
+	}
+	if err := closeHumanIssue(ctx, uw, issue, isWisp, closeReason); err != nil {
+		return humanCloseResult{}, err
+	}
+	return res, nil
+}
+
+func resolveHumanCloseTarget(ctx context.Context, src workapi.DetailSource, id string) (*types.Issue, bool, error) {
+	issue, isWisp, err := workapi.GetIssueOrWisp(ctx, src, id)
+	if errors.Is(err, storage.ErrNotFound) {
+		return nil, false, fmt.Errorf("issue not found: %s", id)
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("resolving issue ID %s: %w", id, err)
+	}
+	if issue.Status == types.StatusClosed {
+		return nil, false, fmt.Errorf("issue %s is already closed", issue.ID)
+	}
+	return issue, isWisp, nil
+}
+
+func loadHumanLabels(ctx context.Context, src workapi.DetailSource, issue *types.Issue, isWisp bool, result *humanCloseResult) {
+	if labels, err := src.Labels(ctx, issue.ID, isWisp); err == nil {
+		issue.Labels = labels
+		result.labelsKnown = true
+	}
+}
+
+func addHumanCloseComment(ctx context.Context, uw uow.UnitOfWork, issue *types.Issue, isWisp bool, comment string) error {
+	var err error
+	if isWisp {
+		_, err = uw.CommentUseCase().AddCommentToWisp(ctx, issue.ID, getActor(), comment)
+	} else {
+		_, err = uw.CommentUseCase().AddCommentToIssue(ctx, issue.ID, getActor(), comment)
+	}
+	if err != nil {
+		return fmt.Errorf("adding comment: %w", err)
+	}
+	return nil
+}
+
+func closeHumanIssue(ctx context.Context, uw uow.UnitOfWork, issue *types.Issue, isWisp bool, reason string) error {
+	params := domain.CloseIssueParams{Reason: reason}
+	var err error
+	if isWisp {
+		_, err = uw.IssueUseCase().CloseWisp(ctx, issue.ID, params, getActor())
+	} else {
+		_, err = uw.IssueUseCase().CloseIssue(ctx, issue.ID, params, getActor())
+	}
+	if err != nil {
+		return fmt.Errorf("closing bead: %w", err)
+	}
+	return nil
 }

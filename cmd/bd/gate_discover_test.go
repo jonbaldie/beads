@@ -20,17 +20,31 @@ import (
 // from ITS OWN repo.
 func TestMatchGatesToRuns_ScopesPerGateRepo(t *testing.T) {
 	currentRepoGate := &types.Issue{
-		ID:        "bd-local",
-		AwaitType: "gh:run",
-		AwaitID:   "release.yml",
-		CreatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "bd-local",
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+		},
+		IssueCoord: types.IssueCoord{
+			AwaitType: "gh:run",
+			AwaitID:   "release.yml",
+		},
 	}
 	crossRepoGate := &types.Issue{
-		ID:        "bd-cross",
-		AwaitType: "gh:run",
-		AwaitID:   "release.yml",
-		CreatedAt: time.Now(),
-		Metadata:  json.RawMessage(`{"repo":"other-owner/other-repo"}`),
+		IssueID: types.IssueID{
+			ID: "bd-cross",
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"repo":"other-owner/other-repo"}`),
+		},
+		IssueCoord: types.IssueCoord{
+			AwaitType: "gh:run",
+			AwaitID:   "release.yml",
+		},
 	}
 
 	queryCalls := map[string]int{}
@@ -90,11 +104,19 @@ func TestMatchGatesToRuns_ScopesPerGateRepo(t *testing.T) {
 // error, never silently matched against the current repo's runs.
 func TestMatchGatesToRuns_RejectsInvalidRepoMetadata(t *testing.T) {
 	gate := &types.Issue{
-		ID:        "bd-bad-repo",
-		AwaitType: "gh:run",
-		AwaitID:   "release.yml",
-		CreatedAt: time.Now(),
-		Metadata:  json.RawMessage(`{"repo":null}`),
+		IssueID: types.IssueID{
+			ID: "bd-bad-repo",
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"repo":null}`),
+		},
+		IssueCoord: types.IssueCoord{
+			AwaitType: "gh:run",
+			AwaitID:   "release.yml",
+		},
 	}
 
 	queried := false
@@ -123,8 +145,8 @@ func TestMatchGatesToRuns_RejectsInvalidRepoMetadata(t *testing.T) {
 // repo, rather than re-querying (or silently matching against an empty run
 // list) per gate.
 func TestMatchGatesToRuns_CachesQueryErrorPerRepo(t *testing.T) {
-	gateA := &types.Issue{ID: "bd-a", AwaitType: "gh:run", AwaitID: "release.yml", CreatedAt: time.Now()}
-	gateB := &types.Issue{ID: "bd-b", AwaitType: "gh:run", AwaitID: "release.yml", CreatedAt: time.Now()}
+	gateA := &types.Issue{IssueID: types.IssueID{ID: "bd-a"}, IssueTimes: types.IssueTimes{CreatedAt: time.Now()}, IssueCoord: types.IssueCoord{AwaitType: "gh:run", AwaitID: "release.yml"}}
+	gateB := &types.Issue{IssueID: types.IssueID{ID: "bd-b"}, IssueTimes: types.IssueTimes{CreatedAt: time.Now()}, IssueCoord: types.IssueCoord{AwaitType: "gh:run", AwaitID: "release.yml"}}
 
 	queryCalls := 0
 	wantErr := errors.New("gh run list failed: rate limited")
@@ -151,10 +173,18 @@ func TestMatchGatesToRuns_CachesQueryErrorPerRepo(t *testing.T) {
 // it rather than spend an API call on a gate that can't be discovered.
 func TestMatchGatesToRuns_ForeignGateWithoutHintNeverQueried(t *testing.T) {
 	gate := &types.Issue{
-		ID:        "bd-cross-no-hint",
-		AwaitType: "gh:run",
-		CreatedAt: time.Now(),
-		Metadata:  json.RawMessage(`{"repo":"other-owner/other-repo"}`),
+		IssueID: types.IssueID{
+			ID: "bd-cross-no-hint",
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"repo":"other-owner/other-repo"}`),
+		},
+		IssueCoord: types.IssueCoord{
+			AwaitType: "gh:run",
+		},
 	}
 
 	queried := false
@@ -186,9 +216,22 @@ func TestMatchGatesToRuns_ForeignGateWithoutHintNeverQueried(t *testing.T) {
 // runGateDiscover uses to detect that at least one repo's query failed so it
 // can still return HandleError - a wholly-failed discovery must not exit 0.
 func TestGateDiscoveryQueryFailures_DetectsFailedQueries(t *testing.T) {
-	gateA := &types.Issue{ID: "bd-a", AwaitType: "gh:run", AwaitID: "release.yml", CreatedAt: time.Now()}
-	gateB := &types.Issue{ID: "bd-b", AwaitType: "gh:run", AwaitID: "release.yml", CreatedAt: time.Now(),
-		Metadata: json.RawMessage(`{"repo":"other-owner/other-repo"}`)}
+	gateA := &types.Issue{IssueID: types.IssueID{ID: "bd-a"}, IssueTimes: types.IssueTimes{CreatedAt: time.Now()}, IssueCoord: types.IssueCoord{AwaitType: "gh:run", AwaitID: "release.yml"}}
+	gateB := &types.Issue{
+		IssueID: types.IssueID{
+			ID: "bd-b",
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"repo":"other-owner/other-repo"}`),
+		},
+		IssueCoord: types.IssueCoord{
+			AwaitType: "gh:run",
+			AwaitID:   "release.yml",
+		},
+	}
 
 	wantErrA := errors.New("gh CLI not found")
 	wantErrB := errors.New("rate limited")
@@ -218,8 +261,21 @@ func TestGateDiscoveryQueryFailures_DetectsFailedQueries(t *testing.T) {
 // all) is not treated as a query failure - it must not, by itself, make
 // runGateDiscover exit non-zero.
 func TestGateDiscoveryQueryFailures_IgnoresMetadataErrors(t *testing.T) {
-	gate := &types.Issue{ID: "bd-bad-repo", AwaitType: "gh:run", AwaitID: "release.yml", CreatedAt: time.Now(),
-		Metadata: json.RawMessage(`{"repo":null}`)}
+	gate := &types.Issue{
+		IssueID: types.IssueID{
+			ID: "bd-bad-repo",
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"repo":null}`),
+		},
+		IssueCoord: types.IssueCoord{
+			AwaitType: "gh:run",
+			AwaitID:   "release.yml",
+		},
+	}
 
 	queryRuns := func(repo, workflowHint string) ([]GHWorkflowRun, error) {
 		t.Fatal("expected no GitHub query for a gate with malformed repo metadata")
@@ -276,10 +332,16 @@ func TestBranchFilterForRepo(t *testing.T) {
 // heuristics would otherwise produce.
 func TestMatchGateToRun_ForeignRepoWithoutHintNeverMatches(t *testing.T) {
 	gate := &types.Issue{
-		ID:        "bd-cross-no-hint",
-		AwaitType: "gh:run",
-		// AwaitID intentionally empty: no workflow name hint.
-		CreatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "bd-cross-no-hint",
+		},
+		IssueTimes: types.IssueTimes{
+			// AwaitID intentionally empty: no workflow name hint.
+			CreatedAt: time.Now(),
+		},
+		IssueCoord: types.IssueCoord{
+			AwaitType: "gh:run",
+		},
 	}
 	runs := []GHWorkflowRun{
 		{
@@ -320,9 +382,15 @@ func TestMatchGateToRun_NeutralizesLocalHeuristicsForForeignRepo(t *testing.T) {
 	}
 
 	gate := &types.Issue{
-		ID:        "bd-cross",
-		AwaitType: "gh:run",
-		CreatedAt: time.Now().Add(-2 * time.Hour),
+		IssueID: types.IssueID{
+			ID: "bd-cross",
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now().Add(-2 * time.Hour),
+		},
+		IssueCoord: types.IssueCoord{
+			AwaitType: "gh:run",
+		},
 	}
 	runs := []GHWorkflowRun{
 		{

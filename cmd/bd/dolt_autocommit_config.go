@@ -14,7 +14,7 @@ const (
 )
 
 func getDoltAutoCommitMode() (doltAutoCommitMode, error) {
-	mode := strings.TrimSpace(strings.ToLower(doltAutoCommit))
+	mode := strings.TrimSpace(strings.ToLower(getDoltAutoCommit()))
 	if mode == "" {
 		// Default resolved at store-creation time in main.go based on server mode.
 		// If still empty here, fall back to off (safe default).
@@ -28,6 +28,6 @@ func getDoltAutoCommitMode() (doltAutoCommitMode, error) {
 	case doltAutoCommitBatch:
 		return doltAutoCommitBatch, nil
 	default:
-		return "", fmt.Errorf("invalid --dolt-auto-commit=%q (valid: off, on, batch)", doltAutoCommit)
+		return "", fmt.Errorf("invalid --dolt-auto-commit=%q (valid: off, on, batch)", getDoltAutoCommit())
 	}
 }

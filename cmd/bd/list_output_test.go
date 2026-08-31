@@ -13,18 +13,30 @@ import (
 func listOutputFixture() ([]*types.Issue, map[string][]*types.Dependency) {
 	issues := []*types.Issue{
 		{
-			ID:        "list-a",
-			Title:     "Alpha",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeBug,
+			IssueID: types.IssueID{
+				ID: "list-a",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Alpha",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeBug,
+			},
 		},
 		{
-			ID:        "list-b",
-			Title:     "Beta",
-			Status:    types.StatusClosed,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "list-b",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Beta",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusClosed,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		},
 	}
 	deps := map[string][]*types.Dependency{
@@ -122,7 +134,7 @@ func TestOutputFormattedListWriterErrors(t *testing.T) {
 
 func TestOutputFormattedListPreservesFirstWriterError(t *testing.T) {
 	t.Parallel()
-	issues := []*types.Issue{{ID: "first"}, {ID: "second"}, {ID: "target"}}
+	issues := []*types.Issue{{IssueID: types.IssueID{ID: "first"}}, {IssueID: types.IssueID{ID: "second"}}, {IssueID: types.IssueID{ID: "target"}}}
 	deps := map[string][]*types.Dependency{
 		"first":  {{IssueID: "first", DependsOnID: "target", Type: types.DepBlocks}},
 		"second": {{IssueID: "second", DependsOnID: "target", Type: types.DepBlocks}},
@@ -141,7 +153,7 @@ func TestOutputFormattedListPreservesFirstWriterError(t *testing.T) {
 
 func TestOutputFormattedListBuffersTemplateExecution(t *testing.T) {
 	t.Parallel()
-	issues := []*types.Issue{{ID: "source"}, {ID: "target"}}
+	issues := []*types.Issue{{IssueID: types.IssueID{ID: "source"}}, {IssueID: types.IssueID{ID: "target"}}}
 	deps := map[string][]*types.Dependency{
 		"source": {{IssueID: "source", DependsOnID: "target", Type: types.DepBlocks}},
 	}
@@ -160,7 +172,7 @@ func TestOutputFormattedListWithNoEdgesDoesNotWrite(t *testing.T) {
 	t.Parallel()
 	writer := &graphFailWriter{err: io.ErrClosedPipe, failAt: 1}
 
-	if err := outputFormattedList(writer, []*types.Issue{{ID: "solo"}}, nil, "digraph"); err != nil {
+	if err := outputFormattedList(writer, []*types.Issue{{IssueID: types.IssueID{ID: "solo"}}}, nil, "digraph"); err != nil {
 		t.Fatalf("outputFormattedList: %v", err)
 	}
 	if writer.writes != 0 {

@@ -65,16 +65,16 @@ func runMolReadyGated(cmd *cobra.Command, args []string) error {
 // single `bd ready --gated` invocation to exactly one cli_command event.
 func runMolReadyGatedCore(_ *cobra.Command, _ []string) error {
 	if usesProxiedServer() {
-		return runMolReadyGatedProxiedServer(rootCtx)
+		return runMolReadyGatedProxiedServer(getRootContext())
 	}
 
-	ctx := rootCtx
+	ctx := getRootContext()
 
-	if store == nil {
+	if getStore() == nil {
 		return HandleErrorRespectJSON("no database connection")
 	}
 
-	molecules, err := findGateReadyMolecules(ctx, store)
+	molecules, err := findGateReadyMolecules(ctx, getStore())
 	if err != nil {
 		return HandleErrorRespectJSON("%v", err)
 	}
@@ -83,7 +83,7 @@ func runMolReadyGatedCore(_ *cobra.Command, _ []string) error {
 }
 
 func renderGatedReadyMolecules(molecules []*GatedMolecule) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		output := GatedReadyOutput{
 			Molecules: molecules,
 			Count:     len(molecules),
@@ -127,66 +127,74 @@ func renderGatedReadyMolecules(molecules []*GatedMolecule) error {
 // 4. Find the parent molecule
 // 5. Filter out molecules that are already hooked by someone
 func findGateReadyMolecules(ctx context.Context, s molReader) ([]*GatedMolecule, error) {
-	// Step 1: Find all closed gate beads
+	closedGates, err := searchClosedGates(ctx, s)
+	if err != nil || len(closedGates) == 0 {
+		return nil, err
+	}
+	readyIDs, err := readyWorkIDs(ctx, s)
+	if err != nil {
+		return nil, err
+	}
+	hookedMolecules := hookedMoleculeIDs(ctx, s)
+	readyDependents := readyGateDependents(ctx, s, closedGates, readyIDs)
+	return assembleGatedMolecules(ctx, s, readyDependents, hookedMolecules), nil
+}
+
+func searchClosedGates(ctx context.Context, s molReader) ([]*types.Issue, error) {
 	gateType := types.IssueType("gate")
 	closedStatus := types.StatusClosed
-	gateFilter := types.IssueFilter{
-		IssueType: &gateType,
-		Status:    &closedStatus,
-	}
-
-	closedGates, err := s.SearchIssues(ctx, "", gateFilter)
+	closedGates, err := s.SearchIssues(ctx, "", types.IssueFilter{
+		IssueFilterCore: types.IssueFilterCore{
+			IssueType: &gateType,
+			Status:    &closedStatus,
+		},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("searching closed gates: %w", err)
 	}
+	return closedGates, nil
+}
 
-	if len(closedGates) == 0 {
-		return nil, nil
-	}
-
-	// Step 2: Get ready work to check which steps are ready
+func readyWorkIDs(ctx context.Context, s molReader) (map[string]bool, error) {
 	readyIssues, err := s.GetReadyWork(ctx, types.WorkFilter{})
 	if err != nil {
 		return nil, fmt.Errorf("getting ready work: %w", err)
 	}
-	readyIDs := make(map[string]bool)
+	readyIDs := make(map[string]bool, len(readyIssues))
 	for _, issue := range readyIssues {
 		readyIDs[issue.ID] = true
 	}
+	return readyIDs, nil
+}
 
-	// Step 3: Get hooked molecules to filter out
+func hookedMoleculeIDs(ctx context.Context, s molReader) map[string]bool {
 	hookedStatus := types.StatusHooked
-	hookedFilter := types.IssueFilter{
-		Status: &hookedStatus,
-	}
-	hookedIssues, err := s.SearchIssues(ctx, "", hookedFilter)
+	hookedIssues, err := s.SearchIssues(ctx, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Status: &hookedStatus}})
 	if err != nil {
-		// Non-fatal: just continue without filtering
-		hookedIssues = nil
+		return map[string]bool{}
 	}
-	// Batch-find parent molecules for hooked issues (bd-hn4q)
 	hookedMolecules := make(map[string]bool)
-	if len(hookedIssues) > 0 {
-		hookedIDs := make([]string, len(hookedIssues))
-		for i, issue := range hookedIssues {
-			hookedIDs[i] = issue.ID
-			hookedMolecules[issue.ID] = true // Mark hooked issue itself
-		}
-		hookedRoots := findParentMolecules(ctx, s, hookedIDs)
-		for _, molID := range hookedRoots {
-			hookedMolecules[molID] = true
-		}
+	if len(hookedIssues) == 0 {
+		return hookedMolecules
 	}
+	hookedIDs := make([]string, len(hookedIssues))
+	for i, issue := range hookedIssues {
+		hookedIDs[i] = issue.ID
+		hookedMolecules[issue.ID] = true // Mark hooked issue itself
+	}
+	for _, molID := range findParentMolecules(ctx, s, hookedIDs) {
+		hookedMolecules[molID] = true
+	}
+	return hookedMolecules
+}
 
-	// Step 4: For each closed gate, collect all dependents that are ready,
-	// then batch-find their parent molecules (bd-hn4q)
-	type gateDependent struct {
-		gate      *types.Issue
-		dependent *types.Issue
-	}
+type gateDependent struct {
+	gate      *types.Issue
+	dependent *types.Issue
+}
+
+func readyGateDependents(ctx context.Context, s molReader, closedGates []*types.Issue, readyIDs map[string]bool) []gateDependent {
 	var readyDependents []gateDependent
-	var readyDepIDs []string
-
 	for _, gate := range closedGates {
 		dependents, err := s.GetDependents(ctx, gate.ID)
 		if err != nil {
@@ -195,38 +203,22 @@ func findGateReadyMolecules(ctx context.Context, s molReader) ([]*GatedMolecule,
 		for _, dependent := range dependents {
 			if readyIDs[dependent.ID] {
 				readyDependents = append(readyDependents, gateDependent{gate: gate, dependent: dependent})
-				readyDepIDs = append(readyDepIDs, dependent.ID)
 			}
 		}
 	}
+	return readyDependents
+}
 
-	// Batch-find molecule roots for all ready dependents
+func assembleGatedMolecules(ctx context.Context, s molReader, readyDependents []gateDependent, hookedMolecules map[string]bool) []*GatedMolecule {
+	readyDepIDs := make([]string, 0, len(readyDependents))
+	for _, gd := range readyDependents {
+		readyDepIDs = append(readyDepIDs, gd.dependent.ID)
+	}
 	depMolRoots := findParentMolecules(ctx, s, readyDepIDs)
-
 	moleculeMap := make(map[string]*GatedMolecule)
 	for _, gd := range readyDependents {
-		moleculeID := depMolRoots[gd.dependent.ID]
-		if moleculeID == "" {
-			continue
-		}
-		if hookedMolecules[moleculeID] {
-			continue
-		}
-		if _, exists := moleculeMap[moleculeID]; !exists {
-			moleculeIssue, err := s.GetIssue(ctx, moleculeID)
-			if err != nil || moleculeIssue == nil {
-				continue
-			}
-			moleculeMap[moleculeID] = &GatedMolecule{
-				MoleculeID:    moleculeID,
-				MoleculeTitle: moleculeIssue.Title,
-				ClosedGate:    gd.gate,
-				ReadyStep:     gd.dependent,
-			}
-		}
+		addGatedMolecule(ctx, s, gd, depMolRoots, hookedMolecules, moleculeMap)
 	}
-
-	// Convert to slice and sort
 	var molecules []*GatedMolecule
 	for _, mol := range moleculeMap {
 		molecules = append(molecules, mol)
@@ -234,8 +226,27 @@ func findGateReadyMolecules(ctx context.Context, s molReader) ([]*GatedMolecule,
 	sort.Slice(molecules, func(i, j int) bool {
 		return molecules[i].MoleculeID < molecules[j].MoleculeID
 	})
+	return molecules
+}
 
-	return molecules, nil
+func addGatedMolecule(ctx context.Context, s molReader, gd gateDependent, depMolRoots map[string]string, hookedMolecules map[string]bool, moleculeMap map[string]*GatedMolecule) {
+	moleculeID := depMolRoots[gd.dependent.ID]
+	if moleculeID == "" || hookedMolecules[moleculeID] {
+		return
+	}
+	if _, exists := moleculeMap[moleculeID]; exists {
+		return
+	}
+	moleculeIssue, err := s.GetIssue(ctx, moleculeID)
+	if err != nil || moleculeIssue == nil {
+		return
+	}
+	moleculeMap[moleculeID] = &GatedMolecule{
+		MoleculeID:    moleculeID,
+		MoleculeTitle: moleculeIssue.Title,
+		ClosedGate:    gd.gate,
+		ReadyStep:     gd.dependent,
+	}
 }
 
 func init() {

@@ -7,6 +7,7 @@ import (
 
 	"github.com/jonbaldie/beads/internal/metrics"
 	"github.com/jonbaldie/beads/internal/storage"
+	"github.com/jonbaldie/beads/internal/types"
 	"github.com/jonbaldie/beads/internal/ui"
 	"github.com/jonbaldie/beads/internal/utils"
 	"github.com/spf13/cobra"
@@ -56,7 +57,9 @@ type BatchBurnResult struct {
 }
 
 func runMolBurn(cmd *cobra.Command, args []string) error {
-	CheckReadonly("mol burn")
+	if err := CheckReadonly("mol burn"); err != nil {
+		return err
+	}
 
 	evt := metrics.NewCommandEvent("mol-burn")
 	defer func() {
@@ -72,12 +75,12 @@ func runMolBurn(cmd *cobra.Command, args []string) error {
 	}
 
 	if usesProxiedServer() {
-		return runMolBurnProxiedServer(rootCtx, args, dryRun, force)
+		return runMolBurnProxiedServer(getRootContext(), args, dryRun, force)
 	}
 
-	ctx := rootCtx
+	ctx := getRootContext()
 
-	if store == nil {
+	if getStore() == nil {
 		return HandleErrorWithHint("no database connection", diagHint())
 	}
 
@@ -89,12 +92,12 @@ func runMolBurn(cmd *cobra.Command, args []string) error {
 }
 
 func burnSingleMolecule(ctx context.Context, moleculeID string, dryRun, force bool) error {
-	resolvedID, err := utils.ResolvePartialID(ctx, store, moleculeID)
+	resolvedID, err := utils.ResolvePartialID(ctx, getStore(), moleculeID)
 	if err != nil {
 		return HandleErrorRespectJSON("resolving molecule ID %s: %v", moleculeID, err)
 	}
 
-	rootIssue, err := store.GetIssue(ctx, resolvedID)
+	rootIssue, err := getStore().GetIssue(ctx, resolvedID)
 	if err != nil {
 		return HandleErrorRespectJSON("loading molecule: %v", err)
 	}
@@ -106,270 +109,319 @@ func burnSingleMolecule(ctx context.Context, moleculeID string, dryRun, force bo
 }
 
 func burnMultipleMolecules(ctx context.Context, moleculeIDs []string, dryRun, force bool) error {
-	var wispIDs []string
-	var persistentIDs []string
-	var failedResolve []string
-
-	// First pass: resolve and categorize all IDs
-	for _, moleculeID := range moleculeIDs {
-		resolvedID, err := utils.ResolvePartialID(ctx, store, moleculeID)
-		if err != nil {
-			if !jsonOutput {
-				fmt.Fprintf(os.Stderr, "Warning: failed to resolve %s: %v\n", moleculeID, err)
-			}
-			failedResolve = append(failedResolve, moleculeID)
-			continue
-		}
-
-		issue, err := store.GetIssue(ctx, resolvedID)
-		if err != nil {
-			if !jsonOutput {
-				fmt.Fprintf(os.Stderr, "Warning: failed to load %s: %v\n", resolvedID, err)
-			}
-			failedResolve = append(failedResolve, moleculeID)
-			continue
-		}
-
-		if issue.Ephemeral {
-			wispIDs = append(wispIDs, resolvedID)
-		} else {
-			persistentIDs = append(persistentIDs, resolvedID)
-		}
+	targets := collectBurnTargets(ctx, moleculeIDs)
+	if targets.empty() {
+		return renderEmptyBatchBurn(targets.failedResolve)
 	}
-
-	if len(wispIDs) == 0 && len(persistentIDs) == 0 {
-		if jsonOutput {
-			return outputJSON(BatchBurnResult{FailedCount: len(failedResolve)})
-		}
-		fmt.Println("No valid molecules to burn")
-		return nil
-	}
-
 	if dryRun {
-		if !jsonOutput {
-			fmt.Printf("\nDry run: would burn %d wisp(s) and %d persistent molecule(s)\n", len(wispIDs), len(persistentIDs))
-			if len(wispIDs) > 0 {
-				fmt.Printf("\nWisps to delete:\n")
-				for _, id := range wispIDs {
-					fmt.Printf("  - %s\n", id)
-				}
-			}
-			if len(persistentIDs) > 0 {
-				fmt.Printf("\nPersistent molecules to delete:\n")
-				for _, id := range persistentIDs {
-					fmt.Printf("  - %s\n", id)
-				}
-			}
-			if len(failedResolve) > 0 {
-				fmt.Printf("\nFailed to resolve (%d):\n", len(failedResolve))
-				for _, id := range failedResolve {
-					fmt.Printf("  - %s\n", id)
-				}
-			}
-		}
+		renderBatchBurnDryRun(targets)
+		return nil
+	}
+	if !force && !isJSONOutput() && !confirmBatchBurn(targets) {
 		return nil
 	}
 
-	if !force && !jsonOutput {
-		fmt.Printf("About to burn %d wisp(s) and %d persistent molecule(s)\n", len(wispIDs), len(persistentIDs))
-		fmt.Printf("This will permanently delete all molecule data with no digest.\n")
-		fmt.Printf("\nContinue? [y/N] ")
-
-		var response string
-		_, _ = fmt.Scanln(&response)
-		if response != "y" && response != "Y" {
-			fmt.Println("Canceled.")
-			return nil
-		}
+	batchResult, err := burnBatchTargets(ctx, targets)
+	if err != nil {
+		return err
 	}
-
-	batchResult := BatchBurnResult{
-		Results:     make([]BurnResult, 0),
-		FailedCount: len(failedResolve),
-	}
-
-	// Batch delete all wisps in one call
-	if len(wispIDs) > 0 {
-		result, err := burnWisps(ctx, store, wispIDs, actor)
-		if err != nil {
-			if !jsonOutput {
-				fmt.Fprintf(os.Stderr, "Error burning wisps: %v\n", err)
-			}
-		} else {
-			batchResult.TotalDeleted += result.DeletedCount
-			batchResult.Results = append(batchResult.Results, *result)
-		}
-	}
-
-	// Handle persistent molecules individually (they need subgraph loading)
-	for _, id := range persistentIDs {
-		subgraph, err := loadTemplateSubgraph(ctx, store, id)
-		if err != nil {
-			if !jsonOutput {
-				fmt.Fprintf(os.Stderr, "Warning: failed to load subgraph for %s: %v\n", id, err)
-			}
-			batchResult.FailedCount++
-			continue
-		}
-
-		var issueIDs []string
-		for _, issue := range subgraph.Issues {
-			issueIDs = append(issueIDs, issue.ID)
-		}
-
-		if err := deleteBatch(nil, issueIDs, true, false, false, false, false, "mol burn"); err != nil {
-			return HandleErrorRespectJSON("%v", err)
-		}
-		batchResult.TotalDeleted += len(issueIDs)
-		batchResult.Results = append(batchResult.Results, BurnResult{
-			MoleculeID:   id,
-			DeletedIDs:   issueIDs,
-			DeletedCount: len(issueIDs),
-		})
-	}
-
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(batchResult)
 	}
-
-	fmt.Printf("%s Burned %d molecule(s): %d issues deleted\n", ui.RenderPass("✓"), len(wispIDs)+len(persistentIDs), batchResult.TotalDeleted)
+	fmt.Printf("%s Burned %d molecule(s): %d issues deleted\n", ui.RenderPass("✓"), len(targets.wispIDs)+len(targets.persistentIDs), batchResult.TotalDeleted)
 	if batchResult.FailedCount > 0 {
 		fmt.Printf("  %d failed\n", batchResult.FailedCount)
 	}
 	return nil
 }
 
+type burnTargets struct {
+	wispIDs       []string
+	persistentIDs []string
+	failedResolve []string
+}
+
+func (targets burnTargets) empty() bool {
+	return len(targets.wispIDs) == 0 && len(targets.persistentIDs) == 0
+}
+
+func collectBurnTargets(ctx context.Context, moleculeIDs []string) burnTargets {
+	targets := burnTargets{}
+	for _, moleculeID := range moleculeIDs {
+		resolvedID, err := utils.ResolvePartialID(ctx, getStore(), moleculeID)
+		if err != nil {
+			recordBurnTargetFailure(&targets, moleculeID, "resolve", moleculeID, err)
+			continue
+		}
+		issue, err := getStore().GetIssue(ctx, resolvedID)
+		if err != nil {
+			recordBurnTargetFailure(&targets, moleculeID, "load", resolvedID, err)
+			continue
+		}
+		if issue.Ephemeral {
+			targets.wispIDs = append(targets.wispIDs, resolvedID)
+		} else {
+			targets.persistentIDs = append(targets.persistentIDs, resolvedID)
+		}
+	}
+	return targets
+}
+
+func recordBurnTargetFailure(targets *burnTargets, originalID, action, displayID string, err error) {
+	if !isJSONOutput() {
+		fmt.Fprintf(os.Stderr, "Warning: failed to %s %s: %v\n", action, displayID, err)
+	}
+	targets.failedResolve = append(targets.failedResolve, originalID)
+}
+
+func renderEmptyBatchBurn(failedResolve []string) error {
+	if isJSONOutput() {
+		return outputJSON(BatchBurnResult{FailedCount: len(failedResolve)})
+	}
+	fmt.Println("No valid molecules to burn")
+	return nil
+}
+
+func renderBatchBurnDryRun(targets burnTargets) {
+	if isJSONOutput() {
+		return
+	}
+	fmt.Printf("\nDry run: would burn %d wisp(s) and %d persistent molecule(s)\n", len(targets.wispIDs), len(targets.persistentIDs))
+	renderBurnTargetIDs("Wisps to delete:", targets.wispIDs)
+	renderBurnTargetIDs("Persistent molecules to delete:", targets.persistentIDs)
+	renderBurnTargetIDs(fmt.Sprintf("Failed to resolve (%d):", len(targets.failedResolve)), targets.failedResolve)
+}
+
+func renderBurnTargetIDs(title string, ids []string) {
+	if len(ids) == 0 {
+		return
+	}
+	fmt.Printf("\n%s\n", title)
+	for _, id := range ids {
+		fmt.Printf("  - %s\n", id)
+	}
+}
+
+func confirmBatchBurn(targets burnTargets) bool {
+	fmt.Printf("About to burn %d wisp(s) and %d persistent molecule(s)\n", len(targets.wispIDs), len(targets.persistentIDs))
+	fmt.Printf("This will permanently delete all molecule data with no digest.\n")
+	fmt.Printf("\nContinue? [y/N] ")
+	var response string
+	_, _ = fmt.Scanln(&response)
+	if response == "y" || response == "Y" {
+		return true
+	}
+	fmt.Println("Canceled.")
+	return false
+}
+
+func burnBatchTargets(ctx context.Context, targets burnTargets) (BatchBurnResult, error) {
+	result := BatchBurnResult{
+		Results:     make([]BurnResult, 0),
+		FailedCount: len(targets.failedResolve),
+	}
+	if len(targets.wispIDs) > 0 {
+		burnBatchWisps(ctx, targets.wispIDs, &result)
+	}
+	for _, id := range targets.persistentIDs {
+		subgraph, err := loadTemplateSubgraph(ctx, getStore(), id)
+		if err != nil {
+			if !isJSONOutput() {
+				fmt.Fprintf(os.Stderr, "Warning: failed to load subgraph for %s: %v\n", id, err)
+			}
+			result.FailedCount++
+			continue
+		}
+		burnResult, err := burnPersistentSubgraph(id, subgraph)
+		if err != nil {
+			return result, err
+		}
+		result.TotalDeleted += burnResult.DeletedCount
+		result.Results = append(result.Results, burnResult)
+	}
+	return result, nil
+}
+
+func burnBatchWisps(ctx context.Context, ids []string, result *BatchBurnResult) {
+	burnResult, err := burnWisps(ctx, getStore(), ids, getActor())
+	if err != nil {
+		if !isJSONOutput() {
+			fmt.Fprintf(os.Stderr, "Error burning wisps: %v\n", err)
+		}
+		return
+	}
+	result.TotalDeleted += burnResult.DeletedCount
+	result.Results = append(result.Results, *burnResult)
+}
+
+func burnPersistentSubgraph(id string, subgraph *TemplateSubgraph) (BurnResult, error) {
+	issueIDs := make([]string, 0, len(subgraph.Issues))
+	for _, issue := range subgraph.Issues {
+		issueIDs = append(issueIDs, issue.ID)
+	}
+	if err := deleteBatch(nil, issueIDs, true, false, false, false, false, "mol burn"); err != nil {
+		return BurnResult{}, HandleErrorRespectJSON("%v", err)
+	}
+	return BurnResult{MoleculeID: id, DeletedIDs: issueIDs, DeletedCount: len(issueIDs)}, nil
+}
+
 func burnWispMolecule(ctx context.Context, resolvedID string, dryRun, force bool) error {
-	subgraph, err := loadTemplateSubgraph(ctx, store, resolvedID)
+	subgraph, err := loadTemplateSubgraph(ctx, getStore(), resolvedID)
 	if err != nil {
 		return HandleErrorRespectJSON("loading wisp molecule: %v", err)
 	}
 
-	var wispIDs []string
-	for _, issue := range subgraph.Issues {
-		if issue.Ephemeral {
-			wispIDs = append(wispIDs, issue.ID)
-		}
-	}
+	wispIDs := collectWispIDs(subgraph)
 
 	if len(wispIDs) == 0 {
-		if jsonOutput {
-			return outputJSON(BurnResult{
-				MoleculeID:   resolvedID,
-				DeletedCount: 0,
-			})
-		}
-		fmt.Printf("No wisp issues found for molecule %s\n", resolvedID)
-		return nil
+		return renderEmptyWispBurn(resolvedID)
 	}
 
 	if dryRun {
-		fmt.Printf("\nDry run: would burn wisp %s\n\n", resolvedID)
-		fmt.Printf("Root: %s\n", subgraph.Root.Title)
-		fmt.Printf("\nWisp issues to delete (%d total):\n", len(wispIDs))
-		for _, issue := range subgraph.Issues {
-			if !issue.Ephemeral {
-				continue
-			}
-			status := string(issue.Status)
-			if issue.ID == subgraph.Root.ID {
-				fmt.Printf("  - [%s] %s (%s) [ROOT]\n", status, issue.Title, issue.ID)
-			} else {
-				fmt.Printf("  - [%s] %s (%s)\n", status, issue.Title, issue.ID)
-			}
-		}
-		fmt.Printf("\nNo digest will be created (use 'bd mol squash' to create one).\n")
+		renderWispBurnDryRun(resolvedID, subgraph, wispIDs)
 		return nil
 	}
 
-	if !force && !jsonOutput {
-		fmt.Printf("About to burn wisp %s (%d issues)\n", resolvedID, len(wispIDs))
-		fmt.Printf("This will permanently delete all wisp data with no digest.\n")
-		fmt.Printf("Use 'bd mol squash' instead if you want to preserve a summary.\n")
-		fmt.Printf("\nContinue? [y/N] ")
-
-		var response string
-		_, _ = fmt.Scanln(&response)
-		if response != "y" && response != "Y" {
-			fmt.Println("Canceled.")
-			return nil
-		}
+	if !force && !isJSONOutput() && !confirmWispBurn(resolvedID, len(wispIDs)) {
+		return nil
 	}
 
-	result, err := burnWisps(ctx, store, wispIDs, actor)
+	result, err := burnWisps(ctx, getStore(), wispIDs, getActor())
 	if err != nil {
 		return HandleErrorRespectJSON("burning wisp: %v", err)
 	}
 	result.MoleculeID = resolvedID
 
-	if jsonOutput {
-		return outputJSON(result)
+	return renderWispBurnResult(result, resolvedID)
+}
+
+func burnPersistentMolecule(ctx context.Context, resolvedID string, dryRun, force bool) error {
+	subgraph, err := loadTemplateSubgraph(ctx, getStore(), resolvedID)
+	if err != nil {
+		return HandleErrorRespectJSON("loading molecule: %v", err)
 	}
 
+	issueIDs := collectIssueIDs(subgraph)
+
+	if len(issueIDs) == 0 {
+		return renderEmptyPersistentBurn(resolvedID)
+	}
+
+	if dryRun {
+		renderPersistentBurnDryRun(resolvedID, subgraph, issueIDs)
+		return nil
+	}
+
+	if !force && !isJSONOutput() && !confirmPersistentBurn(resolvedID, len(issueIDs)) {
+		return nil
+	}
+
+	if err := deleteBatch(nil, issueIDs, true, false, false, isJSONOutput(), false, "mol burn"); err != nil {
+		return HandleErrorRespectJSON("%v", err)
+	}
+	return nil
+}
+
+func collectWispIDs(subgraph *TemplateSubgraph) []string {
+	wispIDs := make([]string, 0, len(subgraph.Issues))
+	for _, issue := range subgraph.Issues {
+		if issue.Ephemeral {
+			wispIDs = append(wispIDs, issue.ID)
+		}
+	}
+	return wispIDs
+}
+
+func collectIssueIDs(subgraph *TemplateSubgraph) []string {
+	issueIDs := make([]string, 0, len(subgraph.Issues))
+	for _, issue := range subgraph.Issues {
+		issueIDs = append(issueIDs, issue.ID)
+	}
+	return issueIDs
+}
+
+func renderEmptyWispBurn(resolvedID string) error {
+	if isJSONOutput() {
+		return outputJSON(BurnResult{MoleculeID: resolvedID, DeletedCount: 0})
+	}
+	fmt.Printf("No wisp issues found for molecule %s\n", resolvedID)
+	return nil
+}
+
+func renderEmptyPersistentBurn(resolvedID string) error {
+	if isJSONOutput() {
+		return outputJSON(BurnResult{MoleculeID: resolvedID, DeletedCount: 0})
+	}
+	fmt.Printf("No issues found for molecule %s\n", resolvedID)
+	return nil
+}
+
+func renderWispBurnResult(result *BurnResult, resolvedID string) error {
+	if isJSONOutput() {
+		return outputJSON(result)
+	}
 	fmt.Printf("%s Burned wisp: %d issues deleted\n", ui.RenderPass("✓"), result.DeletedCount)
 	fmt.Printf("  Ephemeral: %s\n", resolvedID)
 	fmt.Printf("  No digest created.\n")
 	return nil
 }
 
-func burnPersistentMolecule(ctx context.Context, resolvedID string, dryRun, force bool) error {
-	subgraph, err := loadTemplateSubgraph(ctx, store, resolvedID)
-	if err != nil {
-		return HandleErrorRespectJSON("loading molecule: %v", err)
-	}
-
-	var issueIDs []string
+func renderWispBurnDryRun(resolvedID string, subgraph *TemplateSubgraph, wispIDs []string) {
+	fmt.Printf("\nDry run: would burn wisp %s\n\n", resolvedID)
+	fmt.Printf("Root: %s\n", subgraph.Root.Title)
+	fmt.Printf("\nWisp issues to delete (%d total):\n", len(wispIDs))
 	for _, issue := range subgraph.Issues {
-		issueIDs = append(issueIDs, issue.ID)
-	}
-
-	if len(issueIDs) == 0 {
-		if jsonOutput {
-			return outputJSON(BurnResult{
-				MoleculeID:   resolvedID,
-				DeletedCount: 0,
-			})
-		}
-		fmt.Printf("No issues found for molecule %s\n", resolvedID)
-		return nil
-	}
-
-	if dryRun {
-		fmt.Printf("\nDry run: would burn mol %s\n\n", resolvedID)
-		fmt.Printf("Root: %s\n", subgraph.Root.Title)
-		fmt.Printf("\nIssues to delete (%d total):\n", len(issueIDs))
-		for _, issue := range subgraph.Issues {
-			status := string(issue.Status)
-			if issue.ID == subgraph.Root.ID {
-				fmt.Printf("  - [%s] %s (%s) [ROOT]\n", status, issue.Title, issue.ID)
-			} else {
-				fmt.Printf("  - [%s] %s (%s)\n", status, issue.Title, issue.ID)
-			}
-		}
-		fmt.Printf("\nNote: Persistent mol - deletions sync to remotes.\n")
-		fmt.Printf("No digest will be created (use 'bd mol squash' to create one).\n")
-		return nil
-	}
-
-	if !force && !jsonOutput {
-		fmt.Printf("About to burn mol %s (%d issues)\n", resolvedID, len(issueIDs))
-		fmt.Printf("This will permanently delete all molecule data with no digest.\n")
-		fmt.Printf("Note: Persistent mol - deletions sync to remotes.\n")
-		fmt.Printf("Use 'bd mol squash' instead if you want to preserve a summary.\n")
-		fmt.Printf("\nContinue? [y/N] ")
-
-		var response string
-		_, _ = fmt.Scanln(&response)
-		if response != "y" && response != "Y" {
-			fmt.Println("Canceled.")
-			return nil
+		if issue.Ephemeral {
+			renderBurnIssue(issue, subgraph.Root.ID)
 		}
 	}
+	fmt.Printf("\nNo digest will be created (use 'bd mol squash' to create one).\n")
+}
 
-	if err := deleteBatch(nil, issueIDs, true, false, false, jsonOutput, false, "mol burn"); err != nil {
-		return HandleErrorRespectJSON("%v", err)
+func renderPersistentBurnDryRun(resolvedID string, subgraph *TemplateSubgraph, issueIDs []string) {
+	fmt.Printf("\nDry run: would burn mol %s\n\n", resolvedID)
+	fmt.Printf("Root: %s\n", subgraph.Root.Title)
+	fmt.Printf("\nIssues to delete (%d total):\n", len(issueIDs))
+	for _, issue := range subgraph.Issues {
+		renderBurnIssue(issue, subgraph.Root.ID)
 	}
-	return nil
+	fmt.Printf("\nNote: Persistent mol - deletions sync to remotes.\n")
+	fmt.Printf("No digest will be created (use 'bd mol squash' to create one).\n")
+}
+
+func renderBurnIssue(issue *types.Issue, rootID string) {
+	status := string(issue.Status)
+	if issue.ID == rootID {
+		fmt.Printf("  - [%s] %s (%s) [ROOT]\n", status, issue.Title, issue.ID)
+		return
+	}
+	fmt.Printf("  - [%s] %s (%s)\n", status, issue.Title, issue.ID)
+}
+
+func confirmWispBurn(resolvedID string, issueCount int) bool {
+	fmt.Printf("About to burn wisp %s (%d issues)\n", resolvedID, issueCount)
+	fmt.Printf("This will permanently delete all wisp data with no digest.\n")
+	fmt.Printf("Use 'bd mol squash' instead if you want to preserve a summary.\n")
+	return confirmBurn()
+}
+
+func confirmPersistentBurn(resolvedID string, issueCount int) bool {
+	fmt.Printf("About to burn mol %s (%d issues)\n", resolvedID, issueCount)
+	fmt.Printf("This will permanently delete all molecule data with no digest.\n")
+	fmt.Printf("Note: Persistent mol - deletions sync to remotes.\n")
+	fmt.Printf("Use 'bd mol squash' instead if you want to preserve a summary.\n")
+	return confirmBurn()
+}
+
+func confirmBurn() bool {
+	fmt.Printf("\nContinue? [y/N] ")
+	var response string
+	_, _ = fmt.Scanln(&response)
+	if response == "y" || response == "Y" {
+		return true
+	}
+	fmt.Println("Canceled.")
+	return false
 }
 
 // burnWisps deletes all wisp issues atomically within a single transaction.

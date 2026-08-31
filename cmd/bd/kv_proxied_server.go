@@ -20,12 +20,12 @@ import (
 // survive to the CLI surface.
 
 func runKVSetProxiedServer(ctx context.Context, key, value string) error {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return HandleErrorRespectJSON("proxied-server UOW provider not initialized")
 	}
 
 	storageKey := kvPrefix + key
-	err := uow.RunTx(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (string, error) {
+	err := uow.RunTx(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (string, error) {
 		if err := uw.ConfigUseCase().SetConfig(ctx, storageKey, value); err != nil {
 			return "", err
 		}
@@ -40,12 +40,12 @@ func runKVSetProxiedServer(ctx context.Context, key, value string) error {
 }
 
 func runKVGetProxiedServer(ctx context.Context, key string) error {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return HandleErrorRespectJSON("proxied-server UOW provider not initialized")
 	}
 
 	storageKey := kvPrefix + key
-	value, err := uow.RunTxRead(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (string, error) {
+	value, err := uow.RunTxRead(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (string, error) {
 		return uw.ConfigUseCase().GetConfig(ctx, storageKey)
 	})
 	if err != nil {
@@ -56,12 +56,12 @@ func runKVGetProxiedServer(ctx context.Context, key string) error {
 }
 
 func runKVClearProxiedServer(ctx context.Context, key string) error {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return HandleErrorRespectJSON("proxied-server UOW provider not initialized")
 	}
 
 	storageKey := kvPrefix + key
-	err := uow.RunTx(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (string, error) {
+	err := uow.RunTx(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (string, error) {
 		if err := uw.ConfigUseCase().DeleteConfig(ctx, storageKey); err != nil {
 			return "", err
 		}
@@ -76,11 +76,11 @@ func runKVClearProxiedServer(ctx context.Context, key string) error {
 }
 
 func runKVListProxiedServer(ctx context.Context) error {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return HandleErrorRespectJSON("proxied-server UOW provider not initialized")
 	}
 
-	allConfig, err := uow.RunTxRead(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (map[string]string, error) {
+	allConfig, err := uow.RunTxRead(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (map[string]string, error) {
 		return uw.ConfigUseCase().GetAllConfig(ctx)
 	})
 	if err != nil {

@@ -123,7 +123,8 @@ var constructionExemptions = map[string]string{
 	// It writes only local_metadata, which is dolt-ignored working-set state and
 	// not a bead mutation. Journaling it would record a row for something a
 	// replay consumer has no bead to apply it to.
-	"version_tracking.go:autoMigrateOnVersionBump": "store-open-time version reconciliation: writes only dolt-ignored local_metadata, never a bead, and runs before the command's own store is configured",
+	"version_tracking.go:runAutoMigrate":          "store-open-time version reconciliation: writes only dolt-ignored local_metadata, never a bead, and runs before the command's own store is configured",
+	"version_tracking.go:alreadyAtCurrentVersion": "read-only version probe: reads only the local_metadata version marker and cannot mutate a bead",
 
 	// Config reads through a throwaway store. GetConfig only; nothing here
 	// mutates a bead.
@@ -132,8 +133,8 @@ var constructionExemptions = map[string]string{
 	// `bd config apply` / drift detection open a store to read and reconcile the
 	// workspace's Dolt REMOTE configuration. That is workspace state, not bead
 	// rows, so there is nothing for a replay consumer to apply.
-	"config_apply.go:applyRemote":      "reconciles the Dolt remote configuration, not beads: workspace state a replay consumer has no bead to apply it to",
-	"config_drift.go:checkRemoteDrift": "reads the Dolt remote configuration to report drift; no bead mutation",
+	"config_apply.go:applyRemote":          "reconciles the Dolt remote configuration, not beads: workspace state a replay consumer has no bead to apply it to",
+	"config_drift.go:loadRemoteDriftState": "reads the Dolt remote configuration to report drift; no bead mutation",
 
 	// bd doctor's CHECKS: read-only inspection of workspace and bead state.
 	// They report, they never write.
@@ -155,8 +156,7 @@ var constructionExemptions = map[string]string{
 	// DELETE issues) and the two fresh-clone import paths (which CREATE them)
 	// open through openBeadMutatingStore and journal like any other mutation.
 	"doctor/fix/metadata.go:FixMissingMetadata":            "writes bd_version / repo_id / clone_id workspace metadata, never a bead",
-	"doctor/fix/metadata.go:FixProjectIdentity":            "writes the workspace's _project_id, never a bead",
-	"doctor/fix/repo_fingerprint.go:RepoFingerprint":       "rewrites the workspace repo_id fingerprint, never a bead",
+	"doctor/fix/metadata_project.go:FixProjectIdentity":    "writes the workspace's _project_id, never a bead",
 	"doctor/fix/repo_fingerprint.go:updateRepoIDInProcess": "rewrites the workspace repo_id fingerprint in-process, never a bead",
 
 	// The root pre-run probes the backend registry to choose WHICH factory to
@@ -164,11 +164,11 @@ var constructionExemptions = map[string]string{
 	// which activates. This is the one place the guard's "Lookup means
 	// construction" heuristic over-reports, because Lookup here decides a
 	// branch rather than opening anything.
-	"main.go:var rootCmd": "probes backends.Lookup to select a factory; the store is constructed by newRegisteredBackendStore, which activates",
+	"main_prerun_store.go:openPersistentEmbeddedStore": "probes backends.Lookup to select a factory; the store is constructed by newRegisteredBackendStore, which activates",
 
 	// A standalone developer utility binary, not bd. It has no workspace config
 	// to read and never runs as part of a bd command.
-	"embeddeddolt-cmd/main.go:main": "standalone embeddeddolt debug utility, not the bd binary; no workspace config and no bd command context",
+	"embeddeddolt-cmd/main.go:run": "standalone embeddeddolt debug utility, not the bd binary; no workspace config and no bd command context",
 }
 
 func TestEveryStoreConstructionActivatesTheEventsJournal(t *testing.T) {

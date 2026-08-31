@@ -127,12 +127,12 @@ Examples:
 
 		status, _ := cmd.Flags().GetString("status")
 
-		issues, err := humanIssues(rootCtx, status)
+		issues, err := humanIssues(getRootContext(), status)
 		if err != nil {
 			return HandleErrorRespectJSON("listing human beads: %v", err)
 		}
 
-		if jsonOutput {
+		if isJSONOutput() {
 			// SearchIssues already hydrated .Labels on both backends (the
 			// filter never sets SkipLabels), so the issues marshal with their
 			// labels attached.
@@ -160,7 +160,7 @@ func humanIssues(ctx context.Context, status string) ([]*types.Issue, error) {
 	if err := ensureStoreActive(); err != nil {
 		return nil, err
 	}
-	cfg, err := workapi.LoadStoreListConfig(ctx, store)
+	cfg, err := workapi.LoadStoreListConfig(ctx, getStore())
 	if err != nil {
 		return nil, fmt.Errorf("loading status configuration: %w", err)
 	}
@@ -168,7 +168,7 @@ func humanIssues(ctx context.Context, status string) ([]*types.Issue, error) {
 	if err != nil {
 		return nil, err
 	}
-	return store.SearchIssues(ctx, "", filter)
+	return getStore().SearchIssues(ctx, "", filter)
 }
 
 // humanListRequest builds the list request for "human list": every
@@ -181,11 +181,11 @@ func humanIssues(ctx context.Context, status string) ([]*types.Issue, error) {
 // the status defaults entirely.
 func humanListRequest(status string) issueops.ListRequest {
 	unlimited := 0
-	req := issueops.ListRequest{
-		Labels: []string{"human"},
-		Limit:  &unlimited, // human list has never paginated; 0 = unlimited
+	req := issueops.ListRequest{ListLabelFilters: issueops.ListLabelFilters{Labels: []string{"human"}}, ListVisibilityOptions: issueops.ListVisibilityOptions{
+
+		// human list has never paginated; 0 = unlimited
 		// No bead type is hidden from a human listing.
-		IncludeAllTypes: true,
+		IncludeAllTypes: true}, ListPageOptions: issueops.ListPageOptions{Limit: &unlimited},
 	}
 	req.Status = status // "" applies the defaults; "all" lifts them
 	return req
@@ -251,7 +251,9 @@ Examples:
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		CheckReadonly("human respond")
+		if err := CheckReadonly("human respond"); err != nil {
+			return err
+		}
 
 		evt := metrics.NewCommandEvent("human-respond")
 		defer func() {
@@ -269,7 +271,7 @@ Examples:
 			return HandleErrorRespectJSON("%v", err)
 		}
 
-		ctx := rootCtx
+		ctx := getRootContext()
 		issueID := args[0]
 		// Formatted once here so the direct and proxied backends store
 		// identically-shaped comments.
@@ -285,7 +287,7 @@ Examples:
 		}
 
 		// Resolve partial ID and get issue
-		result, err := resolveAndGetIssueForMutation(ctx, store, issueID)
+		result, err := resolveAndGetIssueForMutation(ctx, getStore(), issueID)
 		if err != nil {
 			return HandleErrorRespectJSON("resolving issue ID %s: %v", issueID, err)
 		}
@@ -307,12 +309,12 @@ Examples:
 
 		warnIfNotHumanLabeled(issue)
 
-		_, err = targetStore.AddIssueComment(ctx, resolvedID, actor, commentText)
+		_, err = targetStore.AddIssueComment(ctx, resolvedID, getActor(), commentText)
 		if err != nil {
 			return HandleErrorRespectJSON("adding comment: %v", err)
 		}
 
-		if err := targetStore.CloseIssue(ctx, resolvedID, "Responded", actor, ""); err != nil {
+		if err := targetStore.CloseIssue(ctx, resolvedID, "Responded", getActor(), ""); err != nil {
 			return HandleErrorRespectJSON("closing bead: %v", err)
 		}
 
@@ -338,7 +340,9 @@ Examples:
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		CheckReadonly("human dismiss")
+		if err := CheckReadonly("human dismiss"); err != nil {
+			return err
+		}
 
 		evt := metrics.NewCommandEvent("human-dismiss")
 		defer func() {
@@ -368,7 +372,7 @@ Examples:
 			closeReason = fmt.Sprintf("%s: %s", dismissedCloseReason, reason)
 		}
 
-		ctx := rootCtx
+		ctx := getRootContext()
 		issueID := args[0]
 
 		if usesProxiedServer() {
@@ -381,7 +385,7 @@ Examples:
 		}
 
 		// Resolve partial ID and get issue
-		result, err := resolveAndGetIssueForMutation(ctx, store, issueID)
+		result, err := resolveAndGetIssueForMutation(ctx, getStore(), issueID)
 		if err != nil {
 			return HandleErrorRespectJSON("resolving issue ID %s: %v", issueID, err)
 		}
@@ -403,7 +407,7 @@ Examples:
 
 		warnIfNotHumanLabeled(issue)
 
-		if err := targetStore.CloseIssue(ctx, resolvedID, closeReason, actor, ""); err != nil {
+		if err := targetStore.CloseIssue(ctx, resolvedID, closeReason, getActor(), ""); err != nil {
 			return HandleErrorRespectJSON("closing bead: %v", err)
 		}
 
@@ -435,7 +439,7 @@ Example:
 
 		// The stats universe is `human list --status=all`: every human-labeled
 		// bead, every status, every type.
-		issues, err := humanIssues(rootCtx, "all")
+		issues, err := humanIssues(getRootContext(), "all")
 		if err != nil {
 			return HandleErrorRespectJSON("getting human bead stats: %v", err)
 		}

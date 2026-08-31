@@ -63,7 +63,7 @@ func TestSkipLabelsIssueView_AlwaysEmitsLabelsArray(t *testing.T) {
 
 	view := skipLabelsIssueView{
 		IssueWithCounts: &types.IssueWithCounts{
-			Issue: &types.Issue{ID: "be-1", Title: "x", Labels: []string{"actual"}},
+			Issue: &types.Issue{IssueID: types.IssueID{ID: "be-1"}, IssueContent: types.IssueContent{Title: "x"}, IssueGraph: types.IssueGraph{Labels: []string{"actual"}}},
 		},
 		Labels: []string{},
 	}
@@ -87,8 +87,8 @@ func TestNewSkipLabelsListJSONResponse(t *testing.T) {
 	t.Parallel()
 
 	resp := newSkipLabelsListJSONResponse([]*types.IssueWithCounts{
-		{Issue: &types.Issue{ID: "be-1", Labels: []string{"backend"}}},
-		{Issue: &types.Issue{ID: "be-2"}},
+		{Issue: &types.Issue{IssueID: types.IssueID{ID: "be-1"}, IssueGraph: types.IssueGraph{Labels: []string{"backend"}}}},
+		{Issue: &types.Issue{IssueID: types.IssueID{ID: "be-2"}}},
 	})
 
 	if !resp.Meta.SkipLabels {

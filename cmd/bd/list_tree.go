@@ -8,8 +8,89 @@ import (
 	"time"
 
 	"github.com/jonbaldie/beads/internal/types"
+	"github.com/jonbaldie/beads/internal/ui"
 	"github.com/jonbaldie/beads/internal/utils"
 )
+
+// depRender carries the state needed to annotate and order a --deps tree.
+// A nil *depRender means the feature is off; its methods are nil-safe.
+type depRender struct {
+	mode    string                         // "scheduling" or "all"
+	allDeps map[string][]*types.Dependency // outgoing edges keyed by issue_id
+	inView  map[string]*types.Issue        // displayed issues, for titles + in-view test
+}
+
+type depAnnotationRow struct{ label, target, title string }
+
+// annotationsFor prints the dependency-edge annotation rows for a node, indented
+// to childPrefix so they align with (and sit just above) the node's children.
+// No-op when the receiver is nil (--deps off).
+func (dr *depRender) annotationsFor(nodeID, childPrefix string) {
+	if dr == nil {
+		return
+	}
+	inView, outView := dr.annotationRows(nodeID)
+	if len(inView) == 0 && len(outView) == 0 {
+		return
+	}
+	printInViewAnnotations(inView, childPrefix)
+	printOutOfViewAnnotations(outView, childPrefix)
+}
+
+func (dr *depRender) annotationRows(nodeID string) ([]depAnnotationRow, []string) {
+	var inView []depAnnotationRow
+	var outView []string
+	seen := make(map[string]bool)
+	for _, dep := range dr.allDeps[nodeID] {
+		label, scheduling, ok := depEdgeDisplay(dep.Type)
+		if !ok {
+			continue // parent-child: hierarchy, not a dependency
+		}
+		if dr.mode != "all" && !scheduling {
+			continue // scheduling mode hides knowledge-graph edges
+		}
+		key := string(dep.Type) + "\x00" + dep.DependsOnID
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		if issue := dr.inView[dep.DependsOnID]; issue != nil {
+			inView = append(inView, depAnnotationRow{label: label, target: dep.DependsOnID, title: issue.Title})
+		} else {
+			outView = append(outView, dep.DependsOnID)
+		}
+	}
+	return inView, outView
+}
+
+func printInViewAnnotations(rows []depAnnotationRow, childPrefix string) {
+	slices.SortFunc(rows, func(a, b depAnnotationRow) int {
+		if a.label != b.label {
+			return cmp.Compare(a.label, b.label)
+		}
+		return utils.NaturalCompareIDs(a.target, b.target)
+	})
+	for _, r := range rows {
+		tag := ui.RenderMuted(fmt.Sprintf("%s %-20s", depGlyph, "["+r.label+"]"))
+		fmt.Println(childPrefix + tag + " " + r.target + " " + r.title)
+	}
+}
+
+func printOutOfViewAnnotations(rows []string, childPrefix string) {
+	if len(rows) == 0 {
+		return
+	}
+	slices.SortFunc(rows, utils.NaturalCompareIDs)
+	const maxNamed = 4
+	named, suffix := rows, ""
+	if len(rows) > maxNamed {
+		named = rows[:maxNamed]
+		suffix = fmt.Sprintf(", +%d more", len(rows)-maxNamed)
+	}
+	summary := fmt.Sprintf("%s ↗ %d outside this view: %s%s",
+		depGlyph, len(rows), strings.Join(named, ", "), suffix)
+	fmt.Println(childPrefix + ui.RenderMuted(summary))
+}
 
 // buildIssueTree builds parent-child tree structure from issues
 // Uses actual parent-child dependencies from the database when store is provided
@@ -23,80 +104,68 @@ func buildIssueTree(issues []*types.Issue) (roots []*types.Issue, childrenMap ma
 // (blocks, waits-for, discovered-from, relates-to, ...) are workflow/graph
 // links and are not rendered as hierarchy.
 func buildIssueTreeWithDeps(issues []*types.Issue, allDeps map[string][]*types.Dependency) (roots []*types.Issue, childrenMap map[string][]*types.Issue) {
-	issueMap := make(map[string]*types.Issue)
+	issueMap := indexIssues(issues)
 	childrenMap = make(map[string][]*types.Issue)
 	isChild := make(map[string]bool)
-
-	for _, issue := range issues {
-		issueMap[issue.ID] = issue
+	addDependencyChildren(allDeps, issueMap, childrenMap, isChild)
+	addDottedIDChildren(issues, issueMap, childrenMap, isChild)
+	roots = rootIssues(issues, isChild)
+	slices.SortFunc(roots, compareIssuesByPriority)
+	for parentID := range childrenMap {
+		slices.SortFunc(childrenMap[parentID], compareIssuesByPriority)
 	}
+	return roots, childrenMap
+}
 
-	// If we have dependency records, use them to find parent-child relationships.
-	// Nesting is driven strictly by the parent-child edge type. Earlier versions
-	// also nested any dependency whose target was an epic, but that conflated
-	// workflow edges (a task that merely blocks an epic) with membership, so a
-	// genuinely 2-layer parent tree could render as a 6+ level tangle and trigger
-	// false "the hierarchy is broken" conclusions. This now matches the storage
-	// layer, which scopes an epic's children to parent-child edges only
-	// (see epic_closure.go); non-hierarchical edges stay off the tree.
-	if allDeps != nil {
-		addedChild := make(map[string]bool) // tracks "parentID:childID" to prevent duplicates
-		for issueID, deps := range allDeps {
-			for _, dep := range deps {
-				if dep.Type != types.DepParentChild {
-					continue
-				}
-				parentID := dep.DependsOnID
-				// Only include if both parent and child are in the issue set
-				child, childOk := issueMap[issueID]
-				_, parentOk := issueMap[parentID]
-				if !childOk || !parentOk {
-					continue
-				}
-
-				key := parentID + ":" + issueID
-				if !addedChild[key] {
-					childrenMap[parentID] = append(childrenMap[parentID], child)
-					addedChild[key] = true
-				}
-				isChild[issueID] = true
-			}
-		}
-	}
-
-	// Fallback: check for hierarchical subtask IDs (e.g., "parent.1")
+func indexIssues(issues []*types.Issue) map[string]*types.Issue {
+	indexed := make(map[string]*types.Issue, len(issues))
 	for _, issue := range issues {
-		if isChild[issue.ID] {
-			continue // Already a child via dependency
-		}
-		if strings.Contains(issue.ID, ".") {
-			parts := strings.Split(issue.ID, ".")
-			parentID := strings.Join(parts[:len(parts)-1], ".")
-			if _, exists := issueMap[parentID]; exists {
-				childrenMap[parentID] = append(childrenMap[parentID], issue)
-				isChild[issue.ID] = true
+		indexed[issue.ID] = issue
+	}
+	return indexed
+}
+
+func addDependencyChildren(allDeps map[string][]*types.Dependency, issues map[string]*types.Issue, children map[string][]*types.Issue, isChild map[string]bool) {
+	added := make(map[string]bool)
+	for issueID, deps := range allDeps {
+		for _, dep := range deps {
+			child, childExists := issues[issueID]
+			_, parentExists := issues[dep.DependsOnID]
+			if dep.Type != types.DepParentChild || !childExists || !parentExists {
 				continue
 			}
+			key := dep.DependsOnID + ":" + issueID
+			if !added[key] {
+				children[dep.DependsOnID] = append(children[dep.DependsOnID], child)
+				added[key] = true
+			}
+			isChild[issueID] = true
 		}
 	}
+}
 
-	// Roots are issues that aren't children of any other issue
+func addDottedIDChildren(issues []*types.Issue, indexed map[string]*types.Issue, children map[string][]*types.Issue, isChild map[string]bool) {
+	for _, issue := range issues {
+		if isChild[issue.ID] || !strings.Contains(issue.ID, ".") {
+			continue
+		}
+		parts := strings.Split(issue.ID, ".")
+		parentID := strings.Join(parts[:len(parts)-1], ".")
+		if _, exists := indexed[parentID]; exists {
+			children[parentID] = append(children[parentID], issue)
+			isChild[issue.ID] = true
+		}
+	}
+}
+
+func rootIssues(issues []*types.Issue, isChild map[string]bool) []*types.Issue {
+	roots := make([]*types.Issue, 0, len(issues))
 	for _, issue := range issues {
 		if !isChild[issue.ID] {
 			roots = append(roots, issue)
 		}
 	}
-
-	// Sort roots for stable tree ordering (fixes unstable --tree output)
-	// Use same sorting logic as children for consistency
-	slices.SortFunc(roots, compareIssuesByPriority)
-
-	// Sort children within each parent for stable ordering in data structure
-	for parentID := range childrenMap {
-		slices.SortFunc(childrenMap[parentID], compareIssuesByPriority)
-	}
-
-	return roots, childrenMap
+	return roots
 }
 
 // compareIssuesByPriority provides stable sorting for tree display
@@ -160,42 +229,54 @@ func displayPrettyListWithDeps(issues []*types.Issue, showHeader bool, allDeps m
 // by --limit; the summary then says "Showing N" instead of "Total: N" (GH#5362).
 func displayPrettyListWithDepsMode(issues []*types.Issue, showHeader bool, allDeps map[string][]*types.Dependency, depsMode string, truncated bool) {
 	if showHeader {
-		// Clear screen and show header
-		fmt.Print("\033[2J\033[H")
-		fmt.Println(strings.Repeat("=", 80))
-		fmt.Printf("Beads - Open & In Progress (%s)\n", time.Now().Format("15:04:05"))
-		fmt.Println(strings.Repeat("=", 80))
-		fmt.Println()
+		printTreeHeader()
 	}
-
 	if len(issues) == 0 {
 		fmt.Println("No issues found.")
 		return
 	}
-
 	roots, childrenMap := buildIssueTreeWithDeps(issues, allDeps)
-
-	var dr *depRender
-	if depsMode != "" {
-		inView := make(map[string]*types.Issue, len(issues))
-		for _, issue := range issues {
-			inView[issue.ID] = issue
-		}
-		dr = &depRender{mode: depsMode, allDeps: allDeps, inView: inView}
+	dr := newDepRender(depsMode, allDeps, issues)
+	if dr != nil {
 		roots = orderSiblingsByDeps(roots, allDeps)
 	}
-
 	for _, issue := range roots {
 		fmt.Println(formatPrettyIssue(issue))
 		dr.annotationsFor(issue.ID, "")
 		printPrettyTree(childrenMap, issue.ID, "", dr)
 	}
+	printTreeSummary(issues, truncated, dr != nil)
+}
 
-	// Summary — counts describe the shown page; never label a truncated page "Total".
+func printTreeHeader() {
+	fmt.Print("\033[2J\033[H")
+	fmt.Println(strings.Repeat("=", 80))
+	fmt.Printf("Beads - Open & In Progress (%s)\n", time.Now().Format("15:04:05"))
+	fmt.Println(strings.Repeat("=", 80))
+	fmt.Println()
+}
+
+func newDepRender(mode string, allDeps map[string][]*types.Dependency, issues []*types.Issue) *depRender {
+	if mode == "" {
+		return nil
+	}
+	return &depRender{mode: mode, allDeps: allDeps, inView: indexIssues(issues)}
+}
+
+func printTreeSummary(issues []*types.Issue, truncated, showDeps bool) {
+	openCount, inProgressCount := countTreeStatuses(issues)
 	fmt.Println()
 	fmt.Println(strings.Repeat("-", 80))
-	openCount := 0
-	inProgressCount := 0
+	printTreeCounts(len(issues), openCount, inProgressCount, truncated)
+	fmt.Println()
+	fmt.Println("Status: ○ open  ◐ in_progress  ● blocked  ✓ closed  ❄ deferred")
+	fmt.Println("Priority: P0–P4 (label only; not a status icon)")
+	if showDeps {
+		fmt.Printf("Deps:   %s = depends-on / relationship (points to target); siblings ordered so dependencies come first; ↗ = target outside current view\n", depGlyph)
+	}
+}
+
+func countTreeStatuses(issues []*types.Issue) (openCount, inProgressCount int) {
 	for _, issue := range issues {
 		switch issue.Status {
 		case "open":
@@ -204,16 +285,14 @@ func displayPrettyListWithDepsMode(issues []*types.Issue, showHeader bool, allDe
 			inProgressCount++
 		}
 	}
+	return openCount, inProgressCount
+}
+
+func printTreeCounts(total, openCount, inProgressCount int, truncated bool) {
 	if truncated {
 		fmt.Printf("Showing %d issues (%d open, %d in progress); more match (truncated by --limit). Use --limit 0 for all.\n",
-			len(issues), openCount, inProgressCount)
+			total, openCount, inProgressCount)
 	} else {
-		fmt.Printf("Total: %d issues (%d open, %d in progress)\n", len(issues), openCount, inProgressCount)
-	}
-	fmt.Println()
-	fmt.Println("Status: ○ open  ◐ in_progress  ● blocked  ✓ closed  ❄ deferred")
-	fmt.Println("Priority: P0–P4 (label only; not a status icon)")
-	if dr != nil {
-		fmt.Printf("Deps:   %s = depends-on / relationship (points to target); siblings ordered so dependencies come first; ↗ = target outside current view\n", depGlyph)
+		fmt.Printf("Total: %d issues (%d open, %d in progress)\n", total, openCount, inProgressCount)
 	}
 }

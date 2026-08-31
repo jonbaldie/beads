@@ -61,12 +61,12 @@ func activateEventsJournalStore(beadsDir string, s storage.DoltStorage, err erro
 // A backend that cannot journal cannot need pruning, so a nil result is a
 // silent no-op rather than a diagnostic.
 func eventsJournalMaintenanceRunner() issueops.EventsMaintenanceRunner {
-	if uowProvider != nil {
-		if runner := eventsJournalMaintenanceRunnerFor(uowProvider); runner != nil {
+	if getUOWProvider() != nil {
+		if runner := eventsJournalMaintenanceRunnerFor(getUOWProvider()); runner != nil {
 			return runner
 		}
 	}
-	return eventsJournalMaintenanceRunnerFor(store)
+	return eventsJournalMaintenanceRunnerFor(getStore())
 }
 
 // eventsJournalMaintenanceRunnerFor resolves ONE plumbing value — a store or a
@@ -146,7 +146,7 @@ func shouldAutoPruneEventsJournal(cmd *cobra.Command) bool {
 	if cmd == nil {
 		return false
 	}
-	if !runsPostCommandMaintenance(cmd.Name(), readonlyMode) || isReadOnlyCommand(cmd.Name()) {
+	if !runsPostCommandMaintenance(cmd.Name(), isReadonlyMode()) || isReadOnlyCommand(cmd.Name()) {
 		return false
 	}
 	if isPreviewCommand(cmd) || isEventsJournalCommand(cmd) {

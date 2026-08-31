@@ -235,11 +235,19 @@ func TestCopyIssueRelations_preservesCommentWithTimestamp(t *testing.T) {
 	ctx := context.Background()
 
 	issue := &types.Issue{
-		ID:        "mp-100",
-		Title:     "Issue with a comment",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
-		CreatedBy: "alice",
+		IssueID: types.IssueID{
+			ID: "mp-100",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Issue with a comment",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedBy: "alice",
+		},
 	}
 	if err := src.CreateIssue(ctx, issue, "alice"); err != nil {
 		t.Fatalf("seed src CreateIssue: %v", err)

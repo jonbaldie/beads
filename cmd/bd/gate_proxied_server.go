@@ -44,7 +44,9 @@ func (proxiedFreshReadGetter) GetIssue(ctx context.Context, id string) (*types.I
 }
 
 func runGateCheckProxiedServer(cmd *cobra.Command, ctx context.Context) error {
-	CheckReadonly("gate check")
+	if err := CheckReadonly("gate check"); err != nil {
+		return err
+	}
 
 	evt := metrics.NewCommandEvent("gate-check")
 	defer func() {
@@ -58,119 +60,162 @@ func runGateCheckProxiedServer(cmd *cobra.Command, ctx context.Context) error {
 	escalateFlag, _ := cmd.Flags().GetBool("escalate")
 	limit, _ := cmd.Flags().GetInt("limit")
 
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return HandleErrorRespectJSON("proxied-server UOW provider not initialized")
 	}
 
-	gateType := types.IssueType("gate")
-	filter := types.IssueFilter{
-		IssueType:     &gateType,
-		ExcludeStatus: []types.Status{types.StatusClosed},
-		Limit:         limit,
-	}
-
 	discovered := map[string]string{}
-	var persistAwaitID func(gateID, runID string) error
-	if !dryRun {
-		persistAwaitID = func(gateID, runID string) error {
-			discovered[gateID] = runID
-			return nil
-		}
-	}
-
-	readUW, err := proxiedOpenReadUOW(ctx)
+	filteredGates, err := loadProxiedCheckableGates(ctx, gateTypeFilter, limit)
 	if err != nil {
 		return err
 	}
-	page, err := readUW.IssueUseCase().SearchIssues(ctx, "", filter)
-	if err != nil {
-		readUW.Close(ctx)
-		return HandleErrorRespectJSON("%v", err)
-	}
-	filteredGates := filterCheckableGates(page.Items, gateTypeFilter)
-	readUW.Close(ctx)
 
 	if len(filteredGates) == 0 {
 		printNoOpenGates(gateTypeFilter)
 		return nil
 	}
-	results := evaluateGates(ctx, filteredGates, time.Now(), proxiedFreshReadGetter{}, persistAwaitID)
+	results := evaluateGates(ctx, filteredGates, time.Now(), proxiedFreshReadGetter{}, proxiedGateAwaitPersistence(dryRun, discovered))
 
 	if dryRun {
 		resolved, escalated, errCount := applyGateCheckResults(results, true, escalateFlag, nil)
 		return printGateCheckSummary(len(results), resolved, escalated, errCount, dryRun)
 	}
 
-	applied, err := uow.RunTxResult(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (gateCheckApply, string, error) {
-		out := gateCheckApply{
-			closeErrs: map[string]error{},
-			awaitErrs: map[string]error{},
-		}
-
-		for gateID, runID := range discovered {
-			if err := uw.IssueUseCase().UpdateIssue(ctx, gateID, map[string]any{"await_id": runID}, actor); err != nil {
-				out.awaitErrs[gateID] = fmt.Errorf("failed to update gate with discovered run ID: %w", err)
-				continue
-			}
-			if after, getErr := uw.IssueUseCase().GetIssue(ctx, gateID); getErr == nil && after != nil {
-				out.updated = append(out.updated, after)
-			}
-		}
-
-		for _, r := range results {
-			if r.err != nil || !r.resolved {
-				continue
-			}
-			if _, awaitFailed := out.awaitErrs[r.gate.ID]; awaitFailed {
-				continue
-			}
-			before, _ := uw.IssueUseCase().GetIssue(ctx, r.gate.ID)
-			if before != nil && before.Status == types.StatusClosed {
-				continue
-			}
-			res, closeErr := uw.IssueUseCase().CloseIssue(ctx, r.gate.ID, domain.CloseIssueParams{Reason: r.reason}, actor)
-			if closeErr != nil {
-				out.closeErrs[r.gate.ID] = closeErr
-				continue
-			}
-			oldStatus := "open"
-			if before != nil && before.Status != "" {
-				oldStatus = string(before.Status)
-			}
-			out.closed = append(out.closed, proxiedGateClose{
-				before:    before,
-				after:     res.Issue,
-				oldStatus: oldStatus,
-				reason:    r.reason,
-			})
-		}
-
-		return out, "bd: gate check", nil
-	})
+	applied, err := applyProxiedGateCheck(ctx, discovered, results)
 	if err != nil {
 		return HandleErrorRespectJSON("%v", err)
 	}
 
-	for _, c := range applied.closed {
-		audit.LogFieldChange(c.after.ID, "status", c.oldStatus, "closed", actor, c.reason)
-	}
-	if len(applied.closed) > 0 || len(applied.updated) > 0 {
-		commandDidWrite.Store(true)
-	}
-
-	for i := range results {
-		if awaitErr, failed := applied.awaitErrs[results[i].gate.ID]; failed {
-			results[i].resolved = false
-			results[i].escalated = false
-			results[i].err = awaitErr
-		}
-	}
+	recordProxiedGateCheckChanges(applied)
+	applyProxiedGateAwaitErrors(results, applied.awaitErrs)
 
 	resolved, escalated, errCount := applyGateCheckResults(results, false, escalateFlag,
 		func(gate *types.Issue, reason string) error {
 			return applied.closeErrs[gate.ID]
 		})
 	return printGateCheckSummary(len(results), resolved, escalated, errCount, dryRun)
+}
+
+func loadProxiedCheckableGates(ctx context.Context, gateTypeFilter string, limit int) ([]*types.Issue, error) {
+	gateType := types.IssueType("gate")
+	filter := types.IssueFilter{
+		IssueFilterCore: types.IssueFilterCore{
+			IssueType: &gateType,
+			Limit:     limit,
+		},
+		IssueFilterFlags: types.IssueFilterFlags{
+			ExcludeStatus: []types.Status{types.StatusClosed},
+		},
+	}
+
+	readUW, err := proxiedOpenReadUOW(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer readUW.Close(ctx)
+
+	page, err := readUW.IssueUseCase().SearchIssues(ctx, "", filter)
+	if err != nil {
+		return nil, HandleErrorRespectJSON("%v", err)
+	}
+	return filterCheckableGates(page.Items, gateTypeFilter), nil
+}
+
+func proxiedGateAwaitPersistence(dryRun bool, discovered map[string]string) func(gateID, runID string) error {
+	if dryRun {
+		return nil
+	}
+	return func(gateID, runID string) error {
+		discovered[gateID] = runID
+		return nil
+	}
+}
+
+func applyProxiedGateCheck(ctx context.Context, discovered map[string]string, results []gateCheckResult) (gateCheckApply, error) {
+	return uow.RunTxResult(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (gateCheckApply, string, error) {
+		return buildProxiedGateCheckApply(ctx, uw, discovered, results)
+	})
+}
+
+func buildProxiedGateCheckApply(ctx context.Context, uw uow.UnitOfWork, discovered map[string]string, results []gateCheckResult) (gateCheckApply, string, error) {
+	out := gateCheckApply{
+		closeErrs: map[string]error{},
+		awaitErrs: map[string]error{},
+	}
+	recordProxiedGateRuns(ctx, uw, discovered, &out)
+	for _, result := range results {
+		closed, ok, err := closeProxiedResolvedGate(ctx, uw, result, out.awaitErrs)
+		if err != nil {
+			out.closeErrs[result.gate.ID] = err
+			continue
+		}
+		if ok {
+			out.closed = append(out.closed, closed)
+		}
+	}
+	return out, "bd: gate check", nil
+}
+
+func recordProxiedGateRuns(ctx context.Context, uw uow.UnitOfWork, discovered map[string]string, out *gateCheckApply) {
+	for gateID, runID := range discovered {
+		if err := uw.IssueUseCase().UpdateIssue(ctx, gateID, map[string]any{"await_id": runID}, getActor()); err != nil {
+			out.awaitErrs[gateID] = fmt.Errorf("failed to update gate with discovered run ID: %w", err)
+			continue
+		}
+		if after, getErr := uw.IssueUseCase().GetIssue(ctx, gateID); getErr == nil && after != nil {
+			out.updated = append(out.updated, after)
+		}
+	}
+}
+
+func closeProxiedResolvedGate(ctx context.Context, uw uow.UnitOfWork, result gateCheckResult, awaitErrs map[string]error) (proxiedGateClose, bool, error) {
+	if result.err != nil || !result.resolved {
+		return proxiedGateClose{}, false, nil
+	}
+	if _, awaitFailed := awaitErrs[result.gate.ID]; awaitFailed {
+		return proxiedGateClose{}, false, nil
+	}
+
+	before, _ := uw.IssueUseCase().GetIssue(ctx, result.gate.ID)
+	if before != nil && before.Status == types.StatusClosed {
+		return proxiedGateClose{}, false, nil
+	}
+	res, err := uw.IssueUseCase().CloseIssue(ctx, result.gate.ID, domain.CloseIssueParams{Reason: result.reason}, getActor())
+	if err != nil {
+		return proxiedGateClose{}, false, err
+	}
+	return proxiedGateClose{
+		before:    before,
+		after:     res.Issue,
+		oldStatus: proxiedGateOldStatus(before),
+		reason:    result.reason,
+	}, true, nil
+}
+
+func proxiedGateOldStatus(issue *types.Issue) string {
+	if issue != nil && issue.Status != "" {
+		return string(issue.Status)
+	}
+	return "open"
+}
+
+func recordProxiedGateCheckChanges(applied gateCheckApply) {
+	for _, closed := range applied.closed {
+		audit.LogFieldChange(closed.after.ID, "status", closed.oldStatus, "closed", getActor(), closed.reason)
+	}
+	if len(applied.closed) > 0 || len(applied.updated) > 0 {
+		commandDidWrite.Store(true)
+	}
+}
+
+func applyProxiedGateAwaitErrors(results []gateCheckResult, awaitErrs map[string]error) {
+	for i := range results {
+		if awaitErr, failed := awaitErrs[results[i].gate.ID]; failed {
+			results[i].resolved = false
+			results[i].escalated = false
+			results[i].err = awaitErr
+		}
+	}
 }
 
 // gateProxiedNotFound reports whether an issue lookup failed because the row
@@ -212,7 +257,7 @@ func runGateShowProxiedServer(_ *cobra.Command, ctx context.Context, args []stri
 		return HandleErrorRespectJSON("%s is not a gate issue (type=%s)", gateID, issue.IssueType)
 	}
 
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(issue)
 	}
 
@@ -226,7 +271,9 @@ type gateAddWaiterApply struct {
 }
 
 func runGateAddWaiterProxiedServer(_ *cobra.Command, ctx context.Context, args []string) error {
-	CheckReadonly("gate add-waiter")
+	if err := CheckReadonly("gate add-waiter"); err != nil {
+		return err
+	}
 
 	evt := metrics.NewCommandEvent("gate-add-waiter")
 	defer func() {
@@ -238,41 +285,12 @@ func runGateAddWaiterProxiedServer(_ *cobra.Command, ctx context.Context, args [
 	gateID := args[0]
 	waiter := args[1]
 
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return HandleError("proxied-server UOW provider not initialized")
 	}
 
-	applied, err := uow.RunTxResult(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (gateAddWaiterApply, string, error) {
-		var out gateAddWaiterApply
-
-		issue, err := uw.IssueUseCase().GetIssue(ctx, gateID)
-		if gateProxiedNotFound(err) {
-			return out, "", fmt.Errorf("gate not found: %s", gateID)
-		}
-		if err != nil {
-			return out, "", fmt.Errorf("reading gate %s: %w", gateID, err)
-		}
-		if issue.IssueType != "gate" {
-			return out, "", fmt.Errorf("%s is not a gate issue (type=%s)", gateID, issue.IssueType)
-		}
-
-		for _, w := range issue.Waiters {
-			if w == waiter {
-				out.already = true
-				// Empty commit message: a registered waiter is a no-op, and a
-				// no-op writes no Dolt commit.
-				return out, "", nil
-			}
-		}
-
-		newWaiters := append(issue.Waiters, waiter)
-		if err := uw.IssueUseCase().UpdateIssue(ctx, gateID, map[string]any{"waiters": newWaiters}, actor); err != nil {
-			return out, "", fmt.Errorf("updating gate: %w", err)
-		}
-		if after, getErr := uw.IssueUseCase().GetIssue(ctx, gateID); getErr == nil {
-			out.after = after
-		}
-		return out, fmt.Sprintf("bd: gate add-waiter %s", gateID), nil
+	applied, err := uow.RunTxResult(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (gateAddWaiterApply, string, error) {
+		return addProxiedGateWaiter(ctx, uw, gateID, waiter)
 	})
 	if err != nil {
 		return HandleError("%v", err)
@@ -289,13 +307,61 @@ func runGateAddWaiterProxiedServer(_ *cobra.Command, ctx context.Context, args [
 	return nil
 }
 
+func addProxiedGateWaiter(ctx context.Context, uw uow.UnitOfWork, gateID, waiter string) (gateAddWaiterApply, string, error) {
+	var out gateAddWaiterApply
+	issue, err := loadProxiedGateForMutation(ctx, uw, gateID)
+	if err != nil {
+		return out, "", err
+	}
+	if gateHasWaiter(issue, waiter) {
+		out.already = true
+		// Empty commit message: a registered waiter is a no-op, and a
+		// no-op writes no Dolt commit.
+		return out, "", nil
+	}
+
+	newWaiters := append(issue.Waiters, waiter)
+	if err := uw.IssueUseCase().UpdateIssue(ctx, gateID, map[string]any{"waiters": newWaiters}, getActor()); err != nil {
+		return out, "", fmt.Errorf("updating gate: %w", err)
+	}
+	if after, getErr := uw.IssueUseCase().GetIssue(ctx, gateID); getErr == nil {
+		out.after = after
+	}
+	return out, fmt.Sprintf("bd: gate add-waiter %s", gateID), nil
+}
+
+func loadProxiedGateForMutation(ctx context.Context, uw uow.UnitOfWork, gateID string) (*types.Issue, error) {
+	issue, err := uw.IssueUseCase().GetIssue(ctx, gateID)
+	if gateProxiedNotFound(err) {
+		return nil, fmt.Errorf("gate not found: %s", gateID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading gate %s: %w", gateID, err)
+	}
+	if issue.IssueType != "gate" {
+		return nil, fmt.Errorf("%s is not a gate issue (type=%s)", gateID, issue.IssueType)
+	}
+	return issue, nil
+}
+
+func gateHasWaiter(issue *types.Issue, waiter string) bool {
+	for _, registered := range issue.Waiters {
+		if registered == waiter {
+			return true
+		}
+	}
+	return false
+}
+
 type gateCreateApply struct {
 	gate   *types.Issue
 	target *types.Issue
 }
 
 func runGateCreateProxiedServer(cmd *cobra.Command, ctx context.Context) error {
-	CheckReadonly("gate create")
+	if err := CheckReadonly("gate create"); err != nil {
+		return err
+	}
 
 	evt := metrics.NewCommandEvent("gate-create")
 	defer func() {
@@ -309,7 +375,7 @@ func runGateCreateProxiedServer(cmd *cobra.Command, ctx context.Context) error {
 		return HandleErrorRespectJSON("%v", err)
 	}
 
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return HandleError("proxied-server UOW provider not initialized")
 	}
 
@@ -317,40 +383,8 @@ func runGateCreateProxiedServer(cmd *cobra.Command, ctx context.Context) error {
 	// route's create + add-dependency + explicit store.Commit collapse into a
 	// single unit of work carrying the same commit message. Semantically
 	// equivalent, minus the window where the gate exists without its edge.
-	applied, err := uow.RunTxResult(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (gateCreateApply, string, error) {
-		var out gateCreateApply
-
-		target, err := uw.IssueUseCase().GetIssue(ctx, in.blocksID)
-		if err != nil {
-			// The direct route reports every target-lookup failure as
-			// not-found; keep that message for parity.
-			return out, "", fmt.Errorf("issue not found: %s", in.blocksID)
-		}
-
-		gate := buildGateIssue(in, target.ID)
-		metadata, metaErr := repoMetadataForGate(in.gateType, target)
-		if metaErr != nil {
-			return out, "", fmt.Errorf("invalid GitHub repository metadata on %s: %v", target.ID, metaErr)
-		}
-		gate.Metadata = metadata
-
-		res, err := uw.IssueUseCase().CreateIssue(ctx, domain.CreateIssueParams{Issue: gate}, actor)
-		if err != nil {
-			return out, "", fmt.Errorf("creating gate: %w", err)
-		}
-
-		dep := &types.Dependency{
-			IssueID:     target.ID,
-			DependsOnID: res.Issue.ID,
-			Type:        types.DepBlocks,
-		}
-		if err := uw.DependencyUseCase().AddDependency(ctx, dep, actor); err != nil {
-			return out, "", fmt.Errorf("adding blocking dependency: %w", err)
-		}
-
-		out.gate = res.Issue
-		out.target = target
-		return out, fmt.Sprintf("bd: create gate %s blocking %s", res.Issue.ID, target.ID), nil
+	applied, err := uow.RunTxResult(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (gateCreateApply, string, error) {
+		return createProxiedGate(ctx, uw, in)
 	})
 	if err != nil {
 		return HandleErrorRespectJSON("%v", err)
@@ -358,12 +392,47 @@ func runGateCreateProxiedServer(cmd *cobra.Command, ctx context.Context) error {
 
 	commandDidWrite.Store(true)
 
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(applied.gate)
 	}
 
 	renderGateCreated(applied.gate, applied.target, in)
 	return nil
+}
+
+func createProxiedGate(ctx context.Context, uw uow.UnitOfWork, in gateCreateInput) (gateCreateApply, string, error) {
+	var out gateCreateApply
+	target, err := uw.IssueUseCase().GetIssue(ctx, in.blocksID)
+	if err != nil {
+		// The direct route reports every target-lookup failure as not-found;
+		// keep that message for parity.
+		return out, "", fmt.Errorf("issue not found: %s", in.blocksID)
+	}
+
+	gate := buildGateIssue(in, target.ID)
+	metadata, metaErr := repoMetadataForGate(in.gateType, target)
+	if metaErr != nil {
+		return out, "", fmt.Errorf("invalid GitHub repository metadata on %s: %v", target.ID, metaErr)
+	}
+	gate.Metadata = metadata
+
+	res, err := uw.IssueUseCase().CreateIssue(ctx, domain.CreateIssueParams{Issue: gate}, getActor())
+	if err != nil {
+		return out, "", fmt.Errorf("creating gate: %w", err)
+	}
+
+	dep := &types.Dependency{
+		IssueID:     target.ID,
+		DependsOnID: res.Issue.ID,
+		Type:        types.DepBlocks,
+	}
+	if err := uw.DependencyUseCase().AddDependency(ctx, dep, getActor()); err != nil {
+		return out, "", fmt.Errorf("adding blocking dependency: %w", err)
+	}
+
+	out.gate = res.Issue
+	out.target = target
+	return out, fmt.Sprintf("bd: create gate %s blocking %s", res.Issue.ID, target.ID), nil
 }
 
 type gateResolveApply struct {
@@ -374,7 +443,9 @@ type gateResolveApply struct {
 }
 
 func runGateResolveProxiedServer(cmd *cobra.Command, ctx context.Context, args []string) error {
-	CheckReadonly("gate resolve")
+	if err := CheckReadonly("gate resolve"); err != nil {
+		return err
+	}
 
 	evt := metrics.NewCommandEvent("gate-resolve")
 	defer func() {
@@ -386,37 +457,12 @@ func runGateResolveProxiedServer(cmd *cobra.Command, ctx context.Context, args [
 	gateID := args[0]
 	reason, _ := cmd.Flags().GetString("reason")
 
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return HandleError("proxied-server UOW provider not initialized")
 	}
 
-	applied, err := uow.RunTxResult(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (gateResolveApply, string, error) {
-		var out gateResolveApply
-
-		issue, err := uw.IssueUseCase().GetIssue(ctx, gateID)
-		if gateProxiedNotFound(err) {
-			return out, "", fmt.Errorf("gate not found: %s", gateID)
-		}
-		if err != nil {
-			return out, "", fmt.Errorf("reading gate %s: %w", gateID, err)
-		}
-		if issue.IssueType != "gate" {
-			return out, "", fmt.Errorf("%s is not a gate issue (type=%s)", gateID, issue.IssueType)
-		}
-
-		res, err := uw.IssueUseCase().CloseIssue(ctx, gateID, domain.CloseIssueParams{Reason: reason}, actor)
-		if err != nil {
-			return out, "", fmt.Errorf("closing gate: %w", err)
-		}
-
-		out.before = issue
-		out.after = res.Issue
-		out.oldStatus = "open"
-		if issue.Status != "" {
-			out.oldStatus = string(issue.Status)
-		}
-		out.closed = res.Closed
-		return out, fmt.Sprintf("bd: gate resolve %s", gateID), nil
+	applied, err := uow.RunTxResult(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (gateResolveApply, string, error) {
+		return resolveProxiedGate(ctx, uw, gateID, reason)
 	})
 	if err != nil {
 		return HandleError("%v", err)
@@ -426,12 +472,30 @@ func runGateResolveProxiedServer(cmd *cobra.Command, ctx context.Context, args [
 	// double-resolve must not re-log it (same guard as the o.closed check in
 	// close_proxied_server.go).
 	if applied.closed && applied.after != nil {
-		audit.LogFieldChange(applied.after.ID, "status", applied.oldStatus, "closed", actor, reason)
+		audit.LogFieldChange(applied.after.ID, "status", applied.oldStatus, "closed", getActor(), reason)
 	}
 	commandDidWrite.Store(true)
 
 	renderGateResolved(gateID, reason)
 	return nil
+}
+
+func resolveProxiedGate(ctx context.Context, uw uow.UnitOfWork, gateID, reason string) (gateResolveApply, string, error) {
+	var out gateResolveApply
+	issue, err := loadProxiedGateForMutation(ctx, uw, gateID)
+	if err != nil {
+		return out, "", err
+	}
+	res, err := uw.IssueUseCase().CloseIssue(ctx, gateID, domain.CloseIssueParams{Reason: reason}, getActor())
+	if err != nil {
+		return out, "", fmt.Errorf("closing gate: %w", err)
+	}
+
+	out.before = issue
+	out.after = res.Issue
+	out.oldStatus = proxiedGateOldStatus(issue)
+	out.closed = res.Closed
+	return out, fmt.Sprintf("bd: gate resolve %s", gateID), nil
 }
 
 func runGateListProxiedServer(cmd *cobra.Command, ctx context.Context, args []string) error {
@@ -445,40 +509,61 @@ func runGateListProxiedServer(cmd *cobra.Command, ctx context.Context, args []st
 	defer uw.Close(ctx)
 
 	if len(args) == 1 {
-		target, isWisp, err := workapi.GetIssueOrWisp(ctx, workapi.NewUOWDetailSource(uw), args[0])
-		if errors.Is(err, storage.ErrNotFound) {
-			return HandleErrorRespectJSON("issue not found: %s", args[0])
-		}
-		if err != nil {
-			return HandleErrorRespectJSON("resolving %s: %v", args[0], err)
-		}
-		var metas []*types.IssueWithDependencyMetadata
-		if isWisp {
-			metas, err = uw.DependencyUseCase().ListWispWithIssueMetadata(ctx, target.ID, domain.DepListFilter{Direction: domain.DepDirectionOut})
-		} else {
-			metas, err = uw.DependencyUseCase().ListWithIssueMetadata(ctx, target.ID, domain.DepListFilter{Direction: domain.DepDirectionOut})
-		}
-		if err != nil {
-			return HandleErrorRespectJSON("%v", err)
-		}
-		deps := make([]*types.Issue, 0, len(metas))
-		for _, m := range metas {
-			if m != nil {
-				deps = append(deps, &m.Issue)
-			}
-		}
-		gates := filterIssueGates(deps, allFlag, limit)
-		if jsonOutput {
-			return outputJSON(gates)
-		}
-		displayGates(gates, allFlag)
-		return nil
+		return listProxiedGatesForTarget(ctx, uw, args[0], allFlag, limit)
 	}
 
+	return listAllProxiedGates(ctx, uw, allFlag, limit)
+}
+
+func listProxiedGatesForTarget(ctx context.Context, uw uow.UnitOfWork, targetID string, allFlag bool, limit int) error {
+	target, isWisp, err := workapi.GetIssueOrWisp(ctx, workapi.NewUOWDetailSource(uw), targetID)
+	if errors.Is(err, storage.ErrNotFound) {
+		return HandleErrorRespectJSON("issue not found: %s", targetID)
+	}
+	if err != nil {
+		return HandleErrorRespectJSON("resolving %s: %v", targetID, err)
+	}
+
+	metas := proxiedGateDependencyMetadata(ctx, uw, target.ID, isWisp)
+	if metas.err != nil {
+		return HandleErrorRespectJSON("%v", metas.err)
+	}
+	deps := make([]*types.Issue, 0, len(metas.items))
+	for _, meta := range metas.items {
+		if meta != nil {
+			deps = append(deps, &meta.Issue)
+		}
+	}
+	gates := filterIssueGates(deps, allFlag, limit)
+	if isJSONOutput() {
+		return outputJSON(gates)
+	}
+	displayGates(gates, allFlag)
+	return nil
+}
+
+type proxiedGateDependencyResult struct {
+	items []*types.IssueWithDependencyMetadata
+	err   error
+}
+
+func proxiedGateDependencyMetadata(ctx context.Context, uw uow.UnitOfWork, targetID string, isWisp bool) proxiedGateDependencyResult {
+	filter := domain.DepListFilter{Direction: domain.DepDirectionOut}
+	if isWisp {
+		items, err := uw.DependencyUseCase().ListWispWithIssueMetadata(ctx, targetID, filter)
+		return proxiedGateDependencyResult{items: items, err: err}
+	}
+	items, err := uw.DependencyUseCase().ListWithIssueMetadata(ctx, targetID, filter)
+	return proxiedGateDependencyResult{items: items, err: err}
+}
+
+func listAllProxiedGates(ctx context.Context, uw uow.UnitOfWork, allFlag bool, limit int) error {
 	gateType := types.IssueType("gate")
 	filter := types.IssueFilter{
-		IssueType: &gateType,
-		Limit:     limit,
+		IssueFilterCore: types.IssueFilterCore{
+			IssueType: &gateType,
+			Limit:     limit,
+		},
 	}
 	if !allFlag {
 		filter.ExcludeStatus = []types.Status{types.StatusClosed}
@@ -487,7 +572,7 @@ func runGateListProxiedServer(cmd *cobra.Command, ctx context.Context, args []st
 	if err != nil {
 		return HandleErrorRespectJSON("%v", err)
 	}
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(page.Items)
 	}
 	displayGates(page.Items, allFlag)

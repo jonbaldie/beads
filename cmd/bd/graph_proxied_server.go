@@ -10,19 +10,19 @@ import (
 	"github.com/jonbaldie/beads/internal/types"
 )
 
-func runGraphProxiedServer(ctx context.Context, out io.Writer, args []string) error {
+func runGraphProxiedServer(ctx context.Context, out io.Writer, args []string, opts graphOptions) error {
 	uw, err := openProxiedListUOW(ctx)
 	if err != nil {
 		return HandleError("%v", err)
 	}
 	defer uw.Close(ctx)
 
-	if graphAll {
+	if opts.all {
 		subgraphs, err := loadAllGraphSubgraphsUOW(ctx, uw)
 		if err != nil {
 			return HandleErrorRespectJSON("loading all issues: %v", err)
 		}
-		return renderGraphAllSubgraphs(out, subgraphs)
+		return renderGraphAllSubgraphs(out, subgraphs, opts)
 	}
 
 	root, err := uw.IssueUseCase().GetIssue(ctx, args[0])
@@ -33,7 +33,7 @@ func runGraphProxiedServer(ctx context.Context, out io.Writer, args []string) er
 	if err != nil {
 		return HandleErrorRespectJSON("loading graph: %v", err)
 	}
-	return renderGraphSingleSubgraph(out, subgraph)
+	return renderGraphSingleSubgraph(out, subgraph, opts)
 }
 
 func runGraphCheckProxiedServer(ctx context.Context) error {
@@ -59,29 +59,13 @@ func loadGraphSubgraphUOW(ctx context.Context, uw uow.UnitOfWork, root *types.Is
 
 	queue := []string{root.ID}
 	visited := map[string]bool{root.ID: true}
-
-	addNeighbors := func(currentID string, dir domain.DepDirection) {
-		metas, err := uw.DependencyUseCase().ListWithIssueMetadata(ctx, currentID, domain.DepListFilter{Direction: dir})
-		if err != nil {
-			return
+	for {
+		currentID, ok := popGraphQueue(&queue)
+		if !ok {
+			break
 		}
-		for _, d := range metas {
-			iss := d.Issue
-			if visited[iss.ID] {
-				continue
-			}
-			visited[iss.ID] = true
-			subgraph.Issues = append(subgraph.Issues, &iss)
-			subgraph.IssueMap[iss.ID] = &iss
-			queue = append(queue, iss.ID)
-		}
-	}
-
-	for len(queue) > 0 {
-		currentID := queue[0]
-		queue = queue[1:]
-		addNeighbors(currentID, domain.DepDirectionIn)  // dependents
-		addNeighbors(currentID, domain.DepDirectionOut) // dependencies
+		appendGraphUOWNeighbors(ctx, uw, subgraph, visited, &queue, currentID, domain.DepDirectionIn)
+		appendGraphUOWNeighbors(ctx, uw, subgraph, visited, &queue, currentID, domain.DepDirectionOut)
 	}
 
 	ids := make([]string, 0, len(subgraph.Issues))
@@ -92,6 +76,38 @@ func loadGraphSubgraphUOW(ctx context.Context, uw uow.UnitOfWork, root *types.Is
 	if err != nil {
 		return nil, fmt.Errorf("loading dependencies: %w", err)
 	}
+	appendGraphUOWDependencies(subgraph, recs)
+
+	return subgraph, nil
+}
+
+func popGraphQueue(queue *[]string) (string, bool) {
+	if len(*queue) == 0 {
+		return "", false
+	}
+	currentID := (*queue)[0]
+	*queue = (*queue)[1:]
+	return currentID, true
+}
+
+func appendGraphUOWNeighbors(ctx context.Context, uw uow.UnitOfWork, subgraph *TemplateSubgraph, visited map[string]bool, queue *[]string, currentID string, direction domain.DepDirection) {
+	metas, err := uw.DependencyUseCase().ListWithIssueMetadata(ctx, currentID, domain.DepListFilter{Direction: direction})
+	if err != nil {
+		return
+	}
+	for _, d := range metas {
+		iss := d.Issue
+		if visited[iss.ID] {
+			continue
+		}
+		visited[iss.ID] = true
+		subgraph.Issues = append(subgraph.Issues, &iss)
+		subgraph.IssueMap[iss.ID] = &iss
+		*queue = append(*queue, iss.ID)
+	}
+}
+
+func appendGraphUOWDependencies(subgraph *TemplateSubgraph, recs map[string][]*types.Dependency) {
 	for _, iss := range subgraph.Issues {
 		for _, dep := range recs[iss.ID] {
 			if _, ok := subgraph.IssueMap[dep.DependsOnID]; ok {
@@ -99,15 +115,13 @@ func loadGraphSubgraphUOW(ctx context.Context, uw uow.UnitOfWork, root *types.Is
 			}
 		}
 	}
-
-	return subgraph, nil
 }
 
 func loadAllGraphSubgraphsUOW(ctx context.Context, uw uow.UnitOfWork) ([]*TemplateSubgraph, error) {
 	var allIssues []*types.Issue
 	for _, status := range []types.Status{types.StatusOpen, types.StatusInProgress, types.StatusBlocked} {
 		statusCopy := status
-		page, err := uw.IssueUseCase().SearchIssues(ctx, "", types.IssueFilter{Status: &statusCopy})
+		page, err := uw.IssueUseCase().SearchIssues(ctx, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Status: &statusCopy}})
 		if err != nil {
 			return nil, fmt.Errorf("failed to search issues: %w", err)
 		}

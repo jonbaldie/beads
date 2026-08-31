@@ -83,25 +83,25 @@ var errExportNoStore = errors.New("no store available")
 type storeExportSource struct{}
 
 func (storeExportSource) GetInfraTypes(ctx context.Context) map[string]bool {
-	if store == nil {
+	if getStore() == nil {
 		return nil
 	}
-	return store.GetInfraTypes(ctx)
+	return getStore().GetInfraTypes(ctx)
 }
 
 func (storeExportSource) SearchIssues(ctx context.Context, query string, filter types.IssueFilter) ([]*types.Issue, error) {
-	return store.SearchIssues(ctx, query, filter)
+	return getStore().SearchIssues(ctx, query, filter)
 }
 
 func (storeExportSource) GetConfig(ctx context.Context, key string) (string, error) {
-	if store == nil {
+	if getStore() == nil {
 		return "", errExportNoStore
 	}
-	return store.GetConfig(ctx, key)
+	return getStore().GetConfig(ctx, key)
 }
 
 func (storeExportSource) GetAllConfig(ctx context.Context) (map[string]string, error) {
-	return store.GetAllConfig(ctx)
+	return getStore().GetAllConfig(ctx)
 }
 
 func (storeExportSource) LoadExportRelations(ctx context.Context, issues []*types.Issue) (exportRelations, error) {
@@ -112,11 +112,11 @@ func (storeExportSource) LoadExportRelations(ctx context.Context, issues []*type
 
 	// Individual bulk-load failures deliberately degrade to empty maps rather
 	// than aborting the export — unchanged from the pre-seam classic behavior.
-	labelsMap, _ := store.GetLabelsForIssues(ctx, issueIDs)
-	allDeps, _ := store.GetDependencyRecordsForIssues(ctx, issueIDs)
-	commentsMap, _ := store.GetCommentsForIssues(ctx, issueIDs)
-	commentCounts, _ := store.GetCommentCounts(ctx, issueIDs)
-	depCounts, _ := store.GetDependencyCounts(ctx, issueIDs)
+	labelsMap, _ := getStore().GetLabelsForIssues(ctx, issueIDs)
+	allDeps, _ := getStore().GetDependencyRecordsForIssues(ctx, issueIDs)
+	commentsMap, _ := getStore().GetCommentsForIssues(ctx, issueIDs)
+	commentCounts, _ := getStore().GetCommentCounts(ctx, issueIDs)
+	depCounts, _ := getStore().GetDependencyCounts(ctx, issueIDs)
 
 	return exportRelations{
 		labels:        labelsMap,
@@ -128,12 +128,12 @@ func (storeExportSource) LoadExportRelations(ctx context.Context, issues []*type
 }
 
 func (storeExportSource) WispPlaneIDs(ctx context.Context, ids []string) (map[string]bool, error) {
-	if len(ids) == 0 || store == nil {
+	if len(ids) == 0 || getStore() == nil {
 		return nil, nil
 	}
 	// The store global is decorator-wrapped (telemetry, hook firing); walk
 	// Unwrap() down to the store that carries the partition capability.
-	s := store
+	s := getStore()
 	var p storeWispPartitioner
 	for {
 		if partitioner, ok := s.(storeWispPartitioner); ok {
@@ -228,7 +228,6 @@ func (s *uowExportSource) LoadExportRelations(ctx context.Context, issues []*typ
 		commentCounts: map[string]int{},
 		depCounts:     map[string]*types.DependencyCounts{},
 	}
-
 	allIDs := make([]string, 0, len(issues))
 	for _, issue := range issues {
 		allIDs = append(allIDs, issue.ID)
@@ -236,7 +235,16 @@ func (s *uowExportSource) LoadExportRelations(ctx context.Context, issues []*typ
 	if len(allIDs) == 0 {
 		return rel, nil
 	}
+	if err := s.loadExportIssueRelations(ctx, allIDs, &rel); err != nil {
+		return exportRelations{}, err
+	}
+	if err := s.loadExportWispRelations(ctx, allIDs, &rel); err != nil {
+		return exportRelations{}, err
+	}
+	return s.loadExportDepRelations(ctx, allIDs, rel)
+}
 
+func (s *uowExportSource) loadExportIssueRelations(ctx context.Context, allIDs []string, rel *exportRelations) error {
 	// BATCH READS, and the batch is what keeps them here. Export hydrates every
 	// relation of N issues at once — labels, comments, dependencies, counts,
 	// both planes — and no role answers "the labels of these N ids": Reader.Get
@@ -245,51 +253,41 @@ func (s *uowExportSource) LoadExportRelations(ctx context.Context, issues []*typ
 	// (ga-2ltro.12). Every LabelUseCase call in this file is one of these.
 	labels, err := s.uw.LabelUseCase().GetLabelsForIssues(ctx, allIDs) //nolint:forbidigo // bulk relation load; no role answers labels-for-N-ids
 	if err != nil {
-		return exportRelations{}, fmt.Errorf("load labels: %w", err)
+		return fmt.Errorf("load labels: %w", err)
 	}
 	mergeExportMap(rel.labels, labels)
 	comments, err := s.uw.CommentUseCase().GetCommentsForIssues(ctx, allIDs)
 	if err != nil {
-		return exportRelations{}, fmt.Errorf("load comments: %w", err)
+		return fmt.Errorf("load comments: %w", err)
 	}
 	mergeExportMap(rel.comments, comments)
 	counts, err := s.uw.CommentUseCase().GetCommentCounts(ctx, allIDs)
 	if err != nil {
-		return exportRelations{}, fmt.Errorf("load comment counts: %w", err)
+		return fmt.Errorf("load comment counts: %w", err)
 	}
 	mergeExportMap(rel.commentCounts, counts)
+	return nil
+}
 
+func (s *uowExportSource) loadExportWispRelations(ctx context.Context, allIDs []string, rel *exportRelations) error {
 	wispLabels, err := s.uw.LabelUseCase().GetLabelsForWisps(ctx, allIDs) //nolint:forbidigo // bulk relation load; see GetLabelsForIssues above
-	if err != nil {
-		if !dberrors.IsTableNotExist(err) {
-			return exportRelations{}, fmt.Errorf("load wisp labels: %w", err)
-		}
-	} else {
-		mergeExportMap(rel.labels, wispLabels)
+	if err := mergeOptionalExportMap(rel.labels, wispLabels, err, "load wisp labels"); err != nil {
+		return err
 	}
 	wispComments, err := s.uw.CommentUseCase().GetCommentsForWisps(ctx, allIDs)
-	if err != nil {
-		if !dberrors.IsTableNotExist(err) {
-			return exportRelations{}, fmt.Errorf("load wisp comments: %w", err)
-		}
-	} else {
-		mergeExportMap(rel.comments, wispComments)
+	if err := mergeOptionalExportMap(rel.comments, wispComments, err, "load wisp comments"); err != nil {
+		return err
 	}
 	wispCounts, err := s.uw.CommentUseCase().GetWispCommentCounts(ctx, allIDs)
-	if err != nil {
-		if !dberrors.IsTableNotExist(err) {
-			return exportRelations{}, fmt.Errorf("load wisp comment counts: %w", err)
-		}
-	} else {
-		mergeExportMap(rel.commentCounts, wispCounts)
-	}
+	return mergeOptionalExportMap(rel.commentCounts, wispCounts, err, "load wisp comment counts")
+}
 
+func (s *uowExportSource) loadExportDepRelations(ctx context.Context, allIDs []string, rel exportRelations) (exportRelations, error) {
 	deps, err := s.uw.DependencyUseCase().GetIssueDependencyRecords(ctx, allIDs)
 	if err != nil {
 		return exportRelations{}, fmt.Errorf("load dependency records: %w", err)
 	}
 	rel.deps = deps
-
 	depCounts, err := s.uw.DependencyUseCase().CountsByIssueIDs(ctx, allIDs)
 	if err != nil {
 		return exportRelations{}, fmt.Errorf("load dependency counts: %w", err)
@@ -301,22 +299,36 @@ func (s *uowExportSource) LoadExportRelations(ctx context.Context, issues []*typ
 		if !dberrors.IsTableNotExist(err) {
 			return exportRelations{}, fmt.Errorf("load wisp dependency counts: %w", err)
 		}
-	} else {
-		for id, wc := range wispDepCounts {
-			if wc == nil || (wc.DependencyCount == 0 && wc.DependentCount == 0) {
-				continue
-			}
-			c := rel.depCounts[id]
-			if c == nil {
-				c = &types.DependencyCounts{}
-				rel.depCounts[id] = c
-			}
-			c.DependencyCount += wc.DependencyCount
-			c.DependentCount += wc.DependentCount
-		}
+		return rel, nil
 	}
-
+	mergeWispDepCounts(rel.depCounts, wispDepCounts)
 	return rel, nil
+}
+
+func mergeOptionalExportMap[V any](dst, src map[string]V, err error, wrap string) error {
+	if err != nil {
+		if dberrors.IsTableNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("%s: %w", wrap, err)
+	}
+	mergeExportMap(dst, src)
+	return nil
+}
+
+func mergeWispDepCounts(dst, src map[string]*types.DependencyCounts) {
+	for id, wc := range src {
+		if wc == nil || (wc.DependencyCount == 0 && wc.DependentCount == 0) {
+			continue
+		}
+		c := dst[id]
+		if c == nil {
+			c = &types.DependencyCounts{}
+			dst[id] = c
+		}
+		c.DependencyCount += wc.DependencyCount
+		c.DependentCount += wc.DependentCount
+	}
 }
 
 // WispPlaneIDs classifies by wisps-table membership through the plane-pinned

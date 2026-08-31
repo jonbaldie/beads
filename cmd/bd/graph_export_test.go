@@ -13,20 +13,57 @@ import (
 
 func makeTestSubgraph() (*TemplateSubgraph, *GraphLayout) {
 	issueA := &types.Issue{
-		ID: "test-a", Title: "Root issue", Status: types.StatusOpen,
-		Priority: 0, IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "test-a",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Root issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  0,
+			IssueType: types.TypeEpic,
+		},
 	}
 	issueB := &types.Issue{
-		ID: "test-b", Title: "Child task", Status: types.StatusInProgress,
-		Priority: 1, IssueType: types.TypeTask, Assignee: "alice",
+		IssueID: types.IssueID{
+			ID: "test-b",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Child task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusInProgress,
+			Priority:  1,
+			IssueType: types.TypeTask,
+			Assignee:  "alice",
+		},
 	}
 	issueC := &types.Issue{
-		ID: "test-c", Title: "Blocked task", Status: types.StatusBlocked,
-		Priority: 2, IssueType: types.TypeBug,
+		IssueID: types.IssueID{
+			ID: "test-c",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocked task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusBlocked,
+			Priority:  2,
+			IssueType: types.TypeBug,
+		},
 	}
 	issueD := &types.Issue{
-		ID: "test-d", Title: "Done task", Status: types.StatusClosed,
-		Priority: 1, IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-d",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Done task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	subgraph := &TemplateSubgraph{
@@ -89,7 +126,7 @@ func TestRenderGraphDOT(t *testing.T) {
 func TestRenderGraphDOT_Empty(t *testing.T) {
 	t.Parallel()
 	emptySubgraph := &TemplateSubgraph{
-		Root:     &types.Issue{ID: "empty"},
+		Root:     &types.Issue{IssueID: types.IssueID{ID: "empty"}},
 		Issues:   []*types.Issue{},
 		IssueMap: map[string]*types.Issue{},
 	}
@@ -125,8 +162,17 @@ func TestDotNodeAttrs(t *testing.T) {
 		t.Run(string(tt.status), func(t *testing.T) {
 			node := &GraphNode{
 				Issue: &types.Issue{
-					ID: "test", Title: "Test", Status: tt.status,
-					Priority: 1, IssueType: types.TypeTask,
+					IssueID: types.IssueID{
+						ID: "test",
+					},
+					IssueContent: types.IssueContent{
+						Title: "Test",
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Status:    tt.status,
+						Priority:  1,
+						IssueType: types.TypeTask,
+					},
 				},
 			}
 			_, fillColor, _ := dotNodeAttrs(node)
@@ -280,12 +326,30 @@ func TestMergeSubgraphsForHTML_SingleDOCTYPE(t *testing.T) {
 
 	// Create two disconnected subgraphs (separate components)
 	issueA := &types.Issue{
-		ID: "comp-a", Title: "Component A", Status: types.StatusOpen,
-		Priority: 1, IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "comp-a",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Component A",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	issueB := &types.Issue{
-		ID: "comp-b", Title: "Component B", Status: types.StatusInProgress,
-		Priority: 2, IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "comp-b",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Component B",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusInProgress,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	sg1 := &TemplateSubgraph{
@@ -335,8 +399,17 @@ func TestRenderGraphHTML_EmptyEdgesNotNull(t *testing.T) {
 	t.Parallel()
 	// Verify that a single-node graph emits [] not null for links (GH#3592)
 	issue := &types.Issue{
-		ID: "solo-1", Title: "Solo node", Status: types.StatusOpen,
-		Priority: 2, IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "solo-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Solo node",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	subgraph := &TemplateSubgraph{
@@ -419,43 +492,36 @@ func TestRenderGraphHTMLWriterError(t *testing.T) {
 }
 
 func TestGraphExportDispatchPropagatesWriterErrors(t *testing.T) {
-	oldDOT, oldHTML := graphDOT, graphHTML
-	oldOpen, oldCompact, oldBox := graphOpen, graphCompact, graphBox
 	oldJSON := jsonOutput
 	t.Cleanup(func() {
-		graphDOT, graphHTML = oldDOT, oldHTML
-		graphOpen, graphCompact, graphBox = oldOpen, oldCompact, oldBox
 		jsonOutput = oldJSON
 	})
-	graphOpen, graphCompact, graphBox, jsonOutput = false, false, false, false
+	jsonOutput = false
 
 	t.Run("single DOT", func(t *testing.T) {
-		graphDOT, graphHTML = true, false
 		subgraph, _ := makeTestSubgraph()
 		writer := &graphFailWriter{err: io.ErrClosedPipe, failAt: 1}
 
-		err := renderGraphSingleSubgraph(writer, subgraph)
+		err := renderGraphSingleSubgraph(writer, subgraph, graphOptions{dot: true})
 		if !errors.Is(err, io.ErrClosedPipe) {
 			t.Fatalf("renderGraphSingleSubgraph error = %v, want %v", err, io.ErrClosedPipe)
 		}
 	})
 
 	t.Run("all HTML", func(t *testing.T) {
-		graphDOT, graphHTML = false, true
 		subgraph, _ := makeTestSubgraph()
 		writer := &graphFailWriter{err: io.ErrClosedPipe, failAt: 1}
 
-		err := renderGraphAllSubgraphs(writer, []*TemplateSubgraph{subgraph})
+		err := renderGraphAllSubgraphs(writer, []*TemplateSubgraph{subgraph}, graphOptions{html: true})
 		if !errors.Is(err, io.ErrClosedPipe) {
 			t.Fatalf("renderGraphAllSubgraphs error = %v, want %v", err, io.ErrClosedPipe)
 		}
 	})
 
 	t.Run("all empty message", func(t *testing.T) {
-		graphDOT, graphHTML, graphOpen = false, false, false
 		var out bytes.Buffer
 
-		if err := renderGraphAllSubgraphs(&out, nil); err != nil {
+		if err := renderGraphAllSubgraphs(&out, nil, graphOptions{}); err != nil {
 			t.Fatalf("renderGraphAllSubgraphs: %v", err)
 		}
 		if got, want := out.String(), "No open issues found\n"; got != want {
@@ -464,21 +530,19 @@ func TestGraphExportDispatchPropagatesWriterErrors(t *testing.T) {
 	})
 
 	t.Run("all empty message error", func(t *testing.T) {
-		graphDOT, graphHTML, graphOpen = false, false, false
 		writer := &graphFailWriter{err: io.ErrClosedPipe, failAt: 1}
 
-		err := renderGraphAllSubgraphs(writer, nil)
+		err := renderGraphAllSubgraphs(writer, nil, graphOptions{})
 		if !errors.Is(err, io.ErrClosedPipe) {
 			t.Fatalf("renderGraphAllSubgraphs error = %v, want %v", err, io.ErrClosedPipe)
 		}
 	})
 
 	t.Run("single empty open message", func(t *testing.T) {
-		graphDOT, graphHTML, graphOpen = false, false, true
-		subgraph := &TemplateSubgraph{Issues: []*types.Issue{{ID: "closed", Status: types.StatusClosed}}}
+		subgraph := &TemplateSubgraph{Issues: []*types.Issue{{IssueID: types.IssueID{ID: "closed"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}}}}
 		var out bytes.Buffer
 
-		if err := renderGraphSingleSubgraph(&out, subgraph); err != nil {
+		if err := renderGraphSingleSubgraph(&out, subgraph, graphOptions{open: true}); err != nil {
 			t.Fatalf("renderGraphSingleSubgraph: %v", err)
 		}
 		if got, want := out.String(), "No open issues in subgraph\n"; got != want {
@@ -487,11 +551,10 @@ func TestGraphExportDispatchPropagatesWriterErrors(t *testing.T) {
 	})
 
 	t.Run("single empty open message error", func(t *testing.T) {
-		graphDOT, graphHTML, graphOpen = false, false, true
-		subgraph := &TemplateSubgraph{Issues: []*types.Issue{{ID: "closed", Status: types.StatusClosed}}}
+		subgraph := &TemplateSubgraph{Issues: []*types.Issue{{IssueID: types.IssueID{ID: "closed"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}}}}
 		writer := &graphFailWriter{err: io.ErrClosedPipe, failAt: 1}
 
-		err := renderGraphSingleSubgraph(writer, subgraph)
+		err := renderGraphSingleSubgraph(writer, subgraph, graphOptions{open: true})
 		if !errors.Is(err, io.ErrClosedPipe) {
 			t.Fatalf("renderGraphSingleSubgraph error = %v, want %v", err, io.ErrClosedPipe)
 		}

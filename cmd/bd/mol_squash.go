@@ -14,10 +14,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var molSquashCmd = &cobra.Command{
-	Use:   "squash <molecule-id>",
-	Short: "Compress molecule execution into a digest",
-	Long: `Squash a molecule's ephemeral children into a single digest issue.
+func newMolSquashCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "squash <molecule-id>",
+		Short: "Compress molecule execution into a digest",
+		Long: `Squash a molecule's ephemeral children into a single digest issue.
 
 This command collects all ephemeral child issues of a molecule (Ephemeral=true),
 generates a summary digest, and promotes the wisps to persistent by
@@ -45,10 +46,15 @@ Example:
   bd mol squash bd-abc123 --dry-run          # Preview what would be squashed
   bd mol squash bd-abc123 --keep-children    # Keep wisps after digest
   bd mol squash bd-abc123 --summary "Agent-generated summary of work done"`,
-	Args:          cobra.ExactArgs(1),
-	SilenceUsage:  true,
-	SilenceErrors: true,
-	RunE:          runMolSquash,
+		Args:          cobra.ExactArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE:          runMolSquash,
+	}
+	cmd.Flags().Bool("dry-run", false, "Preview what would be squashed")
+	cmd.Flags().Bool("keep-children", false, "Don't delete ephemeral children after squash")
+	cmd.Flags().String("summary", "", "Agent-provided summary (bypasses auto-generation)")
+	return cmd
 }
 
 // SquashResult holds the result of a squash operation
@@ -113,7 +119,7 @@ func renderSquashDryRun(moleculeID string, subgraph *TemplateSubgraph, wispChild
 }
 
 func renderSquashResult(result *SquashResult) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(result)
 	}
 	fmt.Printf("%s Squashed molecule: %d children → 1 digest\n", ui.RenderPass("✓"), result.SquashedCount)
@@ -130,7 +136,9 @@ func renderSquashResult(result *SquashResult) error {
 }
 
 func runMolSquash(cmd *cobra.Command, args []string) error {
-	CheckReadonly("mol squash")
+	if err := CheckReadonly("mol squash"); err != nil {
+		return err
+	}
 
 	evt := metrics.NewCommandEvent("mol-squash")
 	defer func() {
@@ -142,47 +150,44 @@ func runMolSquash(cmd *cobra.Command, args []string) error {
 	in := gatherMolSquashInput(cmd, args)
 
 	if usesProxiedServer() {
-		return runMolSquashProxiedServer(rootCtx, in)
+		return runMolSquashProxiedServer(getRootContext(), in)
 	}
+	return runMolSquashDirect(in)
+}
 
-	ctx := rootCtx
-
-	if store == nil {
+func runMolSquashDirect(in molSquashInput) error {
+	if getStore() == nil {
 		return HandleErrorWithHint("no database connection", diagHint())
 	}
-
-	moleculeID, err := utils.ResolvePartialID(ctx, store, in.moleculeArg)
+	moleculeID, err := utils.ResolvePartialID(getRootContext(), getStore(), in.moleculeArg)
 	if err != nil {
 		return HandleErrorRespectJSON("resolving molecule ID %s: %v", in.moleculeArg, err)
 	}
-
-	subgraph, err := loadTemplateSubgraph(ctx, store, moleculeID)
+	subgraph, err := loadTemplateSubgraph(getRootContext(), getStore(), moleculeID)
 	if err != nil {
 		return HandleErrorRespectJSON("loading molecule: %v", err)
 	}
-
 	wispChildren := wispChildrenOf(subgraph)
 	if len(wispChildren) == 0 {
-		if jsonOutput {
-			return outputJSON(SquashResult{
-				MoleculeID:    moleculeID,
-				SquashedCount: 0,
-			})
-		}
-		fmt.Printf("No ephemeral children found for molecule %s\n", moleculeID)
-		return nil
+		return reportNoWispChildren(moleculeID)
 	}
-
 	if in.dryRun {
 		renderSquashDryRun(moleculeID, subgraph, wispChildren, in.keepChildren)
 		return nil
 	}
-
-	result, err := squashMolecule(ctx, store, subgraph.Root, wispChildren, in.keepChildren, in.summary, actor)
+	result, err := squashMolecule(getRootContext(), getStore(), subgraph.Root, wispChildren, in.keepChildren, in.summary, getActor())
 	if err != nil {
 		return HandleErrorRespectJSON("squashing molecule: %v", err)
 	}
 	return renderSquashResult(result)
+}
+
+func reportNoWispChildren(moleculeID string) error {
+	if isJSONOutput() {
+		return outputJSON(SquashResult{MoleculeID: moleculeID, SquashedCount: 0})
+	}
+	fmt.Printf("No ephemeral children found for molecule %s\n", moleculeID)
+	return nil
 }
 
 // generateDigest creates a summary from the molecule execution
@@ -259,33 +264,8 @@ func squashMolecule(ctx context.Context, s storage.DoltStorage, root *types.Issu
 }
 
 func squashMoleculeInto(ctx context.Context, w molWriter, root *types.Issue, children []*types.Issue, keepChildren bool, summary string, actorName string) (*SquashResult, error) {
-	// Collect child IDs
-	childIDs := make([]string, len(children))
-	for i, c := range children {
-		childIDs[i] = c.ID
-	}
-
-	// Use agent-provided summary if available, otherwise generate basic digest
-	var digestContent string
-	if summary != "" {
-		digestContent = summary
-	} else {
-		digestContent = generateDigest(root, children)
-	}
-
-	// Create digest issue (permanent, not a wisp)
-	now := time.Now()
-	digestIssue := &types.Issue{
-		Title:       fmt.Sprintf("Digest: %s", root.Title),
-		Description: digestContent,
-		Status:      types.StatusClosed,
-		CloseReason: fmt.Sprintf("Squashed from %d wisps", len(children)),
-		Priority:    root.Priority,
-		IssueType:   types.TypeTask,
-		Ephemeral:   false, // Digest is permanent, not a wisp
-		ClosedAt:    &now,
-	}
-
+	childIDs := issueIDs(children)
+	digestIssue := newSquashDigest(root, children, summary)
 	result := &SquashResult{
 		MoleculeID:    root.ID,
 		SquashedIDs:   childIDs,
@@ -293,13 +273,11 @@ func squashMoleculeInto(ctx context.Context, w molWriter, root *types.Issue, chi
 		KeptChildren:  keepChildren,
 	}
 
-	// Create digest issue
 	if err := w.CreateIssue(ctx, digestIssue, actorName); err != nil {
 		return nil, fmt.Errorf("failed to create digest issue: %w", err)
 	}
 	result.DigestID = digestIssue.ID
 
-	// Link digest to root as parent-child
 	dep := &types.Dependency{
 		IssueID:     digestIssue.ID,
 		DependsOnID: root.ID,
@@ -309,36 +287,65 @@ func squashMoleculeInto(ctx context.Context, w molWriter, root *types.Issue, chi
 		return nil, fmt.Errorf("failed to link digest to root: %w", err)
 	}
 
-	// Delete ephemeral children within the same transaction
-	if !keepChildren {
-		for _, id := range childIDs {
-			if err := w.DeleteIssue(ctx, id, actorName); err != nil {
-				return nil, fmt.Errorf("failed to delete child %s: %w", id, err)
-			}
-			result.DeletedCount++
-		}
+	deleted, err := deleteSquashedChildren(ctx, w, childIDs, keepChildren, actorName)
+	if err != nil {
+		return nil, err
 	}
-
-	// Auto-close the root if it's a wisp — squash completes the molecule lifecycle
-	if root.Ephemeral {
-		reason := fmt.Sprintf("Squashed: %d steps → digest %s", len(children), result.DigestID)
-		if err := w.CloseIssue(ctx, root.ID, reason, actorName); err != nil {
-			return nil, fmt.Errorf("failed to close wisp root %s: %w", root.ID, err)
-		}
-		// Clear ephemeral so the closed root stops being re-emitted by every wisp-table export cycle.
-		if err := w.UpdateIssue(ctx, root.ID, map[string]interface{}{"wisp": false}, actorName); err != nil {
-			return nil, fmt.Errorf("failed to clear ephemeral flag on root %s: %w", root.ID, err)
-		}
-		result.WispSquash = true
+	result.DeletedCount = deleted
+	if err := closeSquashedWispRoot(ctx, w, root, result, actorName); err != nil {
+		return nil, err
 	}
-
 	return result, nil
 }
 
-func init() {
-	molSquashCmd.Flags().Bool("dry-run", false, "Preview what would be squashed")
-	molSquashCmd.Flags().Bool("keep-children", false, "Don't delete ephemeral children after squash")
-	molSquashCmd.Flags().String("summary", "", "Agent-provided summary (bypasses auto-generation)")
+func issueIDs(issues []*types.Issue) []string {
+	ids := make([]string, len(issues))
+	for i, issue := range issues {
+		ids[i] = issue.ID
+	}
+	return ids
+}
 
-	molCmd.AddCommand(molSquashCmd)
+func newSquashDigest(root *types.Issue, children []*types.Issue, summary string) *types.Issue {
+	if summary == "" {
+		summary = generateDigest(root, children)
+	}
+	now := time.Now()
+	return &types.Issue{
+		IssueContent:  types.IssueContent{Title: fmt.Sprintf("Digest: %s", root.Title), Description: summary},
+		IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed, Priority: root.Priority, IssueType: types.TypeTask},
+		IssueTimes:    types.IssueTimes{CloseReason: fmt.Sprintf("Squashed from %d wisps", len(children)), ClosedAt: &now},
+		IssueWisp:     types.IssueWisp{Ephemeral: false},
+	}
+}
+
+func deleteSquashedChildren(ctx context.Context, w molWriter, childIDs []string, keep bool, actorName string) (int, error) {
+	if keep {
+		return 0, nil
+	}
+	for i, id := range childIDs {
+		if err := w.DeleteIssue(ctx, id, actorName); err != nil {
+			return i, fmt.Errorf("failed to delete child %s: %w", id, err)
+		}
+	}
+	return len(childIDs), nil
+}
+
+func closeSquashedWispRoot(ctx context.Context, w molWriter, root *types.Issue, result *SquashResult, actorName string) error {
+	if !root.Ephemeral {
+		return nil
+	}
+	reason := fmt.Sprintf("Squashed: %d steps → digest %s", result.SquashedCount, result.DigestID)
+	if err := w.CloseIssue(ctx, root.ID, reason, actorName); err != nil {
+		return fmt.Errorf("failed to close wisp root %s: %w", root.ID, err)
+	}
+	if err := w.UpdateIssue(ctx, root.ID, map[string]interface{}{"wisp": false}, actorName); err != nil {
+		return fmt.Errorf("failed to clear ephemeral flag on root %s: %w", root.ID, err)
+	}
+	result.WispSquash = true
+	return nil
+}
+
+func init() {
+	molCmd.AddCommand(newMolSquashCmd())
 }

@@ -17,9 +17,9 @@ import (
 func TestListPageIssuesKeepsThePageOrder(t *testing.T) {
 	page := issueops.IssuePage{
 		Items: []*types.IssueWithCounts{
-			{Issue: &types.Issue{ID: "bd-z"}},
-			{Issue: &types.Issue{ID: "bd-a"}},
-			{Issue: &types.Issue{ID: "bd-m"}},
+			{Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-z"}}},
+			{Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-a"}}},
+			{Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-m"}}},
 		},
 		HasMore: true,
 	}
@@ -44,10 +44,10 @@ func TestListPageIssuesKeepsThePageOrder(t *testing.T) {
 // of it should become a panic in front of a user.
 func TestListPageIssuesDropsANilRowRatherThanPanicking(t *testing.T) {
 	page := issueops.IssuePage{Items: []*types.IssueWithCounts{
-		{Issue: &types.Issue{ID: "bd-1"}},
+		{Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-1"}}},
 		nil,
 		{Issue: nil},
-		{Issue: &types.Issue{ID: "bd-2"}},
+		{Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-2"}}},
 	}}
 
 	issues, _ := listPageIssues(page)

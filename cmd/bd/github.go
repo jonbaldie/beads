@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -75,14 +76,25 @@ var githubReposCmd = &cobra.Command{
 	RunE:          runGitHubRepos,
 }
 
-var (
-	githubSyncDryRun   bool
-	githubSyncPullOnly bool
-	githubSyncPushOnly bool
-	githubPreferLocal  bool
-	githubPreferGitHub bool
-	githubPreferNewer  bool
-)
+type githubSyncOptions struct {
+	dryRun       bool
+	pullOnly     bool
+	pushOnly     bool
+	preferLocal  bool
+	preferGitHub bool
+	preferNewer  bool
+}
+
+func githubSyncOptionsFromCommand(cmd *cobra.Command) githubSyncOptions {
+	return githubSyncOptions{
+		dryRun:       commandBoolFlag(cmd, "dry-run"),
+		pullOnly:     commandBoolFlag(cmd, "pull-only"),
+		pushOnly:     commandBoolFlag(cmd, "push-only"),
+		preferLocal:  commandBoolFlag(cmd, "prefer-local"),
+		preferGitHub: commandBoolFlag(cmd, "prefer-github"),
+		preferNewer:  commandBoolFlag(cmd, "prefer-newer"),
+	}
+}
 
 // GitHubConflictStrategy defines how to resolve conflicts between local and GitHub versions.
 type GitHubConflictStrategy string
@@ -151,14 +163,14 @@ func init() {
 	githubCmd.AddCommand(githubReposCmd)
 
 	// Add flags to sync command
-	githubSyncCmd.Flags().BoolVar(&githubSyncDryRun, "dry-run", false, "Show what would be synced without making changes")
-	githubSyncCmd.Flags().BoolVar(&githubSyncPullOnly, "pull-only", false, "Only pull issues from GitHub")
-	githubSyncCmd.Flags().BoolVar(&githubSyncPushOnly, "push-only", false, "Only push issues to GitHub")
+	githubSyncCmd.Flags().Bool("dry-run", false, "Show what would be synced without making changes")
+	githubSyncCmd.Flags().Bool("pull-only", false, "Only pull issues from GitHub")
+	githubSyncCmd.Flags().Bool("push-only", false, "Only push issues to GitHub")
 
 	// Conflict resolution flags (mutually exclusive)
-	githubSyncCmd.Flags().BoolVar(&githubPreferLocal, "prefer-local", false, "On conflict, keep local beads version")
-	githubSyncCmd.Flags().BoolVar(&githubPreferGitHub, "prefer-github", false, "On conflict, use GitHub version")
-	githubSyncCmd.Flags().BoolVar(&githubPreferNewer, "prefer-newer", false, "On conflict, use most recent version (default)")
+	githubSyncCmd.Flags().Bool("prefer-local", false, "On conflict, keep local beads version")
+	githubSyncCmd.Flags().Bool("prefer-github", false, "On conflict, use GitHub version")
+	githubSyncCmd.Flags().Bool("prefer-newer", false, "On conflict, use most recent version (default)")
 	registerSelectiveSyncFlags(githubSyncCmd)
 
 	// Register github command with root
@@ -197,45 +209,46 @@ func getGitHubConfigValue(ctx context.Context, key string) string {
 	// Secret keys (e.g. github.token) are stored in config.yaml, not the
 	// Dolt database, to avoid leaking secrets when pushing to remotes.
 	if config.IsYamlOnlyKey(key) {
-		if value := config.GetString(key); value != "" {
-			return value
-		}
-		// Fall back to environment variable
-		envKey := githubConfigToEnvVar(key)
-		if envKey != "" {
-			if value := os.Getenv(envKey); value != "" {
-				return value
-			}
-		}
+		return getGitHubYAMLConfigValue(key)
+	}
+
+	if value := getGitHubStoreConfigValue(ctx, key); value != "" {
+		return value
+	}
+	return getGitHubEnvironmentValue(key)
+}
+
+func getGitHubYAMLConfigValue(key string) string {
+	if value := config.GetString(key); value != "" {
+		return value
+	}
+	return getGitHubEnvironmentValue(key)
+}
+
+func getGitHubStoreConfigValue(ctx context.Context, key string) string {
+	if getStore() != nil {
+		value, _ := getStore().GetConfig(ctx, key)
+		return value
+	}
+
+	if getDBPath() == "" {
 		return ""
 	}
-
-	// Try to read from store (works in direct mode)
-	if store != nil {
-		value, _ := store.GetConfig(ctx, key)
-		if value != "" {
-			return value
-		}
-	} else if dbPath != "" {
-		tempStore, err := openReadOnlyStoreForDBPath(ctx, dbPath)
-		if err == nil {
-			defer func() { _ = tempStore.Close() }()
-			value, _ := tempStore.GetConfig(ctx, key)
-			if value != "" {
-				return value
-			}
-		}
+	tempStore, err := openReadOnlyStoreForDBPath(ctx, getDBPath())
+	if err != nil {
+		return ""
 	}
+	defer func() { _ = tempStore.Close() }()
+	value, _ := tempStore.GetConfig(ctx, key)
+	return value
+}
 
-	// Fall back to environment variable
+func getGitHubEnvironmentValue(key string) string {
 	envKey := githubConfigToEnvVar(key)
-	if envKey != "" {
-		if value := os.Getenv(envKey); value != "" {
-			return value
-		}
+	if envKey == "" {
+		return ""
 	}
-
-	return ""
+	return os.Getenv(envKey)
 }
 
 // githubConfigToEnvVar maps GitHub config keys to their environment variable names.
@@ -293,7 +306,7 @@ func getGitHubClient(config GitHubConfig) *github.Client {
 }
 
 // runGitHubStatus implements the github status command.
-func runGitHubStatus(cmd *cobra.Command, args []string) error {
+func runGitHubStatus(cmd *cobra.Command, _ []string) error {
 	if usesProxiedServer() {
 		return HandleErrorRespectJSON("github status is not supported in proxied-server mode")
 	}
@@ -328,7 +341,7 @@ func runGitHubStatus(cmd *cobra.Command, args []string) error {
 }
 
 // runGitHubRepos implements the github repos command.
-func runGitHubRepos(cmd *cobra.Command, args []string) error {
+func runGitHubRepos(cmd *cobra.Command, _ []string) error {
 	if usesProxiedServer() {
 		return HandleErrorRespectJSON("github repos is not supported in proxied-server mode")
 	}
@@ -373,7 +386,8 @@ func runGitHubRepos(cmd *cobra.Command, args []string) error {
 
 // runGitHubSync implements the github sync command.
 // Uses the tracker.Engine for all sync operations.
-func runGitHubSync(cmd *cobra.Command, args []string) error {
+func runGitHubSync(cmd *cobra.Command, _ []string) error {
+	opts := githubSyncOptionsFromCommand(cmd)
 	if usesProxiedServer() {
 		return HandleErrorRespectJSON("github sync is not supported in proxied-server mode")
 	}
@@ -383,81 +397,103 @@ func runGitHubSync(cmd *cobra.Command, args []string) error {
 			c.CloseEventAndAdd(evt)
 		}
 	}()
+	return executeGitHubSync(cmd, opts)
+}
 
-	config := getGitHubConfig()
-	if err := validateGitHubConfig(config); err != nil {
+func executeGitHubSync(cmd *cobra.Command, opts githubSyncOptions) error {
+	conflictStrategy, err := prepareGitHubSync(opts)
+	if err != nil {
 		return HandleError("%v", err)
 	}
-
-	if !githubSyncDryRun {
-		CheckReadonly("github sync")
-	}
-
-	if githubSyncPullOnly && githubSyncPushOnly {
-		return HandleError("cannot use both --pull-only and --push-only")
-	}
-
-	conflictStrategy, err := getGitHubConflictStrategy(githubPreferLocal, githubPreferGitHub, githubPreferNewer)
-	if err != nil {
-		return HandleError("%v (--prefer-local, --prefer-github, --prefer-newer)", err)
-	}
-
 	if err := ensureStoreActive(); err != nil {
 		return HandleError("database not available: %v", err)
 	}
 
 	out := cmd.OutOrStdout()
 	ctx := context.Background()
-
-	gt := &github.Tracker{}
-	if err := gt.Init(ctx, store); err != nil {
+	engine, err := buildGitHubSyncEngine(ctx, out)
+	if err != nil {
 		return HandleError("initializing GitHub tracker: %v", err)
 	}
-
-	// Create the sync engine
-	engine := tracker.NewEngine(gt, store, actor)
-	engine.OnMessage = func(msg string) { _, _ = fmt.Fprintln(out, "  "+msg) }
-	engine.OnWarning = func(msg string) { _, _ = fmt.Fprintf(os.Stderr, "Warning: %s\n", msg) }
-
-	// Set up GitHub-specific pull and push hooks
-	engine.PullHooks = buildGitHubPullHooks(ctx)
-	engine.PushHooks = buildGitHubPushHooks(gt)
-
-	// Build sync options from CLI flags
-	pull := !githubSyncPushOnly
-	push := !githubSyncPullOnly
-
-	opts := tracker.SyncOptions{
-		Pull:   pull,
-		Push:   push,
-		DryRun: githubSyncDryRun,
-	}
-
-	if err := applySelectiveSyncFlags(cmd, &opts, push); err != nil {
-		return HandleError("%v", err)
-	}
-
-	switch conflictStrategy {
-	case GitHubConflictPreferLocal:
-		opts.ConflictResolution = tracker.ConflictLocal
-	case GitHubConflictPreferGitHub:
-		opts.ConflictResolution = tracker.ConflictExternal
-	default:
-		opts.ConflictResolution = tracker.ConflictTimestamp
-	}
-
-	if githubSyncDryRun {
-		_, _ = fmt.Fprintln(out, "Dry run mode - no changes will be made")
-		_, _ = fmt.Fprintln(out)
-	}
-
-	result, err := engine.Sync(ctx, opts)
+	syncOpts, err := buildGitHubSyncOptions(cmd, opts, conflictStrategy)
 	if err != nil {
 		return HandleError("%v", err)
 	}
+	if opts.dryRun {
+		printGitHubSyncDryRun(out)
+	}
+	result, err := engine.Sync(ctx, syncOpts)
+	if err != nil {
+		return HandleError("%v", err)
+	}
+	printGitHubSyncResult(out, result, opts.dryRun)
+	return nil
+}
 
-	// Output results
-	if !githubSyncDryRun {
+func prepareGitHubSync(opts githubSyncOptions) (GitHubConflictStrategy, error) {
+	if err := validateGitHubConfig(getGitHubConfig()); err != nil {
+		return "", err
+	}
+	if !opts.dryRun {
+		if err := CheckReadonly("github sync"); err != nil {
+			return "", err
+		}
+	}
+	if opts.pullOnly && opts.pushOnly {
+		return "", fmt.Errorf("cannot use both --pull-only and --push-only")
+	}
+	strategy, err := getGitHubConflictStrategy(opts.preferLocal, opts.preferGitHub, opts.preferNewer)
+	if err != nil {
+		return "", fmt.Errorf("%v (--prefer-local, --prefer-github, --prefer-newer)", err)
+	}
+	return strategy, nil
+}
+
+func buildGitHubSyncEngine(ctx context.Context, out io.Writer) (*tracker.Engine, error) {
+	gt := &github.Tracker{}
+	if err := gt.Init(ctx, getStore()); err != nil {
+		return nil, err
+	}
+	engine := tracker.NewEngine(gt, getStore(), getActor())
+	engine.OnMessage = func(msg string) { _, _ = fmt.Fprintln(out, "  "+msg) }
+	engine.OnWarning = func(msg string) { _, _ = fmt.Fprintf(os.Stderr, "Warning: %s\n", msg) } //nolint:gosec // G705: CLI stderr, not HTML.
+	engine.PullHooks = buildGitHubPullHooks(ctx)
+	engine.PushHooks = buildGitHubPushHooks(gt)
+	return engine, nil
+}
+
+func buildGitHubSyncOptions(cmd *cobra.Command, opts githubSyncOptions, strategy GitHubConflictStrategy) (tracker.SyncOptions, error) {
+	push := !opts.pullOnly
+	syncOpts := tracker.SyncOptions{
+		Pull:   !opts.pushOnly,
+		Push:   push,
+		DryRun: opts.dryRun,
+	}
+	if err := applySelectiveSyncFlags(cmd, &syncOpts, push); err != nil {
+		return tracker.SyncOptions{}, err
+	}
+	syncOpts.ConflictResolution = githubTrackerConflictResolution(strategy)
+	return syncOpts, nil
+}
+
+func githubTrackerConflictResolution(strategy GitHubConflictStrategy) tracker.ConflictResolution {
+	switch strategy {
+	case GitHubConflictPreferLocal:
+		return tracker.ConflictLocal
+	case GitHubConflictPreferGitHub:
+		return tracker.ConflictExternal
+	default:
+		return tracker.ConflictTimestamp
+	}
+}
+
+func printGitHubSyncDryRun(out io.Writer) {
+	_, _ = fmt.Fprintln(out, "Dry run mode - no changes will be made")
+	_, _ = fmt.Fprintln(out)
+}
+
+func printGitHubSyncResult(out io.Writer, result *tracker.SyncResult, dryRun bool) {
+	if !dryRun {
 		if result.Stats.Pulled > 0 {
 			_, _ = fmt.Fprintf(out, "✓ Pulled %d issues (%d created, %d updated)\n",
 				result.Stats.Pulled, result.Stats.Created, result.Stats.Updated)
@@ -469,13 +505,10 @@ func runGitHubSync(cmd *cobra.Command, args []string) error {
 			_, _ = fmt.Fprintf(out, "→ Resolved %d conflicts\n", result.Stats.Conflicts)
 		}
 	}
-
-	if githubSyncDryRun {
+	if dryRun {
 		_, _ = fmt.Fprintln(out)
 		_, _ = fmt.Fprintln(out, "Run without --dry-run to apply changes")
 	}
-
-	return nil
 }
 
 // buildGitHubPushHooks creates PushHooks for GitHub-specific push behavior.
@@ -519,8 +552,8 @@ func buildGitHubPullHooks(ctx context.Context) *tracker.PullHooks {
 	// may belong to a different project (GH#2469).
 	if p := config.GetString("issue-prefix"); p != "" {
 		prefix = p
-	} else if store != nil {
-		if p, err := store.GetConfig(ctx, "issue_prefix"); err == nil && p != "" {
+	} else if getStore() != nil {
+		if p, err := getStore().GetConfig(ctx, "issue_prefix"); err == nil && p != "" {
 			prefix = p
 		}
 	}

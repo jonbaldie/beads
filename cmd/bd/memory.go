@@ -30,17 +30,17 @@ func openMemories(directRequirement string) (memoryops.Memories, error) {
 	if err := ensureDirectMode(directRequirement); err != nil {
 		return nil, err
 	}
-	return store.Memories()
+	return getStore().Memories()
 }
 
 // proxiedMemories hands back the guarded persistent-memory surface for this
 // invocation's proxied-server provider, through the provider's OWN capability
 // accessor — the same two-step proxiedWorkspaceConfig performs.
 func proxiedMemories() (memoryops.Memories, error) {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return nil, errors.New("proxied-server UOW provider not initialized")
 	}
-	return memoriesFromProvider(uowProvider)
+	return memoriesFromProvider(getUOWProvider())
 }
 
 // memoriesFromProvider is that accessor step for a provider the caller names.
@@ -80,9 +80,6 @@ func noteDirectMemoryWrite() {
 // memoryPrefix is prepended (after kvPrefix) to all memory keys.
 const memoryPrefix = kvkeys.MemoryPrefix
 
-// memoryKeyFlag allows explicit key override for bd remember.
-var memoryKeyFlag string
-
 // matchesKnownCommand reports whether insight is a single bare word that
 // matches the name or an alias of a top-level bd command. It is used to catch
 // `bd remember <subcommand>` mistakes before they become accidental memories.
@@ -113,7 +110,7 @@ func matchesKnownCommand(cmd *cobra.Command, insight string) (string, bool) {
 // through memoryapi.DeriveKey unchanged, having already read the key.
 func rememberBareKeyPath(key, insight, existing string) error {
 	if existing != "" {
-		if jsonOutput {
+		if isJSONOutput() {
 			return outputJSON(map[string]interface{}{
 				"key":    key,
 				"value":  existing,
@@ -136,7 +133,7 @@ func rememberBareKeyPath(key, insight, existing string) error {
 
 // printRememberResult renders the `bd remember` success output.
 func printRememberResult(verb, key, insight string) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(map[string]string{
 			"key":    key,
 			"value":  insight,
@@ -149,7 +146,7 @@ func printRememberResult(verb, key, insight string) error {
 
 // printMemoriesResult renders the `bd memories` output.
 func printMemoriesResult(memories map[string]string, search string) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(memories)
 	}
 
@@ -184,7 +181,7 @@ func printMemoriesResult(memories map[string]string, search string) error {
 // printForgetNotFound renders the `bd forget` missing-key output (including
 // the SilentExit contract).
 func printForgetNotFound(key string) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		if jerr := outputJSON(map[string]string{
 			"key":   key,
 			"found": "false",
@@ -199,7 +196,7 @@ func printForgetNotFound(key string) error {
 
 // printForgetResult renders the `bd forget` success output.
 func printForgetResult(key, existing string) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(map[string]string{
 			"key":     key,
 			"deleted": "true",
@@ -212,7 +209,7 @@ func printForgetResult(key, existing string) error {
 // printRecallResult renders the `bd recall` output (including the not-found
 // SilentExit contract).
 func printRecallResult(key, value string) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		if jerr := outputJSON(map[string]interface{}{
 			"key":   key,
 			"value": value,
@@ -257,7 +254,10 @@ Examples:
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		CheckReadonly("remember")
+		memoryKeyFlag, _ := cmd.Flags().GetString("key")
+		if err := CheckReadonly("remember"); err != nil {
+			return err
+		}
 
 		evt := metrics.NewCommandEvent("remember")
 		defer func() {
@@ -317,14 +317,14 @@ Examples:
 		// first; that check is the role's now, so the condition has to say it.
 		derived := memoryapi.DeriveKey(insight)
 		if memoryKeyFlag == "" && derived != "" && derived == insight {
-			recalled, err := memories.Recall(rootCtx, memoryops.RecallRequest{Key: derived})
+			recalled, err := memories.Recall(getRootContext(), memoryops.RecallRequest{Key: derived})
 			if err != nil {
 				return HandleErrorRespectJSON("recalling memory: %v", err)
 			}
 			return rememberBareKeyPath(derived, insight, recalled.Value)
 		}
 
-		result, err := memories.Remember(rootCtx, memoryops.RememberRequest{Key: memoryKeyFlag, Content: insight})
+		result, err := memories.Remember(getRootContext(), memoryops.RememberRequest{Key: memoryKeyFlag, Content: insight})
 		if err != nil {
 			// The role's two refusals ARE this command's shipped sentences —
 			// "memory content cannot be empty" and "could not generate key from
@@ -383,7 +383,7 @@ Examples:
 		// The term goes to the role RAW. Case folding is List's, so the two
 		// routes cannot come to disagree about what matches — which is the
 		// whole reason the filter moved down.
-		result, err := memories.List(rootCtx, memoryops.ListRequest{Search: search})
+		result, err := memories.List(getRootContext(), memoryops.ListRequest{Search: search})
 		if err != nil {
 			return HandleErrorRespectJSON("listing memories: %v", err)
 		}
@@ -413,7 +413,9 @@ Examples:
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		CheckReadonly("forget")
+		if err := CheckReadonly("forget"); err != nil {
+			return err
+		}
 
 		evt := metrics.NewCommandEvent("forget")
 		defer func() {
@@ -429,7 +431,7 @@ Examples:
 		// No pre-read here, deliberately: the value printed below is the one
 		// the role's transaction actually deleted, not the one an earlier read
 		// happened to see.
-		result, err := memories.Forget(rootCtx, memoryops.ForgetRequest{Key: args[0]})
+		result, err := memories.Forget(getRootContext(), memoryops.ForgetRequest{Key: args[0]})
 		if err != nil {
 			return HandleErrorRespectJSON("forgetting memory: %v", err)
 		}
@@ -467,7 +469,7 @@ Examples:
 		if err != nil {
 			return HandleError("%v", err)
 		}
-		result, err := memories.Recall(rootCtx, memoryops.RecallRequest{Key: args[0]})
+		result, err := memories.Recall(getRootContext(), memoryops.RecallRequest{Key: args[0]})
 		if err != nil {
 			return HandleErrorRespectJSON("recalling memory: %v", err)
 		}
@@ -484,7 +486,7 @@ func truncateMemory(s string, maxLen int) string {
 }
 
 func init() {
-	rememberCmd.Flags().StringVar(&memoryKeyFlag, "key", "", "Explicit key for the memory (auto-generated from content if not set). If a memory with this key already exists, it will be updated in place")
+	rememberCmd.Flags().String("key", "", "Explicit key for the memory (auto-generated from content if not set). If a memory with this key already exists, it will be updated in place")
 
 	rootCmd.AddCommand(rememberCmd)
 	rootCmd.AddCommand(memoriesCmd)

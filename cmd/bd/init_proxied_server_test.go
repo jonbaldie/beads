@@ -216,9 +216,9 @@ func TestComposeProxiedServerMetadataJSON_TeamServer(t *testing.T) {
 
 func TestIsTeamServerManaged_RequiresProxiedServerMode(t *testing.T) {
 	cfg := configfile.Config{
-		Backend:        configfile.BackendDolt,
-		DoltMode:       configfile.DoltModeServer,
-		DoltTeamServer: true,
+		Backend:                   configfile.BackendDolt,
+		DoltMode:                  configfile.DoltModeServer,
+		ConfigCompatibilityFields: configfile.ConfigCompatibilityFields{DoltTeamServer: true},
 	}
 	assert.False(t, cfg.IsTeamServerManaged(),
 		"team-server semantics are defined for proxied-server mode only")
