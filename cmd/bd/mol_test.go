@@ -3936,9 +3936,9 @@ func TestPourRootTitleDescSubstitution(t *testing.T) {
 		},
 		Steps: []*formula.Step{
 			{ID: "plan", Title: "Plan: {{title}}", Type: "task"},
-			{ID: "implement", Title: "Implement: {{title}}", Type: "task", DependsOn: []string{"plan"}},
-			{ID: "verify", Title: "Verify: {{title}}", Type: "task", DependsOn: []string{"implement"}},
-			{ID: "review", Title: "Review: {{title}}", Type: "task", DependsOn: []string{"verify"}},
+			{ID: "implement", Title: "Implement: {{title}}", Type: "task", StepExpansion: formula.StepExpansion{DependsOn: []string{"plan"}}},
+			{ID: "verify", Title: "Verify: {{title}}", Type: "task", StepExpansion: formula.StepExpansion{DependsOn: []string{"implement"}}},
+			{ID: "review", Title: "Review: {{title}}", Type: "task", StepExpansion: formula.StepExpansion{DependsOn: []string{"verify"}}},
 		},
 	}
 
@@ -4073,7 +4073,7 @@ func TestPourRootNoVars(t *testing.T) {
 		},
 		Steps: []*formula.Step{
 			{ID: "bump", Title: "Bump to {{version}}", Type: "task"},
-			{ID: "tag", Title: "Tag {{version}}", Type: "task", DependsOn: []string{"bump"}},
+			{ID: "tag", Title: "Tag {{version}}", Type: "task", StepExpansion: formula.StepExpansion{DependsOn: []string{"bump"}}},
 		},
 	}
 

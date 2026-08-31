@@ -633,9 +633,11 @@ func TestLinearIssueToBeads(t *testing.T) {
 				URL:        "https://linear.app/team/issue/TEAM-200/child-task",
 				Priority:   3,
 				State:      &linear.State{Type: "unstarted", Name: "Todo"},
-				Parent:     &linear.Parent{ID: "uuid-parent", Identifier: "TEAM-100"},
-				CreatedAt:  "2025-01-15T10:00:00Z",
-				UpdatedAt:  "2025-01-15T10:00:00Z",
+				IssueRelations: linear.IssueRelations{
+					Parent: &linear.Parent{ID: "uuid-parent", Identifier: "TEAM-100"},
+				},
+				CreatedAt: "2025-01-15T10:00:00Z",
+				UpdatedAt: "2025-01-15T10:00:00Z",
 			},
 			wantTitle:     "Child task",
 			wantStatus:    types.StatusOpen,
@@ -653,23 +655,25 @@ func TestLinearIssueToBeads(t *testing.T) {
 				URL:        "https://linear.app/team/issue/TEAM-300/blocking-issue",
 				Priority:   2,
 				State:      &linear.State{Type: "started", Name: "In Progress"},
-				Relations: &linear.Relations{
-					Nodes: []linear.Relation{
-						{
-							ID:   "rel-1",
-							Type: "blocks",
-							RelatedIssue: struct {
-								ID         string `json:"id"`
-								Identifier string `json:"identifier"`
-							}{ID: "uuid-blocked", Identifier: "TEAM-301"},
-						},
-						{
-							ID:   "rel-2",
-							Type: "related",
-							RelatedIssue: struct {
-								ID         string `json:"id"`
-								Identifier string `json:"identifier"`
-							}{ID: "uuid-related", Identifier: "TEAM-302"},
+				IssueRelations: linear.IssueRelations{
+					Relations: &linear.Relations{
+						Nodes: []linear.Relation{
+							{
+								ID:   "rel-1",
+								Type: "blocks",
+								RelatedIssue: struct {
+									ID         string `json:"id"`
+									Identifier string `json:"identifier"`
+								}{ID: "uuid-blocked", Identifier: "TEAM-301"},
+							},
+							{
+								ID:   "rel-2",
+								Type: "related",
+								RelatedIssue: struct {
+									ID         string `json:"id"`
+									Identifier string `json:"identifier"`
+								}{ID: "uuid-related", Identifier: "TEAM-302"},
+							},
 						},
 					},
 				},
@@ -692,15 +696,17 @@ func TestLinearIssueToBeads(t *testing.T) {
 				URL:        "https://linear.app/team/issue/TEAM-350/dup-issue",
 				Priority:   3,
 				State:      &linear.State{Type: "unstarted", Name: "Todo"},
-				Relations: &linear.Relations{
-					Nodes: []linear.Relation{
-						{
-							ID:   "rel-dup",
-							Type: "duplicate",
-							RelatedIssue: struct {
-								ID         string `json:"id"`
-								Identifier string `json:"identifier"`
-							}{ID: "uuid-canonical", Identifier: "TEAM-351"},
+				IssueRelations: linear.IssueRelations{
+					Relations: &linear.Relations{
+						Nodes: []linear.Relation{
+							{
+								ID:   "rel-dup",
+								Type: "duplicate",
+								RelatedIssue: struct {
+									ID         string `json:"id"`
+									Identifier string `json:"identifier"`
+								}{ID: "uuid-canonical", Identifier: "TEAM-351"},
+							},
 						},
 					},
 				},

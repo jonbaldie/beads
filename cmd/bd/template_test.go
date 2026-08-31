@@ -372,7 +372,7 @@ func (h *templateTestHelper) createHierarchy(rootID string, descendantIDs ...str
 	}
 }
 
-func issueIDs(issues []*types.Issue) []string {
+func templateIssueIDs(issues []*types.Issue) []string {
 	ids := make([]string, 0, len(issues))
 	for _, issue := range issues {
 		ids = append(ids, issue.ID)
@@ -384,7 +384,7 @@ func issueIDs(issues []*types.Issue) []string {
 func requireIssueIDs(t testing.TB, issues []*types.Issue, want ...string) {
 	t.Helper()
 
-	got := issueIDs(issues)
+	got := templateIssueIDs(issues)
 	want = slices.Clone(want)
 	sort.Strings(want)
 
