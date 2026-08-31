@@ -29,6 +29,10 @@ func (e *Engine) shouldPushIssue(issue *types.Issue, opts SyncOptions) bool {
 	return shouldPushIssue(e, issue, opts)
 }
 
+func (e *Engine) pushCacheValue(issue *types.Issue, externalRef string) string {
+	return pushCacheValue(e, issue, externalRef)
+}
+
 // newTestStore creates a dolt store on the shared database with branch isolation.
 func newTestStore(t *testing.T) *dolt.DoltStore {
 	t.Helper()
@@ -757,9 +761,9 @@ func TestEnginePushUsesBatchTrackerWhenAvailable(t *testing.T) {
 	tracker := &mockBatchTracker{
 		mockTracker: newMockTracker("notion"),
 		batchResult: &BatchPushResult{
-			Created:             []BatchPushItem{{LocalID: "bd-batch-1", ExternalRef: "https://notion.so/new-page"}},
-			Updated:             []BatchPushItem{{LocalID: "bd-batch-2", ExternalRef: "https://notion.so/existing"}},
-			TrackerIssueDetails: TrackerIssueDetails{Warnings: []string{"Skipped unsupported Notion issue types: pm=1"}},
+			Created:  []BatchPushItem{{LocalID: "bd-batch-1", ExternalRef: "https://notion.so/new-page"}},
+			Updated:  []BatchPushItem{{LocalID: "bd-batch-2", ExternalRef: "https://notion.so/existing"}},
+			Warnings: []string{"Skipped unsupported Notion issue types: pm=1"},
 		},
 	}
 	engine := NewEngine(tracker, store, "test-actor")
@@ -824,8 +828,8 @@ func TestEngineDryRunUsesBatchPreviewWhenAvailable(t *testing.T) {
 	tracker := &mockBatchTracker{
 		mockTracker: newMockTracker("notion"),
 		batchDryRun: &BatchPushResult{
-			Skipped:             []string{"bd-batch-preview"},
-			TrackerIssueDetails: TrackerIssueDetails{Warnings: []string{"Skipped bd-batch-preview: Notion external_ref points outside the current target"}},
+			Skipped:  []string{"bd-batch-preview"},
+			Warnings: []string{"Skipped bd-batch-preview: Notion external_ref points outside the current target"},
 		},
 	}
 	engine := NewEngine(tracker, store, "test-actor")
