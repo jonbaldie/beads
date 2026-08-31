@@ -9,7 +9,11 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
 
 printf 'Checking Go formatting...\n'
-mapfile -d '' GO_FILES < <(git ls-files -z --cached --others --exclude-standard -- '*.go')
+# Bash 3.2 (the macOS system shell) does not provide mapfile.
+GO_FILES=()
+while IFS= read -r -d '' GO_FILE; do
+    GO_FILES[${#GO_FILES[@]}]="$GO_FILE"
+done < <(git ls-files -z --cached --others --exclude-standard -- '*.go')
 if ((${#GO_FILES[@]} == 0)); then
     UNFORMATTED=""
 elif UNFORMATTED="$(gofmt -l "${GO_FILES[@]}")"; then
