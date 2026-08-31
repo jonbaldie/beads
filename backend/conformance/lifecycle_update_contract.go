@@ -291,10 +291,14 @@ func RunLifecycleUpdatePreservesTheCreationStamp(t *testing.T, ctx context.Conte
 	seeded.CreatedBy = "founder"
 	seedLifecycleUpdateIssue(t, ctx, fixture, seeded)
 
-}
-
-func assertLifecycleUpdateNotesExclusive(t *testing.T, ctx context.Context, fixture LifecycleUpdateFixture, id string) {
-	t.Helper()
+	before := lifecycleUpdateRow(t, ctx, fixture, id)
+	if !before.CreatedAt.Equal(lifecycleUpdateSeededCreatedAt) {
+		t.Fatalf("seeded %s carries created_at %v, want the preset %v — a seed that stamps its own creation time leaves this case unable to tell a preserved stamp from a rewritten one",
+			id, before.CreatedAt.UTC(), lifecycleUpdateSeededCreatedAt)
+	}
+	if before.CreatedBy != "founder" {
+		t.Fatalf("seeded %s carries created_by %q, want the preset %q — see above", id, before.CreatedBy, "founder")
+	}
 
 	for _, edit := range []struct {
 		name  string
@@ -323,6 +327,18 @@ func assertLifecycleUpdateNotesExclusive(t *testing.T, ctx context.Context, fixt
 			assertLifecycleUpdateCreationStamp(t, "the update result after "+edit.name, result.Issue)
 		})
 	}
+}
+
+func assertLifecycleUpdateNotesExclusive(t *testing.T, ctx context.Context, fixture LifecycleUpdateFixture, id string) {
+	t.Helper()
+
+	before := lifecycleUpdateRow(t, ctx, fixture, id)
+	if _, err := fixture.Lifecycle.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: id, Patch: publicops.IssuePatch{
+		Notes: publicops.Field[string]{Set: true, Value: "both"}, IssuePatchDetails: publicops.IssuePatchDetails{AppendNotes: publicops.Field[string]{Set: true, Value: "both"}},
+	}}); !errors.Is(err, storage.ErrValidation) {
+		t.Errorf("a patch setting Notes and AppendNotes together = %v, want ErrValidation — the two are mutually exclusive", err)
+	}
+	assertLifecycleUpdateRowUnchanged(t, ctx, fixture, id, "after the mutually-exclusive refusal", before)
 }
 
 // lifecycleUpdateSeededCreatedAt is years in the past, which is what makes a
@@ -451,14 +467,6 @@ func assertLifecycleUpdateNotesReplace(t *testing.T, ctx context.Context, fixtur
 	if got := lifecycleUpdateRow(t, ctx, fixture, id).Notes; got != "replaced" {
 		t.Errorf("notes after the replacement = %q, want %q", got, "replaced")
 	}
-
-	before := lifecycleUpdateRow(t, ctx, fixture, id)
-	if _, err := fixture.Lifecycle.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: id, Patch: publicops.IssuePatch{
-		Notes: publicops.Field[string]{Set: true, Value: "both"}, IssuePatchDetails: publicops.IssuePatchDetails{AppendNotes: publicops.Field[string]{Set: true, Value: "both"}},
-	}}); !errors.Is(err, storage.ErrValidation) {
-		t.Errorf("a patch setting Notes and AppendNotes together = %v, want ErrValidation — the two are mutually exclusive", err)
-	}
-	assertLifecycleUpdateRowUnchanged(t, ctx, fixture, id, "after the mutually-exclusive refusal", before)
 
 }
 
