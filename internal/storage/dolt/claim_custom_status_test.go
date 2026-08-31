@@ -32,11 +32,17 @@ func TestClaimIssue_CustomStatuses(t *testing.T) {
 	mk := func(id string, status types.Status) {
 		t.Helper()
 		iss := &types.Issue{
-			ID:        id,
-			Title:     "Issue " + id,
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: "Issue " + id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("failed to create issue %s: %v", id, err)
@@ -109,11 +115,17 @@ func TestClaimIssue_CustomActiveAntiSteal(t *testing.T) {
 	}
 
 	iss := &types.Issue{
-		ID:        "cc-steal",
-		Title:     "Steal target",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "cc-steal",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Steal target",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 		t.Fatalf("create: %v", err)

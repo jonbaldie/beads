@@ -21,7 +21,7 @@ func TestEmbeddedMoveIssuePersistenceEphemeralNoHistorySmoke(t *testing.T) {
 	if err := store.SetConfig(ctx, "issue_prefix", "persist"); err != nil {
 		t.Fatal(err)
 	}
-	issue := &types.Issue{ID: "persist-embedded", Title: "embedded", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "persist-embedded"}, IssueContent: types.IssueContent{Title: "embedded"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatal(err)
 	}

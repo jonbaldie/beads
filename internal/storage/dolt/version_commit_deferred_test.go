@@ -30,7 +30,7 @@ func TestDeferredVersionCommitLeavesWritesForCommitPending(t *testing.T) {
 	deferredCtx := issueops.WithDeferredVersionCommit(ctx)
 	before = doltCommitCount(ctx, t, store)
 	if err := store.CreateIssues(deferredCtx, []*types.Issue{
-		{ID: "test-defer-pending", Title: "deferred write", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+		{IssueID: types.IssueID{ID: "test-defer-pending"}, IssueContent: types.IssueContent{Title: "deferred write"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
 	}, "tester"); err != nil {
 		t.Fatalf("deferred create: %v", err)
 	}

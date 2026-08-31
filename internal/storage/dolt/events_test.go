@@ -21,11 +21,17 @@ func TestGetAllEventsSince_UnionBothTables(t *testing.T) {
 
 	// Create a permanent issue (events go to 'events' table)
 	perm := &types.Issue{
-		ID:        "test-ev-perm",
-		Title:     "Permanent Issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-ev-perm",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Permanent Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, perm, "tester"); err != nil {
 		t.Fatalf("failed to create permanent issue: %v", err)
@@ -33,12 +39,20 @@ func TestGetAllEventsSince_UnionBothTables(t *testing.T) {
 
 	// Create an ephemeral issue (events go to 'wisp_events' table)
 	wisp := &types.Issue{
-		ID:        "test-ev-wisp",
-		Title:     "Wisp Issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: "test-ev-wisp",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Wisp Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, wisp, "tester"); err != nil {
 		t.Fatalf("failed to create wisp issue: %v", err)

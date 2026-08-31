@@ -11,8 +11,7 @@ import (
 // repository files are never interpreted or opened.
 func HasRepository(beadsDir string) bool {
 	root := filepath.Join(beadsDir, "embeddeddolt")
-	info, err := os.Lstat(root)
-	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+	if !isRepositoryRoot(root) {
 		return false
 	}
 	databases, err := os.ReadDir(root)
@@ -20,17 +19,30 @@ func HasRepository(beadsDir string) bool {
 		return false
 	}
 	for _, database := range databases {
-		if !database.IsDir() || database.Type()&os.ModeSymlink != 0 {
-			continue
-		}
-		marker, err := os.Lstat(filepath.Join(root, database.Name(), ".dolt"))
-		if err != nil || !marker.IsDir() || marker.Mode()&os.ModeSymlink != 0 {
-			continue
-		}
-		entries, err := os.ReadDir(filepath.Join(root, database.Name(), ".dolt"))
-		if err == nil && len(entries) > 0 {
+		if hasDatabaseRepository(root, database) {
 			return true
 		}
 	}
 	return false
+}
+
+func isRepositoryRoot(root string) bool {
+	info, err := os.Lstat(root)
+	return err == nil && info.IsDir()
+}
+
+func hasDatabaseRepository(root string, database os.DirEntry) bool {
+	if !database.IsDir() {
+		return false
+	}
+	markerPath := filepath.Join(root, database.Name(), ".dolt")
+	marker, err := os.Lstat(markerPath)
+	if err != nil || !marker.IsDir() {
+		return false
+	}
+	entries, err := os.ReadDir(markerPath)
+	if err != nil {
+		return false
+	}
+	return len(entries) > 0
 }

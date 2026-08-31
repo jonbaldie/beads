@@ -51,8 +51,8 @@ func TestJoinIterPanic_Spike(t *testing.T) {
 	ctx := context.Background()
 
 	// Seed minimal data: two issues, one blocking the other.
-	parent := &types.Issue{ID: "test-jip-1", Title: "blocker", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
-	child := &types.Issue{ID: "test-jip-2", Title: "blocked", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	parent := &types.Issue{IssueID: types.IssueID{ID: "test-jip-1"}, IssueContent: types.IssueContent{Title: "blocker"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
+	child := &types.Issue{IssueID: types.IssueID{ID: "test-jip-2"}, IssueContent: types.IssueContent{Title: "blocked"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	for _, issue := range []*types.Issue{parent, child} {
 		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 			t.Fatalf("create issue %s: %v", issue.ID, err)

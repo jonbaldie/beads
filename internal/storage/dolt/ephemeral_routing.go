@@ -147,7 +147,8 @@ func (s *DoltStore) batchWispExists(ctx context.Context, ids []string) map[strin
 	defer s.mu.RUnlock()
 
 	result := make(map[string]bool)
-	for start := 0; start < len(ids); start += queryBatchSize {
+	nIDs := len(ids)
+	for start := 0; start < nIDs; start += queryBatchSize {
 		end := start + queryBatchSize
 		if end > len(ids) {
 			end = len(ids)
@@ -235,63 +236,69 @@ func (s *DoltStore) demoteToWispInTx(ctx context.Context, tx *sql.Tx, id string,
 	if _, err := issueops.UpdateIssueWithoutEventInTx(ctx, tx, id, updates, actor); err != nil {
 		return fmt.Errorf("update issue before demotion: %w", err)
 	}
-
-	issue, err := scanIssueTxFromTable(ctx, tx, "issues", id)
+	issue, err := s.prepareDemotedIssue(ctx, tx, id)
 	if err != nil {
-		return fmt.Errorf("failed to get updated issue for demotion: %w", err)
+		return err
 	}
-
 	if err := insertIssueTxIntoTable(ctx, tx, "wisps", issue); err != nil {
 		return fmt.Errorf("failed to insert issue into wisps: %w", err)
 	}
+	if err := copyDemotionAuxiliaryRows(ctx, tx, id); err != nil {
+		return err
+	}
+	return s.finishDemotion(ctx, tx, id, actor)
+}
 
-	if _, err := tx.ExecContext(ctx, `
+func (s *DoltStore) prepareDemotedIssue(ctx context.Context, tx *sql.Tx, id string) (*types.Issue, error) {
+	issue, err := scanIssueTxFromTable(ctx, tx, "issues", id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get updated issue for demotion: %w", err)
+	}
+	return issue, nil
+}
+
+func copyDemotionAuxiliaryRows(ctx context.Context, tx *sql.Tx, id string) error {
+	if err := copyAndDeleteDemotionRows(ctx, tx, id, `
 		INSERT IGNORE INTO wisp_labels (issue_id, label)
 		SELECT issue_id, label FROM labels WHERE issue_id = ?
-	`, id); err != nil {
-		return fmt.Errorf("copy labels for demoted issue %s: %w", id, err)
+	`, `DELETE FROM labels WHERE issue_id = ?`, "labels"); err != nil {
+		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM labels WHERE issue_id = ?`, id); err != nil {
-		return fmt.Errorf("delete copied labels for demoted issue %s: %w", id, err)
-	}
-
-	// Demotion is the inverse of promotion: carry id across so the wisp edge
-	// keeps the deterministic key its dependency had. Both tables key id on
-	// (issue_id, target), and wisp_dependencies.id also has no DEFAULT now, so
-	// the copy is both consistent and required (#4259).
-	if _, err := tx.ExecContext(ctx, `
+	if err := copyAndDeleteDemotionRows(ctx, tx, id, `
 		INSERT IGNORE INTO wisp_dependencies (id, issue_id, depends_on_issue_id, depends_on_wisp_id, depends_on_external, type, created_at, created_by, metadata, thread_id)
 		SELECT id, issue_id, depends_on_issue_id, depends_on_wisp_id, depends_on_external, type, created_at, created_by, metadata, thread_id
 		FROM dependencies WHERE issue_id = ?
-	`, id); err != nil {
-		return fmt.Errorf("copy dependencies for demoted issue %s: %w", id, err)
+	`, `DELETE FROM dependencies WHERE issue_id = ?`, "dependencies"); err != nil {
+		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM dependencies WHERE issue_id = ?`, id); err != nil {
-		return fmt.Errorf("delete copied dependencies for demoted issue %s: %w", id, err)
-	}
-
-	if _, err := tx.ExecContext(ctx, `
+	if err := copyAndDeleteDemotionRows(ctx, tx, id, `
 		INSERT IGNORE INTO wisp_events (id, issue_id, event_type, actor, old_value, new_value, comment, created_at)
 		SELECT id, issue_id, event_type, actor, old_value, new_value, comment, created_at
 		FROM events WHERE issue_id = ?
-	`, id); err != nil {
-		return fmt.Errorf("copy events for demoted issue %s: %w", id, err)
+	`, `DELETE FROM events WHERE issue_id = ?`, "events"); err != nil {
+		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM events WHERE issue_id = ?`, id); err != nil {
-		return fmt.Errorf("delete copied events for demoted issue %s: %w", id, err)
-	}
-
-	if _, err := tx.ExecContext(ctx, `
+	if err := copyAndDeleteDemotionRows(ctx, tx, id, `
 		INSERT IGNORE INTO wisp_comments (id, issue_id, author, text, created_at)
 		SELECT id, issue_id, author, text, created_at
 		FROM comments WHERE issue_id = ?
-	`, id); err != nil {
-		return fmt.Errorf("copy comments for demoted issue %s: %w", id, err)
+	`, `DELETE FROM comments WHERE issue_id = ?`, "comments"); err != nil {
+		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM comments WHERE issue_id = ?`, id); err != nil {
-		return fmt.Errorf("delete copied comments for demoted issue %s: %w", id, err)
-	}
+	return nil
+}
 
+func copyAndDeleteDemotionRows(ctx context.Context, tx *sql.Tx, id, copySQL, deleteSQL, name string) error {
+	if _, err := tx.ExecContext(ctx, copySQL, id); err != nil {
+		return fmt.Errorf("copy %s for demoted issue %s: %w", name, id, err)
+	}
+	if _, err := tx.ExecContext(ctx, deleteSQL, id); err != nil {
+		return fmt.Errorf("delete copied %s for demoted issue %s: %w", name, id, err)
+	}
+	return nil
+}
+
+func (s *DoltStore) finishDemotion(ctx context.Context, tx *sql.Tx, id, actor string) error {
 	if err := issueops.RecordFullEventInTable(ctx, tx, "wisp_events", id, types.EventUpdated, actor, "", "demoted to wisp"); err != nil {
 		return fmt.Errorf("record demotion event for demoted issue %s: %w", id, err)
 	}

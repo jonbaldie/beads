@@ -27,9 +27,9 @@ func TestCountsIncludeWispDependencies(t *testing.T) {
 	// ec-perm-dep --blocks--> ec-target   (edge in `dependencies`)
 	// ec-wisp-dep --blocks--> ec-target   (edge in `wisp_dependencies`)
 	for _, issue := range []*types.Issue{
-		{ID: "ec-target", Title: "target", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: "ec-perm-dep", Title: "perm dependent", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: "ec-wisp-dep", Title: "wisp dependent", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true},
+		{IssueID: types.IssueID{ID: "ec-target"}, IssueContent: types.IssueContent{Title: "target"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "ec-perm-dep"}, IssueContent: types.IssueContent{Title: "perm dependent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "ec-wisp-dep"}, IssueContent: types.IssueContent{Title: "wisp dependent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}},
 	} {
 		if err := te.store.CreateIssue(ctx, issue, "tester"); err != nil {
 			t.Fatalf("CreateIssue %s: %v", issue.ID, err)

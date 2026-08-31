@@ -38,11 +38,17 @@ func TestCommitToleratesDirtyIgnoredWisp(t *testing.T) {
 	// proving the store commits real work — so a later "nothing to commit" is
 	// the anti-join at work, not a dead store.
 	durable := &types.Issue{
-		ID:        "dirty-wisp-durable",
-		Title:     "Durable baseline",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "dirty-wisp-durable",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Durable baseline",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, durable, "tester"); err != nil {
 		t.Fatalf("CreateIssue durable: %v", err)
@@ -51,12 +57,20 @@ func TestCommitToleratesDirtyIgnoredWisp(t *testing.T) {
 
 	// An ephemeral create writes the wisps table without committing it.
 	wisp := &types.Issue{
-		ID:        "dirty-wisp-ephemeral",
-		Title:     "Ephemeral wisp",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: "dirty-wisp-ephemeral",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Ephemeral wisp",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, wisp, "tester"); err != nil {
 		t.Fatalf("CreateIssue wisp: %v", err)

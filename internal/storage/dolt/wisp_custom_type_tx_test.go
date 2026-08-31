@@ -49,16 +49,24 @@ func setupLocalServerStore(t *testing.T) (*DoltStore, func()) {
 	defer cancel()
 
 	store, err := New(ctx, &Config{
-		Path:            filepath.Join(beadsDir, "dolt"),
-		BeadsDir:        beadsDir,
-		CommitterName:   "test",
-		CommitterEmail:  "test@example.com",
-		Database:        uniqueTestDBName(t),
-		ServerHost:      "127.0.0.1",
-		ServerPort:      state.Port,
-		ServerUser:      "root",
-		CreateIfMissing: true, // creates and schema-inits the fresh database
-		MaxOpenConns:    1,    // Required: DOLT_CHECKOUT is session-level
+		Path:           filepath.Join(beadsDir, "dolt"),
+		BeadsDir:       beadsDir,
+		CommitterName:  "test",
+		CommitterEmail: "test@example.com",
+		Database:       uniqueTestDBName(t),
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: state.Port,
+			ServerUser: "root",
+		},
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
+		PoolOptions: PoolOptions{
+			// creates and schema-inits the fresh database
+			MaxOpenConns: 1,
+		},
+		// Required: DOLT_CHECKOUT is session-level,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -86,18 +94,30 @@ func TestWispSeesCustomTypeRegisteredInTransaction(t *testing.T) {
 	defer cancel()
 
 	wisp := &types.Issue{
-		Title:     "custom-typed wisp",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.IssueType("duty"),
-		Ephemeral: true,
+		IssueContent: types.IssueContent{
+			Title: "custom-typed wisp",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.IssueType("duty"),
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	batchWisp := &types.Issue{
-		Title:     "custom-typed wisp via batch",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.IssueType("duty"),
-		Ephemeral: true,
+		IssueContent: types.IssueContent{
+			Title: "custom-typed wisp via batch",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.IssueType("duty"),
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	err := store.RunInTransaction(ctx, "register type then create wisps", func(tx storage.Transaction) error {
 		if err := tx.SetConfig(ctx, "types.custom", `["duty"]`); err != nil {

@@ -27,7 +27,7 @@ func buildReadyWorkOrder(policy types.SortPolicy) sqlbuild.ReadyWorkOrder {
 // needs (children of deferred parents, parent descendants), then delegates
 // the clause text to sqlbuild so both stacks share ready semantics. Unlike
 // the classic stack, ORDER BY and LIMIT are applied at the UNION outer query.
-func (r *issueSQLRepositoryImpl) buildReadyWorkPredicates(ctx context.Context, filter types.WorkFilter, tables filterTables) (*readyWorkPredicates, error) {
+func (r *issueReadyRepository) buildReadyWorkPredicates(ctx context.Context, filter types.WorkFilter, tables filterTables) (*readyWorkPredicates, error) {
 	var inputs sqlbuild.ReadyWorkWhereInputs
 	if !filter.IncludeDeferred {
 		deferredChildIDs, dcErr := r.getChildrenOfDeferredParents(ctx)
@@ -62,7 +62,7 @@ var deferredParentEdges = []deferredParentEdge{
 	{"wisp_dependencies", "wisps", "depends_on_wisp_id"},
 }
 
-func (r *issueSQLRepositoryImpl) getChildrenOfDeferredParents(ctx context.Context) ([]string, error) {
+func (r *issueReadyRepository) getChildrenOfDeferredParents(ctx context.Context) ([]string, error) {
 	has, err := r.anyFutureDeferredParent(ctx)
 	if err != nil || !has {
 		return nil, err
@@ -70,7 +70,7 @@ func (r *issueSQLRepositoryImpl) getChildrenOfDeferredParents(ctx context.Contex
 	return r.descendantsOfFutureDeferredParents(ctx)
 }
 
-func (r *issueSQLRepositoryImpl) anyFutureDeferredParent(ctx context.Context) (bool, error) {
+func (r *issueReadyRepository) anyFutureDeferredParent(ctx context.Context) (bool, error) {
 	for _, table := range []string{"issues", "wisps"} {
 		var probe int
 		//nolint:gosec // G201: table is a hardcoded constant.
@@ -89,7 +89,7 @@ func (r *issueSQLRepositoryImpl) anyFutureDeferredParent(ctx context.Context) (b
 	return false, nil
 }
 
-func (r *issueSQLRepositoryImpl) descendantsOfFutureDeferredParents(ctx context.Context) ([]string, error) {
+func (r *issueReadyRepository) descendantsOfFutureDeferredParents(ctx context.Context) ([]string, error) {
 	var childIDs []string
 	for _, e := range deferredParentEdges {
 		//nolint:gosec // G201: depTable/issueTable/targetCol are hardcoded.
@@ -128,73 +128,17 @@ func scanStringsInto(rows *sql.Rows, out *[]string) error {
 }
 
 //nolint:gosec // G201: depTable is hardcoded.
-func (r *issueSQLRepositoryImpl) getDescendantIDs(ctx context.Context, rootID string, maxDepth int) ([]string, error) {
+func (r *issueReadyRepository) getDescendantIDs(ctx context.Context, rootID string, maxDepth int) ([]string, error) {
 	if rootID == "" {
 		return nil, nil
 	}
 
-	queryDescendants := func(includeWisps bool) ([]string, bool, error) {
-		edgeQuery := fmt.Sprintf(`
-			SELECT issue_id, %s FROM dependencies WHERE type = 'parent-child'
-		`, depTargetExpr)
-		if includeWisps {
-			edgeQuery += fmt.Sprintf(`
-			UNION ALL
-			SELECT issue_id, %s FROM wisp_dependencies WHERE type = 'parent-child'
-		`, depTargetExpr)
-		}
-
-		//nolint:gosec // G201: edgeQuery is built from hardcoded SQL plus depTargetExpr (no user input)
-		query := fmt.Sprintf(`
-			WITH RECURSIVE
-			parent_edges(issue_id, depends_on_id) AS (
-				%s
-			),
-			descendants(id, depth, path) AS (
-				SELECT issue_id, 1, CONCAT(',', ?, ',', issue_id, ',')
-				FROM parent_edges
-				WHERE depends_on_id = ?
-				UNION ALL
-				SELECT e.issue_id, d.depth + 1, CONCAT(d.path, e.issue_id, ',')
-				FROM parent_edges e
-				JOIN descendants d ON e.depends_on_id = d.id
-				WHERE (? <= 0 OR d.depth < ?)
-				  AND LOCATE(CONCAT(',', e.issue_id, ','), d.path) = 0
-			)
-			SELECT id, depth FROM descendants WHERE id <> ?
-		`, edgeQuery)
-
-		rows, err := r.runner.QueryContext(ctx, query, rootID, rootID, maxDepth, maxDepth, rootID)
-		if err != nil {
-			return nil, false, err
-		}
-		defer func() { _ = rows.Close() }()
-
-		var result []string
-		reachedMaxDepth := false
-		for rows.Next() {
-			var id string
-			var depth int
-			if err := rows.Scan(&id, &depth); err != nil {
-				return nil, false, fmt.Errorf("scan descendant: %w", err)
-			}
-			result = append(result, id)
-			if maxDepth > 0 && depth >= maxDepth {
-				reachedMaxDepth = true
-			}
-		}
-		if err := rows.Err(); err != nil {
-			return nil, false, fmt.Errorf("descendant rows: %w", err)
-		}
-		return result, reachedMaxDepth, nil
-	}
-
-	result, reachedMaxDepth, err := queryDescendants(true)
+	result, reachedMaxDepth, err := queryDescendantIDs(ctx, r.runner, rootID, maxDepth, true)
 	if err != nil {
 		if !dberrors.IsTableNotExist(err) {
 			return nil, err
 		}
-		result, reachedMaxDepth, err = queryDescendants(false)
+		result, reachedMaxDepth, err = queryDescendantIDs(ctx, r.runner, rootID, maxDepth, false)
 		if err != nil {
 			return nil, err
 		}
@@ -203,4 +147,61 @@ func (r *issueSQLRepositoryImpl) getDescendantIDs(ctx context.Context, rootID st
 		return nil, fmt.Errorf("parent descendant traversal for %s reached max depth %d", rootID, maxDepth)
 	}
 	return result, nil
+}
+
+//nolint:gosec // G201: edgeQuery is built from hardcoded SQL plus depTargetExpr (no user input).
+func queryDescendantIDs(ctx context.Context, runner Runner, rootID string, maxDepth int, includeWisps bool) ([]string, bool, error) {
+	edgeQuery := fmt.Sprintf(`
+		SELECT issue_id, %s FROM dependencies WHERE type = 'parent-child'
+	`, depTargetExpr)
+	if includeWisps {
+		edgeQuery += fmt.Sprintf(`
+		UNION ALL
+		SELECT issue_id, %s FROM wisp_dependencies WHERE type = 'parent-child'
+	`, depTargetExpr)
+	}
+
+	//nolint:gosec // G201: edgeQuery is built from hardcoded SQL plus depTargetExpr (no user input)
+	query := fmt.Sprintf(`
+		WITH RECURSIVE
+		parent_edges(issue_id, depends_on_id) AS (
+			%s
+		),
+		descendants(id, depth, path) AS (
+			SELECT issue_id, 1, CONCAT(',', ?, ',', issue_id, ',')
+			FROM parent_edges
+			WHERE depends_on_id = ?
+			UNION ALL
+			SELECT e.issue_id, d.depth + 1, CONCAT(d.path, e.issue_id, ',')
+			FROM parent_edges e
+			JOIN descendants d ON e.depends_on_id = d.id
+			WHERE (? <= 0 OR d.depth < ?)
+			  AND LOCATE(CONCAT(',', e.issue_id, ','), d.path) = 0
+		)
+		SELECT id, depth FROM descendants WHERE id <> ?
+	`, edgeQuery)
+
+	rows, err := runner.QueryContext(ctx, query, rootID, rootID, maxDepth, maxDepth, rootID)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var result []string
+	reachedMaxDepth := false
+	for rows.Next() {
+		var id string
+		var depth int
+		if err := rows.Scan(&id, &depth); err != nil {
+			return nil, false, fmt.Errorf("scan descendant: %w", err)
+		}
+		result = append(result, id)
+		if maxDepth > 0 && depth >= maxDepth {
+			reachedMaxDepth = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, fmt.Errorf("descendant rows: %w", err)
+	}
+	return result, reachedMaxDepth, nil
 }

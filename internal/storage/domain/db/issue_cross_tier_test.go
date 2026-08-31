@@ -12,13 +12,13 @@ func (s *testSuite) TestParentTierControlsInheritedLabels() {
 		s.resetMintConfig("tier-durable-parent", "")
 		uc := s.issueUseCase()
 		parent, err := uc.CreateIssue(s.Ctx(), domain.CreateIssueParams{
-			Issue:  &types.Issue{Title: "durable parent", IssueType: types.TypeEpic, Priority: 2},
+			Issue:  &types.Issue{IssueContent: types.IssueContent{Title: "durable parent"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeEpic, Priority: 2}},
 			Labels: []string{"durable-parent-label"},
 		}, "tester")
 		s.Require().NoError(err)
 
 		child, err := uc.CreateWisp(s.Ctx(), domain.CreateIssueParams{
-			Issue:                   &types.Issue{Title: "wisp child", IssueType: types.TypeTask, Priority: 2, Ephemeral: true},
+			Issue:                   &types.Issue{IssueContent: types.IssueContent{Title: "wisp child"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}, IssueWisp: types.IssueWisp{Ephemeral: true}},
 			ParentID:                parent.Issue.ID,
 			InheritLabelsFromParent: true,
 		}, "tester")
@@ -34,13 +34,13 @@ func (s *testSuite) TestParentTierControlsInheritedLabels() {
 		s.resetMintConfig("tier-wisp-parent", "")
 		uc := s.issueUseCase()
 		parent, err := uc.CreateWisp(s.Ctx(), domain.CreateIssueParams{
-			Issue:  &types.Issue{Title: "wisp parent", IssueType: types.TypeEpic, Priority: 2, Ephemeral: true},
+			Issue:  &types.Issue{IssueContent: types.IssueContent{Title: "wisp parent"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeEpic, Priority: 2}, IssueWisp: types.IssueWisp{Ephemeral: true}},
 			Labels: []string{"wisp-parent-label"},
 		}, "tester")
 		s.Require().NoError(err)
 
 		child, err := uc.CreateIssue(s.Ctx(), domain.CreateIssueParams{
-			Issue:                   &types.Issue{Title: "durable child", IssueType: types.TypeTask, Priority: 2},
+			Issue:                   &types.Issue{IssueContent: types.IssueContent{Title: "durable child"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}},
 			ParentID:                parent.Issue.ID,
 			InheritLabelsFromParent: true,
 		}, "tester")
@@ -58,11 +58,11 @@ func (s *testSuite) TestReverseCreateDependencyUsesActualSourceTier() {
 	uc := s.issueUseCase()
 
 	wispSource, err := uc.CreateWisp(s.Ctx(), domain.CreateIssueParams{
-		Issue: &types.Issue{Title: "wisp source", IssueType: types.TypeTask, Priority: 2, Ephemeral: true},
+		Issue: &types.Issue{IssueContent: types.IssueContent{Title: "wisp source"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}, IssueWisp: types.IssueWisp{Ephemeral: true}},
 	}, "tester")
 	s.Require().NoError(err)
 	durableTarget, err := uc.CreateIssue(s.Ctx(), domain.CreateIssueParams{
-		Issue: &types.Issue{Title: "durable target", IssueType: types.TypeTask, Priority: 2},
+		Issue: &types.Issue{IssueContent: types.IssueContent{Title: "durable target"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}},
 		Dependencies: []domain.DependencySpec{{
 			Type: types.DepRelated, TargetID: wispSource.Issue.ID, SwapDirection: true,
 			Metadata: `{"from":"wisp"}`, ThreadID: "wisp-thread",
@@ -77,11 +77,11 @@ func (s *testSuite) TestReverseCreateDependencyUsesActualSourceTier() {
 	s.Equal("wisp-thread", wispRecords[wispSource.Issue.ID][0].ThreadID)
 
 	durableSource, err := uc.CreateIssue(s.Ctx(), domain.CreateIssueParams{
-		Issue: &types.Issue{Title: "durable source", IssueType: types.TypeTask, Priority: 2},
+		Issue: &types.Issue{IssueContent: types.IssueContent{Title: "durable source"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}},
 	}, "tester")
 	s.Require().NoError(err)
 	wispTarget, err := uc.CreateWisp(s.Ctx(), domain.CreateIssueParams{
-		Issue: &types.Issue{Title: "wisp target", IssueType: types.TypeTask, Priority: 2, Ephemeral: true},
+		Issue: &types.Issue{IssueContent: types.IssueContent{Title: "wisp target"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}, IssueWisp: types.IssueWisp{Ephemeral: true}},
 		Dependencies: []domain.DependencySpec{{
 			Type: types.DepRelated, TargetID: durableSource.Issue.ID, SwapDirection: true,
 			Metadata: `{"from":"durable"}`, ThreadID: "durable-thread",

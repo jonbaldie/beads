@@ -58,11 +58,17 @@ func BenchmarkLabelListAllLabelCounting(b *testing.B) {
 
 	for i := range issueCount {
 		issue := &types.Issue{
-			ID:        fmt.Sprintf("bench-%04d", i),
-			Title:     fmt.Sprintf("Bench issue %d", i),
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("bench-%04d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Bench issue %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "bench"); err != nil {
 			b.Fatalf("CreateIssue %s: %v", issue.ID, err)

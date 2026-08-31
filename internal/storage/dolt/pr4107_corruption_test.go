@@ -45,7 +45,7 @@ func TestPR4107WispIsBlockedMigrationBackfillsBlockedWisps(t *testing.T) {
 		t.Errorf("default ready work returned blocked no-history wisp after migration: %v", issueIDs(defaultReady))
 	}
 
-	ephemeralReady, err := store.GetReadyWork(ctx, types.WorkFilter{IncludeEphemeral: true})
+	ephemeralReady, err := store.GetReadyWork(ctx, types.WorkFilter{WorkFilterExtra: types.WorkFilterExtra{IncludeEphemeral: true}})
 	if err != nil {
 		t.Fatalf("GetReadyWork include ephemeral: %v", err)
 	}
@@ -303,7 +303,7 @@ func TestPR4107JSONCountReadPathsTolerateMissingWispTables(t *testing.T) {
 		createPerm(t, ctx, store, "pr4107-missing-wisps-query")
 		dropWispTables(t, ctx, store)
 
-		results, err := store.SearchIssuesWithCounts(ctx, "", types.IssueFilter{Limit: 10})
+		results, err := store.SearchIssuesWithCounts(ctx, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 10}})
 		if err != nil {
 			t.Fatalf("SearchIssuesWithCounts should tolerate missing wisp tables: %v", err)
 		}
@@ -322,7 +322,7 @@ func TestPR4107JSONCountReadPathsTolerateMissingWispTables(t *testing.T) {
 		createPerm(t, ctx, store, "pr4107-missing-wisps-ready")
 		dropWispTables(t, ctx, store)
 
-		results, err := store.GetReadyWorkWithCounts(ctx, types.WorkFilter{Limit: 10})
+		results, err := store.GetReadyWorkWithCounts(ctx, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Limit: 10}})
 		if err != nil {
 			t.Fatalf("GetReadyWorkWithCounts should tolerate missing wisp tables: %v", err)
 		}
@@ -342,7 +342,7 @@ func TestPR4107SearchIssuesWithCountsLimitIsGlobalAcrossIssuesAndWisps(t *testin
 	createPerm(t, ctx, store, "pr4107-limit-issue")
 	createEphemeralWisp(t, ctx, store, "pr4107-limit-wisp")
 
-	results, err := store.SearchIssuesWithCounts(ctx, "", types.IssueFilter{Limit: 1})
+	results, err := store.SearchIssuesWithCounts(ctx, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 1}})
 	if err != nil {
 		t.Fatalf("SearchIssuesWithCounts limit=1: %v", err)
 	}
@@ -359,26 +359,40 @@ func TestPR4107SearchIssuesWithCountsLimitUsesGlobalSortOrderAcrossIssuesAndWisp
 	defer cancel()
 
 	if err := store.CreateIssue(ctx, &types.Issue{
-		ID:        "pr4107-limit-low-priority-issue",
-		Title:     "low priority issue",
-		Status:    types.StatusOpen,
-		Priority:  4,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "pr4107-limit-low-priority-issue",
+		},
+		IssueContent: types.IssueContent{
+			Title: "low priority issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  4,
+			IssueType: types.TypeTask,
+		},
 	}, "tester"); err != nil {
 		t.Fatalf("create low-priority issue: %v", err)
 	}
 	if err := store.CreateIssue(ctx, &types.Issue{
-		ID:        "pr4107-limit-high-priority-wisp",
-		Title:     "high priority wisp",
-		Status:    types.StatusOpen,
-		Priority:  0,
-		IssueType: types.TypeTask,
-		NoHistory: true,
+		IssueID: types.IssueID{
+			ID: "pr4107-limit-high-priority-wisp",
+		},
+		IssueContent: types.IssueContent{
+			Title: "high priority wisp",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  0,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			NoHistory: true,
+		},
 	}, "tester"); err != nil {
 		t.Fatalf("create high-priority wisp: %v", err)
 	}
 
-	results, err := store.SearchIssuesWithCounts(ctx, "", types.IssueFilter{Limit: 1})
+	results, err := store.SearchIssuesWithCounts(ctx, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 1}})
 	if err != nil {
 		t.Fatalf("SearchIssuesWithCounts limit=1: %v", err)
 	}
@@ -395,26 +409,40 @@ func TestPR4107ReadyWorkWithCountsLimitUsesGlobalSortOrderAcrossIssuesAndWisps(t
 	defer cancel()
 
 	if err := store.CreateIssue(ctx, &types.Issue{
-		ID:        "pr4107-ready-limit-low-priority-issue",
-		Title:     "low priority ready issue",
-		Status:    types.StatusOpen,
-		Priority:  4,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "pr4107-ready-limit-low-priority-issue",
+		},
+		IssueContent: types.IssueContent{
+			Title: "low priority ready issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  4,
+			IssueType: types.TypeTask,
+		},
 	}, "tester"); err != nil {
 		t.Fatalf("create low-priority issue: %v", err)
 	}
 	if err := store.CreateIssue(ctx, &types.Issue{
-		ID:        "pr4107-ready-limit-high-priority-wisp",
-		Title:     "high priority ready wisp",
-		Status:    types.StatusOpen,
-		Priority:  0,
-		IssueType: types.TypeTask,
-		NoHistory: true,
+		IssueID: types.IssueID{
+			ID: "pr4107-ready-limit-high-priority-wisp",
+		},
+		IssueContent: types.IssueContent{
+			Title: "high priority ready wisp",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  0,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			NoHistory: true,
+		},
 	}, "tester"); err != nil {
 		t.Fatalf("create high-priority no-history wisp: %v", err)
 	}
 
-	results, err := store.GetReadyWorkWithCounts(ctx, types.WorkFilter{Limit: 1, SortPolicy: types.SortPolicyPriority})
+	results, err := store.GetReadyWorkWithCounts(ctx, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Limit: 1, SortPolicy: types.SortPolicyPriority}})
 	if err != nil {
 		t.Fatalf("GetReadyWorkWithCounts limit=1: %v", err)
 	}
@@ -439,7 +467,7 @@ func TestPR4107SearchIssuesWithCountsMatchesMixedDependencyCounts(t *testing.T) 
 	addDependency(t, ctx, store, "pr4107-counts-wisp-dependent", "pr4107-counts-target", types.DepBlocks)
 	addDependency(t, ctx, store, "pr4107-counts-wisp-source", "pr4107-counts-target", types.DepBlocks)
 
-	results, err := store.SearchIssuesWithCounts(ctx, "", types.IssueFilter{Limit: 0})
+	results, err := store.SearchIssuesWithCounts(ctx, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 0}})
 	if err != nil {
 		t.Fatalf("SearchIssuesWithCounts: %v", err)
 	}
@@ -484,7 +512,7 @@ func TestPR4107ReadyWorkWithCountsExcludesBlockedWisps(t *testing.T) {
 		t.Fatalf("default ready counts returned blocked no-history wisp: %v", issueWithCountsIDs(defaultReady))
 	}
 
-	ephemeralReady, err := store.GetReadyWorkWithCounts(ctx, types.WorkFilter{IncludeEphemeral: true})
+	ephemeralReady, err := store.GetReadyWorkWithCounts(ctx, types.WorkFilter{WorkFilterExtra: types.WorkFilterExtra{IncludeEphemeral: true}})
 	if err != nil {
 		t.Fatalf("GetReadyWorkWithCounts include ephemeral: %v", err)
 	}
@@ -506,7 +534,7 @@ func TestPR4107SearchIssuesWithCountsEphemeralFalseIncludesNoHistoryOnly(t *test
 	createEphemeralWisp(t, ctx, store, "pr4107-eph-false-ephemeral")
 
 	ephemeral := false
-	results, err := store.SearchIssuesWithCounts(ctx, "", types.IssueFilter{Ephemeral: &ephemeral})
+	results, err := store.SearchIssuesWithCounts(ctx, "", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{Ephemeral: &ephemeral}})
 	if err != nil {
 		t.Fatalf("SearchIssuesWithCounts ephemeral=false: %v", err)
 	}
@@ -580,12 +608,20 @@ func TestPR4107Migration0047ExecutesLegacyWispDependencySplit(t *testing.T) {
 func createNoHistoryWisp(t *testing.T, ctx context.Context, store *DoltStore, id string) {
 	t.Helper()
 	issue := &types.Issue{
-		ID:        id,
-		Title:     "no-history " + id,
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		NoHistory: true,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: "no-history " + id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			NoHistory: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("create no-history wisp %s: %v", id, err)
@@ -595,12 +631,20 @@ func createNoHistoryWisp(t *testing.T, ctx context.Context, store *DoltStore, id
 func createEphemeralWisp(t *testing.T, ctx context.Context, store *DoltStore, id string) {
 	t.Helper()
 	issue := &types.Issue{
-		ID:        id,
-		Title:     "ephemeral " + id,
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: "ephemeral " + id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("create ephemeral wisp %s: %v", id, err)

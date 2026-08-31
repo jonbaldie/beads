@@ -99,12 +99,16 @@ func setupBenchStore(b *testing.B) (*DoltStore, func()) {
 
 	dbName := benchDatabaseName()
 	cfg := &Config{
-		Path:            tmpDir,
-		CommitterName:   "bench",
-		CommitterEmail:  "bench@example.com",
-		Database:        dbName,
-		ServerPort:      port,
-		CreateIfMissing: true,
+		Path:           tmpDir,
+		CommitterName:  "bench",
+		CommitterEmail: "bench@example.com",
+		Database:       dbName,
+		ServerOptions: ServerOptions{
+			ServerPort: port,
+		},
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
 	}
 
 	store, err := New(ctx, cfg)
@@ -167,12 +171,16 @@ func BenchmarkBootstrapEmbedded(b *testing.B) {
 	// Create initial store to set up schema
 	dbName := benchDatabaseName()
 	cfg := &Config{
-		Path:            tmpDir,
-		CommitterName:   "bench",
-		CommitterEmail:  "bench@example.com",
-		Database:        dbName,
-		ServerPort:      port,
-		CreateIfMissing: true,
+		Path:           tmpDir,
+		CommitterName:  "bench",
+		CommitterEmail: "bench@example.com",
+		Database:       dbName,
+		ServerOptions: ServerOptions{
+			ServerPort: port,
+		},
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
 	}
 
 	initStore, err := New(ctx, cfg)
@@ -201,12 +209,18 @@ func BenchmarkColdStart(b *testing.B) {
 
 	// Create a test issue
 	issue := &types.Issue{
-		ID:          "cold-start-issue",
-		Title:       "Cold Start Test Issue",
-		Description: "Issue for cold start benchmark",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "cold-start-issue",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Cold Start Test Issue",
+			Description: "Issue for cold start benchmark",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "bench"); err != nil {
 		b.Fatalf("failed to create issue: %v", err)
@@ -218,11 +232,13 @@ func BenchmarkColdStart(b *testing.B) {
 	store.Close()
 
 	cfg := &Config{
-		Path:            tmpDir,
-		CommitterName:   "bench",
-		CommitterEmail:  "bench@example.com",
-		Database:        dbName,
-		CreateIfMissing: true,
+		Path:           tmpDir,
+		CommitterName:  "bench",
+		CommitterEmail: "bench@example.com",
+		Database:       dbName,
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
 	}
 
 	b.ResetTimer()
@@ -257,12 +273,18 @@ func BenchmarkWarmCache(b *testing.B) {
 
 	// Create a test issue
 	issue := &types.Issue{
-		ID:          "warm-cache-issue",
-		Title:       "Warm Cache Test Issue",
-		Description: "Issue for warm cache benchmark",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "warm-cache-issue",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Warm Cache Test Issue",
+			Description: "Issue for warm cache benchmark",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "bench"); err != nil {
 		b.Fatalf("failed to create issue: %v", err)
@@ -287,11 +309,17 @@ func BenchmarkCLIWorkflow(b *testing.B) {
 	// Create some issues
 	for i := 0; i < 20; i++ {
 		issue := &types.Issue{
-			ID:        fmt.Sprintf("cli-workflow-%d", i),
-			Title:     fmt.Sprintf("CLI Workflow Issue %d", i),
-			Status:    types.StatusOpen,
-			Priority:  (i % 4) + 1,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("cli-workflow-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("CLI Workflow Issue %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  (i % 4) + 1,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "bench"); err != nil {
 			b.Fatalf("failed to create issue: %v", err)
@@ -303,11 +331,13 @@ func BenchmarkCLIWorkflow(b *testing.B) {
 	store.Close()
 
 	cfg := &Config{
-		Path:            tmpDir,
-		CommitterName:   "bench",
-		CommitterEmail:  "bench@example.com",
-		Database:        dbName,
-		CreateIfMissing: true,
+		Path:           tmpDir,
+		CommitterName:  "bench",
+		CommitterEmail: "bench@example.com",
+		Database:       dbName,
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
 	}
 
 	b.ResetTimer()
@@ -350,11 +380,15 @@ func BenchmarkCreateIssue(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		issue := &types.Issue{
-			Title:       fmt.Sprintf("Benchmark Issue %d", i),
-			Description: "Benchmark issue for performance testing",
-			Status:      types.StatusOpen,
-			Priority:    (i % 4) + 1,
-			IssueType:   types.TypeTask,
+			IssueContent: types.IssueContent{
+				Title:       fmt.Sprintf("Benchmark Issue %d", i),
+				Description: "Benchmark issue for performance testing",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  (i % 4) + 1,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "bench"); err != nil {
 			b.Fatalf("failed to create issue: %v", err)
@@ -371,12 +405,18 @@ func BenchmarkGetIssue(b *testing.B) {
 
 	// Create a test issue
 	issue := &types.Issue{
-		ID:          "bench-get-issue",
-		Title:       "Get Benchmark Issue",
-		Description: "For get benchmark",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "bench-get-issue",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Get Benchmark Issue",
+			Description: "For get benchmark",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "bench"); err != nil {
 		b.Fatalf("failed to create issue: %v", err)
@@ -400,12 +440,18 @@ func BenchmarkUpdateIssue(b *testing.B) {
 
 	// Create a test issue
 	issue := &types.Issue{
-		ID:          "bench-update-issue",
-		Title:       "Update Benchmark Issue",
-		Description: "For update benchmark",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "bench-update-issue",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Update Benchmark Issue",
+			Description: "For update benchmark",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "bench"); err != nil {
 		b.Fatalf("failed to create issue: %v", err)
@@ -440,12 +486,18 @@ func BenchmarkBulkCreateIssues(b *testing.B) {
 		issues := make([]*types.Issue, batchSize)
 		for j := 0; j < batchSize; j++ {
 			issues[j] = &types.Issue{
-				ID:          fmt.Sprintf("bulk-%d-%d", i, j),
-				Title:       fmt.Sprintf("Bulk Issue %d-%d", i, j),
-				Description: "Bulk created issue",
-				Status:      types.StatusOpen,
-				Priority:    (j % 4) + 1,
-				IssueType:   types.TypeTask,
+				IssueID: types.IssueID{
+					ID: fmt.Sprintf("bulk-%d-%d", i, j),
+				},
+				IssueContent: types.IssueContent{
+					Title:       fmt.Sprintf("Bulk Issue %d-%d", i, j),
+					Description: "Bulk created issue",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  (j % 4) + 1,
+					IssueType: types.TypeTask,
+				},
 			}
 		}
 		if err := store.CreateIssues(ctx, issues, "bench"); err != nil {
@@ -469,12 +521,18 @@ func BenchmarkBulkCreate1000Issues(b *testing.B) {
 		issues := make([]*types.Issue, batchSize)
 		for j := 0; j < batchSize; j++ {
 			issues[j] = &types.Issue{
-				ID:          fmt.Sprintf("bulk1k-%d-%d", i, j),
-				Title:       fmt.Sprintf("Bulk 1K Issue %d-%d", i, j),
-				Description: "Bulk created issue for 1000 issue benchmark",
-				Status:      types.StatusOpen,
-				Priority:    (j % 4) + 1,
-				IssueType:   types.TypeTask,
+				IssueID: types.IssueID{
+					ID: fmt.Sprintf("bulk1k-%d-%d", i, j),
+				},
+				IssueContent: types.IssueContent{
+					Title:       fmt.Sprintf("Bulk 1K Issue %d-%d", i, j),
+					Description: "Bulk created issue for 1000 issue benchmark",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  (j % 4) + 1,
+					IssueType: types.TypeTask,
+				},
 			}
 		}
 		if err := store.CreateIssues(ctx, issues, "bench"); err != nil {
@@ -499,12 +557,18 @@ func BenchmarkSearchIssues(b *testing.B) {
 	issues := make([]*types.Issue, 100)
 	for i := 0; i < 100; i++ {
 		issues[i] = &types.Issue{
-			ID:          fmt.Sprintf("search-%d", i),
-			Title:       fmt.Sprintf("Searchable Issue Number %d", i),
-			Description: fmt.Sprintf("This is issue %d with some searchable content about testing", i),
-			Status:      types.StatusOpen,
-			Priority:    (i % 4) + 1,
-			IssueType:   types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("search-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title:       fmt.Sprintf("Searchable Issue Number %d", i),
+				Description: fmt.Sprintf("This is issue %d with some searchable content about testing", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  (i % 4) + 1,
+				IssueType: types.TypeTask,
+			},
 		}
 	}
 	if err := store.CreateIssues(ctx, issues, "bench"); err != nil {
@@ -537,12 +601,18 @@ func BenchmarkSearchWithFilter(b *testing.B) {
 		}
 
 		issue := &types.Issue{
-			ID:          fmt.Sprintf("filter-search-%d", i),
-			Title:       fmt.Sprintf("Filter Search Issue %d", i),
-			Description: "Issue for filtered search benchmark",
-			Status:      status,
-			Priority:    (i % 4) + 1,
-			IssueType:   types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("filter-search-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title:       fmt.Sprintf("Filter Search Issue %d", i),
+				Description: "Issue for filtered search benchmark",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    status,
+				Priority:  (i % 4) + 1,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "bench"); err != nil {
 			b.Fatalf("failed to create issue: %v", err)
@@ -553,7 +623,7 @@ func BenchmarkSearchWithFilter(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := store.SearchIssues(ctx, "", types.IssueFilter{Status: &openStatus})
+		_, err := store.SearchIssues(ctx, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Status: &openStatus}})
 		if err != nil {
 			b.Fatalf("failed to search with filter: %v", err)
 		}
@@ -573,11 +643,17 @@ func BenchmarkAddDependency(b *testing.B) {
 
 	// Create issues to link
 	parent := &types.Issue{
-		ID:        "dep-parent",
-		Title:     "Dependency Parent",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "dep-parent",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Dependency Parent",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
 	}
 	if err := store.CreateIssue(ctx, parent, "bench"); err != nil {
 		b.Fatalf("failed to create parent: %v", err)
@@ -585,11 +661,17 @@ func BenchmarkAddDependency(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		child := &types.Issue{
-			ID:        fmt.Sprintf("dep-child-%d", i),
-			Title:     fmt.Sprintf("Dependency Child %d", i),
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("dep-child-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Dependency Child %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, child, "bench"); err != nil {
 			b.Fatalf("failed to create child: %v", err)
@@ -618,11 +700,17 @@ func BenchmarkGetDependencies(b *testing.B) {
 
 	// Create a child with multiple dependencies
 	child := &types.Issue{
-		ID:        "multi-dep-child",
-		Title:     "Multi Dependency Child",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "multi-dep-child",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Multi Dependency Child",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, child, "bench"); err != nil {
 		b.Fatalf("failed to create child: %v", err)
@@ -631,11 +719,17 @@ func BenchmarkGetDependencies(b *testing.B) {
 	// Create 10 parents and link them
 	for i := 0; i < 10; i++ {
 		parent := &types.Issue{
-			ID:        fmt.Sprintf("multi-parent-%d", i),
-			Title:     fmt.Sprintf("Multi Parent %d", i),
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("multi-parent-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Multi Parent %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, parent, "bench"); err != nil {
 			b.Fatalf("failed to create parent: %v", err)
@@ -669,18 +763,30 @@ func BenchmarkIsBlocked(b *testing.B) {
 
 	// Create parent and child with blocking relationship
 	parent := &types.Issue{
-		ID:        "block-parent",
-		Title:     "Blocking Parent",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "block-parent",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocking Parent",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	child := &types.Issue{
-		ID:        "block-child",
-		Title:     "Blocked Child",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "block-child",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocked Child",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, parent, "bench"); err != nil {
 		b.Fatalf("failed to create parent: %v", err)
@@ -720,11 +826,17 @@ func BenchmarkConcurrentReads(b *testing.B) {
 
 	// Create test issue
 	issue := &types.Issue{
-		ID:        "concurrent-read",
-		Title:     "Concurrent Read Issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "concurrent-read",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Concurrent Read Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "bench"); err != nil {
 		b.Fatalf("failed to create issue: %v", err)
@@ -760,11 +872,17 @@ func BenchmarkConcurrentWrites(b *testing.B) {
 			mu.Unlock()
 
 			issue := &types.Issue{
-				ID:        fmt.Sprintf("concurrent-write-%d", id),
-				Title:     fmt.Sprintf("Concurrent Write Issue %d", id),
-				Status:    types.StatusOpen,
-				Priority:  2,
-				IssueType: types.TypeTask,
+				IssueID: types.IssueID{
+					ID: fmt.Sprintf("concurrent-write-%d", id),
+				},
+				IssueContent: types.IssueContent{
+					Title: fmt.Sprintf("Concurrent Write Issue %d", id),
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  2,
+					IssueType: types.TypeTask,
+				},
 			}
 			if err := store.CreateIssue(ctx, issue, "bench"); err != nil {
 				b.Errorf("concurrent write failed: %v", err)
@@ -783,11 +901,17 @@ func BenchmarkConcurrentMixedWorkload(b *testing.B) {
 	// Create some initial issues
 	for i := 0; i < 50; i++ {
 		issue := &types.Issue{
-			ID:        fmt.Sprintf("mixed-%d", i),
-			Title:     fmt.Sprintf("Mixed Workload Issue %d", i),
-			Status:    types.StatusOpen,
-			Priority:  (i % 4) + 1,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("mixed-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Mixed Workload Issue %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  (i % 4) + 1,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "bench"); err != nil {
 			b.Fatalf("failed to create issue: %v", err)
@@ -810,11 +934,17 @@ func BenchmarkConcurrentMixedWorkload(b *testing.B) {
 				mu.Unlock()
 
 				issue := &types.Issue{
-					ID:        fmt.Sprintf("mixed-new-%d", id),
-					Title:     fmt.Sprintf("Mixed New Issue %d", id),
-					Status:    types.StatusOpen,
-					Priority:  2,
-					IssueType: types.TypeTask,
+					IssueID: types.IssueID{
+						ID: fmt.Sprintf("mixed-new-%d", id),
+					},
+					IssueContent: types.IssueContent{
+						Title: fmt.Sprintf("Mixed New Issue %d", id),
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Status:    types.StatusOpen,
+						Priority:  2,
+						IssueType: types.TypeTask,
+					},
 				}
 				if err := store.CreateIssue(ctx, issue, "bench"); err != nil {
 					b.Errorf("write failed: %v", err)
@@ -845,11 +975,17 @@ func BenchmarkCommit(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		// Create an issue
 		issue := &types.Issue{
-			ID:        fmt.Sprintf("commit-bench-%d", i),
-			Title:     fmt.Sprintf("Commit Bench Issue %d", i),
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("commit-bench-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Commit Bench Issue %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "bench"); err != nil {
 			b.Fatalf("failed to create issue: %v", err)
@@ -872,11 +1008,17 @@ func BenchmarkLog(b *testing.B) {
 	// Create some commits
 	for i := 0; i < 20; i++ {
 		issue := &types.Issue{
-			ID:        fmt.Sprintf("log-bench-%d", i),
-			Title:     fmt.Sprintf("Log Bench Issue %d", i),
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("log-bench-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Log Bench Issue %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "bench"); err != nil {
 			b.Fatalf("failed to create issue: %v", err)
@@ -916,11 +1058,17 @@ func BenchmarkGetStatistics(b *testing.B) {
 		}
 
 		issue := &types.Issue{
-			ID:        fmt.Sprintf("stats-%d", i),
-			Title:     fmt.Sprintf("Stats Issue %d", i),
-			Status:    status,
-			Priority:  (i % 4) + 1,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("stats-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Stats Issue %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    status,
+				Priority:  (i % 4) + 1,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "bench"); err != nil {
 			b.Fatalf("failed to create issue: %v", err)
@@ -946,22 +1094,34 @@ func BenchmarkGetReadyWork(b *testing.B) {
 	// Create issues with dependencies
 	for i := 0; i < 50; i++ {
 		parent := &types.Issue{
-			ID:        fmt.Sprintf("ready-parent-%d", i),
-			Title:     fmt.Sprintf("Ready Parent %d", i),
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("ready-parent-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Ready Parent %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, parent, "bench"); err != nil {
 			b.Fatalf("failed to create parent: %v", err)
 		}
 
 		child := &types.Issue{
-			ID:        fmt.Sprintf("ready-child-%d", i),
-			Title:     fmt.Sprintf("Ready Child %d", i),
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("ready-child-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Ready Child %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, child, "bench"); err != nil {
 			b.Fatalf("failed to create child: %v", err)
@@ -1211,19 +1371,27 @@ func BenchmarkPerfSearchTypedLabelFilter_5K(b *testing.B) {
 			labels = append(labels, "perf-hot")
 		}
 		issues = append(issues, &types.Issue{
-			ID:        fmt.Sprintf("bench-perf-search-%05d", i),
-			Title:     fmt.Sprintf("Search label benchmark issue %05d", i),
-			Status:    types.StatusOpen,
-			Priority:  (i % 4) + 1,
-			IssueType: issueType,
-			Labels:    labels,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("bench-perf-search-%05d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Search label benchmark issue %05d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  (i % 4) + 1,
+				IssueType: issueType,
+			},
+			IssueGraph: types.IssueGraph{
+				Labels: labels,
+			},
 		})
 	}
 	createBenchIssueBatch(b, store, issues)
 
 	ctx := context.Background()
 	taskType := types.TypeTask
-	filter := types.IssueFilter{IssueType: &taskType, Labels: []string{"perf-hot"}, Limit: 200}
+	filter := types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IssueType: &taskType, Labels: []string{"perf-hot"}, Limit: 200}}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		results, err := store.SearchIssues(ctx, "", filter)
@@ -1244,11 +1412,17 @@ func BenchmarkPerfResolvePartialIDInvalidInput_5K(b *testing.B) {
 	issues := make([]*types.Issue, 0, total)
 	for i := 0; i < total; i++ {
 		issues = append(issues, &types.Issue{
-			ID:        fmt.Sprintf("bench-perf-partial-%05d", i),
-			Title:     fmt.Sprintf("Partial ID benchmark issue %05d", i),
-			Status:    types.StatusOpen,
-			Priority:  (i % 4) + 1,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("bench-perf-partial-%05d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Partial ID benchmark issue %05d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  (i % 4) + 1,
+				IssueType: types.TypeTask,
+			},
 		})
 	}
 	createBenchIssueBatch(b, store, issues)
@@ -1288,17 +1462,27 @@ func BenchmarkPerfIDProjectionVsHydration_5K(b *testing.B) {
 	issues := make([]*types.Issue, 0, total)
 	for i := 0; i < total; i++ {
 		issues = append(issues, &types.Issue{
-			ID:                 fmt.Sprintf("narrowbench-%05d", i),
-			Title:              fmt.Sprintf("narrowbench issue %05d", i),
-			Description:        bigText,
-			Design:             bigText,
-			AcceptanceCriteria: bigText,
-			Notes:              bigText,
-			Metadata:           bigJSON,
-			Status:             types.StatusOpen,
-			Priority:           (i % 4) + 1,
-			IssueType:          types.TypeTask,
-			Labels:             []string{"area-narrow", fmt.Sprintf("bucket-%03d", i%100)},
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("narrowbench-%05d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title:              fmt.Sprintf("narrowbench issue %05d", i),
+				Description:        bigText,
+				Design:             bigText,
+				AcceptanceCriteria: bigText,
+				Notes:              bigText,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  (i % 4) + 1,
+				IssueType: types.TypeTask,
+			},
+			IssueMeta: types.IssueMeta{
+				Metadata: bigJSON,
+			},
+			IssueGraph: types.IssueGraph{
+				Labels: []string{"area-narrow", fmt.Sprintf("bucket-%03d", i%100)},
+			},
 		})
 	}
 	createBenchIssueBatch(b, store, issues)
@@ -1329,7 +1513,7 @@ func BenchmarkPerfIDProjectionVsHydration_5K(b *testing.B) {
 
 	b.Run("SearchIssues_SkipLabels", func(b *testing.B) {
 		b.ReportAllocs()
-		filter := types.IssueFilter{SkipLabels: true}
+		filter := types.IssueFilter{IssueFilterHydrate: types.IssueFilterHydrate{SkipLabels: true}}
 		for i := 0; i < b.N; i++ {
 			if got, err := store.SearchIssues(ctx, query, filter); err != nil {
 				b.Fatalf("SearchIssues SkipLabels: %v", err)
@@ -1358,20 +1542,32 @@ func BenchmarkPerfAddDependencyCycleCheck_DiamondDAG(b *testing.B) {
 	const layers = 10
 	issues := make([]*types.Issue, 0, 2*layers+1)
 	issues = append(issues, &types.Issue{
-		ID:        "bench-perf-cycle-source",
-		Title:     "Cycle source",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "bench-perf-cycle-source",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Cycle source",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	})
 	for layer := 0; layer < layers; layer++ {
 		for _, suffix := range []string{"a", "b"} {
 			issue := &types.Issue{
-				ID:        fmt.Sprintf("bench-perf-cycle-l%02d-%s", layer, suffix),
-				Title:     fmt.Sprintf("Cycle diamond layer %02d %s", layer, suffix),
-				Status:    types.StatusOpen,
-				Priority:  2,
-				IssueType: types.TypeTask,
+				IssueID: types.IssueID{
+					ID: fmt.Sprintf("bench-perf-cycle-l%02d-%s", layer, suffix),
+				},
+				IssueContent: types.IssueContent{
+					Title: fmt.Sprintf("Cycle diamond layer %02d %s", layer, suffix),
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  2,
+					IssueType: types.TypeTask,
+				},
 			}
 			if layer < layers-1 {
 				issue.Dependencies = []*types.Dependency{
@@ -1417,37 +1613,57 @@ func BenchmarkPerfReadyWorkLimited_LargeBlockedGraph(b *testing.B) {
 	issues := make([]*types.Issue, 0, estimatedRowCount)
 	for i := 0; i < readyCount; i++ {
 		issues = append(issues, &types.Issue{
-			ID:        fmt.Sprintf("bench-perf-ready-clear-%04d", i),
-			Title:     fmt.Sprintf("Ready issue %04d", i),
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("bench-perf-ready-clear-%04d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Ready issue %04d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
 		})
 	}
 	for i := 0; i < blockedPairCount; i++ {
 		blockerID := fmt.Sprintf("bench-perf-ready-blocker-%05d", i)
 		issues = append(issues, &types.Issue{
-			ID:        blockerID,
-			Title:     fmt.Sprintf("Ready blocker %05d", i),
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: blockerID,
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Ready blocker %05d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		})
 		issues = append(issues, &types.Issue{
-			ID:        fmt.Sprintf("bench-perf-ready-blocked-%05d", i),
-			Title:     fmt.Sprintf("Blocked ready issue %05d", i),
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Dependencies: []*types.Dependency{
-				{DependsOnID: blockerID, Type: types.DepBlocks},
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("bench-perf-ready-blocked-%05d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Blocked ready issue %05d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueGraph: types.IssueGraph{
+				Dependencies: []*types.Dependency{
+					{DependsOnID: blockerID, Type: types.DepBlocks},
+				},
 			},
 		})
 	}
 	createBenchIssueBatch(b, store, issues)
 
 	ctx := context.Background()
-	filter := types.WorkFilter{Limit: 50, SortPolicy: types.SortPolicyPriority}
+	filter := types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Limit: 50, SortPolicy: types.SortPolicyPriority}}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		results, err := store.GetReadyWork(ctx, filter)
@@ -1474,15 +1690,27 @@ func BenchmarkPerfReadyWorkLimited_ExampleOrgWispHeavy(b *testing.B) {
 
 	makeWisp := func(id string, priority int, assignee string, metadata string, deferUntil *time.Time) *types.Issue {
 		return &types.Issue{
-			ID:         id,
-			Title:      id,
-			Status:     types.StatusOpen,
-			Priority:   priority,
-			IssueType:  types.TypeTask,
-			Assignee:   assignee,
-			Ephemeral:  true,
-			Metadata:   []byte(metadata),
-			DeferUntil: deferUntil,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  priority,
+				IssueType: types.TypeTask,
+				Assignee:  assignee,
+			},
+			IssueLease: types.IssueLease{
+				DeferUntil: deferUntil,
+			},
+			IssueMeta: types.IssueMeta{
+				Metadata: []byte(metadata),
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		}
 	}
 
@@ -1494,10 +1722,14 @@ func BenchmarkPerfReadyWorkLimited_ExampleOrgWispHeavy(b *testing.B) {
 		{
 			name: "AssignedDenseLimit20Of8000",
 			filter: types.WorkFilter{
-				Assignee:         ptrString(gcAssignee),
-				IncludeEphemeral: true,
-				Limit:            readyLimit,
-				SortPolicy:       types.SortPolicyPriority,
+				WorkFilterCore: types.WorkFilterCore{
+					Assignee:   ptrString(gcAssignee),
+					Limit:      readyLimit,
+					SortPolicy: types.SortPolicyPriority,
+				},
+				WorkFilterExtra: types.WorkFilterExtra{
+					IncludeEphemeral: true,
+				},
 			},
 			issues: func() []*types.Issue {
 				issues := make([]*types.Issue, 0, wispCount)
@@ -1516,11 +1748,15 @@ func BenchmarkPerfReadyWorkLimited_ExampleOrgWispHeavy(b *testing.B) {
 		{
 			name: "MetadataRouteDenseLimit20Of8000",
 			filter: types.WorkFilter{
-				Unassigned:       true,
-				MetadataFields:   map[string]string{"route.routed_to": gcRoute},
-				IncludeEphemeral: true,
-				Limit:            readyLimit,
-				SortPolicy:       types.SortPolicyPriority,
+				WorkFilterCore: types.WorkFilterCore{
+					Unassigned: true,
+					Limit:      readyLimit,
+					SortPolicy: types.SortPolicyPriority,
+				},
+				WorkFilterExtra: types.WorkFilterExtra{
+					MetadataFields:   map[string]string{"route.routed_to": gcRoute},
+					IncludeEphemeral: true,
+				},
 			},
 			issues: func() []*types.Issue {
 				issues := make([]*types.Issue, 0, wispCount)
@@ -1539,10 +1775,14 @@ func BenchmarkPerfReadyWorkLimited_ExampleOrgWispHeavy(b *testing.B) {
 		{
 			name: "AssignedSparseAfterDeferredLimit20Of8000",
 			filter: types.WorkFilter{
-				Assignee:         ptrString(gcAssignee),
-				IncludeEphemeral: true,
-				Limit:            readyLimit,
-				SortPolicy:       types.SortPolicyPriority,
+				WorkFilterCore: types.WorkFilterCore{
+					Assignee:   ptrString(gcAssignee),
+					Limit:      readyLimit,
+					SortPolicy: types.SortPolicyPriority,
+				},
+				WorkFilterExtra: types.WorkFilterExtra{
+					IncludeEphemeral: true,
+				},
 			},
 			issues: func() []*types.Issue {
 				issues := make([]*types.Issue, 0, wispCount)
@@ -1570,10 +1810,14 @@ func BenchmarkPerfReadyWorkLimited_ExampleOrgWispHeavy(b *testing.B) {
 		{
 			name: "AssignedClosedNoiseLimit20Of8000",
 			filter: types.WorkFilter{
-				Assignee:         ptrString(gcAssignee),
-				IncludeEphemeral: true,
-				Limit:            readyLimit,
-				SortPolicy:       types.SortPolicyPriority,
+				WorkFilterCore: types.WorkFilterCore{
+					Assignee:   ptrString(gcAssignee),
+					Limit:      readyLimit,
+					SortPolicy: types.SortPolicyPriority,
+				},
+				WorkFilterExtra: types.WorkFilterExtra{
+					IncludeEphemeral: true,
+				},
 			},
 			issues: func() []*types.Issue {
 				issues := make([]*types.Issue, 0, wispCount)
@@ -1636,40 +1880,68 @@ func BenchmarkPerfBlockedIssues_ClosedDependencySkew(b *testing.B) {
 	for i := 0; i < closedPairCount; i++ {
 		blockerID := fmt.Sprintf("bench-perf-closed-blocker-%05d", i)
 		issues = append(issues, &types.Issue{
-			ID:        blockerID,
-			Title:     fmt.Sprintf("Closed blocker %05d", i),
-			Status:    types.StatusClosed,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: blockerID,
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Closed blocker %05d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusClosed,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		})
 		issues = append(issues, &types.Issue{
-			ID:        fmt.Sprintf("bench-perf-closed-blocked-%05d", i),
-			Title:     fmt.Sprintf("Closed blocked issue %05d", i),
-			Status:    types.StatusClosed,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Dependencies: []*types.Dependency{
-				{DependsOnID: blockerID, Type: types.DepBlocks},
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("bench-perf-closed-blocked-%05d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Closed blocked issue %05d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusClosed,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueGraph: types.IssueGraph{
+				Dependencies: []*types.Dependency{
+					{DependsOnID: blockerID, Type: types.DepBlocks},
+				},
 			},
 		})
 	}
 	for i := 0; i < activePairCount; i++ {
 		blockerID := fmt.Sprintf("bench-perf-active-blocker-%02d", i)
 		issues = append(issues, &types.Issue{
-			ID:        blockerID,
-			Title:     fmt.Sprintf("Active blocker %02d", i),
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: blockerID,
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Active blocker %02d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
 		})
 		issues = append(issues, &types.Issue{
-			ID:        fmt.Sprintf("bench-perf-active-blocked-%02d", i),
-			Title:     fmt.Sprintf("Active blocked issue %02d", i),
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
-			Dependencies: []*types.Dependency{
-				{DependsOnID: blockerID, Type: types.DepBlocks},
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("bench-perf-active-blocked-%02d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Active blocked issue %02d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
+			IssueGraph: types.IssueGraph{
+				Dependencies: []*types.Dependency{
+					{DependsOnID: blockerID, Type: types.DepBlocks},
+				},
 			},
 		})
 	}
@@ -1701,39 +1973,61 @@ func BenchmarkPerfReadyWorkDeferredParentExclusion_5K(b *testing.B) {
 	issues := make([]*types.Issue, 0, readyCount+deferredParentCount+deferredChildCount)
 	for i := 0; i < readyCount; i++ {
 		issues = append(issues, &types.Issue{
-			ID:        fmt.Sprintf("bench-perf-deferred-ready-%03d", i),
-			Title:     fmt.Sprintf("Ready non-deferred issue %03d", i),
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("bench-perf-deferred-ready-%03d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Ready non-deferred issue %03d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
 		})
 	}
 	for i := 0; i < deferredParentCount; i++ {
 		issues = append(issues, &types.Issue{
-			ID:         fmt.Sprintf("bench-perf-deferred-parent-%05d", i),
-			Title:      fmt.Sprintf("Future deferred parent %05d", i),
-			Status:     types.StatusOpen,
-			Priority:   2,
-			IssueType:  types.TypeTask,
-			DeferUntil: &future,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("bench-perf-deferred-parent-%05d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Future deferred parent %05d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueLease: types.IssueLease{
+				DeferUntil: &future,
+			},
 		})
 	}
 	for i := 0; i < deferredChildCount; i++ {
 		issues = append(issues, &types.Issue{
-			ID:        fmt.Sprintf("bench-perf-deferred-child-%03d", i),
-			Title:     fmt.Sprintf("Child of deferred parent %03d", i),
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
-			Dependencies: []*types.Dependency{
-				{DependsOnID: fmt.Sprintf("bench-perf-deferred-parent-%05d", i), Type: types.DepParentChild},
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("bench-perf-deferred-child-%03d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Child of deferred parent %03d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
+			IssueGraph: types.IssueGraph{
+				Dependencies: []*types.Dependency{
+					{DependsOnID: fmt.Sprintf("bench-perf-deferred-parent-%05d", i), Type: types.DepParentChild},
+				},
 			},
 		})
 	}
 	createBenchIssueBatch(b, store, issues)
 
 	ctx := context.Background()
-	filter := types.WorkFilter{Limit: 50, SortPolicy: types.SortPolicyPriority}
+	filter := types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Limit: 50, SortPolicy: types.SortPolicyPriority}}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		results, err := store.GetReadyWork(ctx, filter)
@@ -1753,20 +2047,34 @@ func BenchmarkPerfGetIssuePrimaryFirst_PermanentWithWisps(b *testing.B) {
 	const wispCount = 5000
 	issues := make([]*types.Issue, 0, wispCount+1)
 	issues = append(issues, &types.Issue{
-		ID:        "bench-perf-get-primary",
-		Title:     "Permanent issue fetched from primary table",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "bench-perf-get-primary",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Permanent issue fetched from primary table",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	})
 	for i := 0; i < wispCount; i++ {
 		issues = append(issues, &types.Issue{
-			ID:        fmt.Sprintf("bench-perf-get-wisp-%04d", i),
-			Title:     fmt.Sprintf("Wisp noise issue %04d", i),
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Ephemeral: true,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("bench-perf-get-wisp-%04d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Wisp noise issue %04d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		})
 	}
 	createBenchIssueBatch(b, store, issues)
@@ -1797,11 +2105,17 @@ func BenchmarkAddLabel(b *testing.B) {
 
 	// Create test issue
 	issue := &types.Issue{
-		ID:        "label-bench",
-		Title:     "Label Bench Issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "label-bench",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Label Bench Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "bench"); err != nil {
 		b.Fatalf("failed to create issue: %v", err)
@@ -1824,11 +2138,17 @@ func BenchmarkGetLabels(b *testing.B) {
 
 	// Create issue with multiple labels
 	issue := &types.Issue{
-		ID:        "labels-bench",
-		Title:     "Labels Bench Issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "labels-bench",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Labels Bench Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "bench"); err != nil {
 		b.Fatalf("failed to create issue: %v", err)
@@ -1865,11 +2185,17 @@ func seedMixedForWispSetBench(b *testing.B, store *DoltStore, totalN int, wispSh
 	ids := make([]string, 0, totalN)
 	for i := 0; i < numPerms; i++ {
 		iss := &types.Issue{
-			ID:        fmt.Sprintf("ws-perm-%d", i),
-			Title:     "perm",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("ws-perm-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: "perm",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, iss, "bench"); err != nil {
 			b.Fatalf("create perm %d: %v", i, err)
@@ -1878,11 +2204,17 @@ func seedMixedForWispSetBench(b *testing.B, store *DoltStore, totalN int, wispSh
 	}
 	for i := 0; i < numWisps; i++ {
 		iss := &types.Issue{
-			Title:     "wisp",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Ephemeral: true,
+			IssueContent: types.IssueContent{
+				Title: "wisp",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		}
 		if err := store.CreateIssue(ctx, iss, "bench"); err != nil {
 			b.Fatalf("create wisp %d: %v", i, err)
@@ -1955,11 +2287,17 @@ func seedSmallNLargeW(b *testing.B, store *DoltStore, permCount, wispCount int) 
 	permIDs = make([]string, 0, permCount)
 	for i := 0; i < permCount; i++ {
 		iss := &types.Issue{
-			ID:        fmt.Sprintf("smN-perm-%d", i),
-			Title:     "perm",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("smN-perm-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: "perm",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, iss, "bench"); err != nil {
 			b.Fatalf("create perm %d: %v", i, err)
@@ -1969,11 +2307,17 @@ func seedSmallNLargeW(b *testing.B, store *DoltStore, permCount, wispCount int) 
 	wispIDs = make([]string, 0, wispCount)
 	for i := 0; i < wispCount; i++ {
 		iss := &types.Issue{
-			Title:     "wisp",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Ephemeral: true,
+			IssueContent: types.IssueContent{
+				Title: "wisp",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		}
 		if err := store.CreateIssue(ctx, iss, "bench"); err != nil {
 			b.Fatalf("create wisp %d: %v", i, err)

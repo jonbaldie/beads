@@ -158,7 +158,20 @@ func TestEnforceClosePolicyInTxRoutesDualResidentToDurableRow(t *testing.T) {
 		t.Fatalf("BeginTx: %v", err)
 	}
 	if err := issueops.InsertIssueStrictInTx(ctx, tx, "wisps", &types.Issue{
-		ID: parent, Title: "wisp twin", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: parent,
+		},
+		IssueContent: types.IssueContent{
+			Title: "wisp twin",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}); err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("seed wisp twin: %v", err)

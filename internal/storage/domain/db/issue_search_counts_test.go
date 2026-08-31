@@ -36,7 +36,7 @@ func (s *testSuite) searchCountsDepAndRDep() {
 	s.Require().NoError(dep.Insert(s.Ctx(), newDep("bd-srxc-dr-c", "bd-srxc-dr-mid", types.DepBlocks), "tester", domain.DepInsertOpts{}))
 
 	out, err := r.SearchAcrossIssuesAndWispsWithCounts(s.Ctx(), "",
-		types.IssueFilter{IDs: []string{"bd-srxc-dr-mid"}, SkipWisps: true})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDs: []string{"bd-srxc-dr-mid"}}, IssueFilterHydrate: types.IssueFilterHydrate{SkipWisps: true}})
 	s.Require().NoError(err)
 	s.Require().Len(out.Items, 1)
 	s.Equal(2, out.Items[0].DependencyCount, "outgoing blocks count")
@@ -56,7 +56,7 @@ func (s *testSuite) searchCountsComment() {
 	}
 
 	out, err := r.SearchAcrossIssuesAndWispsWithCounts(s.Ctx(), "",
-		types.IssueFilter{IDs: []string{"bd-srxc-cmt-1"}, SkipWisps: true})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDs: []string{"bd-srxc-cmt-1"}}, IssueFilterHydrate: types.IssueFilterHydrate{SkipWisps: true}})
 	s.Require().NoError(err)
 	s.Require().Len(out.Items, 1)
 	s.Equal(3, out.Items[0].CommentCount)
@@ -73,7 +73,7 @@ func (s *testSuite) searchCountsParent() {
 		newDep("bd-srxc-par-child", "bd-srxc-par-parent", types.DepParentChild), "tester", domain.DepInsertOpts{}))
 
 	out, err := r.SearchAcrossIssuesAndWispsWithCounts(s.Ctx(), "",
-		types.IssueFilter{IDs: []string{"bd-srxc-par-child"}, SkipWisps: true})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDs: []string{"bd-srxc-par-child"}}, IssueFilterHydrate: types.IssueFilterHydrate{SkipWisps: true}})
 	s.Require().NoError(err)
 	s.Require().Len(out.Items, 1)
 	s.Require().NotNil(out.Items[0].Parent)
@@ -90,7 +90,7 @@ func (s *testSuite) searchCountsMergesTables() {
 	s.Require().NoError(r.Insert(s.Ctx(), w, "tester", domain.InsertIssueOpts{UseWispsTable: true}))
 
 	out, err := r.SearchAcrossIssuesAndWispsWithCounts(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-srxc-mrg-"})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-srxc-mrg-"}})
 	s.Require().NoError(err)
 	got := iwcIDs(out)
 	s.Contains(got, "bd-srxc-mrg-perm")
@@ -105,7 +105,7 @@ func (s *testSuite) searchCountsSkipWisps() {
 	s.Require().NoError(r.Insert(s.Ctx(), w, "tester", domain.InsertIssueOpts{UseWispsTable: true}))
 
 	out, err := r.SearchAcrossIssuesAndWispsWithCounts(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-srxc-sk-", SkipWisps: true})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-srxc-sk-"}, IssueFilterHydrate: types.IssueFilterHydrate{SkipWisps: true}})
 	s.Require().NoError(err)
 	got := iwcIDs(out)
 	s.Contains(got, "bd-srxc-sk-perm")
@@ -121,7 +121,7 @@ func (s *testSuite) searchCountsEphemeralOnly() {
 
 	yes := true
 	out, err := r.SearchAcrossIssuesAndWispsWithCounts(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-srxc-eo-", Ephemeral: &yes})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-srxc-eo-"}, IssueFilterFlags: types.IssueFilterFlags{Ephemeral: &yes}})
 	s.Require().NoError(err)
 	got := iwcIDs(out)
 	s.Contains(got, "bd-srxc-eo-wisp")
@@ -137,7 +137,7 @@ func (s *testSuite) searchCountsLabelHydration() {
 	s.Require().NoError(labelRepo.Insert(s.Ctx(), "bd-srxc-lbl-1", "beta", "tester", domain.LabelOpts{}))
 
 	out, err := r.SearchAcrossIssuesAndWispsWithCounts(s.Ctx(), "",
-		types.IssueFilter{IDs: []string{"bd-srxc-lbl-1"}, SkipWisps: true})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDs: []string{"bd-srxc-lbl-1"}}, IssueFilterHydrate: types.IssueFilterHydrate{SkipWisps: true}})
 	s.Require().NoError(err)
 	s.Require().Len(out.Items, 1)
 	s.ElementsMatch([]string{"alpha", "beta"}, out.Items[0].Issue.Labels)
@@ -151,7 +151,7 @@ func (s *testSuite) searchCountsSkipLabels() {
 	s.Require().NoError(labelRepo.Insert(s.Ctx(), "bd-srxc-nolbl-1", "gamma", "tester", domain.LabelOpts{}))
 
 	out, err := r.SearchAcrossIssuesAndWispsWithCounts(s.Ctx(), "",
-		types.IssueFilter{IDs: []string{"bd-srxc-nolbl-1"}, SkipWisps: true, SkipLabels: true})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDs: []string{"bd-srxc-nolbl-1"}}, IssueFilterHydrate: types.IssueFilterHydrate{SkipWisps: true, SkipLabels: true}})
 	s.Require().NoError(err)
 	s.Require().Len(out.Items, 1)
 	s.Empty(out.Items[0].Issue.Labels)
@@ -170,7 +170,7 @@ func (s *testSuite) searchCountsSortOrder() {
 	s.Require().NoError(r.Insert(s.Ctx(), lo, "tester", domain.InsertIssueOpts{}))
 
 	out, err := r.SearchAcrossIssuesAndWispsWithCounts(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-srxc-srt-", SkipWisps: true})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-srxc-srt-"}, IssueFilterHydrate: types.IssueFilterHydrate{SkipWisps: true}})
 	s.Require().NoError(err)
 	s.Require().Len(out.Items, 3)
 	s.Equal("bd-srxc-srt-hi", out.Items[0].Issue.ID)
@@ -186,7 +186,7 @@ func (s *testSuite) searchCountsLimit() {
 			"tester", domain.InsertIssueOpts{}))
 	}
 	out, err := r.SearchAcrossIssuesAndWispsWithCounts(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-srxc-lim-", Limit: 3, SkipWisps: true})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-srxc-lim-", Limit: 3}, IssueFilterHydrate: types.IssueFilterHydrate{SkipWisps: true}})
 	s.Require().NoError(err)
 	s.Len(out.Items, 3)
 }
@@ -210,7 +210,7 @@ func (s *testSuite) searchCountsCollision() {
 	s.Require().NoError(r.Insert(s.Ctx(), w, "tester", domain.InsertIssueOpts{UseWispsTable: true}))
 
 	out, err := r.SearchAcrossIssuesAndWispsWithCounts(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-srxc-coll-"})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-srxc-coll-"}})
 	s.Require().NoError(err)
 	s.Require().Len(out.Items, 1, "the id must come back once, not once per plane")
 	s.Require().NotNil(out.Items[0].Issue)

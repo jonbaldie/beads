@@ -28,14 +28,14 @@ func TestSearchIssuesAndSearchIssueIDs_Parity(t *testing.T) {
 		filter types.IssueFilter
 	}{
 		{name: "no filter, full set"},
-		{name: "open status only", filter: types.IssueFilter{Statuses: []types.Status{types.StatusOpen}}},
-		{name: "priority filter", filter: types.IssueFilter{Priority: ptr(1)}},
+		{name: "open status only", filter: types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Statuses: []types.Status{types.StatusOpen}}}},
+		{name: "priority filter", filter: types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Priority: ptr(1)}}},
 		{name: "substring search (id_parser fallback)", query: "search-parity"},
 		{name: "substring search no match", query: "no-such-prefix-anywhere"},
-		{name: "label-driven (DISTINCT join)", filter: types.IssueFilter{Labels: []string{"alpha"}}},
-		{name: "ephemeral only", filter: types.IssueFilter{Ephemeral: ptr(true)}},
-		{name: "non-ephemeral only", filter: types.IssueFilter{Ephemeral: ptr(false)}},
-		{name: "limit applied", filter: types.IssueFilter{Limit: 2}},
+		{name: "label-driven (DISTINCT join)", filter: types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Labels: []string{"alpha"}}}},
+		{name: "ephemeral only", filter: types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{Ephemeral: ptr(true)}}},
+		{name: "non-ephemeral only", filter: types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{Ephemeral: ptr(false)}}},
+		{name: "limit applied", filter: types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 2}}},
 	}
 
 	for _, tc := range cases {
@@ -71,10 +71,10 @@ func seedSearchParityFixture(ctx context.Context, t *testing.T, store *DoltStore
 
 	// Persistent issues spanning status, priority, and labels.
 	issues := []*types.Issue{
-		{ID: "search-parity-a", Title: "alpha", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
-		{ID: "search-parity-b", Title: "beta", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: "search-parity-c", Title: "gamma", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeBug},
-		{ID: "search-parity-d", Title: "delta", Status: types.StatusOpen, Priority: 3, IssueType: types.TypeTask},
+		{IssueID: types.IssueID{ID: "search-parity-a"}, IssueContent: types.IssueContent{Title: "alpha"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "search-parity-b"}, IssueContent: types.IssueContent{Title: "beta"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "search-parity-c"}, IssueContent: types.IssueContent{Title: "gamma"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeBug}},
+		{IssueID: types.IssueID{ID: "search-parity-d"}, IssueContent: types.IssueContent{Title: "delta"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 3, IssueType: types.TypeTask}},
 	}
 	for _, issue := range issues {
 		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
@@ -92,7 +92,7 @@ func seedSearchParityFixture(ctx context.Context, t *testing.T, store *DoltStore
 	}
 
 	// One wisp to exercise the wisp-merge path.
-	wisp := &types.Issue{Title: "search-parity wisp", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true}
+	wisp := &types.Issue{IssueContent: types.IssueContent{Title: "search-parity wisp"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}
 	if err := store.CreateIssue(ctx, wisp, "tester"); err != nil {
 		t.Fatalf("CreateIssue (wisp): %v", err)
 	}

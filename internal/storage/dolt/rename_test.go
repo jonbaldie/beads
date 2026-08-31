@@ -21,11 +21,17 @@ func TestUpdateIssueIDUpdatesWispDependencyTargets(t *testing.T) {
 
 	// Create a permanent issue that we'll rename
 	issue := &types.Issue{
-		ID:        "test-old1",
-		Title:     "Test issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-old1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Test issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -33,12 +39,20 @@ func TestUpdateIssueIDUpdatesWispDependencyTargets(t *testing.T) {
 
 	// Create a wisp that references the issue via wisp_dependencies
 	wisp := &types.Issue{
-		ID:        "test-wisp-abc",
-		Title:     "Test wisp",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: "test-wisp-abc",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Test wisp",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, wisp, "test"); err != nil {
 		t.Fatalf("failed to create wisp: %v", err)
@@ -101,18 +115,30 @@ func TestUpdateIssueIDUpdatesPersistentDependencyTargets(t *testing.T) {
 	ctx := context.Background()
 
 	source := &types.Issue{
-		ID:        "test-source1",
-		Title:     "Source issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-source1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Source issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	target := &types.Issue{
-		ID:        "test-target-old1",
-		Title:     "Target issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-target-old1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Target issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	for _, issue := range []*types.Issue{source, target} {
 		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
@@ -187,9 +213,9 @@ func TestUpdateIssueIDUpdatesWispTargetDependencyRows(t *testing.T) {
 
 	ctx := context.Background()
 
-	persistentSource := &types.Issue{ID: "test-wisp-target-source", Title: "Persistent source", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
-	wispSource := &types.Issue{ID: "test-wisp-target-wisp-source", Title: "Wisp source", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true}
-	wispTarget := &types.Issue{ID: "test-wisp-target-old", Title: "Wisp target", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true}
+	persistentSource := &types.Issue{IssueID: types.IssueID{ID: "test-wisp-target-source"}, IssueContent: types.IssueContent{Title: "Persistent source"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
+	wispSource := &types.Issue{IssueID: types.IssueID{ID: "test-wisp-target-wisp-source"}, IssueContent: types.IssueContent{Title: "Wisp source"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}
+	wispTarget := &types.Issue{IssueID: types.IssueID{ID: "test-wisp-target-old"}, IssueContent: types.IssueContent{Title: "Wisp target"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}
 	for _, issue := range []*types.Issue{persistentSource, wispSource, wispTarget} {
 		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatalf("failed to create issue %q: %v", issue.ID, err)
@@ -260,9 +286,9 @@ func TestUpdateIssueIDDependencyTargetsIgnoreNonIssueTargets(t *testing.T) {
 
 	ctx := context.Background()
 
-	source := &types.Issue{ID: "test-ignore-source", Title: "Source issue", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
-	wispTarget := &types.Issue{ID: "test-ignore-wisp", Title: "Wisp target", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true}
-	newIssueTarget := &types.Issue{ID: "test-ignore-new", Title: "New issue target", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	source := &types.Issue{IssueID: types.IssueID{ID: "test-ignore-source"}, IssueContent: types.IssueContent{Title: "Source issue"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
+	wispTarget := &types.Issue{IssueID: types.IssueID{ID: "test-ignore-wisp"}, IssueContent: types.IssueContent{Title: "Wisp target"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}
+	newIssueTarget := &types.Issue{IssueID: types.IssueID{ID: "test-ignore-new"}, IssueContent: types.IssueContent{Title: "New issue target"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	for _, issue := range []*types.Issue{source, wispTarget, newIssueTarget} {
 		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatalf("failed to create issue %q: %v", issue.ID, err)
@@ -311,8 +337,8 @@ func TestUpdateIssueIDDependencyTargetCollisionFails(t *testing.T) {
 
 	ctx := context.Background()
 
-	source := &types.Issue{ID: "test-collision-source", Title: "Source issue", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
-	target := &types.Issue{ID: "test-collision-old", Title: "Target issue", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	source := &types.Issue{IssueID: types.IssueID{ID: "test-collision-source"}, IssueContent: types.IssueContent{Title: "Source issue"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
+	target := &types.Issue{IssueID: types.IssueID{ID: "test-collision-old"}, IssueContent: types.IssueContent{Title: "Target issue"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	for _, issue := range []*types.Issue{source, target} {
 		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatalf("failed to create issue %q: %v", issue.ID, err)
@@ -490,11 +516,17 @@ func TestUpdateIssueIDRenamesWisp(t *testing.T) {
 
 	// Create a wisp (goes to wisps + wisp_* tables)
 	wisp := &types.Issue{
-		Title:     "Wisp to rename",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueContent: types.IssueContent{
+			Title: "Wisp to rename",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, wisp, "tester"); err != nil {
 		t.Fatalf("CreateIssue (wisp) failed: %v", err)
@@ -593,11 +625,17 @@ func TestUpdateIssueIDStillWorksForRegularIssues(t *testing.T) {
 
 	// Create a regular issue
 	issue := &types.Issue{
-		ID:        "test-regular-1",
-		Title:     "Regular issue to rename",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-regular-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Regular issue to rename",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("CreateIssue failed: %v", err)

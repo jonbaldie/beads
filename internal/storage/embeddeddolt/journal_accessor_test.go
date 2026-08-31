@@ -21,7 +21,7 @@ func TestEventsJournalAccessor(t *testing.T) {
 	store := env.store
 	store.SetEventsJournalEnabled(true)
 	mk := func(id string) *types.Issue {
-		return &types.Issue{ID: id, Title: "t-" + id, IssueType: types.TypeTask, Status: types.StatusOpen}
+		return &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: "t-" + id}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}}
 	}
 	must := func(err error, what string) {
 		t.Helper()

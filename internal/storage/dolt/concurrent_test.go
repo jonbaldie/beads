@@ -123,11 +123,15 @@ func TestConcurrentIssueCreation(t *testing.T) {
 			defer wg.Done()
 			for attempt := 0; attempt <= maxRetries; attempt++ {
 				issue := &types.Issue{
-					Title:       fmt.Sprintf("Concurrent Issue %d", n),
-					Description: fmt.Sprintf("Created by goroutine %d", n),
-					Status:      types.StatusOpen,
-					Priority:    2,
-					IssueType:   types.TypeTask,
+					IssueContent: types.IssueContent{
+						Title:       fmt.Sprintf("Concurrent Issue %d", n),
+						Description: fmt.Sprintf("Created by goroutine %d", n),
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Status:    types.StatusOpen,
+						Priority:  2,
+						IssueType: types.TypeTask,
+					},
 				}
 				err := store.CreateIssue(ctx, issue, fmt.Sprintf("worker-%d", n))
 				if err == nil {
@@ -200,12 +204,18 @@ func TestSameIssueUpdateRace(t *testing.T) {
 
 	// Create the issue to be updated
 	issue := &types.Issue{
-		ID:          "test-race-issue",
-		Title:       "Race Test Issue",
-		Description: "Original description",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-race-issue",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Race Test Issue",
+			Description: "Original description",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
@@ -275,12 +285,19 @@ func TestReadWriteMix(t *testing.T) {
 	issueIDs := make([]string, numIssues)
 	for i := 0; i < numIssues; i++ {
 		issue := &types.Issue{
-			ID:          fmt.Sprintf("test-rw-%d", i),
-			Title:       fmt.Sprintf("Read-Write Test Issue %d", i),
-			Description: fmt.Sprintf("Issue %d for concurrent read/write testing", i),
-			Status:      types.StatusOpen,
-			Priority:    (i % 4) + 1, // Keep priority in valid range 1-4
-			IssueType:   types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("test-rw-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title:       fmt.Sprintf("Read-Write Test Issue %d", i),
+				Description: fmt.Sprintf("Issue %d for concurrent read/write testing", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:   types.StatusOpen,
+				Priority: (i % 4) + 1,
+				// Keep priority in valid range 1-4
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 			t.Fatalf("failed to create issue %d: %v", i, err)
@@ -382,12 +399,18 @@ func TestLongTransactionBlocking(t *testing.T) {
 
 	// Create a test issue
 	issue := &types.Issue{
-		ID:          "test-long-tx",
-		Title:       "Long Transaction Test",
-		Description: "Test issue for long transaction blocking",
-		Status:      types.StatusOpen,
-		Priority:    1,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-long-tx",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Long Transaction Test",
+			Description: "Test issue for long transaction blocking",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -481,12 +504,18 @@ func TestBranchPerAgentMergeRace(t *testing.T) {
 
 	// Create initial issue on main branch
 	issue := &types.Issue{
-		ID:          "test-merge-race",
-		Title:       "Merge Race Test",
-		Description: "Original description",
-		Status:      types.StatusOpen,
-		Priority:    1,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-merge-race",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Merge Race Test",
+			Description: "Original description",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -583,12 +612,18 @@ func TestWorktreeExportIsolation(t *testing.T) {
 
 	// Create and commit initial issue
 	issue := &types.Issue{
-		ID:          "test-export-isolation",
-		Title:       "Export Isolation Test",
-		Description: "Committed description",
-		Status:      types.StatusOpen,
-		Priority:    1,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-export-isolation",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Export Isolation Test",
+			Description: "Committed description",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -661,12 +696,18 @@ func TestConcurrentDependencyOperations(t *testing.T) {
 	parentIDs := make([]string, numParents)
 	for i := 0; i < numParents; i++ {
 		issue := &types.Issue{
-			ID:          fmt.Sprintf("test-dep-parent-%d", i),
-			Title:       fmt.Sprintf("Parent Issue %d", i),
-			Description: "Parent for dependency test",
-			Status:      types.StatusOpen,
-			Priority:    1,
-			IssueType:   types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("test-dep-parent-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title:       fmt.Sprintf("Parent Issue %d", i),
+				Description: "Parent for dependency test",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 			t.Fatalf("failed to create parent issue %d: %v", i, err)
@@ -676,12 +717,18 @@ func TestConcurrentDependencyOperations(t *testing.T) {
 
 	// Create child issue
 	child := &types.Issue{
-		ID:          "test-dep-child",
-		Title:       "Child Issue",
-		Description: "Child for dependency test",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-dep-child",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Child Issue",
+			Description: "Child for dependency test",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, child, "tester"); err != nil {
 		t.Fatalf("failed to create child issue: %v", err)
@@ -749,12 +796,19 @@ func TestHighContentionStress(t *testing.T) {
 	const numIssues = 10
 	for i := 0; i < numIssues; i++ {
 		issue := &types.Issue{
-			ID:          fmt.Sprintf("stress-%d", i),
-			Title:       fmt.Sprintf("Stress Test Issue %d", i),
-			Description: "For high contention stress testing",
-			Status:      types.StatusOpen,
-			Priority:    (i % 4) + 1, // Keep priority in valid range 1-4
-			IssueType:   types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("stress-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title:       fmt.Sprintf("Stress Test Issue %d", i),
+				Description: "For high contention stress testing",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:   types.StatusOpen,
+				Priority: (i % 4) + 1,
+				// Keep priority in valid range 1-4
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 			t.Fatalf("failed to create issue %d: %v", i, err)
@@ -856,11 +910,15 @@ func TestConcurrentIssueCreationWithoutCallerRetry(t *testing.T) {
 	for n := range numGoroutines {
 		wg.Go(func() {
 			issue := &types.Issue{
-				Title:       fmt.Sprintf("No Retry Issue %d", n),
-				Description: fmt.Sprintf("Created by goroutine %d", n),
-				Status:      types.StatusOpen,
-				Priority:    2,
-				IssueType:   types.TypeTask,
+				IssueContent: types.IssueContent{
+					Title:       fmt.Sprintf("No Retry Issue %d", n),
+					Description: fmt.Sprintf("Created by goroutine %d", n),
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  2,
+					IssueType: types.TypeTask,
+				},
 			}
 			if err := store.CreateIssue(ctx, issue, fmt.Sprintf("worker-%d", n)); err != nil {
 				errs <- fmt.Errorf("goroutine %d: %w", n, err)
@@ -910,12 +968,18 @@ func TestConcurrentCommentAndCloseWithoutCallerRetry(t *testing.T) {
 	issueIDs := make([]string, 0, numIssues)
 	for i := 0; i < numIssues; i++ {
 		issue := &types.Issue{
-			ID:          fmt.Sprintf("cc-%d", i),
-			Title:       fmt.Sprintf("Comment Close %d", i),
-			Description: "permanent issue for concurrent comment/close",
-			Status:      types.StatusOpen,
-			Priority:    2,
-			IssueType:   types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("cc-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title:       fmt.Sprintf("Comment Close %d", i),
+				Description: "permanent issue for concurrent comment/close",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 			t.Fatalf("CreateIssue(%d): %v", i, err)
@@ -981,12 +1045,18 @@ func TestSerializationConflictRetry(t *testing.T) {
 
 	// Create a single issue that all goroutines will contend on.
 	issue := &types.Issue{
-		ID:          "serialization-target",
-		Title:       "Serialization Conflict Target",
-		Description: "All goroutines add labels to this issue",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "serialization-target",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Serialization Conflict Target",
+			Description: "All goroutines add labels to this issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -1060,12 +1130,18 @@ func TestConcurrentWorkQueueDrain(t *testing.T) {
 	for i := 0; i < numIssues; i++ {
 		id := fmt.Sprintf("queue-%03d", i)
 		issue := &types.Issue{
-			ID:          id,
-			Title:       fmt.Sprintf("Queue item %d", i),
-			Description: "ready work for the shared drain",
-			Status:      types.StatusOpen,
-			Priority:    (i % 4) + 1,
-			IssueType:   types.TypeTask,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title:       fmt.Sprintf("Queue item %d", i),
+				Description: "ready work for the shared drain",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  (i % 4) + 1,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "seeder"); err != nil {
 			t.Fatalf("seed issue %s: %v", id, err)

@@ -420,53 +420,56 @@ func cleanStaleCircuitBreakerFilesIn(dir string, removeClosed bool) {
 		return
 	}
 	for _, path := range matches {
-		// Always remove legacy port-0 files — they should never exist
-		// (the port-0 fix prevents creating them, but old ones may linger).
-		base := filepath.Base(path)
-		if base == "beads-dolt-circuit-0.json" {
-			_ = os.Remove(path)
-			log.Printf("[circuit-breaker] removed legacy port-0 breaker file: %s", path)
-			continue
-		}
-
-		// For other breaker files, check if the state is stale.
-		data, err := os.ReadFile(path) //nolint:gosec // G304: path is from filepath.Glob with controlled pattern
-		if err != nil {
-			continue
-		}
-		var state circuitState
-		if err := json.Unmarshal(data, &state); err != nil {
-			// Corrupt file — remove it
-			_ = os.Remove(path)
-			continue
-		}
-		if state.State == circuitClosed {
-			// Legacy-directory mode only — and only past an mtime TTL: the
-			// legacy dir has LIVE writers wherever os.TempDir() is /tmp
-			// (TMPDIR-less launchd/cron/ssh processes), so an unconditional
-			// remove churned against them forever (see legacyClosedSweepTTL).
-			// Silent on purpose: removing routine closed-state hygiene is not
-			// worth a stderr line per file per invocation.
-			if removeClosed {
-				if info, statErr := os.Stat(path); statErr == nil && time.Since(info.ModTime()) > legacyClosedSweepTTL {
-					_ = os.Remove(path)
-				}
-			}
-			continue
-		}
-		if state.State != circuitOpen && state.State != circuitHalfOpen {
-			continue
-		}
-		ref := state.TrippedAt
-		if ref.IsZero() {
-			ref = state.LastFailure
-		}
-		if !ref.IsZero() && time.Since(ref) > circuitStaleTTL {
-			_ = os.Remove(path)
-			log.Printf("[circuit-breaker] removed stale breaker file: %s (age %s)",
-				path, time.Since(ref).Round(time.Second))
-		}
+		cleanCircuitBreakerFile(path, removeClosed)
 	}
+}
+
+func cleanCircuitBreakerFile(path string, removeClosed bool) {
+	// Always remove legacy port-0 files — they should never exist.
+	if filepath.Base(path) == "beads-dolt-circuit-0.json" {
+		_ = os.Remove(path)
+		log.Printf("[circuit-breaker] removed legacy port-0 breaker file: %s", path)
+		return
+	}
+	data, err := os.ReadFile(path) //nolint:gosec // G304: path is from filepath.Glob with controlled pattern
+	if err != nil {
+		return
+	}
+	var state circuitState
+	if err := json.Unmarshal(data, &state); err != nil {
+		_ = os.Remove(path)
+		return
+	}
+	if state.State == circuitClosed {
+		removeStaleClosedCircuitFile(path, removeClosed)
+		return
+	}
+	if state.State != circuitOpen && state.State != circuitHalfOpen {
+		return
+	}
+	removeStaleOpenCircuitFile(path, state)
+}
+
+func removeStaleClosedCircuitFile(path string, removeClosed bool) {
+	if !removeClosed {
+		return
+	}
+	if info, err := os.Stat(path); err == nil && time.Since(info.ModTime()) > legacyClosedSweepTTL {
+		_ = os.Remove(path)
+	}
+}
+
+func removeStaleOpenCircuitFile(path string, state circuitState) {
+	ref := state.TrippedAt
+	if ref.IsZero() {
+		ref = state.LastFailure
+	}
+	if ref.IsZero() || time.Since(ref) <= circuitStaleTTL {
+		return
+	}
+	_ = os.Remove(path)
+	log.Printf("[circuit-breaker] removed stale breaker file: %s (age %s)",
+		path, time.Since(ref).Round(time.Second))
 }
 
 // isConnectionError returns true if the error indicates the Dolt server is
@@ -478,39 +481,25 @@ func isConnectionError(err error) bool {
 	}
 	// A typed 1105 is a semantic response from Dolt, not evidence that the
 	// server is unavailable, even if its message happens to mention a connection.
-	var mysqlErr *mysql.MySQLError
-	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1105 {
+	if isSemanticMySQLError(err) {
 		return false
 	}
-	errStr := strings.ToLower(err.Error())
+	return containsConnectionErrorMarker(strings.ToLower(err.Error()))
+}
 
-	// TCP-level failures
-	if strings.Contains(errStr, "connection refused") {
-		return true
-	}
-	if strings.Contains(errStr, "connection reset") {
-		return true
-	}
-	if strings.Contains(errStr, "broken pipe") {
-		return true
-	}
-	if strings.Contains(errStr, "i/o timeout") {
-		return true
-	}
+func isSemanticMySQLError(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1105
+}
 
-	// MySQL protocol-level disconnects
-	if strings.Contains(errStr, "bad connection") {
-		return true
+func containsConnectionErrorMarker(errStr string) bool {
+	for _, marker := range []string{
+		"connection refused", "connection reset", "broken pipe", "i/o timeout",
+		"bad connection", "invalid connection", "lost connection", "gone away",
+	} {
+		if strings.Contains(errStr, marker) {
+			return true
+		}
 	}
-	if strings.Contains(errStr, "invalid connection") {
-		return true
-	}
-	if strings.Contains(errStr, "lost connection") {
-		return true
-	}
-	if strings.Contains(errStr, "gone away") {
-		return true
-	}
-
 	return false
 }

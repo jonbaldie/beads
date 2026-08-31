@@ -126,36 +126,58 @@ func (r *commentSQLRepositoryImpl) Insert(ctx context.Context, issueID, author, 
 }
 
 func (r *commentSQLRepositoryImpl) InsertRecord(ctx context.Context, comment *types.Comment, opts domain.CommentOpts) (*types.Comment, error) {
+	copy, err := prepareCommentRecord(comment)
+	if err != nil {
+		return nil, err
+	}
+	issueTable := pickIssueTable(opts.UseWispsTable)
+	if err := r.ensureCommentIssue(ctx, issueTable, copy.IssueID); err != nil {
+		return nil, err
+	}
+	createdAtText := issueops.FormatAuxTime(copy.CreatedAt)
+	commentTable := pickCommentTable(opts.UseWispsTable)
+	copy, err = r.insertCommentRecord(ctx, &copy, commentTable, createdAtText)
+	if err != nil {
+		return nil, err
+	}
+	return &copy, nil
+}
+
+func prepareCommentRecord(comment *types.Comment) (types.Comment, error) {
 	if comment == nil {
-		return nil, fmt.Errorf("db: CommentSQLRepository.InsertRecord: comment must not be nil")
+		return types.Comment{}, fmt.Errorf("db: CommentSQLRepository.InsertRecord: comment must not be nil")
 	}
 	copy := *comment
 	if copy.IssueID == "" {
-		return nil, fmt.Errorf("db: CommentSQLRepository.InsertRecord: issueID must not be empty")
+		return types.Comment{}, fmt.Errorf("db: CommentSQLRepository.InsertRecord: issueID must not be empty")
 	}
-
-	issueTable := pickIssueTable(opts.UseWispsTable)
-	var exists bool
-	//nolint:gosec // G201: issueTable is one of two hardcoded constants
-	if err := r.runner.QueryRowContext(ctx,
-		fmt.Sprintf("SELECT EXISTS(SELECT 1 FROM %s WHERE id = ?)", issueTable), copy.IssueID).Scan(&exists); err != nil {
-		return nil, fmt.Errorf("db: CommentSQLRepository.InsertRecord: check issue existence: %w", err)
-	}
-	if !exists {
-		return nil, fmt.Errorf("db: CommentSQLRepository.InsertRecord: issue %s not found", copy.IssueID)
-	}
-
 	if copy.CreatedAt.IsZero() {
 		copy.CreatedAt = time.Now().UTC()
 	} else {
 		copy.CreatedAt = copy.CreatedAt.UTC()
 	}
-	createdAtText := issueops.FormatAuxTime(copy.CreatedAt)
-	commentTable := pickCommentTable(opts.UseWispsTable)
-	if copy.ID == "" {
+	return copy, nil
+}
+
+func (r *commentSQLRepositoryImpl) ensureCommentIssue(ctx context.Context, issueTable, issueID string) error {
+	var exists bool
+	//nolint:gosec // G201: issueTable is one of two hardcoded constants
+	if err := r.runner.QueryRowContext(ctx,
+		fmt.Sprintf("SELECT EXISTS(SELECT 1 FROM %s WHERE id = ?)", issueTable), issueID).Scan(&exists); err != nil {
+		return fmt.Errorf("db: CommentSQLRepository.InsertRecord: check issue existence: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("db: CommentSQLRepository.InsertRecord: issue %s not found", issueID)
+	}
+	return nil
+}
+
+func (r *commentSQLRepositoryImpl) insertCommentRecord(ctx context.Context, comment *types.Comment, commentTable, createdAtText string) (types.Comment, error) {
+	copy := *comment
+	if comment.ID == "" {
 		id, _, err := issueops.InsertDerivedComment(ctx, r.runner, commentTable, copy.IssueID, copy.Author, copy.Text, createdAtText)
 		if err != nil {
-			return nil, fmt.Errorf("db: CommentSQLRepository.InsertRecord: %w", err)
+			return types.Comment{}, fmt.Errorf("db: CommentSQLRepository.InsertRecord: %w", err)
 		}
 		copy.ID = id
 	} else {
@@ -164,19 +186,19 @@ func (r *commentSQLRepositoryImpl) InsertRecord(ctx context.Context, comment *ty
 			INSERT INTO %s (id, issue_id, author, text, created_at)
 			VALUES (?, ?, ?, ?, ?)
 		`, commentTable), copy.ID, copy.IssueID, copy.Author, copy.Text, createdAtText); err != nil {
-			return nil, fmt.Errorf("db: CommentSQLRepository.InsertRecord: %w", err)
+			return types.Comment{}, fmt.Errorf("db: CommentSQLRepository.InsertRecord: %w", err)
 		}
 	}
+
 	createdAt, err := issueops.ParseAuxTime(createdAtText)
 	if err != nil {
-		return nil, fmt.Errorf("db: CommentSQLRepository.InsertRecord: %w", err)
+		return types.Comment{}, fmt.Errorf("db: CommentSQLRepository.InsertRecord: %w", err)
 	}
 	copy.CreatedAt = createdAt
-
 	if err := issueops.RecordCommentEventInTx(ctx, r.runner, copy.IssueID, &issueops.EventComment{
 		ID: copy.ID, Author: copy.Author, Text: copy.Text, CreatedAt: copy.CreatedAt, Source: issueops.CommentSourceStructured,
 	}); err != nil {
-		return nil, err
+		return types.Comment{}, err
 	}
-	return &copy, nil
+	return copy, nil
 }

@@ -68,12 +68,17 @@ func TestFreshBootstrapHealSelfHealsAfterMidPassFailure(t *testing.T) {
 	defer cancel()
 
 	cfg := &Config{
-		Path:            tmpDir,
-		CommitterName:   "test",
-		CommitterEmail:  "test@example.com",
-		Database:        dbName,
-		MaxOpenConns:    1,
-		CreateIfMissing: true, // fresh database: this open must win the create race
+		Path:           tmpDir,
+		CommitterName:  "test",
+		CommitterEmail: "test@example.com",
+		Database:       dbName,
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 1,
+		},
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
+		// fresh database: this open must win the create race,
 	}
 
 	store, err := New(ctx, cfg)
@@ -173,12 +178,16 @@ func TestFreshBootstrapHealNotArmedWhenDatabasePreexists(t *testing.T) {
 	defer cancel()
 
 	cfg := &Config{
-		Path:            tmpDir,
-		CommitterName:   "test",
-		CommitterEmail:  "test@example.com",
-		Database:        dbName,
-		MaxOpenConns:    1,
-		CreateIfMissing: true,
+		Path:           tmpDir,
+		CommitterName:  "test",
+		CommitterEmail: "test@example.com",
+		Database:       dbName,
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 1,
+		},
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
 	}
 
 	store, err := New(ctx, cfg)

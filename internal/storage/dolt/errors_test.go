@@ -125,9 +125,11 @@ func TestWrapExecError(t *testing.T) {
 
 func TestDatabaseNotFoundHint(t *testing.T) {
 	baseCfg := Config{
-		Database:   "beads_test",
-		ServerHost: "127.0.0.1",
-		ServerPort: 3309,
+		Database: "beads_test",
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: 3309,
+		},
 	}
 
 	t.Run("hint suggests setting sync.remote when empty", func(t *testing.T) {

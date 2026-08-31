@@ -17,18 +17,26 @@ func TestCreateIssueCommitsInitialRelationalData(t *testing.T) {
 
 	createdAt := time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC)
 	issue := &types.Issue{
-		ID:          "create-relational-data",
-		Title:       "Create with relational data",
-		Description: "labels and comments should live in the create commit",
-		Status:      types.StatusOpen,
-		Priority:    1,
-		IssueType:   types.TypeTask,
-		Labels:      []string{"gc:wisp", "status:pending"},
-		Comments: []*types.Comment{
-			{
-				Author:    "tester",
-				Text:      "seed comment",
-				CreatedAt: createdAt,
+		IssueID: types.IssueID{
+			ID: "create-relational-data",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Create with relational data",
+			Description: "labels and comments should live in the create commit",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"gc:wisp", "status:pending"},
+			Comments: []*types.Comment{
+				{
+					Author:    "tester",
+					Text:      "seed comment",
+					CreatedAt: createdAt,
+				},
 			},
 		},
 	}
@@ -101,11 +109,17 @@ func TestCreateIssueWithoutInitialRelationalDataDoesNotCommitDirtySideTables(t *
 	defer cancel()
 
 	dirtyOwner := &types.Issue{
-		ID:        "dirty-owner",
-		Title:     "Dirty side table owner",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "dirty-owner",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Dirty side table owner",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, dirtyOwner, "tester"); err != nil {
 		t.Fatalf("CreateIssue dirty owner: %v", err)
@@ -125,11 +139,17 @@ func TestCreateIssueWithoutInitialRelationalDataDoesNotCommitDirtySideTables(t *
 	}
 
 	plain := &types.Issue{
-		ID:        "plain-create",
-		Title:     "Plain create",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "plain-create",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Plain create",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, plain, "tester"); err != nil {
 		t.Fatalf("CreateIssue plain: %v", err)
@@ -177,11 +197,17 @@ func TestCreateIssueCommitsChildCounterForHierarchicalID(t *testing.T) {
 	defer cancel()
 
 	parent := &types.Issue{
-		ID:        "parent-child-counter",
-		Title:     "Parent",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "parent-child-counter",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Parent",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeEpic,
+		},
 	}
 	if err := store.CreateIssue(ctx, parent, "tester"); err != nil {
 		t.Fatalf("CreateIssue parent: %v", err)
@@ -192,11 +218,17 @@ func TestCreateIssueCommitsChildCounterForHierarchicalID(t *testing.T) {
 		t.Fatalf("GetNextChildID: %v", err)
 	}
 	child := &types.Issue{
-		ID:        childID,
-		Title:     "Child",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: childID,
+		},
+		IssueContent: types.IssueContent{
+			Title: "Child",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	createCtx := storage.WithReservedChildCounter(ctx, parent.ID, childID)
 	if err := store.CreateIssue(createCtx, child, "tester"); err != nil {
@@ -223,11 +255,17 @@ func TestCreateIssueWithExplicitHierarchicalIDDoesNotCommitDirtyChildCounters(t 
 	defer cancel()
 
 	parent := &types.Issue{
-		ID:        "explicit-child-parent",
-		Title:     "Explicit child parent",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "explicit-child-parent",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Explicit child parent",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeEpic,
+		},
 	}
 	if err := store.CreateIssue(ctx, parent, "tester"); err != nil {
 		t.Fatalf("CreateIssue parent: %v", err)
@@ -241,11 +279,17 @@ func TestCreateIssueWithExplicitHierarchicalIDDoesNotCommitDirtyChildCounters(t 
 	}
 
 	explicitChild := &types.Issue{
-		ID:        parent.ID + ".7",
-		Title:     "Explicit child",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: parent.ID + ".7",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Explicit child",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, explicitChild, "tester"); err != nil {
 		t.Fatalf("CreateIssue explicit child: %v", err)
@@ -282,11 +326,17 @@ func TestCreateIssuesWithoutInitialRelationalDataDoesNotCommitDirtySideTables(t 
 	defer cancel()
 
 	dirtyOwner := &types.Issue{
-		ID:        "batch-dirty-owner",
-		Title:     "Batch dirty side table owner",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "batch-dirty-owner",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Batch dirty side table owner",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeEpic,
+		},
 	}
 	if err := store.CreateIssue(ctx, dirtyOwner, "tester"); err != nil {
 		t.Fatalf("CreateIssue dirty owner: %v", err)
@@ -312,11 +362,17 @@ func TestCreateIssuesWithoutInitialRelationalDataDoesNotCommitDirtySideTables(t 
 	}
 
 	plain := []*types.Issue{{
-		ID:        "test-batch-plain-create",
-		Title:     "Batch plain create",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-batch-plain-create",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Batch plain create",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}}
 	if err := store.CreateIssues(ctx, plain, "tester"); err != nil {
 		t.Fatalf("CreateIssues plain: %v", err)
@@ -375,11 +431,17 @@ func TestCreateIssuesWithExplicitHierarchicalIDDoesNotCommitDirtyChildCounters(t
 	defer cancel()
 
 	parent := &types.Issue{
-		ID:        "test-batch-explicit-child-parent",
-		Title:     "Batch explicit child parent",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "test-batch-explicit-child-parent",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Batch explicit child parent",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeEpic,
+		},
 	}
 	if err := store.CreateIssue(ctx, parent, "tester"); err != nil {
 		t.Fatalf("CreateIssue parent: %v", err)
@@ -393,11 +455,17 @@ func TestCreateIssuesWithExplicitHierarchicalIDDoesNotCommitDirtyChildCounters(t
 	}
 
 	explicitChildren := []*types.Issue{{
-		ID:        parent.ID + ".7",
-		Title:     "Batch explicit child",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: parent.ID + ".7",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Batch explicit child",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}}
 	if err := store.CreateIssues(ctx, explicitChildren, "tester"); err != nil {
 		t.Fatalf("CreateIssues explicit child: %v", err)
@@ -434,27 +502,45 @@ func TestCreateIssuesHierarchicalIDsCommitChildCounters(t *testing.T) {
 	defer cancel()
 
 	parent := &types.Issue{
-		ID:        "test-batch-child-counter-parent",
-		Title:     "Batch child counter parent",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "test-batch-child-counter-parent",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Batch child counter parent",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeEpic,
+		},
 	}
 	children := []*types.Issue{
 		parent,
 		{
-			ID:        parent.ID + ".1",
-			Title:     "Batch child one",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: parent.ID + ".1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Batch child one",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		},
 		{
-			ID:        parent.ID + ".2",
-			Title:     "Batch child two",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: parent.ID + ".2",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Batch child two",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		},
 	}
 	if err := store.CreateIssues(ctx, children, "tester"); err != nil {
@@ -492,32 +578,58 @@ func TestCreateIssuesAllWispBatchPersistsDependenciesAndCounters(t *testing.T) {
 	defer cancel()
 
 	source := &types.Issue{
-		ID:        "test-wisp-batch-source",
-		Title:     "Wisp source",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
-		Dependencies: []*types.Dependency{{
-			DependsOnID: "test-wisp-batch-target",
-			Type:        types.DepBlocks,
-		}},
+		IssueID: types.IssueID{
+			ID: "test-wisp-batch-source",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Wisp source",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Dependencies: []*types.Dependency{{
+				DependsOnID: "test-wisp-batch-target",
+				Type:        types.DepBlocks,
+			}},
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	target := &types.Issue{
-		ID:        "test-wisp-batch-target",
-		Title:     "Wisp target",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: "test-wisp-batch-target",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Wisp target",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	child := &types.Issue{
-		ID:        source.ID + ".3",
-		Title:     "Wisp child",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: source.ID + ".3",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Wisp child",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 
 	if err := store.CreateIssues(ctx, []*types.Issue{source, target, child}, "tester"); err != nil {
@@ -556,42 +668,68 @@ func TestCreateIssuesDuplicateSideTableInputsDoNotCommitDirtySideTables(t *testi
 
 	createdAt := time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC)
 	source := &types.Issue{
-		ID:        "test-dedupe-source",
-		Title:     "Dedupe source",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Labels:    []string{"existing-label"},
-		Comments: []*types.Comment{{
-			Author:    "tester",
-			Text:      "existing comment",
-			CreatedAt: createdAt,
-		}},
-		Dependencies: []*types.Dependency{{
-			DependsOnID: "test-dedupe-target",
-			Type:        types.DepBlocks,
-		}},
+		IssueID: types.IssueID{
+			ID: "test-dedupe-source",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Dedupe source",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"existing-label"},
+			Comments: []*types.Comment{{
+				Author:    "tester",
+				Text:      "existing comment",
+				CreatedAt: createdAt,
+			}},
+			Dependencies: []*types.Dependency{{
+				DependsOnID: "test-dedupe-target",
+				Type:        types.DepBlocks,
+			}},
+		},
 	}
 	target := &types.Issue{
-		ID:        "test-dedupe-target",
-		Title:     "Dedupe target",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-dedupe-target",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Dedupe target",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	dirtyOwner := &types.Issue{
-		ID:        "test-dedupe-dirty-owner",
-		Title:     "Dirty owner",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-dedupe-dirty-owner",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Dirty owner",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	dirtyTarget := &types.Issue{
-		ID:        "test-dedupe-dirty-target",
-		Title:     "Dirty target",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-dedupe-dirty-target",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Dirty target",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssues(ctx, []*types.Issue{source, target, dirtyOwner, dirtyTarget}, "tester"); err != nil {
 		t.Fatalf("CreateIssues seed: %v", err)
@@ -617,21 +755,29 @@ func TestCreateIssuesDuplicateSideTableInputsDoNotCommitDirtySideTables(t *testi
 	}
 
 	duplicateSource := &types.Issue{
-		ID:        source.ID,
-		Title:     source.Title,
-		Status:    source.Status,
-		Priority:  source.Priority,
-		IssueType: source.IssueType,
-		Labels:    []string{"existing-label"},
-		Comments: []*types.Comment{{
-			Author:    "tester",
-			Text:      "existing comment",
-			CreatedAt: createdAt,
-		}},
-		Dependencies: []*types.Dependency{{
-			DependsOnID: target.ID,
-			Type:        types.DepBlocks,
-		}},
+		IssueID: types.IssueID{
+			ID: source.ID,
+		},
+		IssueContent: types.IssueContent{
+			Title: source.Title,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    source.Status,
+			Priority:  source.Priority,
+			IssueType: source.IssueType,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"existing-label"},
+			Comments: []*types.Comment{{
+				Author:    "tester",
+				Text:      "existing comment",
+				CreatedAt: createdAt,
+			}},
+			Dependencies: []*types.Dependency{{
+				DependsOnID: target.ID,
+				Type:        types.DepBlocks,
+			}},
+		},
 	}
 	if err := store.CreateIssues(ctx, []*types.Issue{duplicateSource}, "tester"); err != nil {
 		t.Fatalf("CreateIssues duplicate side tables: %v", err)

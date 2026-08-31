@@ -18,7 +18,7 @@ func seedIssues(ctx context.Context, t *testing.T, store *DoltStore, ids ...stri
 	t.Helper()
 	issues := make([]*types.Issue, 0, len(ids))
 	for _, id := range ids {
-		issues = append(issues, &types.Issue{ID: id, Title: id, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask})
+		issues = append(issues, &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}})
 	}
 	if err := store.CreateIssues(ctx, issues, "seed"); err != nil {
 		t.Fatalf("seed issues %v: %v", ids, err)

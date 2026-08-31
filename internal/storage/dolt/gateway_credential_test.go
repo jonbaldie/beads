@@ -57,7 +57,11 @@ func TestApplyGatewayCredentialFailsClosed(t *testing.T) {
 // doubles as an exec detector — no error means it never executed).
 func TestApplyGatewayCredentialPresetWins(t *testing.T) {
 	t.Setenv("BEADS_DOLT_CREDENTIAL_COMMAND", "false")
-	cfg := &Config{ServerUser: "preset"}
+	cfg := &Config{
+		ServerOptions: ServerOptions{
+			ServerUser: "preset",
+		},
+	}
 	applied, err := ApplyGatewayCredential(context.Background(), &configfile.Config{}, cfg)
 	if err != nil {
 		t.Fatalf("preset should short-circuit before running the helper: %v", err)

@@ -108,19 +108,23 @@ func TestCredentialCLIRoutingE2ESharedServer(t *testing.T) {
 	defer cancel()
 
 	store, err := New(ctx, &Config{
-		Path:            clientDataDir,
-		BeadsDir:        projectBeadsDir,
-		Database:        "testdb",
-		ServerHost:      "127.0.0.1",
-		ServerPort:      port,
-		ServerUser:      "root",
-		CommitterName:   "test",
-		CommitterEmail:  "test@test.com",
-		AutoStart:       false,
-		CreateIfMissing: false,
-		Remote:          "origin",
-		RemoteUser:      "testuser",
-		RemotePassword:  "testpassword",
+		Path:     clientDataDir,
+		BeadsDir: projectBeadsDir,
+		Database: "testdb",
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: port,
+			ServerUser: "root",
+			AutoStart:  false,
+		},
+		CommitterName:  "test",
+		CommitterEmail: "test@test.com",
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: false,
+			RemoteUser:      "testuser",
+			RemotePassword:  "testpassword",
+		},
+		Remote: "origin",
 	})
 	if err != nil {
 		t.Fatalf("failed to create DoltStore: %v", err)
@@ -134,11 +138,17 @@ func TestCredentialCLIRoutingE2ESharedServer(t *testing.T) {
 	require.True(t, store.shouldUseCLIForCredentials(ctx, store.remote, store.mainRemoteCredentials()), "shared-server mode should route credentials via the shared CLI remote")
 
 	issue := &types.Issue{
-		ID:        "shared-route-001",
-		Title:     "Shared server routed push",
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		Priority:  2,
+		IssueID: types.IssueID{
+			ID: "shared-route-001",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Shared server routed push",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+			Priority:  2,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("CreateIssue failed: %v", err)

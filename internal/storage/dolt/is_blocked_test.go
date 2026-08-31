@@ -206,17 +206,39 @@ func TestIsBlocked_BatchedCreateWithDepsInOneTxn(t *testing.T) {
 	createPerm(t, ctx, store, "isb-batch-blocker")
 
 	parent := &types.Issue{
-		ID: "isb-batch-parent", Title: "p", Status: types.StatusOpen,
-		Priority: 2, IssueType: types.TypeTask,
-		Dependencies: []*types.Dependency{
-			{DependsOnID: "isb-batch-blocker", Type: types.DepBlocks},
+		IssueID: types.IssueID{
+			ID: "isb-batch-parent",
+		},
+		IssueContent: types.IssueContent{
+			Title: "p",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Dependencies: []*types.Dependency{
+				{DependsOnID: "isb-batch-blocker", Type: types.DepBlocks},
+			},
 		},
 	}
 	child := &types.Issue{
-		ID: "isb-batch-child", Title: "c", Status: types.StatusOpen,
-		Priority: 2, IssueType: types.TypeTask,
-		Dependencies: []*types.Dependency{
-			{DependsOnID: "isb-batch-parent", Type: types.DepParentChild},
+		IssueID: types.IssueID{
+			ID: "isb-batch-child",
+		},
+		IssueContent: types.IssueContent{
+			Title: "c",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Dependencies: []*types.Dependency{
+				{DependsOnID: "isb-batch-parent", Type: types.DepParentChild},
+			},
 		},
 	}
 	if err := store.CreateIssuesWithFullOptions(ctx, []*types.Issue{parent, child}, "tester",

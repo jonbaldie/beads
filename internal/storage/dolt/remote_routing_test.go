@@ -80,10 +80,12 @@ func TestSQLCapableCLIRoutingFallsBackWhenCLIDirIsNotDoltRepo(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			store := &DoltStore{
-				serverMode: true,
-				dbPath:     t.TempDir(),
-				database:   "beads",
-				remote:     "origin",
+				dbPath:   t.TempDir(),
+				database: "beads",
+				doltStoreVersionControlState: doltStoreVersionControlState{
+					serverMode: true,
+					remote:     "origin",
+				},
 			}
 			if err := os.MkdirAll(store.CLIDir(), 0o755); err != nil {
 				t.Fatalf("create non-Dolt CLI dir: %v", err)
@@ -156,10 +158,12 @@ func TestCLIRoutingFallsBackToSQLWhenNoCLIDir(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			store := &DoltStore{
-				serverMode: true,
-				dbPath:     "",
-				database:   "beads",
-				remote:     "origin",
+				dbPath:   "",
+				database: "beads",
+				doltStoreVersionControlState: doltStoreVersionControlState{
+					serverMode: true,
+					remote:     "origin",
+				},
 			}
 			useCLI, err := tt.route(store)
 			if err != nil {
@@ -205,11 +209,13 @@ func TestPrepareCLIRouteForGitProtocolColdStartWindow(t *testing.T) {
 				WillReturnRows(sqlmock.NewRows([]string{"name", "url"}))
 		}
 		store := &DoltStore{
-			serverMode: true,
-			dbPath:     t.TempDir(),
-			database:   "testdb",
-			remote:     "origin",
-			db:         db,
+			dbPath:   t.TempDir(),
+			database: "testdb",
+			db:       db,
+			doltStoreVersionControlState: doltStoreVersionControlState{
+				serverMode: true,
+				remote:     "origin",
+			},
 		}
 		initLocalDoltRepoForRemote(t, store.CLIDir())
 		return store

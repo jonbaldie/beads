@@ -35,7 +35,16 @@ func TestEventsJournalPruneNeverSplitsASkewedPair(t *testing.T) {
 
 	for _, id := range []string{"skw-1", "skw-2", "skw-3", "skw-4", "skw-5", "skw-6"} {
 		if err := store.CreateIssue(ctx, &types.Issue{
-			ID: id, Title: "t-" + id, IssueType: types.TypeTask, Status: types.StatusOpen,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: "t-" + id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				IssueType: types.TypeTask,
+				Status:    types.StatusOpen,
+			},
 		}, "actor"); err != nil {
 			t.Fatalf("create %s: %v", id, err)
 		}
@@ -108,7 +117,16 @@ func TestEventsJournalPruneWhenEveryRowIsOlderThanTheCutoff(t *testing.T) {
 
 	for _, id := range []string{"old-1", "old-2", "old-3", "old-4"} {
 		if err := store.CreateIssue(ctx, &types.Issue{
-			ID: id, Title: "t-" + id, IssueType: types.TypeTask, Status: types.StatusOpen,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: "t-" + id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				IssueType: types.TypeTask,
+				Status:    types.StatusOpen,
+			},
 		}, "actor"); err != nil {
 			t.Fatalf("create %s: %v", id, err)
 		}
@@ -160,7 +178,16 @@ func TestEventsJournalReadRefusesAnInteriorHole(t *testing.T) {
 
 	for _, id := range []string{"hol-1", "hol-2", "hol-3", "hol-4", "hol-5"} {
 		if err := store.CreateIssue(ctx, &types.Issue{
-			ID: id, Title: "t-" + id, IssueType: types.TypeTask, Status: types.StatusOpen,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: "t-" + id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				IssueType: types.TypeTask,
+				Status:    types.StatusOpen,
+			},
 		}, "actor"); err != nil {
 			t.Fatalf("create %s: %v", id, err)
 		}

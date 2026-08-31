@@ -21,7 +21,7 @@ func TestGetDependentRecords(t *testing.T) {
 	defer cancel()
 
 	mk := func(id string, ephemeral bool) *types.Issue {
-		iss := &types.Issue{ID: id, Title: id, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: ephemeral}
+		iss := &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: ephemeral}}
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("create %s: %v", id, err)
 		}
@@ -138,7 +138,7 @@ func TestCountDependentRecords(t *testing.T) {
 	defer cancel()
 
 	mk := func(id string, ephemeral bool) {
-		iss := &types.Issue{ID: id, Title: id, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: ephemeral}
+		iss := &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: ephemeral}}
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("create %s: %v", id, err)
 		}
@@ -195,7 +195,7 @@ func TestDependentRecordsCrossTableCollision(t *testing.T) {
 	defer cancel()
 
 	mk := func(id string, ephemeral bool) {
-		iss := &types.Issue{ID: id, Title: id, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: ephemeral}
+		iss := &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: ephemeral}}
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("create %s: %v", id, err)
 		}
@@ -292,7 +292,7 @@ func TestGetDependentRecordsLimitClamp(t *testing.T) {
 	ctx, cancel := testContext(t)
 	defer cancel()
 
-	if err := store.CreateIssue(ctx, &types.Issue{ID: "lc-target", Title: "t", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, "tester"); err != nil {
+	if err := store.CreateIssue(ctx, &types.Issue{IssueID: types.IssueID{ID: "lc-target"}, IssueContent: types.IssueContent{Title: "t"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}, "tester"); err != nil {
 		t.Fatalf("create target: %v", err)
 	}
 	// 120 durable dependents -> more than the default clamp (100), fewer than
@@ -300,7 +300,7 @@ func TestGetDependentRecordsLimitClamp(t *testing.T) {
 	const n = 120
 	for i := 0; i < n; i++ {
 		id := "lc-s" + pad(i)
-		if err := store.CreateIssue(ctx, &types.Issue{ID: id, Title: id, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, "tester"); err != nil {
+		if err := store.CreateIssue(ctx, &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}, "tester"); err != nil {
 			t.Fatalf("create %s: %v", id, err)
 		}
 		if err := store.AddDependency(ctx, &types.Dependency{IssueID: id, DependsOnID: "lc-target", Type: types.DepBlocks}, "tester"); err != nil {
@@ -341,7 +341,7 @@ func TestGetDependentRecordsForIssues(t *testing.T) {
 	defer cancel()
 
 	mk := func(id string, ephemeral bool) {
-		iss := &types.Issue{ID: id, Title: id, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: ephemeral}
+		iss := &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: ephemeral}}
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("create %s: %v", id, err)
 		}

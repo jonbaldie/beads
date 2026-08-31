@@ -39,7 +39,7 @@ func TestEventsJournal_EmbeddedConcurrentGaplessNoDup(t *testing.T) {
 				defer wg.Done()
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
-				iss := &types.Issue{ID: fmt.Sprintf("ecw-%d", k), Title: "t", IssueType: types.TypeTask, Status: types.StatusOpen}
+				iss := &types.Issue{IssueID: types.IssueID{ID: fmt.Sprintf("ecw-%d", k)}, IssueContent: types.IssueContent{Title: "t"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}}
 				errs[k] = store.CreateIssue(ctx, iss, "actor")
 			}(i)
 		}

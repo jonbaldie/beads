@@ -38,11 +38,17 @@ func TestCheckEligibility_OpenIssueNotEligible(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "elig-open",
-		Title:     "Open Issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "elig-open",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Open Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -68,11 +74,17 @@ func TestCheckEligibility_RecentlyClosedNotEligible(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "elig-recent",
-		Title:     "Recently Closed",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "elig-recent",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Recently Closed",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -101,11 +113,17 @@ func TestCheckEligibility_Tier1EligibleOldClosed(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "elig-old",
-		Title:     "Old Closed Issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "elig-old",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Old Closed Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -139,11 +157,17 @@ func TestCheckEligibility_Tier1AlreadyCompacted(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "elig-compact1",
-		Title:     "Already Compacted",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "elig-compact1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Already Compacted",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -180,11 +204,17 @@ func TestCheckEligibility_Tier2Eligible(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "elig-t2",
-		Title:     "Tier 2 Candidate",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "elig-t2",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Tier 2 Candidate",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -218,11 +248,17 @@ func TestCheckEligibility_Tier2NotCompactedFirst(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "elig-t2-noprior",
-		Title:     "Not Tier 1 Compacted",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "elig-t2-noprior",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Not Tier 1 Compacted",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -259,11 +295,17 @@ func TestCheckEligibility_Tier2AlreadyCompacted(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "elig-t2-done",
-		Title:     "Already Tier 2",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "elig-t2-done",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Already Tier 2",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -299,11 +341,17 @@ func TestCheckEligibility_InvalidTier(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "elig-badtier",
-		Title:     "Bad Tier",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "elig-badtier",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Bad Tier",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -332,11 +380,17 @@ func TestCheckEligibility_ClosedNoTimestamp(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "elig-notime",
-		Title:     "No Closed At",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "elig-notime",
+		},
+		IssueContent: types.IssueContent{
+			Title: "No Closed At",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -390,12 +444,18 @@ func TestGetTier1Candidates_ReturnsEligible(t *testing.T) {
 
 	// Create and close an issue, then backdate it
 	issue := &types.Issue{
-		ID:          "t1-cand",
-		Title:       "Tier 1 Candidate",
-		Description: "Some description content",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "t1-cand",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Tier 1 Candidate",
+			Description: "Some description content",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -438,11 +498,17 @@ func TestGetTier1Candidates_ExcludesRecentlyClosed(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "t1-recent",
-		Title:     "Recently Closed",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "t1-recent",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Recently Closed",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -471,11 +537,17 @@ func TestGetTier1Candidates_ExcludesAlreadyCompacted(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "t1-already",
-		Title:     "Already Compacted",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "t1-already",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Already Compacted",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -510,11 +582,17 @@ func TestGetTier1Candidates_ExcludesOpenIssues(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "t1-open",
-		Title:     "Still Open",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "t1-open",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Still Open",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -559,12 +637,18 @@ func TestGetTier2Candidates_ReturnsEligible(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:          "t2-cand",
-		Title:       "Tier 2 Candidate",
-		Description: "Some tier 2 content",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "t2-cand",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Tier 2 Candidate",
+			Description: "Some tier 2 content",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -601,11 +685,17 @@ func TestGetTier2Candidates_ExcludesNotYetTier1(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "t2-noprior",
-		Title:     "Not Tier 1 Yet",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "t2-noprior",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Not Tier 1 Yet",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -641,11 +731,17 @@ func TestGetTier2Candidates_ExcludesRecentTier1(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "t2-recent",
-		Title:     "Recent Tier 1",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "t2-recent",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Recent Tier 1",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -685,11 +781,17 @@ func TestApplyCompaction(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "compact-apply",
-		Title:     "Apply Compaction",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "compact-apply",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Apply Compaction",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -735,19 +837,31 @@ func TestGetTier1Candidates_DependentCount(t *testing.T) {
 
 	// Create a closed issue (the candidate) and another open issue that depends on it
 	candidate := &types.Issue{
-		ID:          "t1-dep-cand",
-		Title:       "Candidate With Deps",
-		Description: "Has dependents",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "t1-dep-cand",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Candidate With Deps",
+			Description: "Has dependents",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	dependent := &types.Issue{
-		ID:        "t1-dep-child",
-		Title:     "Dependent Issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "t1-dep-child",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Dependent Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, iss := range []*types.Issue{candidate, dependent} {
@@ -797,15 +911,21 @@ func TestSnapshotRestoreRoundTrip(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:                 "snap-rt",
-		Title:              "Round Trip",
-		Description:        "the original description",
-		Design:             "the original design",
-		Notes:              "the original notes",
-		AcceptanceCriteria: "the original acceptance criteria",
-		Status:             types.StatusOpen,
-		Priority:           2,
-		IssueType:          types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "snap-rt",
+		},
+		IssueContent: types.IssueContent{
+			Title:              "Round Trip",
+			Description:        "the original description",
+			Design:             "the original design",
+			Notes:              "the original notes",
+			AcceptanceCriteria: "the original acceptance criteria",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("create issue: %v", err)

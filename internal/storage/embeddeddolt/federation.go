@@ -27,7 +27,7 @@ const credentialKeyFile = ".beads-credential-key" //nolint:gosec // G101: filena
 
 // ensureCredentialKey lazily initializes the credential encryption key.
 func (s *EmbeddedDoltStore) ensureCredentialKey() error {
-	if s.credentialKey != nil {
+	if embeddedCredentialKeyAvailable(s) {
 		return nil
 	}
 	if s.beadsDir == "" {
@@ -294,71 +294,13 @@ func (s *EmbeddedDoltStore) Sync(ctx context.Context, peer string, strategy stri
 		Peer:      peer,
 		StartTime: time.Now(),
 	}
-
-	// GH#2474 / bd-578h9.2: commit pending changes before the merge, matching
-	// embedded Pull/PullRemote/PullFrom and server-mode Sync. Embedded Commit is
-	// DOLT_COMMIT('-Am'), so it stages config — where kv.memory.* memories live —
-	// and a leftover dirty working set (e.g. a `bd remember` write) would
-	// otherwise make DOLT_MERGE refuse to start ("cannot merge with uncommitted
-	// changes"). CommitPending is a no-op when the working set is already clean.
-	if _, err := s.CommitPending(ctx, "beads"); err != nil {
-		result.Error = fmt.Errorf("commit pending before sync: %w", err)
-		return result, result.Error
-	}
-
-	// Step 1: Fetch
-	if err := s.Fetch(ctx, peer); err != nil {
-		result.Error = fmt.Errorf("fetch failed: %w", err)
-		return result, result.Error
+	if err := s.prepareSync(ctx, peer); err != nil {
+		return syncFailure(result, err)
 	}
 	result.Fetched = true
-
-	// Step 2: Get commit before merge for change detection
-	beforeCommit, _ := s.GetCurrentCommit(ctx)
-
-	// Step 3: Merge peer's branch
-	remoteBranch := fmt.Sprintf("%s/%s", peer, s.branch)
-	conflicts, err := s.Merge(ctx, remoteBranch)
+	beforeCommit, err := s.mergeSync(ctx, peer, strategy, result)
 	if err != nil {
-		result.Error = fmt.Errorf("merge failed: %w", err)
-		return result, result.Error
-	}
-
-	// Step 4: Handle conflicts
-	if len(conflicts) > 0 {
-		result.Conflicts = conflicts
-
-		if strategy == "" {
-			result.Error = fmt.Errorf("merge conflicts require resolution (use --strategy ours|theirs)")
-			return result, result.Error
-		}
-
-		for _, c := range conflicts {
-			if err := s.ResolveConflicts(ctx, c.Field, strategy); err != nil {
-				result.Error = fmt.Errorf("conflict resolution failed for %s: %w", c.Field, err)
-				return result, result.Error
-			}
-		}
-		result.ConflictsResolved = true
-
-		// CommitMergeResolution, not Commit: Commit's GH#3886 nothing-to-commit
-		// tolerance would swallow the --ours case (resolution dirties nothing)
-		// as a silent no-op here, leaving dolt_merge_status.is_merging true while
-		// this function reports result.Merged = true and pushes — the exact
-		// re-wedge CommitMergeResolution's doc comment describes. See the
-		// server-mode twin, dolt/federation.go's Sync.
-		if err := s.CommitMergeResolution(ctx, fmt.Sprintf("Resolve conflicts from %s using %s strategy", peer, strategy)); err != nil {
-			result.Error = fmt.Errorf("commit conflict resolution: %w", err)
-			return result, result.Error
-		}
-
-		// bd-578h9.11: the conflicted merge skipped the automatic is_blocked
-		// recompute (unresolved rows would have fed it garbage); now that the
-		// resolution is committed, cover the whole merge+resolution window.
-		if err := s.RecomputeBlockedAfterMerge(ctx, beforeCommit); err != nil {
-			result.Error = fmt.Errorf("conflicts resolved but is_blocked recompute failed: %w", err)
-			return result, result.Error
-		}
+		return syncFailure(result, err)
 	}
 	result.Merged = true
 
@@ -366,19 +308,72 @@ func (s *EmbeddedDoltStore) Sync(ctx context.Context, peer string, strategy stri
 	if beforeCommit != afterCommit {
 		result.PulledCommits = 1
 	}
+	s.pushSync(ctx, peer, result)
 
-	// Step 5: Push
+	result.EndTime = time.Now()
+	return result, nil
+}
+
+func syncFailure(result *storage.SyncResult, err error) (*storage.SyncResult, error) {
+	result.Error = err
+	return result, err
+}
+
+func (s *EmbeddedDoltStore) prepareSync(ctx context.Context, peer string) error {
+	// CommitPending is required before an embedded merge because DOLT_MERGE
+	// rejects an uncommitted working set.
+	if _, err := s.CommitPending(ctx, "beads"); err != nil {
+		return fmt.Errorf("commit pending before sync: %w", err)
+	}
+	if err := s.Fetch(ctx, peer); err != nil {
+		return fmt.Errorf("fetch failed: %w", err)
+	}
+	return nil
+}
+
+func (s *EmbeddedDoltStore) mergeSync(ctx context.Context, peer, strategy string, result *storage.SyncResult) (string, error) {
+	beforeCommit, _ := s.GetCurrentCommit(ctx)
+	remoteBranch := fmt.Sprintf("%s/%s", peer, s.branch)
+	conflicts, err := s.Merge(ctx, remoteBranch)
+	if err != nil {
+		return "", fmt.Errorf("merge failed: %w", err)
+	}
+	if len(conflicts) == 0 {
+		return beforeCommit, nil
+	}
+	result.Conflicts = conflicts
+	if strategy == "" {
+		return "", fmt.Errorf("merge conflicts require resolution (use --strategy ours|theirs)")
+	}
+	if err := s.resolveSyncConflicts(ctx, conflicts, strategy); err != nil {
+		return "", err
+	}
+	result.ConflictsResolved = true
+	if err := s.CommitMergeResolution(ctx, fmt.Sprintf("Resolve conflicts from %s using %s strategy", peer, strategy)); err != nil {
+		return "", fmt.Errorf("commit conflict resolution: %w", err)
+	}
+	if err := s.RecomputeBlockedAfterMerge(ctx, beforeCommit); err != nil {
+		return "", fmt.Errorf("conflicts resolved but is_blocked recompute failed: %w", err)
+	}
+	return beforeCommit, nil
+}
+
+func (s *EmbeddedDoltStore) resolveSyncConflicts(ctx context.Context, conflicts []storage.Conflict, strategy string) error {
+	for _, conflict := range conflicts {
+		if err := s.ResolveConflicts(ctx, conflict.Field, strategy); err != nil {
+			return fmt.Errorf("conflict resolution failed for %s: %w", conflict.Field, err)
+		}
+	}
+	return nil
+}
+
+func (s *EmbeddedDoltStore) pushSync(ctx context.Context, peer string, result *storage.SyncResult) {
 	if err := s.PushTo(ctx, peer); err != nil {
 		result.PushError = err
 	} else {
 		result.Pushed = true
 	}
-
-	// Record last sync time in metadata.
 	_ = s.setLastSyncTime(ctx, peer)
-
-	result.EndTime = time.Now()
-	return result, nil
 }
 
 // SyncStatus returns the synchronization status with a peer.

@@ -84,10 +84,8 @@ func TestIssueOperationsClaimVerifyPostcondition(t *testing.T) {
 			}},
 		},
 		{
-			name: "claim with a persistence patch is not verified",
-			request: publicops.UpdateRequest{Actor: "alice", IssueID: "bd-1", Claim: true, Patch: publicops.IssuePatch{
-				Persistence: publicops.Field[publicops.PersistenceMode]{Set: true, Value: publicops.PersistenceModeEphemeral},
-			}},
+			name:    "claim with a persistence patch is not verified",
+			request: publicops.UpdateRequest{Actor: "alice", IssueID: "bd-1", Claim: true, Patch: publicops.IssuePatch{IssuePatchDetails: publicops.IssuePatchDetails{Persistence: publicops.Field[publicops.PersistenceMode]{Set: true, Value: publicops.PersistenceModeEphemeral}}}},
 		},
 		{
 			name: "guarded assignee transfer",

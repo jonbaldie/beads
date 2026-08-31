@@ -29,7 +29,7 @@ func TestSearchIssuesKeysetPlanIsIndexed(t *testing.T) {
 
 	base := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC)
 	for i := 0; i < 5; i++ {
-		iss := &types.Issue{ID: "kp-" + string(rune('a'+i)), Title: "kp", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, CreatedAt: base.Add(time.Duration(i) * time.Second)}
+		iss := &types.Issue{IssueID: types.IssueID{ID: "kp-" + string(rune('a'+i))}, IssueContent: types.IssueContent{Title: "kp"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueTimes: types.IssueTimes{CreatedAt: base.Add(time.Duration(i) * time.Second)}}
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("create seed: %v", err)
 		}

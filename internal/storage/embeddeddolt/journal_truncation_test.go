@@ -46,7 +46,16 @@ func TestEventsJournalRestartAndRetentionBoundary(t *testing.T) {
 	create := func(id string) {
 		t.Helper()
 		must(store.CreateIssue(ctx, &types.Issue{
-			ID: id, Title: "t-" + id, IssueType: types.TypeTask, Status: types.StatusOpen,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: "t-" + id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				IssueType: types.TypeTask,
+				Status:    types.StatusOpen,
+			},
 		}, "actor"), "create "+id)
 	}
 

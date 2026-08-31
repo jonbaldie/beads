@@ -373,11 +373,13 @@ func TestSchemaRunsInitWhenMissing(t *testing.T) {
 
 	dbName := uniqueTestDBName(t)
 	cfg := &Config{
-		Path:            tmpDir,
-		CommitterName:   "test",
-		CommitterEmail:  "test@example.com",
-		Database:        dbName,
-		CreateIfMissing: true,
+		Path:           tmpDir,
+		CommitterName:  "test",
+		CommitterEmail: "test@example.com",
+		Database:       dbName,
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
 	}
 
 	store, err := New(ctx, cfg)

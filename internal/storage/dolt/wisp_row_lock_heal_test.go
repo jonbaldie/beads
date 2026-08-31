@@ -27,12 +27,16 @@ func TestDoltNew_WispRowLockSelfHeal_RealDolt(t *testing.T) {
 	dbName := uniqueTestDBName(t)
 
 	cfg := &Config{
-		Path:            tmpDir,
-		CommitterName:   "test",
-		CommitterEmail:  "test@example.com",
-		Database:        dbName,
-		CreateIfMissing: true,
-		MaxOpenConns:    1,
+		Path:           tmpDir,
+		CommitterName:  "test",
+		CommitterEmail: "test@example.com",
+		Database:       dbName,
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 1,
+		},
 	}
 
 	store, err := New(ctx, cfg)

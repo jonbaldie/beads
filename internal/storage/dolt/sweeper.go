@@ -54,24 +54,33 @@ func (s *sweeper) Sweep(ctx context.Context, req issueops.SweepRequest) (issueop
 	}
 
 	var result issueops.SweepResult
-	run := func(tx *sql.Tx) error {
-		var err error
-		result, err = storeops.SweepInTx(ctx, tx, req)
-		return err
-	}
 	if req.DryRun {
-		if err := s.store.withReadTx(ctx, run); err != nil {
+		if err := s.sweepRead(ctx, req, &result); err != nil {
 			return issueops.SweepResult{}, err
 		}
 		return result, nil
 	}
 
-	if err := s.store.withWriteTx(ctx, func(tx *sql.Tx) error {
-		if err := run(tx); err != nil {
+	if err := s.sweepWrite(ctx, req, &result); err != nil {
+		return issueops.SweepResult{}, err
+	}
+	return result, nil
+}
+
+func (s *sweeper) sweepRead(ctx context.Context, req issueops.SweepRequest, result *issueops.SweepResult) error {
+	return s.store.withReadTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		*result, err = storeops.SweepInTx(ctx, tx, req)
+		return err
+	})
+}
+
+func (s *sweeper) sweepWrite(ctx context.Context, req issueops.SweepRequest, result *issueops.SweepResult) error {
+	return s.store.withWriteTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		*result, err = storeops.SweepInTx(ctx, tx, req)
+		if err != nil || result.Swept == 0 {
 			return err
-		}
-		if result.Swept == 0 {
-			return nil
 		}
 		for _, table := range sweptTables {
 			_ = schema.DrainCall(ctx, tx, "CALL DOLT_ADD(?)", table)
@@ -82,10 +91,7 @@ func (s *sweeper) Sweep(ctx context.Context, req issueops.SweepRequest) (issueop
 			return fmt.Errorf("dolt commit: %w", err)
 		}
 		return nil
-	}); err != nil {
-		return issueops.SweepResult{}, err
-	}
-	return result, nil
+	})
 }
 
 // sweptTables are the versioned tables a sweep can touch, staged before the

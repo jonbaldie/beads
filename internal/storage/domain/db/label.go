@@ -33,6 +33,13 @@ func pickLabelTable(useWisps bool) string {
 }
 
 func (r *labelSQLRepositoryImpl) Insert(ctx context.Context, issueID, label, actor string, opts domain.LabelOpts) error {
+	if err := validateLabelInsert(issueID, label); err != nil {
+		return err
+	}
+	return r.insertLabelRow(ctx, issueID, label, actor, opts)
+}
+
+func validateLabelInsert(issueID, label string) error {
 	if issueID == "" {
 		return fmt.Errorf("db: LabelSQLRepository.Insert: issueID must not be empty")
 	}
@@ -46,6 +53,10 @@ func (r *labelSQLRepositoryImpl) Insert(ctx context.Context, issueID, label, act
 	if err := types.CheckFieldLen("label", label); err != nil {
 		return err
 	}
+	return nil
+}
+
+func (r *labelSQLRepositoryImpl) insertLabelRow(ctx context.Context, issueID, label, actor string, opts domain.LabelOpts) error {
 	table := pickLabelTable(opts.UseWispsTable)
 	//nolint:gosec // G201: table is one of two hardcoded constants
 	result, err := r.runner.ExecContext(ctx,
@@ -60,19 +71,7 @@ func (r *labelSQLRepositoryImpl) Insert(ctx context.Context, issueID, label, act
 		return fmt.Errorf("db: LabelSQLRepository.Insert %s/%s: rows affected: %w", issueID, label, err)
 	}
 	if rows == 0 {
-		issueTable := "issues"
-		if opts.UseWispsTable {
-			issueTable = "wisps"
-		}
-		var count int
-		//nolint:gosec // G201: issueTable is one of two hardcoded constants.
-		if err := r.runner.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE id = ?", issueTable), issueID).Scan(&count); err != nil {
-			return fmt.Errorf("db: LabelSQLRepository.Insert %s/%s: verify issue: %w", issueID, label, err)
-		}
-		if count == 0 {
-			return fmt.Errorf("db: LabelSQLRepository.Insert %s/%s: issue does not exist", issueID, label)
-		}
-		return nil
+		return r.verifyLabelIssue(ctx, issueID, label, opts.UseWispsTable)
 	}
 	if err := r.events.Record(ctx, domain.Event{
 		IssueID:  issueID,
@@ -85,6 +84,22 @@ func (r *labelSQLRepositoryImpl) Insert(ctx context.Context, issueID, label, act
 	// A label is part of the bead snapshot; the idempotent no-op path above
 	// returns without writing and journals nothing.
 	return issueops.RecordEventInTx(ctx, r.runner, issueops.EventUpdate, issueID)
+}
+
+func (r *labelSQLRepositoryImpl) verifyLabelIssue(ctx context.Context, issueID, label string, useWispsTable bool) error {
+	issueTable := "issues"
+	if useWispsTable {
+		issueTable = "wisps"
+	}
+	var count int
+	//nolint:gosec // G201: issueTable is one of two hardcoded constants.
+	if err := r.runner.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE id = ?", issueTable), issueID).Scan(&count); err != nil {
+		return fmt.Errorf("db: LabelSQLRepository.Insert %s/%s: verify issue: %w", issueID, label, err)
+	}
+	if count == 0 {
+		return fmt.Errorf("db: LabelSQLRepository.Insert %s/%s: issue does not exist", issueID, label)
+	}
+	return nil
 }
 
 func (r *labelSQLRepositoryImpl) Delete(ctx context.Context, issueID, label, actor string, opts domain.LabelOpts) error {
@@ -195,35 +210,44 @@ func (r *labelSQLRepositoryImpl) DeleteAllForIDs(ctx context.Context, ids []stri
 		table = "wisp_labels"
 	}
 	total := 0
-	for start := 0; start < len(ids); start += deleteBatchSize {
+	idsLen := len(ids)
+	for start := 0; start < idsLen; start += deleteBatchSize {
 		end := start + deleteBatchSize
-		if end > len(ids) {
-			end = len(ids)
+		if end > idsLen {
+			end = idsLen
 		}
 		batch := ids[start:end]
-		placeholders := make([]string, len(batch))
-		args := make([]any, len(batch))
-		for i, id := range batch {
-			placeholders[i] = "?"
-			args[i] = id
-		}
-		//nolint:gosec // G201: table is one of two hardcoded constants; ? placeholders only.
-		res, err := r.runner.ExecContext(ctx,
-			fmt.Sprintf("DELETE FROM %s WHERE issue_id IN (%s)", table, strings.Join(placeholders, ",")),
-			args...)
+		n, err := deleteLabelBatch(ctx, r.runner, table, batch)
 		if err != nil {
 			if opts.UseWispsTable && dberrors.IsTableNotExist(err) {
 				return total, nil
 			}
-			return total, fmt.Errorf("db: LabelSQLRepository.DeleteAllForIDs from %s: %w", table, err)
-		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return total, fmt.Errorf("db: LabelSQLRepository.DeleteAllForIDs rows affected: %w", err)
+			return total, err
 		}
 		total += int(n)
 	}
 	return total, nil
+}
+
+func deleteLabelBatch(ctx context.Context, runner Runner, table string, batch []string) (int64, error) {
+	placeholders := make([]string, len(batch))
+	args := make([]any, len(batch))
+	for i, id := range batch {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	//nolint:gosec // G201: table is one of two hardcoded constants; ? placeholders only.
+	res, err := runner.ExecContext(ctx,
+		fmt.Sprintf("DELETE FROM %s WHERE issue_id IN (%s)", table, strings.Join(placeholders, ",")),
+		args...)
+	if err != nil {
+		return 0, fmt.Errorf("db: LabelSQLRepository.DeleteAllForIDs from %s: %w", table, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("db: LabelSQLRepository.DeleteAllForIDs rows affected: %w", err)
+	}
+	return n, nil
 }
 
 func (r *labelSQLRepositoryImpl) CountAllForIDs(ctx context.Context, ids []string, opts domain.LabelOpts) (int, error) {

@@ -28,7 +28,7 @@ func TestEmbeddedRecomputeAllBlockedWiring(t *testing.T) {
 
 	// Correct graph via the normal write path: rcb-w blocked on open rcb-x.
 	for _, id := range []string{"rcb-w", "rcb-x"} {
-		iss := &types.Issue{ID: id, Title: id, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+		iss := &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 		if err := te.store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("create %s: %v", id, err)
 		}
@@ -83,7 +83,7 @@ func TestEmbeddedRecomputeAllBlockedDirtyGraphIsTyped(t *testing.T) {
 
 	// An uncommitted write leaves `issues` dirty in the working set — exactly
 	// the state a concurrent writer produces mid-transaction.
-	iss := &types.Issue{ID: "rcbdirty-a", Title: "dirty", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	iss := &types.Issue{IssueID: types.IssueID{ID: "rcbdirty-a"}, IssueContent: types.IssueContent{Title: "dirty"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := te.store.CreateIssue(ctx, iss, "tester"); err != nil {
 		t.Fatalf("create: %v", err)
 	}

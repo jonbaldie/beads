@@ -161,7 +161,10 @@ func setupTestStore(t *testing.T) (*DoltStore, func()) {
 		CommitterName:  "test",
 		CommitterEmail: "test@example.com",
 		Database:       testSharedDB,
-		MaxOpenConns:   1, // Required: DOLT_CHECKOUT is session-level
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 1,
+		},
+		// Required: DOLT_CHECKOUT is session-level,
 	}
 
 	store, err := New(ctx, cfg)
@@ -209,12 +212,18 @@ func setupConcurrentTestStore(t *testing.T) (*DoltStore, func()) {
 	dbName := uniqueTestDBName(t)
 
 	cfg := &Config{
-		Path:            tmpDir,
-		CommitterName:   "test",
-		CommitterEmail:  "test@example.com",
-		Database:        dbName,
-		MaxOpenConns:    2,    // limit to avoid overwhelming the test container
-		CreateIfMissing: true, // tests create fresh databases
+		Path:           tmpDir,
+		CommitterName:  "test",
+		CommitterEmail: "test@example.com",
+		Database:       dbName,
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 2,
+		},
+		RemoteOptions: RemoteOptions{
+			// limit to avoid overwhelming the test container
+			CreateIfMissing: true,
+		},
+		// tests create fresh databases,
 	}
 
 	store, err := New(ctx, cfg)
@@ -254,11 +263,14 @@ func TestNewDoltStore(t *testing.T) {
 
 	dbName := uniqueTestDBName(t)
 	cfg := &Config{
-		Path:            tmpDir,
-		CommitterName:   "test",
-		CommitterEmail:  "test@example.com",
-		Database:        dbName,
-		CreateIfMissing: true, // tests create fresh databases
+		Path:           tmpDir,
+		CommitterName:  "test",
+		CommitterEmail: "test@example.com",
+		Database:       dbName,
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
+		// tests create fresh databases,
 	}
 
 	store, err := New(ctx, cfg)
@@ -292,10 +304,14 @@ func TestCreateIssueEventType(t *testing.T) {
 
 	// setupTestStore does not set types.custom, so this reproduces the bug
 	event := &types.Issue{
-		Title:     "state change audit trail",
-		Status:    types.StatusClosed,
-		Priority:  4,
-		IssueType: types.TypeEvent,
+		IssueContent: types.IssueContent{
+			Title: "state change audit trail",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  4,
+			IssueType: types.TypeEvent,
+		},
 	}
 	err := store.CreateIssue(ctx, event, "test-user")
 	if err != nil {
@@ -393,10 +409,14 @@ func TestCreateIssueNoDoubleHyphen(t *testing.T) {
 	}
 
 	issue := &types.Issue{
-		Title:     "test double hyphen",
-		Status:    types.StatusOpen,
-		Priority:  3,
-		IssueType: types.TypeBug,
+		IssueContent: types.IssueContent{
+			Title: "test double hyphen",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  3,
+			IssueType: types.TypeBug,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-user"); err != nil {
 		t.Fatalf("CreateIssue failed: %v", err)
@@ -427,11 +447,17 @@ func TestCreateWispNoDoubleHyphen(t *testing.T) {
 	}
 
 	wisp := &types.Issue{
-		Title:     "test wisp double hyphen",
-		Status:    types.StatusOpen,
-		Priority:  3,
-		IssueType: types.TypeBug,
-		Ephemeral: true,
+		IssueContent: types.IssueContent{
+			Title: "test wisp double hyphen",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  3,
+			IssueType: types.TypeBug,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, wisp, "test-user"); err != nil {
 		t.Fatalf("CreateIssue (wisp) failed: %v", err)
@@ -456,12 +482,21 @@ func TestCreateWispNoDoublePrefix(t *testing.T) {
 	defer cancel()
 
 	wisp := &types.Issue{
-		Title:     "test wisp double prefix",
-		Status:    types.StatusOpen,
-		Priority:  3,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
-		IDPrefix:  "wisp", // Set by cloneSubgraph for wisp molecules
+		IssueContent: types.IssueContent{
+			Title: "test wisp double prefix",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  3,
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			IDPrefix: "wisp",
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
+		// Set by cloneSubgraph for wisp molecules,
 	}
 	if err := store.CreateIssue(ctx, wisp, "test-user"); err != nil {
 		t.Fatalf("CreateIssue (wisp) failed: %v", err)
@@ -495,10 +530,14 @@ func TestTransactionCreateIssueNoDoubleHyphen(t *testing.T) {
 	var createdID string
 	err = store.RunInTransaction(ctx, "test-tx", func(tx storage.Transaction) error {
 		issue := &types.Issue{
-			Title:     "test tx double hyphen",
-			Status:    types.StatusOpen,
-			Priority:  3,
-			IssueType: types.TypeBug,
+			IssueContent: types.IssueContent{
+				Title: "test tx double hyphen",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  3,
+				IssueType: types.TypeBug,
+			},
 		}
 		if err := tx.CreateIssue(ctx, issue, "test-user"); err != nil {
 			return err
@@ -560,11 +599,15 @@ func TestDoltStoreIssue(t *testing.T) {
 
 	// Create an issue
 	issue := &types.Issue{
-		Title:       "Test Issue",
-		Description: "Test description",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title:       "Test Issue",
+			Description: "Test description",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
@@ -598,11 +641,15 @@ func TestDoltStoreIssueUpdate(t *testing.T) {
 
 	// Create an issue
 	issue := &types.Issue{
-		Title:       "Original Title",
-		Description: "Original description",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title:       "Original Title",
+			Description: "Original description",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
@@ -645,11 +692,15 @@ func TestDoltStoreIssueClose(t *testing.T) {
 
 	// Create an issue
 	issue := &types.Issue{
-		Title:       "Issue to Close",
-		Description: "Will be closed",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title:       "Issue to Close",
+			Description: "Will be closed",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
@@ -707,11 +758,17 @@ func TestClosePromotedWisp(t *testing.T) {
 
 	// Create a wisp (goes to wisps table)
 	wisp := &types.Issue{
-		Title:     "Wisp to promote and close",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueContent: types.IssueContent{
+			Title: "Wisp to promote and close",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, wisp, "tester"); err != nil {
 		t.Fatalf("CreateIssue (wisp) failed: %v", err)
@@ -783,11 +840,15 @@ func TestDoltStoreLabels(t *testing.T) {
 
 	// Create an issue
 	issue := &types.Issue{
-		Title:       "Issue with Labels",
-		Description: "Test labels",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title:       "Issue with Labels",
+			Description: "Test labels",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
@@ -836,20 +897,32 @@ func TestDoltStoreDependencies(t *testing.T) {
 	// Create parent and child issues (both tasks for a same-type blocks
 	// pair; cross-type blocks edges are now allowed for unrelated issues).
 	parent := &types.Issue{
-		ID:          "test-parent",
-		Title:       "Parent Issue",
-		Description: "Parent description",
-		Status:      types.StatusOpen,
-		Priority:    1,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-parent",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Parent Issue",
+			Description: "Parent description",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	child := &types.Issue{
-		ID:          "test-child",
-		Title:       "Child Issue",
-		Description: "Child description",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-child",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Child Issue",
+			Description: "Child description",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	if err := store.CreateIssue(ctx, parent, "tester"); err != nil {
@@ -927,28 +1000,46 @@ func TestDoltStoreSearch(t *testing.T) {
 	// Create multiple issues
 	issues := []*types.Issue{
 		{
-			ID:          "test-search-1",
-			Title:       "Search test one",
-			Description: "First issue description",
-			Status:      types.StatusOpen,
-			Priority:    1,
-			IssueType:   types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "test-search-1",
+			},
+			IssueContent: types.IssueContent{
+				Title:       "Search test one",
+				Description: "First issue description",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
 		},
 		{
-			ID:          "test-search-2",
-			Title:       "Search test two",
-			Description: "Second issue description",
-			Status:      types.StatusOpen,
-			Priority:    2,
-			IssueType:   types.TypeBug,
+			IssueID: types.IssueID{
+				ID: "test-search-2",
+			},
+			IssueContent: types.IssueContent{
+				Title:       "Search test two",
+				Description: "Second issue description",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeBug,
+			},
 		},
 		{
-			ID:          "test-search-3",
-			Title:       "Third Issue",
-			Description: "Different content",
-			Status:      types.StatusClosed,
-			Priority:    3,
-			IssueType:   types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "test-search-3",
+			},
+			IssueContent: types.IssueContent{
+				Title:       "Third Issue",
+				Description: "Different content",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusClosed,
+				Priority:  3,
+				IssueType: types.TypeTask,
+			},
 		},
 	}
 
@@ -969,7 +1060,7 @@ func TestDoltStoreSearch(t *testing.T) {
 
 	// Search with status filter
 	openStatus := types.StatusOpen
-	results, err = store.SearchIssues(ctx, "", types.IssueFilter{Status: &openStatus})
+	results, err = store.SearchIssues(ctx, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Status: &openStatus}})
 	if err != nil {
 		t.Fatalf("failed to search with status filter: %v", err)
 	}
@@ -979,7 +1070,7 @@ func TestDoltStoreSearch(t *testing.T) {
 
 	// Search by issue type
 	bugType := types.TypeBug
-	results, err = store.SearchIssues(ctx, "", types.IssueFilter{IssueType: &bugType})
+	results, err = store.SearchIssues(ctx, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IssueType: &bugType}})
 	if err != nil {
 		t.Fatalf("failed to search by type: %v", err)
 	}
@@ -998,20 +1089,32 @@ func TestDoltStoreCreateIssues(t *testing.T) {
 	// Create multiple issues in batch
 	issues := []*types.Issue{
 		{
-			ID:          "test-batch-1",
-			Title:       "Batch Issue 1",
-			Description: "First batch issue",
-			Status:      types.StatusOpen,
-			Priority:    1,
-			IssueType:   types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "test-batch-1",
+			},
+			IssueContent: types.IssueContent{
+				Title:       "Batch Issue 1",
+				Description: "First batch issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
 		},
 		{
-			ID:          "test-batch-2",
-			Title:       "Batch Issue 2",
-			Description: "Second batch issue",
-			Status:      types.StatusOpen,
-			Priority:    2,
-			IssueType:   types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "test-batch-2",
+			},
+			IssueContent: types.IssueContent{
+				Title:       "Batch Issue 2",
+				Description: "Second batch issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		},
 	}
 
@@ -1043,12 +1146,18 @@ func TestDoltStoreComments(t *testing.T) {
 
 	// Create an issue
 	issue := &types.Issue{
-		ID:          "test-comment-issue",
-		Title:       "Issue with Comments",
-		Description: "Test comments",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-comment-issue",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Issue with Comments",
+			Description: "Test comments",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
@@ -1091,12 +1200,18 @@ func TestDoltStoreEvents(t *testing.T) {
 
 	// Create an issue (this creates a creation event)
 	issue := &types.Issue{
-		ID:          "test-event-issue",
-		Title:       "Issue with Events",
-		Description: "Test events",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-event-issue",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Issue with Events",
+			Description: "Test events",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
@@ -1127,12 +1242,18 @@ func TestDoltStoreDeleteIssue(t *testing.T) {
 
 	// Create an issue
 	issue := &types.Issue{
-		ID:          "test-delete-issue",
-		Title:       "Issue to Delete",
-		Description: "Will be deleted",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-delete-issue",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Issue to Delete",
+			Description: "Will be deleted",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
@@ -1172,11 +1293,17 @@ func TestDeleteIssuesBatchPerformance(t *testing.T) {
 	// Create issues with chain dependencies: issue-1 <- issue-2 <- ... <- issue-N
 	for i := 1; i <= issueCount; i++ {
 		issue := &types.Issue{
-			ID:        fmt.Sprintf("batch-del-%d", i),
-			Title:     fmt.Sprintf("Batch Delete Issue %d", i),
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("batch-del-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Batch Delete Issue %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 			t.Fatalf("failed to create issue %d: %v", i, err)
@@ -1247,12 +1374,30 @@ func TestDeleteIssuesNonCascadeWithExternalDeps(t *testing.T) {
 
 	// Create parent issue and a dependent that will NOT be in the deletion set
 	parent := &types.Issue{
-		ID: "nc-parent", Title: "Parent", Status: types.StatusOpen,
-		Priority: 1, IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "nc-parent",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Parent",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	child := &types.Issue{
-		ID: "nc-child", Title: "Child", Status: types.StatusOpen,
-		Priority: 1, IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "nc-child",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Child",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	for _, iss := range []*types.Issue{parent, child} {
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
@@ -1308,8 +1453,17 @@ func TestDeleteIssuesDryRun(t *testing.T) {
 	// Create 3 issues with chain deps and a label
 	for i := 1; i <= 3; i++ {
 		iss := &types.Issue{
-			ID: fmt.Sprintf("dry-%d", i), Title: fmt.Sprintf("Dry %d", i),
-			Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("dry-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Dry %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("failed to create issue: %v", err)
@@ -1367,8 +1521,17 @@ func TestDeleteIssuesForceWithOrphans(t *testing.T) {
 	// Create: parent, child1 (in deletion set), child2 (external dependent)
 	for _, id := range []string{"f-parent", "f-child1", "f-child2"} {
 		iss := &types.Issue{
-			ID: id, Title: id, Status: types.StatusOpen,
-			Priority: 1, IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("failed to create %s: %v", id, err)
@@ -1435,8 +1598,17 @@ func TestDeleteIssuesBatchBoundary(t *testing.T) {
 				id := fmt.Sprintf("bb-%d-%d", count, i)
 				ids[i] = id
 				iss := &types.Issue{
-					ID: id, Title: id, Status: types.StatusOpen,
-					Priority: 1, IssueType: types.TypeTask,
+					IssueID: types.IssueID{
+						ID: id,
+					},
+					IssueContent: types.IssueContent{
+						Title: id,
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Status:    types.StatusOpen,
+						Priority:  1,
+						IssueType: types.TypeTask,
+					},
 				}
 				if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 					t.Fatalf("failed to create issue %s: %v", id, err)
@@ -1486,8 +1658,17 @@ func TestDeleteIssuesCircularDeps(t *testing.T) {
 	// Create A -> B -> C -> A (circular)
 	for _, id := range []string{"circ-a", "circ-b", "circ-c"} {
 		iss := &types.Issue{
-			ID: id, Title: id, Status: types.StatusOpen,
-			Priority: 1, IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("failed to create %s: %v", id, err)
@@ -1545,8 +1726,17 @@ func TestDeleteIssuesDiamondDeps(t *testing.T) {
 	// Diamond: root <- left, root <- right, left <- bottom, right <- bottom
 	for _, id := range []string{"dia-root", "dia-left", "dia-right", "dia-bottom"} {
 		iss := &types.Issue{
-			ID: id, Title: id, Status: types.StatusOpen,
-			Priority: 1, IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("failed to create %s: %v", id, err)
@@ -1597,8 +1787,17 @@ func TestDeleteIssuesDepsCountAccuracy(t *testing.T) {
 	// Create 2 issues with 1 dependency between them
 	for _, id := range []string{"dc-a", "dc-b"} {
 		iss := &types.Issue{
-			ID: id, Title: id, Status: types.StatusOpen,
-			Priority: 1, IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("failed to create %s: %v", id, err)
@@ -1631,9 +1830,9 @@ func TestDoltStoreStatistics(t *testing.T) {
 
 	// Create some issues
 	issues := []*types.Issue{
-		{ID: "test-stat-1", Title: "Open 1", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
-		{ID: "test-stat-2", Title: "Open 2", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: "test-stat-3", Title: "Closed", Status: types.StatusClosed, Priority: 1, IssueType: types.TypeTask},
+		{IssueID: types.IssueID{ID: "test-stat-1"}, IssueContent: types.IssueContent{Title: "Open 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "test-stat-2"}, IssueContent: types.IssueContent{Title: "Open 2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "test-stat-3"}, IssueContent: types.IssueContent{Title: "Closed"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed, Priority: 1, IssueType: types.TypeTask}},
 	}
 
 	for _, issue := range issues {
@@ -1788,28 +1987,46 @@ func TestDoltStoreGetReadyWork(t *testing.T) {
 
 	// Create issues: one blocked, one ready
 	blocker := &types.Issue{
-		ID:          "test-blocker",
-		Title:       "Blocker",
-		Description: "Blocks another issue",
-		Status:      types.StatusOpen,
-		Priority:    1,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-blocker",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Blocker",
+			Description: "Blocks another issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	blocked := &types.Issue{
-		ID:          "test-blocked",
-		Title:       "Blocked",
-		Description: "Is blocked",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-blocked",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Blocked",
+			Description: "Is blocked",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	ready := &types.Issue{
-		ID:          "test-ready",
-		Title:       "Ready",
-		Description: "Is ready",
-		Status:      types.StatusOpen,
-		Priority:    3,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-ready",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Ready",
+			Description: "Is ready",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  3,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, issue := range []*types.Issue{blocker, blocked, ready} {
@@ -1861,12 +2078,20 @@ func TestDoltStoreGetReadyWork(t *testing.T) {
 
 	// Test ephemeral filtering: create an ephemeral issue
 	ephemeral := &types.Issue{
-		ID:        "test-ephemeral",
-		Title:     "Ephemeral Task",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: "test-ephemeral",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Ephemeral Task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, ephemeral, "tester"); err != nil {
 		t.Fatalf("failed to create ephemeral issue: %v", err)
@@ -1884,7 +2109,7 @@ func TestDoltStoreGetReadyWork(t *testing.T) {
 	}
 
 	// IncludeEphemeral should include it
-	readyWithEph, err := store.GetReadyWork(ctx, types.WorkFilter{IncludeEphemeral: true})
+	readyWithEph, err := store.GetReadyWork(ctx, types.WorkFilter{WorkFilterExtra: types.WorkFilterExtra{IncludeEphemeral: true}})
 	if err != nil {
 		t.Fatalf("failed to get ready work (include-ephemeral): %v", err)
 	}
@@ -1908,39 +2133,69 @@ func TestDoltStoreGetReadyWorkWaitsForChildrenOfSpawner(t *testing.T) {
 	defer cancel()
 
 	implement := &types.Issue{
-		ID:        "test-implement",
-		Title:     "Implement",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-implement",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Implement",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	review := &types.Issue{
-		ID:        "test-review",
-		Title:     "Review",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-review",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Review",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	otherSpawner := &types.Issue{
-		ID:        "test-other-spawner",
-		Title:     "Other spawner",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-other-spawner",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Other spawner",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	implChild := &types.Issue{
-		ID:        "test-implement.1",
-		Title:     "Implement child",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-implement.1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Implement child",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	otherChild := &types.Issue{
-		ID:        "test-other-spawner.1",
-		Title:     "Unrelated child",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-other-spawner.1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Unrelated child",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, issue := range []*types.Issue{implement, review, otherSpawner, implChild, otherChild} {
@@ -2071,36 +2326,72 @@ func TestGetReadyWorkSortPolicy(t *testing.T) {
 	// The "recent-*" issues are recent (within 48h).
 	issues := []*types.Issue{
 		{
-			ID:        "test-old-p3",
-			Title:     "Old P3",
-			Status:    types.StatusOpen,
-			Priority:  3,
-			IssueType: types.TypeTask,
-			CreatedAt: now.Add(-72 * time.Hour), // 3 days ago
+			IssueID: types.IssueID{
+				ID: "test-old-p3",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Old P3",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  3,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: now.Add(-72 * time.Hour),
+			},
+			// 3 days ago,
 		},
 		{
-			ID:        "test-recent-p1-older",
-			Title:     "Recent P1 Older",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
-			CreatedAt: now.Add(-90 * time.Minute), // 90 min ago
+			IssueID: types.IssueID{
+				ID: "test-recent-p1-older",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Recent P1 Older",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: now.Add(-90 * time.Minute),
+			},
+			// 90 min ago,
 		},
 		{
-			ID:        "test-recent-p2",
-			Title:     "Recent P2",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			CreatedAt: now.Add(-1 * time.Hour), // 1 hour ago
+			IssueID: types.IssueID{
+				ID: "test-recent-p2",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Recent P2",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: now.Add(-1 * time.Hour),
+			},
+			// 1 hour ago,
 		},
 		{
-			ID:        "test-recent-p1",
-			Title:     "Recent P1",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
-			CreatedAt: now.Add(-30 * time.Minute), // 30 min ago
+			IssueID: types.IssueID{
+				ID: "test-recent-p1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Recent P1",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: now.Add(-30 * time.Minute),
+			},
+			// 30 min ago,
 		},
 	}
 
@@ -2112,7 +2403,9 @@ func TestGetReadyWorkSortPolicy(t *testing.T) {
 
 	t.Run("SortPolicyPriority", func(t *testing.T) {
 		result, err := store.GetReadyWork(ctx, types.WorkFilter{
-			SortPolicy: types.SortPolicyPriority,
+			WorkFilterCore: types.WorkFilterCore{
+				SortPolicy: types.SortPolicyPriority,
+			},
 		})
 		if err != nil {
 			t.Fatalf("GetReadyWork failed: %v", err)
@@ -2125,7 +2418,9 @@ func TestGetReadyWorkSortPolicy(t *testing.T) {
 
 	t.Run("SortPolicyOldest", func(t *testing.T) {
 		result, err := store.GetReadyWork(ctx, types.WorkFilter{
-			SortPolicy: types.SortPolicyOldest,
+			WorkFilterCore: types.WorkFilterCore{
+				SortPolicy: types.SortPolicyOldest,
+			},
 		})
 		if err != nil {
 			t.Fatalf("GetReadyWork failed: %v", err)
@@ -2138,7 +2433,9 @@ func TestGetReadyWorkSortPolicy(t *testing.T) {
 
 	t.Run("SortPolicyHybrid", func(t *testing.T) {
 		result, err := store.GetReadyWork(ctx, types.WorkFilter{
-			SortPolicy: types.SortPolicyHybrid,
+			WorkFilterCore: types.WorkFilterCore{
+				SortPolicy: types.SortPolicyHybrid,
+			},
 		})
 		if err != nil {
 			t.Fatalf("GetReadyWork failed: %v", err)
@@ -2171,28 +2468,52 @@ func TestDoltStoreClaimReadyIssuePriorityFIFO(t *testing.T) {
 	now := time.Now().UTC()
 	issues := []*types.Issue{
 		{
-			ID:        "claim-ready-first",
-			Title:     "First task",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
-			CreatedAt: now.Add(-2 * time.Hour),
+			IssueID: types.IssueID{
+				ID: "claim-ready-first",
+			},
+			IssueContent: types.IssueContent{
+				Title: "First task",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: now.Add(-2 * time.Hour),
+			},
 		},
 		{
-			ID:        "claim-ready-second",
-			Title:     "Second task",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
-			CreatedAt: now.Add(-1 * time.Hour),
+			IssueID: types.IssueID{
+				ID: "claim-ready-second",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Second task",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: now.Add(-1 * time.Hour),
+			},
 		},
 		{
-			ID:        "claim-ready-third",
-			Title:     "Third task",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
-			CreatedAt: now.Add(-30 * time.Minute),
+			IssueID: types.IssueID{
+				ID: "claim-ready-third",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Third task",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: now.Add(-30 * time.Minute),
+			},
 		},
 	}
 	for _, issue := range issues {
@@ -2202,7 +2523,9 @@ func TestDoltStoreClaimReadyIssuePriorityFIFO(t *testing.T) {
 	}
 
 	claimed, err := store.ClaimReadyIssue(ctx, types.WorkFilter{
-		SortPolicy: types.SortPolicyPriority,
+		WorkFilterCore: types.WorkFilterCore{
+			SortPolicy: types.SortPolicyPriority,
+		},
 	}, "agent")
 	if err != nil {
 		t.Fatalf("ClaimReadyIssue failed: %v", err)
@@ -2250,12 +2573,20 @@ func TestEphemeralExplicitID_GetIssue(t *testing.T) {
 
 	// Create an ephemeral bead with an explicit ID (no -wisp- in name)
 	issue := &types.Issue{
-		ID:        "test-agent-emma",
-		Title:     "Agent: test-agent-emma",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: "test-agent-emma",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Agent: test-agent-emma",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-user"); err != nil {
 		t.Fatalf("CreateIssue (ephemeral with explicit ID) failed: %v", err)
@@ -2282,12 +2613,20 @@ func TestGetIssue_WispLabelTableErrorPropagates(t *testing.T) {
 	defer cancel()
 
 	wisp := &types.Issue{
-		ID:        "test-wisp-label-error",
-		Title:     "Wisp with missing labels table",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: "test-wisp-label-error",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Wisp with missing labels table",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, wisp, "tester"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -2318,12 +2657,20 @@ func TestEphemeralExplicitID_UpdateIssue(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "test-ephemeral-update",
-		Title:     "Ephemeral: test-ephemeral-update",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: "test-ephemeral-update",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Ephemeral: test-ephemeral-update",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-user"); err != nil {
 		t.Fatalf("CreateIssue failed: %v", err)
@@ -2357,12 +2704,20 @@ func TestEphemeralExplicitID_SearchIssues(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "test-agent-furiosa",
-		Title:     "Agent: test-agent-furiosa",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: "test-agent-furiosa",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Agent: test-agent-furiosa",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-user"); err != nil {
 		t.Fatalf("CreateIssue failed: %v", err)
@@ -2370,7 +2725,9 @@ func TestEphemeralExplicitID_SearchIssues(t *testing.T) {
 
 	// SearchIssues with nil Ephemeral filter should find it (merges wisps)
 	results, err := store.SearchIssues(ctx, "", types.IssueFilter{
-		IDs: []string{"test-agent-furiosa"},
+		IssueFilterCore: types.IssueFilterCore{
+			IDs: []string{"test-agent-furiosa"},
+		},
 	})
 	if err != nil {
 		t.Fatalf("SearchIssues failed: %v", err)
@@ -2394,11 +2751,17 @@ func TestCreateEphemeralAutoID(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		Title:     "Ephemeral auto ID test",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueContent: types.IssueContent{
+			Title: "Ephemeral auto ID test",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-user"); err != nil {
 		t.Fatalf("CreateIssue (ephemeral, no explicit ID) failed: %v", err)
@@ -2440,11 +2803,17 @@ func TestCreateMultipleEphemeralAutoIDs(t *testing.T) {
 	ids := make(map[string]bool)
 	for i := 0; i < 5; i++ {
 		issue := &types.Issue{
-			Title:     fmt.Sprintf("Ephemeral #%d", i),
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Ephemeral: true,
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Ephemeral #%d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test-user"); err != nil {
 			t.Fatalf("CreateIssue #%d failed: %v", i, err)

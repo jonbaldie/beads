@@ -15,11 +15,17 @@ func TestSchemaMigrationDoesNotCommitPreExistingDirtyData(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "schema-dirty-label",
-		Title:     "schema migration dirty label",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "schema-dirty-label",
+		},
+		IssueContent: types.IssueContent{
+			Title: "schema migration dirty label",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -102,11 +108,17 @@ func TestSchemaMigrationDoesNotCommitPreExistingStagedData(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "schema-staged-label",
-		Title:     "schema migration staged label",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "schema-staged-label",
+		},
+		IssueContent: types.IssueContent{
+			Title: "schema migration staged label",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -181,11 +193,17 @@ func TestSchemaMigrationDoesNotCommitIgnoredDirtyWispTables(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "schema-dirty-with-wisp-label",
-		Title:     "schema migration dirty label with ignored wisp",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "schema-dirty-with-wisp-label",
+		},
+		IssueContent: types.IssueContent{
+			Title: "schema migration dirty label with ignored wisp",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -213,12 +231,20 @@ func TestSchemaMigrationDoesNotCommitIgnoredDirtyWispTables(t *testing.T) {
 	}
 
 	wisp := &types.Issue{
-		ID:        "schema-dirty-ignored-wisp",
-		Title:     "ignored wisp must stay local",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		NoHistory: true,
+		IssueID: types.IssueID{
+			ID: "schema-dirty-ignored-wisp",
+		},
+		IssueContent: types.IssueContent{
+			Title: "ignored wisp must stay local",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			NoHistory: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, wisp, "tester"); err != nil {
 		t.Fatalf("CreateIssue no-history wisp: %v", err)

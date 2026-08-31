@@ -218,14 +218,20 @@ func TestFreshBootstrapHealIncarnation(t *testing.T) {
 
 func freshBootstrapIntegrationConfig(beadsDir string, port int, database, pathSuffix string) *Config {
 	return &Config{
-		Path:            filepath.Join(beadsDir, pathSuffix),
-		BeadsDir:        beadsDir,
-		ServerHost:      "127.0.0.1",
-		ServerPort:      port,
-		ServerUser:      "root",
-		Database:        database,
-		CreateIfMissing: true,
-		MaxOpenConns:    1,
+		Path:     filepath.Join(beadsDir, pathSuffix),
+		BeadsDir: beadsDir,
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: port,
+			ServerUser: "root",
+		},
+		Database: database,
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 1,
+		},
 	}
 }
 

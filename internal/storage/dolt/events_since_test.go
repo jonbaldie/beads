@@ -22,13 +22,13 @@ func TestEventsSince(t *testing.T) {
 	defer cancel()
 
 	// A durable issue to anchor events (events.issue_id → issues.id FK).
-	durable := &types.Issue{ID: "es-durable", Title: "Durable", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	durable := &types.Issue{IssueID: types.IssueID{ID: "es-durable"}, IssueContent: types.IssueContent{Title: "Durable"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := store.CreateIssue(ctx, durable, "tester"); err != nil {
 		t.Fatalf("create durable issue: %v", err)
 	}
 	// A wisp issue whose "created" event lands in wisp_events, which the
 	// durable-only feed must never surface.
-	wisp := &types.Issue{ID: "es-wisp", Title: "Wisp", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true}
+	wisp := &types.Issue{IssueID: types.IssueID{ID: "es-wisp"}, IssueContent: types.IssueContent{Title: "Wisp"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}
 	if err := store.CreateIssue(ctx, wisp, "tester"); err != nil {
 		t.Fatalf("create wisp issue: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestEventsSinceClaimedConstant(t *testing.T) {
 	ctx, cancel := testContext(t)
 	defer cancel()
 
-	issue := &types.Issue{ID: "es-claim", Title: "Claimable", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "es-claim"}, IssueContent: types.IssueContent{Title: "Claimable"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestEventsSinceIssueFilter(t *testing.T) {
 	defer cancel()
 
 	mk := func(id string) {
-		iss := &types.Issue{ID: id, Title: id, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+		iss := &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("create %s: %v", id, err)
 		}
@@ -222,7 +222,7 @@ func TestEventsSinceLimitClamp(t *testing.T) {
 	ctx, cancel := testContext(t)
 	defer cancel()
 
-	iss := &types.Issue{ID: "clamp", Title: "clamp", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	iss := &types.Issue{IssueID: types.IssueID{ID: "clamp"}, IssueContent: types.IssueContent{Title: "clamp"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestEventsSincePlanIsIndexed(t *testing.T) {
 	ctx, cancel := testContext(t)
 	defer cancel()
 
-	iss := &types.Issue{ID: "plan", Title: "plan", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	iss := &types.Issue{IssueID: types.IssueID{ID: "plan"}, IssueContent: types.IssueContent{Title: "plan"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}

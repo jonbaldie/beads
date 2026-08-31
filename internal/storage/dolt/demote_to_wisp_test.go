@@ -17,10 +17,14 @@ func TestDemoteToWisp_NoHistory(t *testing.T) {
 
 	// Create a regular (versioned) issue.
 	issue := &types.Issue{
-		Title:     "will become no-history",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "will become no-history",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("create issue: %v", err)
@@ -79,10 +83,14 @@ func TestDemoteToWisp_Ephemeral(t *testing.T) {
 
 	// Create a regular (versioned) issue.
 	issue := &types.Issue{
-		Title:     "will become ephemeral",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeBug,
+		IssueContent: types.IssueContent{
+			Title: "will become ephemeral",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeBug,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("create issue: %v", err)
@@ -121,10 +129,14 @@ func TestDemoteToWisp_FieldUpdatesApplied(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		Title:     "original title",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "original title",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("create issue: %v", err)
@@ -163,10 +175,14 @@ func TestDemoteToWisp_MetadataAndClosedAtUpdatesApplied(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		Title:     "will close as wisp",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "will close as wisp",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("create issue: %v", err)
@@ -210,10 +226,14 @@ func TestDemoteToWisp_LabelsPreserved(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		Title:     "labeled issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "labeled issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("create issue: %v", err)
@@ -263,11 +283,17 @@ func TestDemoteToWisp_AlreadyInWisps(t *testing.T) {
 
 	// Create an already-ephemeral issue.
 	issue := &types.Issue{
-		Title:     "already a wisp",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueContent: types.IssueContent{
+			Title: "already a wisp",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("create wisp: %v", err)

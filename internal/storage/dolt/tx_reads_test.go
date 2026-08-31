@@ -21,10 +21,10 @@ func TestTxReadYourWritesWithComment(t *testing.T) {
 	defer cancel()
 
 	err := store.RunInTransaction(ctx, "bd: tx read-your-writes", func(tx storage.Transaction) error {
-		if err := tx.CreateIssue(ctx, &types.Issue{ID: "txr-1", Title: "Blocker", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, "tester"); err != nil {
+		if err := tx.CreateIssue(ctx, &types.Issue{IssueID: types.IssueID{ID: "txr-1"}, IssueContent: types.IssueContent{Title: "Blocker"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}, "tester"); err != nil {
 			return err
 		}
-		if err := tx.CreateIssue(ctx, &types.Issue{ID: "txr-2", Title: "Blocked", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, "tester"); err != nil {
+		if err := tx.CreateIssue(ctx, &types.Issue{IssueID: types.IssueID{ID: "txr-2"}, IssueContent: types.IssueContent{Title: "Blocked"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}, "tester"); err != nil {
 			return err
 		}
 		if err := tx.AddDependency(ctx, &types.Dependency{IssueID: "txr-2", DependsOnID: "txr-1", Type: types.DepBlocks}, "tester"); err != nil {

@@ -16,16 +16,46 @@ import (
 )
 
 func NewConfigSQLRepository(runner Runner) domain.ConfigSQLRepository {
-	return &configSQLRepositoryImpl{runner: runner}
+	core := &configRepositoryCore{runner: runner}
+	metadata := &configMetadataRepository{configRepositoryCore: core}
+	values := &configValueRepository{configRepositoryCore: core}
+	statuses := &configStatusRepository{configRepositoryCore: core}
+	repo := &configSQLRepositoryImpl{
+		configMetadataRepository: metadata,
+		configValueRepository:    values,
+		configStatusRepository:   statuses,
+	}
+	_ = repo.configMetadataRepository
+	_ = repo.configValueRepository
+	_ = repo.configStatusRepository
+	return repo
 }
 
 type configSQLRepositoryImpl struct {
+	*configMetadataRepository
+	*configValueRepository
+	*configStatusRepository
+}
+
+type configRepositoryCore struct {
 	runner Runner
+}
+
+type configMetadataRepository struct {
+	*configRepositoryCore
+}
+
+type configValueRepository struct {
+	*configRepositoryCore
+}
+
+type configStatusRepository struct {
+	*configRepositoryCore
 }
 
 var _ domain.ConfigSQLRepository = (*configSQLRepositoryImpl)(nil)
 
-func (r *configSQLRepositoryImpl) GetMetadata(ctx context.Context, key string) (string, error) {
+func (r *configMetadataRepository) GetMetadata(ctx context.Context, key string) (string, error) {
 	var value string
 	err := r.runner.QueryRowContext(ctx, "SELECT value FROM metadata WHERE `key` = ?", key).Scan(&value)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -37,14 +67,14 @@ func (r *configSQLRepositoryImpl) GetMetadata(ctx context.Context, key string) (
 	return value, nil
 }
 
-func (r *configSQLRepositoryImpl) SetMetadata(ctx context.Context, key, value string) error {
+func (r *configMetadataRepository) SetMetadata(ctx context.Context, key, value string) error {
 	if _, err := r.runner.ExecContext(ctx, "REPLACE INTO metadata (`key`, value) VALUES (?, ?)", key, value); err != nil {
 		return fmt.Errorf("db: SetMetadata %s: %w", key, err)
 	}
 	return nil
 }
 
-func (r *configSQLRepositoryImpl) GetLocalMetadata(ctx context.Context, key string) (string, error) {
+func (r *configMetadataRepository) GetLocalMetadata(ctx context.Context, key string) (string, error) {
 	var value string
 	err := r.runner.QueryRowContext(ctx, "SELECT value FROM local_metadata WHERE `key` = ?", key).Scan(&value)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -56,14 +86,14 @@ func (r *configSQLRepositoryImpl) GetLocalMetadata(ctx context.Context, key stri
 	return value, nil
 }
 
-func (r *configSQLRepositoryImpl) SetLocalMetadata(ctx context.Context, key, value string) error {
+func (r *configMetadataRepository) SetLocalMetadata(ctx context.Context, key, value string) error {
 	if _, err := r.runner.ExecContext(ctx, "REPLACE INTO local_metadata (`key`, value) VALUES (?, ?)", key, value); err != nil {
 		return fmt.Errorf("db: SetLocalMetadata %s: %w", key, err)
 	}
 	return nil
 }
 
-func (r *configSQLRepositoryImpl) GetConfig(ctx context.Context, key string) (string, error) {
+func (r *configValueRepository) GetConfig(ctx context.Context, key string) (string, error) {
 	var value string
 	err := r.runner.QueryRowContext(ctx, "SELECT value FROM config WHERE `key` = ?", key).Scan(&value)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -75,7 +105,7 @@ func (r *configSQLRepositoryImpl) GetConfig(ctx context.Context, key string) (st
 	return value, nil
 }
 
-func (r *configSQLRepositoryImpl) SetConfig(ctx context.Context, key, value string) error {
+func (r *configValueRepository) SetConfig(ctx context.Context, key, value string) error {
 	if key == "issue_prefix" {
 		value = strings.TrimSuffix(value, "-")
 	}
@@ -99,14 +129,14 @@ func (r *configSQLRepositoryImpl) SetConfig(ctx context.Context, key, value stri
 	return nil
 }
 
-func (r *configSQLRepositoryImpl) DeleteConfig(ctx context.Context, key string) error {
+func (r *configValueRepository) DeleteConfig(ctx context.Context, key string) error {
 	if _, err := r.runner.ExecContext(ctx, "DELETE FROM config WHERE `key` = ?", key); err != nil {
 		return fmt.Errorf("db: DeleteConfig %s: %w", key, err)
 	}
 	return nil
 }
 
-func (r *configSQLRepositoryImpl) GetAllConfig(ctx context.Context) (map[string]string, error) {
+func (r *configValueRepository) GetAllConfig(ctx context.Context) (map[string]string, error) {
 	rows, err := r.runner.QueryContext(ctx, "SELECT `key`, value FROM config")
 	if err != nil {
 		return nil, fmt.Errorf("db: GetAllConfig: %w", err)
@@ -126,7 +156,7 @@ func (r *configSQLRepositoryImpl) GetAllConfig(ctx context.Context) (map[string]
 	return out, nil
 }
 
-func (r *configSQLRepositoryImpl) GetCustomTypes(ctx context.Context) ([]string, error) {
+func (r *configValueRepository) GetCustomTypes(ctx context.Context) ([]string, error) {
 	fromTable, err := r.readCustomTypesTable(ctx)
 	if err != nil {
 		return nil, err
@@ -144,7 +174,7 @@ func (r *configSQLRepositoryImpl) GetCustomTypes(ctx context.Context) ([]string,
 	return unionWithYAMLCustomTypes(fromDB, config.GetCustomTypesFromYAML()), nil
 }
 
-func (r *configSQLRepositoryImpl) readCustomTypesTable(ctx context.Context) ([]string, error) {
+func (r *configValueRepository) readCustomTypesTable(ctx context.Context) ([]string, error) {
 	rows, err := r.runner.QueryContext(ctx, "SELECT name FROM custom_types ORDER BY name")
 	if err != nil {
 		if dberrors.IsTableNotExist(err) {
@@ -169,7 +199,7 @@ func (r *configSQLRepositoryImpl) readCustomTypesTable(ctx context.Context) ([]s
 	return out, nil
 }
 
-func (r *configSQLRepositoryImpl) readCustomTypesConfig(ctx context.Context) ([]string, error) {
+func (r *configValueRepository) readCustomTypesConfig(ctx context.Context) ([]string, error) {
 	value, err := r.GetConfig(ctx, "types.custom")
 	if err != nil {
 		return nil, fmt.Errorf("db: GetCustomTypes: %w", err)
@@ -202,7 +232,7 @@ func unionWithYAMLCustomTypes(dbTypes, yamlTypes []string) []string {
 	return out
 }
 
-func (r *configSQLRepositoryImpl) GetAllowedPrefixes(ctx context.Context) (string, error) {
+func (r *configValueRepository) GetAllowedPrefixes(ctx context.Context) (string, error) {
 	value, err := r.GetConfig(ctx, "allowed_prefixes")
 	if err != nil {
 		return "", fmt.Errorf("db: GetAllowedPrefixes: %w", err)
@@ -210,41 +240,70 @@ func (r *configSQLRepositoryImpl) GetAllowedPrefixes(ctx context.Context) (strin
 	return value, nil
 }
 
-func (r *configSQLRepositoryImpl) GetAdaptiveIDConfig(ctx context.Context) (domain.AdaptiveIDConfig, error) {
+func (r *configValueRepository) GetAdaptiveIDConfig(ctx context.Context) (domain.AdaptiveIDConfig, error) {
 	cfg := domain.DefaultAdaptiveConfig()
 
-	if probStr, err := r.GetConfig(ctx, "max_collision_prob"); err != nil {
-		return cfg, fmt.Errorf("db: GetAdaptiveIDConfig: read max_collision_prob: %w", err)
-	} else if probStr != "" {
-		if prob, perr := strconv.ParseFloat(probStr, 64); perr == nil {
-			cfg.MaxCollisionProbability = prob
-		}
+	probStr, err := r.adaptiveConfigValue(ctx, "max_collision_prob")
+	if err != nil {
+		return cfg, err
 	}
+	applyAdaptiveProbability(&cfg, probStr)
 
-	if minStr, err := r.GetConfig(ctx, "min_hash_length"); err != nil {
-		return cfg, fmt.Errorf("db: GetAdaptiveIDConfig: read min_hash_length: %w", err)
-	} else if minStr != "" {
-		if v, perr := strconv.Atoi(minStr); perr == nil {
-			cfg.MinLength = v
-		}
+	minStr, err := r.adaptiveConfigValue(ctx, "min_hash_length")
+	if err != nil {
+		return cfg, err
 	}
+	applyAdaptiveMinLength(&cfg, minStr)
 
-	if maxStr, err := r.GetConfig(ctx, "max_hash_length"); err != nil {
-		return cfg, fmt.Errorf("db: GetAdaptiveIDConfig: read max_hash_length: %w", err)
-	} else if maxStr != "" {
-		if v, perr := strconv.Atoi(maxStr); perr == nil {
-			cfg.MaxLength = v
-		}
+	maxStr, err := r.adaptiveConfigValue(ctx, "max_hash_length")
+	if err != nil {
+		return cfg, err
 	}
+	applyAdaptiveMaxLength(&cfg, maxStr)
 
 	return cfg, nil
 }
 
-func (r *configSQLRepositoryImpl) GetCustomStatuses(ctx context.Context) ([]types.CustomStatus, error) {
+func (r *configValueRepository) adaptiveConfigValue(ctx context.Context, key string) (string, error) {
+	value, err := r.GetConfig(ctx, key)
+	if err != nil {
+		return "", fmt.Errorf("db: GetAdaptiveIDConfig: read %s: %w", key, err)
+	}
+	return value, nil
+}
+
+func applyAdaptiveProbability(cfg *domain.AdaptiveIDConfig, value string) {
+	if value == "" {
+		return
+	}
+	if probability, err := strconv.ParseFloat(value, 64); err == nil {
+		cfg.MaxCollisionProbability = probability
+	}
+}
+
+func applyAdaptiveMinLength(cfg *domain.AdaptiveIDConfig, value string) {
+	if value == "" {
+		return
+	}
+	if length, err := strconv.Atoi(value); err == nil {
+		cfg.MinLength = length
+	}
+}
+
+func applyAdaptiveMaxLength(cfg *domain.AdaptiveIDConfig, value string) {
+	if value == "" {
+		return
+	}
+	if length, err := strconv.Atoi(value); err == nil {
+		cfg.MaxLength = length
+	}
+}
+
+func (r *configStatusRepository) GetCustomStatuses(ctx context.Context) ([]types.CustomStatus, error) {
 	return issueops.ResolveCustomStatusesDetailedInTx(ctx, r.runner)
 }
 
-func (r *configSQLRepositoryImpl) ListAllStatusNames(ctx context.Context) ([]string, error) {
+func (r *configStatusRepository) ListAllStatusNames(ctx context.Context) ([]string, error) {
 	builtins := []types.Status{
 		types.StatusOpen, types.StatusInProgress, types.StatusBlocked,
 		types.StatusDeferred, types.StatusClosed, types.StatusPinned, types.StatusHooked,
@@ -263,7 +322,7 @@ func (r *configSQLRepositoryImpl) ListAllStatusNames(ctx context.Context) ([]str
 	return out, nil
 }
 
-func (r *configSQLRepositoryImpl) GetInfraTypes(ctx context.Context) (map[string]bool, error) {
+func (r *configValueRepository) GetInfraTypes(ctx context.Context) (map[string]bool, error) {
 	value, err := r.GetConfig(ctx, "types.infra")
 	if err != nil {
 		return nil, fmt.Errorf("db: GetInfraTypes: %w", err)

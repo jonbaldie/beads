@@ -26,7 +26,7 @@ func (r *contextRepositoryImpl) beadsDir(ctx context.Context) string {
 	return r.fsRepo.ResolveBeadsDirPath(ctx).BeadsDir
 }
 
-func (r *contextRepositoryImpl) RepoContext(ctx context.Context) (domain.RepoPaths, error) {
+func (r *contextRepositoryImpl) RepoContext(_ context.Context) (domain.RepoPaths, error) {
 	rc, err := beads.GetRepoContext()
 	if err != nil {
 		return domain.RepoPaths{}, err
@@ -40,7 +40,7 @@ func (r *contextRepositoryImpl) RepoContext(ctx context.Context) (domain.RepoPat
 	}, nil
 }
 
-func (r *contextRepositoryImpl) Role(ctx context.Context) (string, bool, error) {
+func (r *contextRepositoryImpl) Role(_ context.Context) (string, bool, error) {
 	rc, err := beads.GetRepoContext()
 	if err != nil {
 		return "", false, err

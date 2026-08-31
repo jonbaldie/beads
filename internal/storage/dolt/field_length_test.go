@@ -25,11 +25,17 @@ func TestFieldLengthValidation(t *testing.T) {
 
 	baseIssue := func(id string) *types.Issue {
 		return &types.Issue{
-			ID:        id,
-			Title:     "field-length " + id,
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: "field-length " + id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 	}
 

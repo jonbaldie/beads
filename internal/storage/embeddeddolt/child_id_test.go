@@ -17,11 +17,17 @@ func TestGetNextChildID(t *testing.T) {
 		ctx := t.Context()
 
 		parent := &types.Issue{
-			ID:        "nc-parent",
-			Title:     "Parent",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeEpic,
+			IssueID: types.IssueID{
+				ID: "nc-parent",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Parent",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeEpic,
+			},
 		}
 		if err := te.store.CreateIssue(ctx, parent, "tester"); err != nil {
 			t.Fatalf("CreateIssue: %v", err)
@@ -41,11 +47,17 @@ func TestGetNextChildID(t *testing.T) {
 		ctx := t.Context()
 
 		parent := &types.Issue{
-			ID:        "ni-parent",
-			Title:     "Parent",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeEpic,
+			IssueID: types.IssueID{
+				ID: "ni-parent",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Parent",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeEpic,
+			},
 		}
 		if err := te.store.CreateIssue(ctx, parent, "tester"); err != nil {
 			t.Fatalf("CreateIssue: %v", err)
@@ -73,11 +85,17 @@ func TestGetNextChildID(t *testing.T) {
 		ctx := t.Context()
 
 		parent := &types.Issue{
-			ID:        "rc-parent",
-			Title:     "Parent",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeEpic,
+			IssueID: types.IssueID{
+				ID: "rc-parent",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Parent",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeEpic,
+			},
 		}
 		if err := te.store.CreateIssue(ctx, parent, "tester"); err != nil {
 			t.Fatalf("CreateIssue parent: %v", err)
@@ -86,11 +104,17 @@ func TestGetNextChildID(t *testing.T) {
 		// Simulate imported children by creating them directly.
 		for i := 1; i <= 3; i++ {
 			child := &types.Issue{
-				ID:        fmt.Sprintf("rc-parent.%d", i),
-				Title:     fmt.Sprintf("Child %d", i),
-				Status:    types.StatusOpen,
-				Priority:  2,
-				IssueType: types.TypeTask,
+				IssueID: types.IssueID{
+					ID: fmt.Sprintf("rc-parent.%d", i),
+				},
+				IssueContent: types.IssueContent{
+					Title: fmt.Sprintf("Child %d", i),
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  2,
+					IssueType: types.TypeTask,
+				},
 			}
 			if err := te.store.CreateIssue(ctx, child, "tester"); err != nil {
 				t.Fatalf("CreateIssue child %d: %v", i, err)
@@ -115,11 +139,17 @@ func TestGetNextChildID(t *testing.T) {
 		ctx := t.Context()
 
 		parent := &types.Issue{
-			ID:        "ex-parent",
-			Title:     "Parent",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeEpic,
+			IssueID: types.IssueID{
+				ID: "ex-parent",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Parent",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeEpic,
+			},
 		}
 		if err := te.store.CreateIssue(ctx, parent, "tester"); err != nil {
 			t.Fatalf("CreateIssue parent: %v", err)
@@ -127,11 +157,17 @@ func TestGetNextChildID(t *testing.T) {
 
 		// Simulate `bd create --id ex-parent.8` (no prior counter activity).
 		child := &types.Issue{
-			ID:        "ex-parent.8",
-			Title:     "Explicit child 8",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "ex-parent.8",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Explicit child 8",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := te.store.CreateIssue(ctx, child, "tester"); err != nil {
 			t.Fatalf("CreateIssue explicit child: %v", err)
@@ -159,12 +195,20 @@ func TestGetNextChildID(t *testing.T) {
 		ctx := t.Context()
 
 		parent := &types.Issue{
-			ID:        "wp-wisp-parent",
-			Title:     "Wisp parent",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Ephemeral: true,
+			IssueID: types.IssueID{
+				ID: "wp-wisp-parent",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Wisp parent",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		}
 		if err := te.store.CreateIssue(ctx, parent, "tester"); err != nil {
 			t.Fatalf("CreateIssue: %v", err)
@@ -207,24 +251,40 @@ func TestGetNextChildID(t *testing.T) {
 		ctx := t.Context()
 
 		parent := &types.Issue{
-			ID:        "wr-wisp-parent",
-			Title:     "Wisp parent",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Ephemeral: true,
+			IssueID: types.IssueID{
+				ID: "wr-wisp-parent",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Wisp parent",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		}
 		if err := te.store.CreateIssue(ctx, parent, "tester"); err != nil {
 			t.Fatalf("CreateIssue parent: %v", err)
 		}
 		for _, n := range []int{3, 5} {
 			child := &types.Issue{
-				ID:        fmt.Sprintf("wr-wisp-parent.%d", n),
-				Title:     fmt.Sprintf("Child %d", n),
-				Status:    types.StatusOpen,
-				Priority:  2,
-				IssueType: types.TypeTask,
-				Ephemeral: true,
+				IssueID: types.IssueID{
+					ID: fmt.Sprintf("wr-wisp-parent.%d", n),
+				},
+				IssueContent: types.IssueContent{
+					Title: fmt.Sprintf("Child %d", n),
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  2,
+					IssueType: types.TypeTask,
+				},
+				IssueWisp: types.IssueWisp{
+					Ephemeral: true,
+				},
 			}
 			if err := te.store.CreateIssue(ctx, child, "tester"); err != nil {
 				t.Fatalf("CreateIssue child %d: %v", n, err)

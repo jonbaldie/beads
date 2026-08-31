@@ -91,12 +91,18 @@ func TestInsertTimeIDsMatchBackfillDerivation(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		Title:       "derived id fixture",
-		Description: "insert-time derivation",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
-		Labels:      []string{"lane-a"},
+		IssueContent: types.IssueContent{
+			Title:       "derived id fixture",
+			Description: "insert-time derivation",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"lane-a"},
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -124,10 +130,14 @@ func TestDerivedEventOrdinalsPreserveLocalDuplicates(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		Title:     "ordinal fixture",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "ordinal fixture",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -192,10 +202,14 @@ func TestDerivedCommentInsertCollapsesDuplicates(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		Title:     "collapse fixture",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "collapse fixture",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)

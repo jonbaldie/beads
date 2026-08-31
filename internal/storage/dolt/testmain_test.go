@@ -101,12 +101,20 @@ func testMainInner(m *testing.M) int {
 func initSharedSchema(port int) error {
 	ctx := context.Background()
 	cfg := &Config{
-		Path:            "/tmp/dolt-shared-init", // not used, just needs to be non-empty
-		ServerHost:      "127.0.0.1",
-		ServerPort:      port,
-		Database:        testSharedDB,
-		MaxOpenConns:    1,
-		CreateIfMissing: true, // TestMain creates the shared database
+		Path: "/tmp/dolt-shared-init",
+		ServerOptions: ServerOptions{
+			// not used, just needs to be non-empty
+			ServerHost: "127.0.0.1",
+			ServerPort: port,
+		},
+		Database: testSharedDB,
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 1,
+		},
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
+		// TestMain creates the shared database,
 	}
 	store, err := New(ctx, cfg)
 	if err != nil {

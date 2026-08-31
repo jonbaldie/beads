@@ -31,8 +31,8 @@ func TestAddDependency(t *testing.T) {
 		te := newTestEnv(t, "db")
 		ctx := t.Context()
 
-		a := &types.Issue{ID: "db-a", Title: "A", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
-		b := &types.Issue{ID: "db-b", Title: "B", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+		a := &types.Issue{IssueID: types.IssueID{ID: "db-a"}, IssueContent: types.IssueContent{Title: "A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
+		b := &types.Issue{IssueID: types.IssueID{ID: "db-b"}, IssueContent: types.IssueContent{Title: "B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 		if err := te.store.CreateIssue(ctx, a, "tester"); err != nil {
 			t.Fatalf("CreateIssue A: %v", err)
 		}
@@ -50,8 +50,8 @@ func TestAddDependency(t *testing.T) {
 		te := newTestEnv(t, "cy")
 		ctx := t.Context()
 
-		a := &types.Issue{ID: "cy-a", Title: "A", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
-		b := &types.Issue{ID: "cy-b", Title: "B", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+		a := &types.Issue{IssueID: types.IssueID{ID: "cy-a"}, IssueContent: types.IssueContent{Title: "A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
+		b := &types.Issue{IssueID: types.IssueID{ID: "cy-b"}, IssueContent: types.IssueContent{Title: "B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 		if err := te.store.CreateIssue(ctx, a, "tester"); err != nil {
 			t.Fatalf("CreateIssue A: %v", err)
 		}
@@ -84,9 +84,9 @@ func TestAddDependency(t *testing.T) {
 		ctx := t.Context()
 
 		for _, issue := range []*types.Issue{
-			{ID: "mp-a", Title: "A", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-			{ID: "mp-x", Title: "X", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-			{ID: "mp-wisp-w", Title: "W", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true},
+			{IssueID: types.IssueID{ID: "mp-a"}, IssueContent: types.IssueContent{Title: "A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+			{IssueID: types.IssueID{ID: "mp-x"}, IssueContent: types.IssueContent{Title: "X"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+			{IssueID: types.IssueID{ID: "mp-wisp-w"}, IssueContent: types.IssueContent{Title: "W"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}},
 		} {
 			if err := te.store.CreateIssue(ctx, issue, "tester"); err != nil {
 				t.Fatalf("CreateIssue %s: %v", issue.ID, err)
@@ -116,9 +116,9 @@ func TestAddDependency(t *testing.T) {
 		ctx := t.Context()
 
 		for _, issue := range []*types.Issue{
-			{ID: "mw-wisp-a", Title: "A", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true},
-			{ID: "mw-wisp-x", Title: "X", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true},
-			{ID: "mw-b", Title: "B", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+			{IssueID: types.IssueID{ID: "mw-wisp-a"}, IssueContent: types.IssueContent{Title: "A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}},
+			{IssueID: types.IssueID{ID: "mw-wisp-x"}, IssueContent: types.IssueContent{Title: "X"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}},
+			{IssueID: types.IssueID{ID: "mw-b"}, IssueContent: types.IssueContent{Title: "B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
 		} {
 			if err := te.store.CreateIssue(ctx, issue, "tester"); err != nil {
 				t.Fatalf("CreateIssue %s: %v", issue.ID, err)
@@ -147,8 +147,8 @@ func TestAddDependency(t *testing.T) {
 		te := newTestEnv(t, "ct")
 		ctx := t.Context()
 
-		epic := &types.Issue{ID: "ct-epic", Title: "Epic", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}
-		task := &types.Issue{ID: "ct-task", Title: "Task", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+		epic := &types.Issue{IssueID: types.IssueID{ID: "ct-epic"}, IssueContent: types.IssueContent{Title: "Epic"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}}
+		task := &types.Issue{IssueID: types.IssueID{ID: "ct-task"}, IssueContent: types.IssueContent{Title: "Task"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 		if err := te.store.CreateIssue(ctx, epic, "tester"); err != nil {
 			t.Fatalf("CreateIssue epic: %v", err)
 		}
@@ -168,8 +168,8 @@ func TestAddDependency(t *testing.T) {
 		te := newTestEnv(t, "sh")
 		ctx := t.Context()
 
-		epic := &types.Issue{ID: "sh-epic", Title: "Epic", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}
-		task := &types.Issue{ID: "sh-task", Title: "Task", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+		epic := &types.Issue{IssueID: types.IssueID{ID: "sh-epic"}, IssueContent: types.IssueContent{Title: "Epic"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}}
+		task := &types.Issue{IssueID: types.IssueID{ID: "sh-task"}, IssueContent: types.IssueContent{Title: "Task"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 		if err := te.store.CreateIssue(ctx, epic, "tester"); err != nil {
 			t.Fatalf("CreateIssue epic: %v", err)
 		}
@@ -202,7 +202,7 @@ func TestAddDependency(t *testing.T) {
 		// Siblings share a hierarchy component but not a hierarchy line:
 		// ordering blocks edges between them stay allowed (the guard walks
 		// child -> parent only, never back down).
-		sib := &types.Issue{ID: "sh-sib", Title: "Sibling", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+		sib := &types.Issue{IssueID: types.IssueID{ID: "sh-sib"}, IssueContent: types.IssueContent{Title: "Sibling"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 		if err := te.store.CreateIssue(ctx, sib, "tester"); err != nil {
 			t.Fatalf("CreateIssue sibling: %v", err)
 		}
@@ -219,8 +219,8 @@ func TestAddDependency(t *testing.T) {
 		ctx := t.Context()
 
 		for _, issue := range []*types.Issue{
-			{ID: "wh-parent", Title: "Parent", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic, Ephemeral: true},
-			{ID: "wh-child", Title: "Child", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true},
+			{IssueID: types.IssueID{ID: "wh-parent"}, IssueContent: types.IssueContent{Title: "Parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}, IssueWisp: types.IssueWisp{Ephemeral: true}},
+			{IssueID: types.IssueID{ID: "wh-child"}, IssueContent: types.IssueContent{Title: "Child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}},
 		} {
 			if err := te.store.CreateIssue(ctx, issue, "tester"); err != nil {
 				t.Fatalf("CreateIssue %s: %v", issue.ID, err)
@@ -253,8 +253,8 @@ func TestAddDependency(t *testing.T) {
 		te := newTestEnv(t, "id")
 		ctx := t.Context()
 
-		a := &types.Issue{ID: "id-a", Title: "A", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
-		b := &types.Issue{ID: "id-b", Title: "B", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+		a := &types.Issue{IssueID: types.IssueID{ID: "id-a"}, IssueContent: types.IssueContent{Title: "A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
+		b := &types.Issue{IssueID: types.IssueID{ID: "id-b"}, IssueContent: types.IssueContent{Title: "B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 		if err := te.store.CreateIssue(ctx, a, "tester"); err != nil {
 			t.Fatalf("CreateIssue A: %v", err)
 		}
@@ -280,8 +280,8 @@ func TestAddDependency(t *testing.T) {
 		te := newTestEnv(t, "tc")
 		ctx := t.Context()
 
-		a := &types.Issue{ID: "tc-a", Title: "A", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
-		b := &types.Issue{ID: "tc-b", Title: "B", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+		a := &types.Issue{IssueID: types.IssueID{ID: "tc-a"}, IssueContent: types.IssueContent{Title: "A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
+		b := &types.Issue{IssueID: types.IssueID{ID: "tc-b"}, IssueContent: types.IssueContent{Title: "B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 		if err := te.store.CreateIssue(ctx, a, "tester"); err != nil {
 			t.Fatalf("CreateIssue A: %v", err)
 		}
@@ -312,7 +312,7 @@ func TestAddDependency(t *testing.T) {
 		te := newTestEnv(t, "sn")
 		ctx := t.Context()
 
-		b := &types.Issue{ID: "sn-b", Title: "B", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+		b := &types.Issue{IssueID: types.IssueID{ID: "sn-b"}, IssueContent: types.IssueContent{Title: "B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 		if err := te.store.CreateIssue(ctx, b, "tester"); err != nil {
 			t.Fatalf("CreateIssue B: %v", err)
 		}
@@ -331,7 +331,7 @@ func TestAddDependency(t *testing.T) {
 		te := newTestEnv(t, "tn")
 		ctx := t.Context()
 
-		a := &types.Issue{ID: "tn-a", Title: "A", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+		a := &types.Issue{IssueID: types.IssueID{ID: "tn-a"}, IssueContent: types.IssueContent{Title: "A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 		if err := te.store.CreateIssue(ctx, a, "tester"); err != nil {
 			t.Fatalf("CreateIssue A: %v", err)
 		}
@@ -350,7 +350,7 @@ func TestAddDependency(t *testing.T) {
 		te := newTestEnv(t, "er")
 		ctx := t.Context()
 
-		a := &types.Issue{ID: "er-a", Title: "A", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+		a := &types.Issue{IssueID: types.IssueID{ID: "er-a"}, IssueContent: types.IssueContent{Title: "A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 		if err := te.store.CreateIssue(ctx, a, "tester"); err != nil {
 			t.Fatalf("CreateIssue A: %v", err)
 		}
@@ -366,7 +366,7 @@ func TestAddDependency(t *testing.T) {
 		te := newTestEnv(t, "cp")
 		ctx := t.Context()
 
-		a := &types.Issue{ID: "cp-a", Title: "A", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+		a := &types.Issue{IssueID: types.IssueID{ID: "cp-a"}, IssueContent: types.IssueContent{Title: "A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 		if err := te.store.CreateIssue(ctx, a, "tester"); err != nil {
 			t.Fatalf("CreateIssue A: %v", err)
 		}
@@ -382,8 +382,8 @@ func TestAddDependency(t *testing.T) {
 		te := newTestEnv(t, "pc")
 		ctx := t.Context()
 
-		epic := &types.Issue{ID: "pc-epic", Title: "Epic", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}
-		task := &types.Issue{ID: "pc-task", Title: "Task", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+		epic := &types.Issue{IssueID: types.IssueID{ID: "pc-epic"}, IssueContent: types.IssueContent{Title: "Epic"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}}
+		task := &types.Issue{IssueID: types.IssueID{ID: "pc-task"}, IssueContent: types.IssueContent{Title: "Task"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 		if err := te.store.CreateIssue(ctx, epic, "tester"); err != nil {
 			t.Fatalf("CreateIssue epic: %v", err)
 		}
@@ -403,8 +403,8 @@ func TestAddDependency(t *testing.T) {
 		te := newTestEnv(t, "ss")
 		ctx := t.Context()
 
-		e1 := &types.Issue{ID: "ss-e1", Title: "Epic 1", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}
-		e2 := &types.Issue{ID: "ss-e2", Title: "Epic 2", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}
+		e1 := &types.Issue{IssueID: types.IssueID{ID: "ss-e1"}, IssueContent: types.IssueContent{Title: "Epic 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}}
+		e2 := &types.Issue{IssueID: types.IssueID{ID: "ss-e2"}, IssueContent: types.IssueContent{Title: "Epic 2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}}
 		if err := te.store.CreateIssue(ctx, e1, "tester"); err != nil {
 			t.Fatalf("CreateIssue E1: %v", err)
 		}
@@ -423,8 +423,8 @@ func TestAddDependency(t *testing.T) {
 		te := newTestEnv(t, "et")
 		ctx := t.Context()
 
-		epic := &types.Issue{ID: "et-epic", Title: "Epic", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}
-		task := &types.Issue{ID: "et-task", Title: "Task", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+		epic := &types.Issue{IssueID: types.IssueID{ID: "et-epic"}, IssueContent: types.IssueContent{Title: "Epic"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}}
+		task := &types.Issue{IssueID: types.IssueID{ID: "et-task"}, IssueContent: types.IssueContent{Title: "Task"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 		if err := te.store.CreateIssue(ctx, epic, "tester"); err != nil {
 			t.Fatalf("CreateIssue epic: %v", err)
 		}
@@ -450,10 +450,10 @@ func TestAddDependency(t *testing.T) {
 		ctx := t.Context()
 
 		issues := []*types.Issue{
-			{ID: "cc-e1", Title: "Epic 1", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic},
-			{ID: "cc-e2", Title: "Epic 2", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic},
-			{ID: "cc-t0", Title: "Task 0", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-			{ID: "cc-t1", Title: "Task 1", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+			{IssueID: types.IssueID{ID: "cc-e1"}, IssueContent: types.IssueContent{Title: "Epic 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}},
+			{IssueID: types.IssueID{ID: "cc-e2"}, IssueContent: types.IssueContent{Title: "Epic 2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}},
+			{IssueID: types.IssueID{ID: "cc-t0"}, IssueContent: types.IssueContent{Title: "Task 0"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+			{IssueID: types.IssueID{ID: "cc-t1"}, IssueContent: types.IssueContent{Title: "Task 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
 		}
 		for _, iss := range issues {
 			if err := te.store.CreateIssue(ctx, iss, "tester"); err != nil {
@@ -494,10 +494,10 @@ func TestAddDependency(t *testing.T) {
 		ctx := t.Context()
 
 		issues := []*types.Issue{
-			{ID: "cp-e1", Title: "Epic 1", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic},
-			{ID: "cp-e2", Title: "Epic 2", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic},
-			{ID: "cp-t0", Title: "Task 0", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-			{ID: "cp-t1", Title: "Task 1", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+			{IssueID: types.IssueID{ID: "cp-e1"}, IssueContent: types.IssueContent{Title: "Epic 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}},
+			{IssueID: types.IssueID{ID: "cp-e2"}, IssueContent: types.IssueContent{Title: "Epic 2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}},
+			{IssueID: types.IssueID{ID: "cp-t0"}, IssueContent: types.IssueContent{Title: "Task 0"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+			{IssueID: types.IssueID{ID: "cp-t1"}, IssueContent: types.IssueContent{Title: "Task 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
 		}
 		for _, iss := range issues {
 			if err := te.store.CreateIssue(ctx, iss, "tester"); err != nil {
@@ -541,10 +541,30 @@ func TestAddDependency(t *testing.T) {
 		const levels = 5
 		for i := 1; i <= levels; i++ {
 			epic := &types.Issue{
-				ID: "dl-e" + string(rune('0'+i)), Title: "E", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic,
+				IssueID: types.IssueID{
+					ID: "dl-e" + string(rune('0'+i)),
+				},
+				IssueContent: types.IssueContent{
+					Title: "E",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  2,
+					IssueType: types.TypeEpic,
+				},
 			}
 			task := &types.Issue{
-				ID: "dl-t" + string(rune('0'+i)), Title: "T", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask,
+				IssueID: types.IssueID{
+					ID: "dl-t" + string(rune('0'+i)),
+				},
+				IssueContent: types.IssueContent{
+					Title: "T",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  2,
+					IssueType: types.TypeTask,
+				},
 			}
 			if err := te.store.CreateIssue(ctx, epic, "tester"); err != nil {
 				t.Fatalf("CreateIssue %s: %v", epic.ID, err)

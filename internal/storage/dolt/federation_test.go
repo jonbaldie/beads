@@ -71,14 +71,22 @@ func TestFederationDatabaseIsolation(t *testing.T) {
 
 	// Create issue in Alpha
 	alphaIssue := &types.Issue{
-		ID:          "alpha-001",
-		Title:       "Work item from Town Alpha",
-		Description: "This issue exists only in Town Alpha",
-		IssueType:   types.TypeTask,
-		Status:      types.StatusOpen,
-		Priority:    1,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		IssueID: types.IssueID{
+			ID: "alpha-001",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Work item from Town Alpha",
+			Description: "This issue exists only in Town Alpha",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+			Priority:  1,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
 	}
 	if err := alphaStore.CreateIssue(ctx, alphaIssue, "federation-test"); err != nil {
 		t.Fatalf("failed to create issue in alpha: %v", err)
@@ -89,14 +97,22 @@ func TestFederationDatabaseIsolation(t *testing.T) {
 
 	// Create different issue in Beta
 	betaIssue := &types.Issue{
-		ID:          "beta-001",
-		Title:       "Work item from Town Beta",
-		Description: "This issue exists only in Town Beta",
-		IssueType:   types.TypeTask,
-		Status:      types.StatusOpen,
-		Priority:    2,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		IssueID: types.IssueID{
+			ID: "beta-001",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Work item from Town Beta",
+			Description: "This issue exists only in Town Beta",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+			Priority:  2,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
 	}
 	if err := betaStore.CreateIssue(ctx, betaIssue, "federation-test"); err != nil {
 		t.Fatalf("failed to create issue in beta: %v", err)
@@ -152,13 +168,21 @@ func TestFederationVersionControlAPIs(t *testing.T) {
 
 	// Create initial issue
 	issue := &types.Issue{
-		ID:        "vc-001",
-		Title:     "Version control test",
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		Priority:  1,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "vc-001",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Version control test",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+			Priority:  1,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -278,13 +302,21 @@ func TestFederationHistoryQueries(t *testing.T) {
 
 	// Create issue
 	issue := &types.Issue{
-		ID:        "hist-001",
-		Title:     "History test - v1",
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		Priority:  1,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "hist-001",
+		},
+		IssueContent: types.IssueContent{
+			Title: "History test - v1",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+			Priority:  1,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 		t.Fatalf("failed to create: %v", err)
@@ -500,13 +532,21 @@ func TestFilteredPushExcludesWisp(t *testing.T) {
 
 	// Create a regular task (should survive filtering)
 	task := &types.Issue{
-		ID:        "fed-filter-task",
-		Title:     "Regular task",
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		Priority:  1,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "fed-filter-task",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Regular task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+			Priority:  1,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
 	}
 	if err := store.CreateIssue(ctx, task, "test"); err != nil {
 		t.Fatalf("create task: %v", err)
@@ -987,14 +1027,32 @@ func seedFilteredPushGraph(t *testing.T, ctx context.Context, store *DoltStore, 
 	waiterID := prefix + "-waiter"
 	blockerID := prefix + "-blocker"
 	if err := store.CreateIssue(ctx, &types.Issue{
-		ID: waiterID, Title: "retained waiter", IssueType: types.TypeBug,
-		Status: types.StatusOpen, Priority: 1,
+		IssueID: types.IssueID{
+			ID: waiterID,
+		},
+		IssueContent: types.IssueContent{
+			Title: "retained waiter",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeBug,
+			Status:    types.StatusOpen,
+			Priority:  1,
+		},
 	}, "test"); err != nil {
 		t.Fatalf("create waiter: %v", err)
 	}
 	if err := store.CreateIssue(ctx, &types.Issue{
-		ID: blockerID, Title: "excluded blocker", IssueType: types.TypeTask,
-		Status: types.StatusOpen, Priority: 1,
+		IssueID: types.IssueID{
+			ID: blockerID,
+		},
+		IssueContent: types.IssueContent{
+			Title: "excluded blocker",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+			Priority:  1,
+		},
 	}, "test"); err != nil {
 		t.Fatalf("create blocker: %v", err)
 	}
@@ -1264,22 +1322,38 @@ func TestFilteredPushExcludesCustomType(t *testing.T) {
 
 	// Create a task and a permanent non-infrastructure issue type.
 	task := &types.Issue{
-		ID:        "fed-custom-task",
-		Title:     "Regular task",
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		Priority:  1,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "fed-custom-task",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Regular task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+			Priority:  1,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
 	}
 	chore := &types.Issue{
-		ID:        "fed-custom-chore",
-		Title:     "Internal chore",
-		IssueType: types.TypeChore,
-		Status:    types.StatusOpen,
-		Priority:  1,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "fed-custom-chore",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Internal chore",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeChore,
+			Status:    types.StatusOpen,
+			Priority:  1,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
 	}
 	if err := store.CreateIssue(ctx, task, "test"); err != nil {
 		t.Fatalf("create task: %v", err)
@@ -1369,8 +1443,8 @@ func TestFilteredStagingPublishesRetainedWaiterUnblocked(t *testing.T) {
 	defer cancel()
 	versionWispTablesForFilteredPush(t, ctx, store)
 
-	waiter := &types.Issue{ID: "fed-filter-w", Title: "retained waiter", IssueType: types.TypeBug, Status: types.StatusOpen, Priority: 1}
-	blocker := &types.Issue{ID: "fed-filter-x", Title: "excluded blocker", IssueType: types.TypeTask, Status: types.StatusOpen, Priority: 1, Labels: []string{"private"}}
+	waiter := &types.Issue{IssueID: types.IssueID{ID: "fed-filter-w"}, IssueContent: types.IssueContent{Title: "retained waiter"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeBug, Status: types.StatusOpen, Priority: 1}}
+	blocker := &types.Issue{IssueID: types.IssueID{ID: "fed-filter-x"}, IssueContent: types.IssueContent{Title: "excluded blocker"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen, Priority: 1}, IssueGraph: types.IssueGraph{Labels: []string{"private"}}}
 	if err := store.CreateIssue(ctx, waiter, "test"); err != nil {
 		t.Fatalf("create waiter: %v", err)
 	}
@@ -1489,11 +1563,14 @@ func setupFederationStore(t *testing.T, ctx context.Context, path, prefix string
 	t.Helper()
 
 	cfg := &Config{
-		Path:            path,
-		CommitterName:   "town-" + prefix,
-		CommitterEmail:  prefix + "@federation.test",
-		Database:        "beads",
-		CreateIfMissing: true, // test creates fresh database
+		Path:           path,
+		CommitterName:  "town-" + prefix,
+		CommitterEmail: prefix + "@federation.test",
+		Database:       "beads",
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
+		// test creates fresh database,
 	}
 
 	store, err := New(ctx, cfg)

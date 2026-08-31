@@ -34,10 +34,12 @@ func isFieldPatch(fv reflect.Value) bool {
 func TestHasNonCoordinationPatchClassifiesEveryScalarField(t *testing.T) {
 	typ := reflect.TypeOf(issueops.IssuePatch{})
 	scalarSeen := 0
-	for i := 0; i < typ.NumField(); i++ {
-		field := typ.Field(i)
+	for _, field := range reflect.VisibleFields(typ) {
+		if field.Anonymous {
+			continue
+		}
 		probe := reflect.New(typ).Elem()
-		fv := probe.Field(i)
+		fv := probe.FieldByIndex(field.Index)
 		if !isFieldPatch(fv) {
 			continue
 		}
@@ -67,8 +69,8 @@ func TestNonCoordinationPatchSignalsCountMatchesStruct(t *testing.T) {
 	patchType := reflect.TypeOf(issueops.IssuePatch{})
 	probe := reflect.New(patchType).Elem()
 	scalar := 0
-	for i := 0; i < patchType.NumField(); i++ {
-		if isFieldPatch(probe.Field(i)) {
+	for _, field := range reflect.VisibleFields(patchType) {
+		if !field.Anonymous && isFieldPatch(probe.FieldByIndex(field.Index)) {
 			scalar++
 		}
 	}

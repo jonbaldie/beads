@@ -381,7 +381,11 @@ func TestApplyConfigDefaults_EnvOverridesConfig(t *testing.T) {
 	os.Setenv("BEADS_DOLT_PORT", "19999")
 
 	// Simulate metadata.json having set port to production default
-	cfg := &Config{ServerPort: DefaultSQLPort}
+	cfg := &Config{
+		ServerOptions: ServerOptions{
+			ServerPort: DefaultSQLPort,
+		},
+	}
 	applyConfigDefaults(cfg)
 
 	if cfg.ServerPort != 19999 {
@@ -474,7 +478,11 @@ func TestApplyConfigDefaults_SocketExplicitOverridesEnv(t *testing.T) {
 	t.Setenv("BEADS_DOLT_PORT", "")
 	t.Setenv("BEADS_DOLT_SERVER_PORT", "")
 
-	cfg := &Config{ServerSocket: "/tmp/explicit.sock"}
+	cfg := &Config{
+		ServerOptions: ServerOptions{
+			ServerSocket: "/tmp/explicit.sock",
+		},
+	}
 	applyConfigDefaults(cfg)
 
 	if cfg.ServerSocket != "/tmp/explicit.sock" {
@@ -486,11 +494,13 @@ func TestApplyConfigDefaults_SocketExplicitOverridesEnv(t *testing.T) {
 // DSN when ServerSocket is configured.
 func TestBuildServerDSN_WithSocket(t *testing.T) {
 	cfg := &Config{
-		ServerSocket: "/tmp/dolt.sock",
-		ServerUser:   "root",
-		ServerHost:   "127.0.0.1",
-		ServerPort:   3307,
-		Database:     "testdb",
+		ServerOptions: ServerOptions{
+			ServerSocket: "/tmp/dolt.sock",
+			ServerUser:   "root",
+			ServerHost:   "127.0.0.1",
+			ServerPort:   3307,
+		},
+		Database: "testdb",
 	}
 	applyConfigDefaults(cfg)
 
@@ -515,10 +525,12 @@ func TestBuildServerDSN_WithSocket(t *testing.T) {
 // TestBuildServerDSN_WithoutSocket verifies TCP DSN is unaffected.
 func TestBuildServerDSN_WithoutSocket(t *testing.T) {
 	cfg := &Config{
-		ServerUser: "root",
-		ServerHost: "127.0.0.1",
-		ServerPort: 3307,
-		Database:   "testdb",
+		ServerOptions: ServerOptions{
+			ServerUser: "root",
+			ServerHost: "127.0.0.1",
+			ServerPort: 3307,
+		},
+		Database: "testdb",
 	}
 	applyConfigDefaults(cfg)
 
@@ -538,10 +550,12 @@ func TestBuildServerDSN_WithoutSocket(t *testing.T) {
 // given a DSN from buildServerDSN.
 func TestExecWithLongTimeoutDSNRewrite(t *testing.T) {
 	cfg := &Config{
-		ServerUser: "root",
-		ServerHost: "127.0.0.1",
-		ServerPort: 3307,
-		Database:   "testdb",
+		ServerOptions: ServerOptions{
+			ServerUser: "root",
+			ServerHost: "127.0.0.1",
+			ServerPort: 3307,
+		},
+		Database: "testdb",
 	}
 	applyConfigDefaults(cfg)
 
@@ -583,12 +597,16 @@ func TestBuildServerDSN_PoolTimeouts(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &Config{
-				ServerUser:       "root",
-				ServerHost:       "127.0.0.1",
-				ServerPort:       3307,
-				Database:         "testdb",
-				PoolReadTimeout:  tt.readTimeout,
-				PoolWriteTimeout: tt.writeTimeout,
+				ServerOptions: ServerOptions{
+					ServerUser: "root",
+					ServerHost: "127.0.0.1",
+					ServerPort: 3307,
+				},
+				Database: "testdb",
+				PoolOptions: PoolOptions{
+					PoolReadTimeout:  tt.readTimeout,
+					PoolWriteTimeout: tt.writeTimeout,
+				},
 			}
 			parsed, err := mysql.ParseDSN(buildServerDSN(cfg, cfg.Database))
 			if err != nil {
@@ -650,11 +668,13 @@ func TestBuildServerDSN_SpecialCharacterPassword(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &Config{
-				ServerUser:     "testuser",
-				ServerPassword: tt.password,
-				ServerHost:     "127.0.0.1",
-				ServerPort:     3308,
-				Database:       "testdb",
+				ServerOptions: ServerOptions{
+					ServerUser:     "testuser",
+					ServerPassword: tt.password,
+					ServerHost:     "127.0.0.1",
+					ServerPort:     3308,
+				},
+				Database: "testdb",
 			}
 			applyConfigDefaults(cfg)
 

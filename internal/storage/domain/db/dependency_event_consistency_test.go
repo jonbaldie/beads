@@ -66,11 +66,11 @@ func (s *testSuite) consistencyCreateParentNoEmit() {
 	s.resetMintConfig("cparent", "")
 	uc := s.issueUseCase()
 	parent, err := uc.CreateIssue(s.Ctx(), domain.CreateIssueParams{
-		Issue: &types.Issue{Title: "parent", IssueType: types.TypeEpic, Priority: 2},
+		Issue: &types.Issue{IssueContent: types.IssueContent{Title: "parent"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeEpic, Priority: 2}},
 	}, "tester")
 	s.Require().NoError(err)
 	child, err := uc.CreateIssue(s.Ctx(), domain.CreateIssueParams{
-		Issue:    &types.Issue{Title: "child", IssueType: types.TypeTask, Priority: 2},
+		Issue:    &types.Issue{IssueContent: types.IssueContent{Title: "child"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}},
 		ParentID: parent.Issue.ID,
 	}, "tester")
 	s.Require().NoError(err)
@@ -97,11 +97,11 @@ func (s *testSuite) consistencyCreateDepsNoEmit() {
 	s.resetMintConfig("cdeps", "")
 	uc := s.issueUseCase()
 	target, err := uc.CreateIssue(s.Ctx(), domain.CreateIssueParams{
-		Issue: &types.Issue{Title: "target", IssueType: types.TypeTask, Priority: 2},
+		Issue: &types.Issue{IssueContent: types.IssueContent{Title: "target"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}},
 	}, "tester")
 	s.Require().NoError(err)
 	src, err := uc.CreateIssue(s.Ctx(), domain.CreateIssueParams{
-		Issue: &types.Issue{Title: "source", IssueType: types.TypeTask, Priority: 2},
+		Issue: &types.Issue{IssueContent: types.IssueContent{Title: "source"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}},
 		Dependencies: []domain.DependencySpec{
 			{Type: types.DepBlocks, TargetID: target.Issue.ID},
 		},

@@ -168,79 +168,98 @@ func resolveProjectID(cfg *configfile.Config) string {
 }
 
 func (u *beadsDirFSUseCaseImpl) InitializeBeadsDir(ctx context.Context, params InitializeBeadsDirParams) (InitializeBeadsDirResult, error) {
+	if err := u.createBeadsDirFiles(ctx); err != nil {
+		return InitializeBeadsDirResult{}, err
+	}
+	if err := u.writeInitializePayloads(ctx, params); err != nil {
+		return InitializeBeadsDirResult{}, err
+	}
+	if err := u.writeInitializeReadmes(ctx, params.WriteProjectGitignore); err != nil {
+		return InitializeBeadsDirResult{}, err
+	}
+	return u.applyInitializeAdapters(ctx, params), nil
+}
+
+func (u *beadsDirFSUseCaseImpl) createBeadsDirFiles(ctx context.Context) error {
 	if err := u.fsRepo.CreateBeadsDir(ctx); err != nil {
-		return InitializeBeadsDirResult{}, err
+		return err
 	}
-	if err := u.fsRepo.WriteBeadsGitignore(ctx); err != nil {
-		return InitializeBeadsDirResult{}, err
-	}
+	return u.fsRepo.WriteBeadsGitignore(ctx)
+}
+
+func (u *beadsDirFSUseCaseImpl) writeInitializePayloads(ctx context.Context, params InitializeBeadsDirParams) error {
 	if len(params.MetadataJSONBody) > 0 {
 		if err := u.fsRepo.WriteMetadataJSON(ctx, params.MetadataJSONBody); err != nil {
-			return InitializeBeadsDirResult{}, err
+			return err
 		}
 	}
 	if len(params.ConfigYAMLBody) > 0 {
 		if err := u.fsRepo.WriteConfigYAML(ctx, params.ConfigYAMLBody); err != nil {
-			return InitializeBeadsDirResult{}, err
+			return err
 		}
 	}
 	if params.ProxiedServerClientInfo != nil {
 		if err := u.fsRepo.WriteProxiedServerClientInfo(ctx, params.ProxiedServerClientInfo); err != nil {
-			return InitializeBeadsDirResult{}, err
+			return err
 		}
 	}
-	if err := u.fsRepo.WriteReadme(ctx); err != nil {
-		return InitializeBeadsDirResult{}, err
-	}
-	if params.WriteProjectGitignore {
-		if err := u.fsRepo.WriteProjectGitignore(ctx); err != nil {
-			return InitializeBeadsDirResult{}, err
-		}
-	}
-
-	var result InitializeBeadsDirResult
-	if params.SetNoCOW && u.adapters.ApplyNoCOW != nil {
-		result.NoCOWErr = u.adapters.ApplyNoCOW(u.fsRepo.ResolveBeadsDirPath(ctx).BeadsDir)
-	}
-	if params.LocalVersion != "" && u.adapters.WriteLocalVersion != nil {
-		beadsDir := u.fsRepo.ResolveBeadsDirPath(ctx).BeadsDir
-		result.LocalVersionErr = u.adapters.WriteLocalVersion(
-			filepath.Join(beadsDir, ".local_version"),
-			params.LocalVersion,
-		)
-	}
-	return result, nil
+	return nil
 }
 
-func (u *beadsDirFSUseCaseImpl) SetupForkExclude(ctx context.Context, verbose bool) error {
+func (u *beadsDirFSUseCaseImpl) writeInitializeReadmes(ctx context.Context, writeProjectGitignore bool) error {
+	if err := u.fsRepo.WriteReadme(ctx); err != nil {
+		return err
+	}
+	if writeProjectGitignore {
+		return u.fsRepo.WriteProjectGitignore(ctx)
+	}
+	return nil
+}
+
+func (u *beadsDirFSUseCaseImpl) applyInitializeAdapters(ctx context.Context, params InitializeBeadsDirParams) InitializeBeadsDirResult {
+	var result InitializeBeadsDirResult
+	beadsDir := ""
+	if params.SetNoCOW || params.LocalVersion != "" {
+		beadsDir = u.fsRepo.ResolveBeadsDirPath(ctx).BeadsDir
+	}
+	if params.SetNoCOW && u.adapters.ApplyNoCOW != nil {
+		result.NoCOWErr = u.adapters.ApplyNoCOW(beadsDir)
+	}
+	if params.LocalVersion != "" && u.adapters.WriteLocalVersion != nil {
+		result.LocalVersionErr = u.adapters.WriteLocalVersion(filepath.Join(beadsDir, ".local_version"), params.LocalVersion)
+	}
+	return result
+}
+
+func (u *beadsDirFSUseCaseImpl) SetupForkExclude(_ context.Context, verbose bool) error {
 	if u.adapters.SetupForkExclude == nil {
 		return fmt.Errorf("SetupForkExclude: adapter not configured")
 	}
 	return u.adapters.SetupForkExclude(verbose)
 }
 
-func (u *beadsDirFSUseCaseImpl) SetupStealthMode(ctx context.Context, verbose bool) error {
+func (u *beadsDirFSUseCaseImpl) SetupStealthMode(_ context.Context, verbose bool) error {
 	if u.adapters.SetupStealthMode == nil {
 		return fmt.Errorf("SetupStealthMode: adapter not configured")
 	}
 	return u.adapters.SetupStealthMode(verbose)
 }
 
-func (u *beadsDirFSUseCaseImpl) InstallGitHooks(ctx context.Context, params HooksInstallParams) error {
+func (u *beadsDirFSUseCaseImpl) InstallGitHooks(_ context.Context, params HooksInstallParams) error {
 	if u.adapters.InstallGitHooks == nil {
 		return fmt.Errorf("InstallGitHooks: adapter not configured")
 	}
 	return u.adapters.InstallGitHooks(params)
 }
 
-func (u *beadsDirFSUseCaseImpl) InstallJJHooks(ctx context.Context) error {
+func (u *beadsDirFSUseCaseImpl) InstallJJHooks(_ context.Context) error {
 	if u.adapters.InstallJJHooks == nil {
 		return fmt.Errorf("InstallJJHooks: adapter not configured")
 	}
 	return u.adapters.InstallJJHooks()
 }
 
-func (u *beadsDirFSUseCaseImpl) AddAgentsInstructions(ctx context.Context, params AgentsFileParams) error {
+func (u *beadsDirFSUseCaseImpl) AddAgentsInstructions(_ context.Context, params AgentsFileParams) error {
 	if u.adapters.AddAgentsInstructions == nil {
 		return fmt.Errorf("AddAgentsInstructions: adapter not configured")
 	}
@@ -248,14 +267,14 @@ func (u *beadsDirFSUseCaseImpl) AddAgentsInstructions(ctx context.Context, param
 	return nil
 }
 
-func (u *beadsDirFSUseCaseImpl) InstallClaudeProject(ctx context.Context, stealth bool) error {
+func (u *beadsDirFSUseCaseImpl) InstallClaudeProject(_ context.Context, stealth bool) error {
 	if u.adapters.InstallClaudeProject == nil {
 		return fmt.Errorf("InstallClaudeProject: adapter not configured")
 	}
 	return u.adapters.InstallClaudeProject(stealth)
 }
 
-func (u *beadsDirFSUseCaseImpl) SetYAMLConfig(ctx context.Context, key, value string) error {
+func (u *beadsDirFSUseCaseImpl) SetYAMLConfig(_ context.Context, key, value string) error {
 	if u.adapters.SetYAMLConfig == nil {
 		return fmt.Errorf("SetYAMLConfig: adapter not configured")
 	}

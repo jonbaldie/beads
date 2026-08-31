@@ -100,7 +100,7 @@ func TestRecomputeAllBlocked_AllowsDirtyWisps(t *testing.T) {
 	seedBlockedPair(ctx, t, store, true)
 
 	// A throwaway wisp leaves the dolt-ignored wisp tables perpetually dirty.
-	scratch := &types.Issue{ID: "bm-wisp", Title: "scratch", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	scratch := &types.Issue{IssueID: types.IssueID{ID: "bm-wisp"}, IssueContent: types.IssueContent{Title: "scratch"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := store.CreateIssue(ctx, scratch, "tester"); err != nil {
 		t.Fatalf("create scratch issue: %v", err)
 	}

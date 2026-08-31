@@ -95,7 +95,7 @@ func TestGetIssueCommentsPageWalkEqualsFullRead(t *testing.T) {
 	ctx, cancel := testContext(t)
 	defer cancel()
 
-	iss := &types.Issue{ID: "cm-page", Title: "cm", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	iss := &types.Issue{IssueID: types.IssueID{ID: "cm-page"}, IssueContent: types.IssueContent{Title: "cm"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestGetIssueCommentsPageEmptyThread(t *testing.T) {
 	ctx, cancel := testContext(t)
 	defer cancel()
 
-	iss := &types.Issue{ID: "cm-empty", Title: "cm", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	iss := &types.Issue{IssueID: types.IssueID{ID: "cm-empty"}, IssueContent: types.IssueContent{Title: "cm"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestGetIssueCommentsPageWisp(t *testing.T) {
 	ctx, cancel := testContext(t)
 	defer cancel()
 
-	wisp := &types.Issue{ID: "cm-wisp", Title: "wisp", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true}
+	wisp := &types.Issue{IssueID: types.IssueID{ID: "cm-wisp"}, IssueContent: types.IssueContent{Title: "wisp"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}
 	if err := store.CreateIssue(ctx, wisp, "tester"); err != nil {
 		t.Fatalf("create wisp: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestGetIssueCommentsPagePlanIsIndexed(t *testing.T) {
 	ctx, cancel := testContext(t)
 	defer cancel()
 
-	iss := &types.Issue{ID: "cm-plan", Title: "cm", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	iss := &types.Issue{IssueID: types.IssueID{ID: "cm-plan"}, IssueContent: types.IssueContent{Title: "cm"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}

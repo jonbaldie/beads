@@ -24,12 +24,35 @@ func TestCreateRejectsCrossTableIDCollision(t *testing.T) {
 	t.Run("issue then wisp", func(t *testing.T) {
 		te := newTestEnv(t, "ct")
 		if err := te.store.CreateIssue(ctx, &types.Issue{
-			ID: "ct-aaa", Title: "perm", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "ct-aaa",
+			},
+			IssueContent: types.IssueContent{
+				Title: "perm",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}, "tester"); err != nil {
 			t.Fatalf("create permanent issue: %v", err)
 		}
 		err := te.store.CreateIssue(ctx, &types.Issue{
-			ID: "ct-aaa", Title: "wisp", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true,
+			IssueID: types.IssueID{
+				ID: "ct-aaa",
+			},
+			IssueContent: types.IssueContent{
+				Title: "wisp",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		}, "tester")
 		if err == nil {
 			t.Fatal("expected cross-table collision to be rejected, got nil error")
@@ -49,12 +72,35 @@ func TestCreateRejectsCrossTableIDCollision(t *testing.T) {
 	t.Run("wisp then issue", func(t *testing.T) {
 		te := newTestEnv(t, "ct")
 		if err := te.store.CreateIssue(ctx, &types.Issue{
-			ID: "ct-bbb", Title: "wisp", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true,
+			IssueID: types.IssueID{
+				ID: "ct-bbb",
+			},
+			IssueContent: types.IssueContent{
+				Title: "wisp",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		}, "tester"); err != nil {
 			t.Fatalf("create wisp: %v", err)
 		}
 		err := te.store.CreateIssue(ctx, &types.Issue{
-			ID: "ct-bbb", Title: "perm", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "ct-bbb",
+			},
+			IssueContent: types.IssueContent{
+				Title: "perm",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}, "tester")
 		if err == nil {
 			t.Fatal("expected cross-table collision to be rejected, got nil error")
@@ -74,7 +120,17 @@ func TestCreateRejectsCrossTableIDCollision(t *testing.T) {
 		te := newTestEnv(t, "ct")
 		mk := func(title string) error {
 			return te.store.CreateIssue(ctx, &types.Issue{
-				ID: "ct-ccc", Title: title, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask,
+				IssueID: types.IssueID{
+					ID: "ct-ccc",
+				},
+				IssueContent: types.IssueContent{
+					Title: title,
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  2,
+					IssueType: types.TypeTask,
+				},
 			}, "tester")
 		}
 		if err := mk("first"); err != nil {
@@ -97,7 +153,20 @@ func TestPromoteStillWorksWithCollisionGuard(t *testing.T) {
 	te := newTestEnv(t, "ct")
 
 	if err := te.store.CreateIssue(ctx, &types.Issue{
-		ID: "ct-eph", Title: "ephemeral", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: "ct-eph",
+		},
+		IssueContent: types.IssueContent{
+			Title: "ephemeral",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}, "tester"); err != nil {
 		t.Fatalf("create ephemeral wisp: %v", err)
 	}

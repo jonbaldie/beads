@@ -40,9 +40,27 @@ func (s *DoltStore) IterIssues(ctx context.Context, query string, filter types.I
 	if s.closed.Load() {
 		return nil, ErrStoreClosed
 	}
+	q, args, err := buildIterIssuesQuery(query, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	var issues []*types.Issue
+	txErr := s.withReadTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		issues, err = readIterIssuesInTx(ctx, tx, q, args)
+		return err
+	})
+	if txErr != nil {
+		return nil, txErr
+	}
+	return storage.NewSliceIter(issues), nil
+}
+
+func buildIterIssuesQuery(query string, filter types.IssueFilter) (string, []interface{}, error) {
 	whereClauses, args, err := issueops.BuildIssueFilterClauses(query, filter, issueops.IssuesFilterTables)
 	if err != nil {
-		return nil, fmt.Errorf("iter issues: build filter: %w", err)
+		return "", nil, fmt.Errorf("iter issues: build filter: %w", err)
 	}
 	whereSQL := ""
 	if len(whereClauses) > 0 {
@@ -52,46 +70,42 @@ func (s *DoltStore) IterIssues(ctx context.Context, query string, filter types.I
 	if filter.Limit > 0 {
 		limitSQL = fmt.Sprintf(" LIMIT %d", filter.Limit)
 	}
-
 	//nolint:gosec // G201: whereSQL contains column comparisons with ?, limitSQL is a safe integer
 	q := fmt.Sprintf(`SELECT %s FROM issues %s %s ORDER BY priority ASC, created_at DESC, id ASC%s`,
 		issueops.IssueSelectColumns, sqlbuild.LeaseJoin("issues"), whereSQL, limitSQL)
+	return q, args, nil
+}
 
-	var issues []*types.Issue
-	txErr := s.withReadTx(ctx, func(tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, q, args...)
-		if err != nil {
-			return fmt.Errorf("iter issues: query: %w", err)
-		}
-		defer func() { _ = rows.Close() }()
-		ids := make([]string, 0)
-		for rows.Next() {
-			iss, scanErr := issueops.ScanIssueFrom(rows)
-			if scanErr != nil {
-				return fmt.Errorf("iter issues: scan: %w", scanErr)
-			}
-			issues = append(issues, iss)
-			ids = append(ids, iss.ID)
-		}
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("iter issues: rows: %w", err)
-		}
-		// A *sql.Tx is bound to one connection, so the cursor must be closed
-		// before the label query can run on it (idempotent with the defer).
-		_ = rows.Close()
-		labelMap, err := issueops.GetLabelsForIssuesFromTableInTx(ctx, tx, "labels", ids)
-		if err != nil {
-			return fmt.Errorf("iter issues: hydrate labels: %w", err)
-		}
-		for _, iss := range issues {
-			if labels, ok := labelMap[iss.ID]; ok {
-				iss.Labels = labels
-			}
-		}
-		return nil
-	})
-	if txErr != nil {
-		return nil, txErr
+func readIterIssuesInTx(ctx context.Context, tx *sql.Tx, query string, args []interface{}) ([]*types.Issue, error) {
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("iter issues: query: %w", err)
 	}
-	return storage.NewSliceIter(issues), nil
+	defer func() { _ = rows.Close() }()
+	issues := make([]*types.Issue, 0)
+	ids := make([]string, 0)
+	for rows.Next() {
+		iss, scanErr := issueops.ScanIssueFrom(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("iter issues: scan: %w", scanErr)
+		}
+		issues = append(issues, iss)
+		ids = append(ids, iss.ID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iter issues: rows: %w", err)
+	}
+	// A *sql.Tx is bound to one connection, so the cursor must be closed
+	// before the label query can run on it (idempotent with the defer).
+	_ = rows.Close()
+	labelMap, err := issueops.GetLabelsForIssuesFromTableInTx(ctx, tx, "labels", ids)
+	if err != nil {
+		return nil, fmt.Errorf("iter issues: hydrate labels: %w", err)
+	}
+	for _, iss := range issues {
+		if labels, ok := labelMap[iss.ID]; ok {
+			iss.Labels = labels
+		}
+	}
+	return issues, nil
 }

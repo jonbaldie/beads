@@ -16,7 +16,7 @@ import (
 func seedBlockedPair(ctx context.Context, t *testing.T, store *DoltStore, withEdge bool) string {
 	t.Helper()
 	for _, id := range []string{"bm-w", "bm-x"} {
-		iss := &types.Issue{ID: id, Title: id, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+		iss := &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("seed issue %s: %v", id, err)
 		}

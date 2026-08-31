@@ -160,7 +160,7 @@ func (s *testSuite) readyCountsPriorityFilter() {
 	s.Require().NoError(r.Insert(s.Ctx(), lo, "tester", domain.InsertIssueOpts{}))
 
 	pri := 1
-	out, err := r.GetReadyWorkWithCounts(s.Ctx(), types.WorkFilter{Priority: &pri})
+	out, err := r.GetReadyWorkWithCounts(s.Ctx(), types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Priority: &pri}})
 	s.Require().NoError(err)
 	got := iwcIDs(out)
 	s.Contains(got, "bd-rdyc-pr-hi")
@@ -200,7 +200,7 @@ func (s *testSuite) readyCountsSortByPriority() {
 	mid.Priority = 2
 	s.Require().NoError(r.Insert(s.Ctx(), mid, "tester", domain.InsertIssueOpts{}))
 
-	out, err := r.GetReadyWorkWithCounts(s.Ctx(), types.WorkFilter{SortPolicy: types.SortPolicyPriority})
+	out, err := r.GetReadyWorkWithCounts(s.Ctx(), types.WorkFilter{WorkFilterCore: types.WorkFilterCore{SortPolicy: types.SortPolicyPriority}})
 	s.Require().NoError(err)
 	got := iwcIDs(out)
 	hiIdx, midIdx, loIdx := indexOf(got, "bd-rdyc-srt-hi"), indexOf(got, "bd-rdyc-srt-mid"), indexOf(got, "bd-rdyc-srt-lo")
@@ -219,7 +219,7 @@ func (s *testSuite) readyCountsLimit() {
 		s.Require().NoError(r.Insert(s.Ctx(), iss, "tester", domain.InsertIssueOpts{}))
 	}
 	pri := 1
-	out, err := r.GetReadyWorkWithCounts(s.Ctx(), types.WorkFilter{Priority: &pri, Limit: 3, SortPolicy: types.SortPolicyPriority})
+	out, err := r.GetReadyWorkWithCounts(s.Ctx(), types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Priority: &pri, Limit: 3, SortPolicy: types.SortPolicyPriority}})
 	s.Require().NoError(err)
 	s.Len(out.Items, 3)
 }

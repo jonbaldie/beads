@@ -48,11 +48,17 @@ func TestEmbeddedDirtyTablesGate_BlocksReopenThenWorkingSetReconcileRecovers(t *
 	// SQL transaction but does not run a Dolt commit, so the new row stays
 	// uncommitted.
 	issue := &types.Issue{
-		ID:        "testdb-1",
-		Title:     "dirty working set issue",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "testdb-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "dirty working set issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		store.Close()

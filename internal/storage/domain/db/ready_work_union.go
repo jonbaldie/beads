@@ -10,13 +10,27 @@ import (
 	"github.com/jonbaldie/beads/internal/types"
 )
 
-func (r *issueSQLRepositoryImpl) getReadyWorkIDPage(ctx context.Context, filter types.WorkFilter) (idSrcPage, bool, error) {
+type issueReadyRepository struct {
+	*issueRepositoryCore
+	search *issueSearchRepository
+	counts *issueCountSearchRepository
+}
+
+func (r *issueReadyRepository) GetReadyWork(ctx context.Context, filter types.WorkFilter) (domain.SearchPage, error) {
+	return r.getReadyWorkUnion(ctx, filter)
+}
+
+func (r *issueReadyRepository) GetReadyWorkWithCounts(ctx context.Context, filter types.WorkFilter) (domain.SearchCountsPage, error) {
+	return r.getReadyWorkWithCountsUnion(ctx, filter)
+}
+
+func (r *issueReadyRepository) getReadyWorkIDPage(ctx context.Context, filter types.WorkFilter) (idSrcPage, bool, error) {
 	issuePreds, err := r.buildReadyWorkPredicates(ctx, filter, issuesFilterTables)
 	if err != nil {
 		return idSrcPage{}, false, err
 	}
 
-	wispsEmpty, probeErr := r.wispsTableEmptyOrMissing(ctx)
+	wispsEmpty, probeErr := wispsTableEmptyOrMissing(ctx, r.issueRepositoryCore.runner)
 	if probeErr != nil {
 		return idSrcPage{}, false, fmt.Errorf("ready work union: wisps probe: %w", probeErr)
 	}
@@ -73,26 +87,26 @@ func (r *issueSQLRepositoryImpl) getReadyWorkIDPage(ctx context.Context, filter 
 	if err != nil {
 		return idSrcPage{}, false, fmt.Errorf("ready work union: %w", err)
 	}
-	hasMore, err := page.finishWindow(window)
+	hasMore, err := page.FinishWindow(window)
 	if err != nil {
 		return idSrcPage{}, false, err
 	}
 	return page, hasMore, nil
 }
 
-func (r *issueSQLRepositoryImpl) getReadyWorkUnion(ctx context.Context, filter types.WorkFilter) (domain.SearchPage, error) {
+func (r *issueReadyRepository) getReadyWorkUnion(ctx context.Context, filter types.WorkFilter) (domain.SearchPage, error) {
 	page, hasMore, err := r.getReadyWorkIDPage(ctx, filter)
 	if err != nil {
 		return domain.SearchPage{}, err
 	}
 
-	issuesByID, err := r.fetchIssuesByIDs(ctx, page.issueIDs, issuesFilterTables, types.IssueFilter{})
+	issuesByID, err := r.search.hydrator.fetchIssuesByIDs(ctx, page.issueIDs, issuesFilterTables, types.IssueFilter{})
 	if err != nil {
 		return domain.SearchPage{}, fmt.Errorf("ready work union: hydrate issues: %w", err)
 	}
 	var wispsByID map[string]*types.Issue
 	if len(page.wispIDs) > 0 {
-		wispsByID, err = r.fetchIssuesByIDs(ctx, page.wispIDs, wispsFilterTables, types.IssueFilter{})
+		wispsByID, err = r.search.hydrator.fetchIssuesByIDs(ctx, page.wispIDs, wispsFilterTables, types.IssueFilter{})
 		if err != nil && !dberrors.IsTableNotExist(err) {
 			return domain.SearchPage{}, fmt.Errorf("ready work union: hydrate wisps: %w", err)
 		}
@@ -104,8 +118,8 @@ func (r *issueSQLRepositoryImpl) getReadyWorkUnion(ctx context.Context, filter t
 	}, nil
 }
 
-func (r *issueSQLRepositoryImpl) getReadyWorkWithCountsUnion(ctx context.Context, filter types.WorkFilter) (domain.SearchCountsPage, error) {
-	wispDepsExist, err := r.optionalTableExists(ctx, "wisp_dependencies")
+func (r *issueReadyRepository) getReadyWorkWithCountsUnion(ctx context.Context, filter types.WorkFilter) (domain.SearchCountsPage, error) {
+	wispDepsExist, err := optionalTableExists(ctx, r.runner, "wisp_dependencies")
 	if err != nil {
 		return domain.SearchCountsPage{}, fmt.Errorf("ready work union with counts: wisp dependency probe: %w", err)
 	}
@@ -118,13 +132,13 @@ func (r *issueSQLRepositoryImpl) getReadyWorkWithCountsUnion(ctx context.Context
 		return domain.SearchCountsPage{Items: nil, HasMore: hasMore}, nil
 	}
 
-	issuesByID, err := r.fetchCountsByIDs(ctx, page.issueIDs, issuesFilterTables, wispDepsExist, readyHydrationFor(filter))
+	issuesByID, err := r.counts.fetchCountsByIDs(ctx, page.issueIDs, issuesFilterTables, wispDepsExist, readyHydrationFor(filter))
 	if err != nil {
 		return domain.SearchCountsPage{}, fmt.Errorf("ready work union with counts: hydrate issues: %w", err)
 	}
 	var wispsByID map[string]*types.IssueWithCounts
 	if len(page.wispIDs) > 0 {
-		wispsByID, err = r.fetchCountsByIDs(ctx, page.wispIDs, wispsFilterTables, true, readyHydrationFor(filter))
+		wispsByID, err = r.counts.fetchCountsByIDs(ctx, page.wispIDs, wispsFilterTables, true, readyHydrationFor(filter))
 		if err != nil && !dberrors.IsTableNotExist(err) {
 			return domain.SearchCountsPage{}, fmt.Errorf("ready work union with counts: hydrate wisps: %w", err)
 		}

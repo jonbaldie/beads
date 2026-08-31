@@ -25,10 +25,14 @@ func claimVerifyTestIssue(t *testing.T, s *DoltStore) string {
 	ctx, cancel := testContext(t)
 	defer cancel()
 	issue := &types.Issue{
-		Title:     "claim verify target",
-		IssueType: types.TypeTask,
-		Priority:  2,
-		Status:    types.StatusOpen,
+		IssueContent: types.IssueContent{
+			Title: "claim verify target",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Priority:  2,
+			Status:    types.StatusOpen,
+		},
 	}
 	if err := s.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("create issue: %v", err)
@@ -82,7 +86,7 @@ func TestVerifiedReadyClaimDoesNotReplayDefiniteMySQLError(t *testing.T) {
 	claimed, err := store.verifiedReadyClaim(context.Background(), "alice", func() (*types.Issue, error) {
 		calls++
 		err := store.withRetryTx(context.Background(), func(*sql.Tx) error { return nil })
-		return &types.Issue{ID: "ready-target"}, err
+		return &types.Issue{IssueID: types.IssueID{ID: "ready-target"}}, err
 	})
 	if !errors.Is(err, cause) {
 		t.Fatalf("verifiedReadyClaim() error = %v, want %v", err, cause)
@@ -194,7 +198,7 @@ func TestVerifiedReadyClaimDoesNotReplayIndeterminate(t *testing.T) {
 	indeterminate := fmt.Errorf("write commit result indeterminate after connection loss: i/o timeout (%w)", ErrCommitIndeterminate)
 	got, err := s.verifiedReadyClaim(ctx, "alice", func() (*types.Issue, error) {
 		calls++
-		return &types.Issue{ID: id}, indeterminate
+		return &types.Issue{IssueID: types.IssueID{ID: id}}, indeterminate
 	})
 	if err != indeterminate {
 		t.Fatalf("error = %v, want original indeterminate error %v", err, indeterminate)

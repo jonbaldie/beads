@@ -142,7 +142,7 @@ func (s *testSuite) readyFilterByPriority() {
 	s.Require().NoError(r.Insert(s.Ctx(), lo, "tester", domain.InsertIssueOpts{}))
 
 	pri := 1
-	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{Priority: &pri})
+	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Priority: &pri}})
 	s.Require().NoError(err)
 	got := issueIDsFrom(out)
 	s.Contains(got, "bd-rdy-pr-hi")
@@ -159,7 +159,7 @@ func (s *testSuite) readyFilterByAssignee() {
 	s.Require().NoError(r.Insert(s.Ctx(), theirs, "tester", domain.InsertIssueOpts{}))
 
 	alice := "alice"
-	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{Assignee: &alice})
+	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Assignee: &alice}})
 	s.Require().NoError(err)
 	got := issueIDsFrom(out)
 	s.Contains(got, "bd-rdy-as-mine")
@@ -174,7 +174,7 @@ func (s *testSuite) readyFilterByType() {
 	task := newTestIssue("bd-rdy-typ-task", "task")
 	s.Require().NoError(r.Insert(s.Ctx(), task, "tester", domain.InsertIssueOpts{}))
 
-	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{Type: string(types.TypeBug)})
+	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Type: string(types.TypeBug)}})
 	s.Require().NoError(err)
 	got := issueIDsFrom(out)
 	s.Contains(got, bug.ID)
@@ -194,7 +194,7 @@ func (s *testSuite) readyFilterByParent() {
 		newDep(child.ID, parent.ID, types.DepParentChild), "tester", domain.DepInsertOpts{}))
 
 	parentID := parent.ID
-	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{ParentID: &parentID})
+	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{WorkFilterCore: types.WorkFilterCore{ParentID: &parentID}})
 	s.Require().NoError(err)
 	got := issueIDsFrom(out)
 	s.Contains(got, child.ID)
@@ -210,7 +210,7 @@ func (s *testSuite) readyFilterByMetadataEquality() {
 	other.Metadata = json.RawMessage(`{"team":"frontend"}`)
 	s.Require().NoError(r.Insert(s.Ctx(), other, "tester", domain.InsertIssueOpts{}))
 
-	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{MetadataFields: map[string]string{"team": "platform"}})
+	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{WorkFilterExtra: types.WorkFilterExtra{MetadataFields: map[string]string{"team": "platform"}}})
 	s.Require().NoError(err)
 	got := issueIDsFrom(out)
 	s.Contains(got, match.ID)
@@ -226,7 +226,7 @@ func (s *testSuite) readyFilterByMetadataKeyPresence() {
 	withoutKey.Metadata = json.RawMessage(`{"area":"cli"}`)
 	s.Require().NoError(r.Insert(s.Ctx(), withoutKey, "tester", domain.InsertIssueOpts{}))
 
-	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{HasMetadataKey: "team"})
+	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{WorkFilterExtra: types.WorkFilterExtra{HasMetadataKey: "team"}})
 	s.Require().NoError(err)
 	got := issueIDsFrom(out)
 	s.Contains(got, withKey.ID)
@@ -244,7 +244,7 @@ func (s *testSuite) readyExcludesRequestedTypes() {
 	epic.IssueType = types.TypeEpic
 	s.Require().NoError(r.Insert(s.Ctx(), epic, "tester", domain.InsertIssueOpts{}))
 
-	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{ExcludeTypes: []types.IssueType{types.TypeBug, types.TypeEpic}})
+	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{WorkFilterExtra: types.WorkFilterExtra{ExcludeTypes: []types.IssueType{types.TypeBug, types.TypeEpic}}})
 	s.Require().NoError(err)
 	got := issueIDsFrom(out)
 	s.Contains(got, task.ID)
@@ -260,7 +260,7 @@ func (s *testSuite) readyUnassigned() {
 	assigned.Assignee = "alice"
 	s.Require().NoError(r.Insert(s.Ctx(), assigned, "tester", domain.InsertIssueOpts{}))
 
-	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{Unassigned: true})
+	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Unassigned: true}})
 	s.Require().NoError(err)
 	got := issueIDsFrom(out)
 	s.Contains(got, "bd-rdy-un-yes")
@@ -288,7 +288,7 @@ func (s *testSuite) readyIncludeDeferred() {
 	_, err := s.Runner().ExecContext(s.Ctx(), "UPDATE issues SET defer_until = ? WHERE id = ?", future, "bd-rdy-idf-1")
 	s.Require().NoError(err)
 
-	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{IncludeDeferred: true})
+	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{WorkFilterExtra: types.WorkFilterExtra{IncludeDeferred: true}})
 	s.Require().NoError(err)
 	s.Contains(issueIDsFrom(out), "bd-rdy-idf-1")
 }
@@ -305,7 +305,7 @@ func (s *testSuite) readyLabelFilter() {
 	s.Require().NoError(r.Insert(s.Ctx(), cold, "tester", domain.InsertIssueOpts{}))
 	s.Require().NoError(labelRepo.Insert(s.Ctx(), "bd-rdy-lbl-cold", "cold", "tester", domain.LabelOpts{}))
 
-	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{Labels: []string{"hot"}})
+	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Labels: []string{"hot"}}})
 	s.Require().NoError(err)
 	got := issueIDsFrom(out)
 	s.Contains(got, "bd-rdy-lbl-hot")
@@ -320,7 +320,7 @@ func (s *testSuite) readyLimitRespected() {
 		s.Require().NoError(r.Insert(s.Ctx(), iss, "tester", domain.InsertIssueOpts{}))
 	}
 	pri := 1
-	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{Priority: &pri, Limit: 3, SortPolicy: types.SortPolicyPriority})
+	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Priority: &pri, Limit: 3, SortPolicy: types.SortPolicyPriority}})
 	s.Require().NoError(err)
 	s.Len(out.Items, 3)
 }
@@ -337,7 +337,7 @@ func (s *testSuite) readySortByPriority() {
 	mid.Priority = 2
 	s.Require().NoError(r.Insert(s.Ctx(), mid, "tester", domain.InsertIssueOpts{}))
 
-	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{SortPolicy: types.SortPolicyPriority})
+	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{WorkFilterCore: types.WorkFilterCore{SortPolicy: types.SortPolicyPriority}})
 	s.Require().NoError(err)
 	got := issueIDsFrom(out)
 	hiIdx, midIdx, loIdx := indexOf(got, "bd-rdy-srt-hi"), indexOf(got, "bd-rdy-srt-mid"), indexOf(got, "bd-rdy-srt-lo")
@@ -391,10 +391,14 @@ func (s *testSuite) readyOffsetSkipsLeadingRows() {
 	}
 
 	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{
-		Offset:     2,
-		Limit:      2,
-		SortPolicy: types.SortPolicyPriority,
-		Labels:     []string{isoLabel},
+		WorkFilterCore: types.WorkFilterCore{
+			Limit:      2,
+			SortPolicy: types.SortPolicyPriority,
+			Labels:     []string{isoLabel},
+		},
+		WorkFilterExtra: types.WorkFilterExtra{
+			Offset: 2,
+		},
 	})
 	s.Require().NoError(err)
 	got := issueIDsFrom(out)
@@ -418,10 +422,14 @@ func (s *testSuite) readyOffsetWithoutLimit() {
 	}
 
 	out, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{
-		Offset:     3,
-		Limit:      100,
-		SortPolicy: types.SortPolicyPriority,
-		Labels:     []string{isoLabel},
+		WorkFilterCore: types.WorkFilterCore{
+			Limit:      100,
+			SortPolicy: types.SortPolicyPriority,
+			Labels:     []string{isoLabel},
+		},
+		WorkFilterExtra: types.WorkFilterExtra{
+			Offset: 3,
+		},
 	})
 	s.Require().NoError(err)
 
@@ -443,8 +451,10 @@ func (s *testSuite) readyOffsetHasMoreSignaling() {
 		s.Require().NoError(labelRepo.Insert(s.Ctx(), id, isoLabel, "tester", domain.LabelOpts{}))
 	}
 	filter := types.WorkFilter{
-		Labels:     []string{isoLabel},
-		SortPolicy: types.SortPolicyPriority,
+		WorkFilterCore: types.WorkFilterCore{
+			Labels:     []string{isoLabel},
+			SortPolicy: types.SortPolicyPriority,
+		},
 	}
 
 	first, err := r.GetReadyWork(s.Ctx(), withOffsetLimit(filter, 0, 3))
@@ -482,7 +492,7 @@ func (s *testSuite) readyOffsetWalksAllPages() {
 		s.Require().NoError(r.Insert(s.Ctx(), iss, "tester", domain.InsertIssueOpts{}))
 		s.Require().NoError(labelRepo.Insert(s.Ctx(), id, isoLabel, "tester", domain.LabelOpts{}))
 	}
-	base := types.WorkFilter{Labels: []string{isoLabel}, SortPolicy: types.SortPolicyPriority}
+	base := types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Labels: []string{isoLabel}, SortPolicy: types.SortPolicyPriority}}
 
 	unpaginated, err := r.GetReadyWork(s.Ctx(), withOffsetLimit(base, 0, 0))
 	s.Require().NoError(err)

@@ -138,7 +138,7 @@ func (s *testSuite) TestParityListStatusFilter() {
 
 	for _, status := range []types.Status{types.StatusOpen, types.StatusInProgress, types.StatusClosed} {
 		st := status
-		filter := types.IssueFilter{Status: &st}
+		filter := types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Status: &st}}
 		classic := idsOf(s.classicList(filter))
 		dom := idsOf(s.domainList(filter))
 		s.Equal(classic, dom, "status=%s: direct and domain stacks must return the same ID sequence", status)
@@ -180,8 +180,8 @@ func (s *testSuite) TestParityWispInclusion() {
 
 	// List, Ephemeral=false: NoHistory wisp survives, true ephemerals do not.
 	ephFalse := false
-	classic = idsOf(s.classicList(types.IssueFilter{Ephemeral: &ephFalse}))
-	dom = idsOf(s.domainList(types.IssueFilter{Ephemeral: &ephFalse}))
+	classic = idsOf(s.classicList(types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{Ephemeral: &ephFalse}}))
+	dom = idsOf(s.domainList(types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{Ephemeral: &ephFalse}}))
 	s.ElementsMatch(classic, dom, "list non-ephemeral: same membership")
 	s.ElementsMatch(nonEphemeral, dom, "list non-ephemeral: domain membership")
 
@@ -192,8 +192,8 @@ func (s *testSuite) TestParityWispInclusion() {
 	s.ElementsMatch(nonEphemeral, dom, "ready default: ephemeral wisps must not leak in")
 
 	// Ready, IncludeEphemeral: both stacks include the ephemerals.
-	classic = idsOf(s.classicReady(types.WorkFilter{IncludeEphemeral: true}))
-	dom = idsOf(s.domainReady(types.WorkFilter{IncludeEphemeral: true}).Items)
+	classic = idsOf(s.classicReady(types.WorkFilter{WorkFilterExtra: types.WorkFilterExtra{IncludeEphemeral: true}}))
+	dom = idsOf(s.domainReady(types.WorkFilter{WorkFilterExtra: types.WorkFilterExtra{IncludeEphemeral: true}}).Items)
 	s.ElementsMatch(classic, dom, "ready include-ephemeral: same membership")
 	s.ElementsMatch(all, dom, "ready include-ephemeral: domain membership")
 }
@@ -213,8 +213,8 @@ func (s *testSuite) TestParityListLimit() {
 	s.Equal(full, idsOf(s.domainList(types.IssueFilter{})), "limit 0: same sequence")
 	s.Len(full, 6)
 
-	classic := idsOf(s.classicList(types.IssueFilter{Limit: 4}))
-	dom := idsOf(s.domainList(types.IssueFilter{Limit: 4}))
+	classic := idsOf(s.classicList(types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 4}}))
+	dom := idsOf(s.domainList(types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 4}}))
 	s.Equal(classic, dom, "limit 4: same sequence")
 	s.Equal(full[:4], dom, "limit 4 must be a prefix of the unlimited sequence")
 }
@@ -309,8 +309,8 @@ func (s *testSuite) TestParityReadyLimitBoundary() {
 	s.Len(unlimited, 5)
 
 	for _, limit := range []int{3, 5} {
-		classic := idsOf(s.classicReady(types.WorkFilter{Limit: limit}))
-		page := s.domainReady(types.WorkFilter{Limit: limit})
+		classic := idsOf(s.classicReady(types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Limit: limit}}))
+		page := s.domainReady(types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Limit: limit}})
 		s.Equal(classic, idsOf(page.Items), "ready limit %d: same sequence", limit)
 		s.Equal(len(unlimited) > limit, page.HasMore, "ready limit %d: HasMore must match the unlimited row count", limit)
 	}
@@ -390,9 +390,9 @@ func (s *testSuite) TestParityLabelFilters() {
 		filter types.IssueFilter
 		want   []string
 	}{
-		{"and", types.IssueFilter{Labels: []string{"red", "blue"}}, []string{"bd-par-lbl-1"}},
-		{"any", types.IssueFilter{LabelsAny: []string{"red", "blue"}}, []string{"bd-par-lbl-1", "bd-par-lbl-2", "bd-par-lbl-3"}},
-		{"exclude", types.IssueFilter{ExcludeLabels: []string{"red"}}, []string{"bd-par-lbl-3", "bd-par-lbl-4"}},
+		{"and", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Labels: []string{"red", "blue"}}}, []string{"bd-par-lbl-1"}},
+		{"any", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{LabelsAny: []string{"red", "blue"}}}, []string{"bd-par-lbl-1", "bd-par-lbl-2", "bd-par-lbl-3"}},
+		{"exclude", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{ExcludeLabels: []string{"red"}}}, []string{"bd-par-lbl-3", "bd-par-lbl-4"}},
 	}
 	for _, tc := range cases {
 		classic := idsOf(s.classicList(tc.filter))
@@ -417,7 +417,7 @@ func (s *testSuite) TestParitySortTieBreak() {
 	wantLexical := []string{"bd-par-tie-a", "bd-par-tie-b", "bd-par-tie-c", "bd-par-tie-d"}
 
 	for _, sortBy := range []string{"", "priority", "created"} {
-		filter := types.IssueFilter{SortBy: sortBy}
+		filter := types.IssueFilter{IssueFilterPage: types.IssueFilterPage{SortBy: sortBy}}
 		classic := idsOf(s.classicList(filter))
 		dom := idsOf(s.domainList(filter))
 		s.Equal(classic, dom, "sort=%q: same sequence", sortBy)

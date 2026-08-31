@@ -79,11 +79,13 @@ func TestCheckForwardDrift_EscapeHatch_ReturnsNil(t *testing.T) {
 	dbName := uniqueTestDBName(t)
 
 	store, err := New(ctx, &Config{
-		Path:            tmpDir,
-		CommitterName:   "test",
-		CommitterEmail:  "test@example.com",
-		Database:        dbName,
-		CreateIfMissing: true,
+		Path:           tmpDir,
+		CommitterName:  "test",
+		CommitterEmail: "test@example.com",
+		Database:       dbName,
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
 	})
 	if err != nil {
 		t.Fatalf("New (create): %v", err)
@@ -118,11 +120,13 @@ func TestDoltNew_ReadOnly_ForwardDrift_ReturnsSchemaSkewError(t *testing.T) {
 
 	// Open a writable store to create the database and initialize the schema.
 	store, err := New(ctx, &Config{
-		Path:            tmpDir,
-		CommitterName:   "test",
-		CommitterEmail:  "test@example.com",
-		Database:        dbName,
-		CreateIfMissing: true,
+		Path:           tmpDir,
+		CommitterName:  "test",
+		CommitterEmail: "test@example.com",
+		Database:       dbName,
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
 	})
 	if err != nil {
 		t.Fatalf("New (create): %v", err)
@@ -171,11 +175,13 @@ func TestDoltNew_ReadOnly_ForwardDrift_EscapeHatch_Succeeds(t *testing.T) {
 	dbName := uniqueTestDBName(t)
 
 	store, err := New(ctx, &Config{
-		Path:            tmpDir,
-		CommitterName:   "test",
-		CommitterEmail:  "test@example.com",
-		Database:        dbName,
-		CreateIfMissing: true,
+		Path:           tmpDir,
+		CommitterName:  "test",
+		CommitterEmail: "test@example.com",
+		Database:       dbName,
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
 	})
 	if err != nil {
 		t.Fatalf("New (create): %v", err)
@@ -218,11 +224,13 @@ func TestDoltNew_CreateIfMissing_NoSchemaSkewError(t *testing.T) {
 	dbName := uniqueTestDBName(t)
 
 	store, err := New(ctx, &Config{
-		Path:            tmpDir,
-		CommitterName:   "test",
-		CommitterEmail:  "test@example.com",
-		Database:        dbName,
-		CreateIfMissing: true,
+		Path:           tmpDir,
+		CommitterName:  "test",
+		CommitterEmail: "test@example.com",
+		Database:       dbName,
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
 	})
 	if err != nil {
 		if schema.IsSchemaSkewError(err) {

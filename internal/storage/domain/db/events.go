@@ -40,35 +40,44 @@ func (r *eventsSQLRepositoryImpl) DeleteAllForIDs(ctx context.Context, ids []str
 		table = "wisp_events"
 	}
 	total := 0
-	for start := 0; start < len(ids); start += deleteBatchSize {
+	idsLen := len(ids)
+	for start := 0; start < idsLen; start += deleteBatchSize {
 		end := start + deleteBatchSize
-		if end > len(ids) {
-			end = len(ids)
+		if end > idsLen {
+			end = idsLen
 		}
 		batch := ids[start:end]
-		placeholders := make([]string, len(batch))
-		args := make([]any, len(batch))
-		for i, id := range batch {
-			placeholders[i] = "?"
-			args[i] = id
-		}
-		//nolint:gosec // G201: table is one of two hardcoded constants; ? placeholders only.
-		res, err := r.runner.ExecContext(ctx,
-			fmt.Sprintf("DELETE FROM %s WHERE issue_id IN (%s)", table, strings.Join(placeholders, ",")),
-			args...)
+		n, err := deleteEventBatch(ctx, r.runner, table, batch)
 		if err != nil {
 			if opts.UseWispsTable && dberrors.IsTableNotExist(err) {
 				return total, nil
 			}
-			return total, fmt.Errorf("db: EventsSQLRepository.DeleteAllForIDs from %s: %w", table, err)
-		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return total, fmt.Errorf("db: EventsSQLRepository.DeleteAllForIDs rows affected: %w", err)
+			return total, err
 		}
 		total += int(n)
 	}
 	return total, nil
+}
+
+func deleteEventBatch(ctx context.Context, runner Runner, table string, batch []string) (int64, error) {
+	placeholders := make([]string, len(batch))
+	args := make([]any, len(batch))
+	for i, id := range batch {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	//nolint:gosec // G201: table is one of two hardcoded constants; ? placeholders only.
+	res, err := runner.ExecContext(ctx,
+		fmt.Sprintf("DELETE FROM %s WHERE issue_id IN (%s)", table, strings.Join(placeholders, ",")),
+		args...)
+	if err != nil {
+		return 0, fmt.Errorf("db: EventsSQLRepository.DeleteAllForIDs from %s: %w", table, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("db: EventsSQLRepository.DeleteAllForIDs rows affected: %w", err)
+	}
+	return n, nil
 }
 
 func (r *eventsSQLRepositoryImpl) CountAllForIDs(ctx context.Context, ids []string, opts domain.RecordEventOpts) (int, error) {

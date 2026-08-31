@@ -46,45 +46,61 @@ func loadMetadataSchema() storage.MetadataSchemaConfig {
 
 // parseFieldSchema converts a raw config map into a MetadataFieldSchema.
 func parseFieldSchema(m map[string]interface{}) storage.MetadataFieldSchema {
-	schema := storage.MetadataFieldSchema{}
-
-	if t, ok := m["type"].(string); ok {
-		schema.Type = storage.MetadataFieldType(t)
+	min, hasMin := toFloat64(m["min"])
+	max, hasMax := toFloat64(m["max"])
+	schema := storage.MetadataFieldSchema{
+		Type:     fieldSchemaType(m),
+		Required: fieldSchemaRequired(m),
+		Values:   parseFieldValues(m["values"]),
 	}
-
-	if req, ok := m["required"].(bool); ok {
-		schema.Required = req
-	}
-
-	// Parse enum values
-	if vals, ok := m["values"]; ok {
-		switch v := vals.(type) {
-		case []interface{}:
-			for _, item := range v {
-				if s, ok := item.(string); ok {
-					schema.Values = append(schema.Values, s)
-				}
-			}
-		case string:
-			// Comma-separated fallback
-			for _, s := range strings.Split(v, ",") {
-				s = strings.TrimSpace(s)
-				if s != "" {
-					schema.Values = append(schema.Values, s)
-				}
-			}
-		}
-	}
-
-	// Parse min/max for numeric types
-	if min, ok := toFloat64(m["min"]); ok {
+	if hasMin {
 		schema.Min = &min
 	}
-	if max, ok := toFloat64(m["max"]); ok {
+	if hasMax {
 		schema.Max = &max
 	}
-
 	return schema
+}
+
+func fieldSchemaType(m map[string]interface{}) storage.MetadataFieldType {
+	value, _ := m["type"].(string)
+	return storage.MetadataFieldType(value)
+}
+
+func fieldSchemaRequired(m map[string]interface{}) bool {
+	value, _ := m["required"].(bool)
+	return value
+}
+
+func parseFieldValues(raw interface{}) []string {
+	switch values := raw.(type) {
+	case []interface{}:
+		return stringValues(values)
+	case string:
+		return splitFieldValues(values)
+	default:
+		return nil
+	}
+}
+
+func stringValues(values []interface{}) []string {
+	result := make([]string, 0, len(values))
+	for _, item := range values {
+		if value, ok := item.(string); ok {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func splitFieldValues(values string) []string {
+	result := make([]string, 0)
+	for _, value := range strings.Split(values, ",") {
+		if value = strings.TrimSpace(value); value != "" {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 // toFloat64 converts an interface{} to float64, handling int and float YAML values.

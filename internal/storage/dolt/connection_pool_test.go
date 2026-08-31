@@ -223,9 +223,11 @@ func TestApplyPoolLimits_Overrides(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	applyPoolLimits(db, &Config{
-		MaxOpenConns:    3,
-		MaxIdleConns:    2,
-		ConnMaxLifetime: 15 * time.Minute,
+		PoolOptions: PoolOptions{
+			MaxOpenConns:    3,
+			MaxIdleConns:    2,
+			ConnMaxLifetime: 15 * time.Minute,
+		},
 	})
 
 	stats := db.Stats()
@@ -242,7 +244,11 @@ func TestApplyPoolLimits_ClampsIdleToOpen(t *testing.T) {
 
 	// Default MaxIdleConns is 5, but MaxOpenConns=1 must clamp idle to 1.
 	// Otherwise database/sql silently overrides our request.
-	applyPoolLimits(db, &Config{MaxOpenConns: 1})
+	applyPoolLimits(db, &Config{
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 1,
+		},
+	})
 
 	// Force a connection into the idle pool, then open a second one.
 	// If the clamp is wrong this test still passes, but it at least
@@ -265,7 +271,12 @@ func TestPool_SequentialQueriesReuseSingleConnection(t *testing.T) {
 	db, drv := openMockDB(t)
 	t.Cleanup(func() { _ = db.Close() })
 
-	applyPoolLimits(db, &Config{MaxOpenConns: 5, MaxIdleConns: 5})
+	applyPoolLimits(db, &Config{
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 5,
+			MaxIdleConns: 5,
+		},
+	})
 
 	ctx := context.Background()
 	for i := 0; i < 2; i++ {
@@ -301,7 +312,12 @@ func TestPool_ConcurrentQueriesRespectMaxOpen(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	const maxOpen = 2
-	applyPoolLimits(db, &Config{MaxOpenConns: maxOpen, MaxIdleConns: maxOpen})
+	applyPoolLimits(db, &Config{
+		PoolOptions: PoolOptions{
+			MaxOpenConns: maxOpen,
+			MaxIdleConns: maxOpen,
+		},
+	})
 
 	ctx := context.Background()
 	var wg sync.WaitGroup
@@ -339,7 +355,12 @@ func TestPool_CloseReleasesUnderlyingConnections(t *testing.T) {
 	t.Parallel()
 
 	db, drv := openMockDB(t)
-	applyPoolLimits(db, &Config{MaxOpenConns: 3, MaxIdleConns: 3})
+	applyPoolLimits(db, &Config{
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 3,
+			MaxIdleConns: 3,
+		},
+	})
 
 	// Warm up two connections and return them to the idle pool.
 	ctx := context.Background()

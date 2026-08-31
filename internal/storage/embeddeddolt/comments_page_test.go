@@ -45,7 +45,7 @@ func TestGetIssueCommentsPageEmbedded(t *testing.T) {
 	te := newTestEnv(t, "cp")
 	ctx := t.Context()
 
-	iss := &types.Issue{ID: "cp-1", Title: "cp", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	iss := &types.Issue{IssueID: types.IssueID{ID: "cp-1"}, IssueContent: types.IssueContent{Title: "cp"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := te.store.CreateIssue(ctx, iss, "tester"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestGetIssueCommentsPageEmbedded(t *testing.T) {
 	}
 
 	// Empty thread -> empty page.
-	empty := &types.Issue{ID: "cp-empty", Title: "cp", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	empty := &types.Issue{IssueID: types.IssueID{ID: "cp-empty"}, IssueContent: types.IssueContent{Title: "cp"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := te.store.CreateIssue(ctx, empty, "tester"); err != nil {
 		t.Fatalf("CreateIssue(empty): %v", err)
 	}
@@ -143,7 +143,7 @@ func TestGetIssueCommentsPageEmbedded(t *testing.T) {
 	}
 
 	// Wisp route: an active wisp pages wisp_comments and matches its full read.
-	wisp := &types.Issue{ID: "cp-wisp", Title: "wisp", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true}
+	wisp := &types.Issue{IssueID: types.IssueID{ID: "cp-wisp"}, IssueContent: types.IssueContent{Title: "wisp"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}
 	if err := te.store.CreateIssue(ctx, wisp, "tester"); err != nil {
 		t.Fatalf("CreateIssue(wisp): %v", err)
 	}

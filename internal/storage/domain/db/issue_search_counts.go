@@ -14,60 +14,72 @@ import (
 	"github.com/jonbaldie/beads/internal/types"
 )
 
-func (r *issueSQLRepositoryImpl) searchAcrossIssuesAndWispsWithCounts(ctx context.Context, query string, filter types.IssueFilter) (domain.SearchCountsPage, error) {
-	wispDepsExist, err := r.optionalTableExists(ctx, "wisp_dependencies")
+type issueCountSearchRepository struct {
+	*issueRepositoryCore
+	search *issueSearchRepository
+}
+
+func (r *issueCountSearchRepository) SearchAcrossIssuesAndWispsWithCounts(ctx context.Context, query string, filter types.IssueFilter) (domain.SearchCountsPage, error) {
+	return r.searchAcrossIssuesAndWispsWithCounts(ctx, query, filter)
+}
+
+func (r *issueCountSearchRepository) searchAcrossIssuesAndWispsWithCounts(ctx context.Context, query string, filter types.IssueFilter) (domain.SearchCountsPage, error) {
+	wispDepsExist, err := optionalTableExists(ctx, r.issueRepositoryCore.runner, "wisp_dependencies")
 	if err != nil {
 		return domain.SearchCountsPage{}, fmt.Errorf("search issues with counts: wisp dependency probe: %w", err)
 	}
 
 	if filter.Ephemeral != nil && *filter.Ephemeral {
-		empty, probeErr := r.wispsTableEmptyOrMissing(ctx)
-		if probeErr != nil {
-			return domain.SearchCountsPage{}, fmt.Errorf("search issues with counts: ephemeral wisp probe: %w", probeErr)
-		}
-		if empty || !wispDepsExist {
-			return domain.SearchCountsPage{}, nil
-		}
-		wisps, err := r.runFilterSearchQuery(ctx, query, filter, wispsFilterTables, true)
-		if err != nil {
-			return domain.SearchCountsPage{}, err
-		}
-		return finishSearchCountsPage(wisps, filter)
+		return r.searchEphemeralWithCounts(ctx, query, filter, wispDepsExist)
 	}
 
 	if filter.SkipWisps {
-		out, err := r.runFilterSearchQuery(ctx, query, filter, issuesFilterTables, wispDepsExist)
-		if err != nil {
-			return domain.SearchCountsPage{}, err
-		}
-		return finishSearchCountsPage(out, filter)
+		return r.searchCountsForTable(ctx, query, filter, issuesFilterTables, wispDepsExist)
 	}
+	return r.searchCountsWithWisps(ctx, query, filter, wispDepsExist)
+}
 
-	empty, probeErr := r.wispsTableEmptyOrMissing(ctx)
+func (r *issueCountSearchRepository) searchEphemeralWithCounts(ctx context.Context, query string, filter types.IssueFilter, wispDepsExist bool) (domain.SearchCountsPage, error) {
+	empty, probeErr := wispsTableEmptyOrMissing(ctx, r.runner)
+	if probeErr != nil {
+		return domain.SearchCountsPage{}, fmt.Errorf("search issues with counts: ephemeral wisp probe: %w", probeErr)
+	}
+	if empty || !wispDepsExist {
+		return domain.SearchCountsPage{}, nil
+	}
+	return r.searchCountsForTable(ctx, query, filter, wispsFilterTables, true)
+}
+
+func (r *issueCountSearchRepository) searchCountsForTable(ctx context.Context, query string, filter types.IssueFilter, tables filterTables, includeWispReverseDeps bool) (domain.SearchCountsPage, error) {
+	out, err := r.runFilterSearchQuery(ctx, query, filter, tables, includeWispReverseDeps)
+	if err != nil {
+		return domain.SearchCountsPage{}, err
+	}
+	return finishSearchCountsPage(out, filter)
+}
+
+func (r *issueCountSearchRepository) searchCountsWithWisps(ctx context.Context, query string, filter types.IssueFilter, wispDepsExist bool) (domain.SearchCountsPage, error) {
+	empty, probeErr := wispsTableEmptyOrMissing(ctx, r.runner)
 	if probeErr != nil {
 		return domain.SearchCountsPage{}, fmt.Errorf("search issues with counts: wisp probe: %w", probeErr)
 	}
 	if empty || !wispDepsExist {
-		out, err := r.runFilterSearchQuery(ctx, query, filter, issuesFilterTables, wispDepsExist)
-		if err != nil {
-			return domain.SearchCountsPage{}, err
-		}
-		return finishSearchCountsPage(out, filter)
+		return r.searchCountsForTable(ctx, query, filter, issuesFilterTables, wispDepsExist)
 	}
 
 	return r.searchUnionWithCounts(ctx, query, filter, wispDepsExist)
 }
 
-func (r *issueSQLRepositoryImpl) searchUnionWithCounts(ctx context.Context, query string, filter types.IssueFilter, wispDepsExist bool) (domain.SearchCountsPage, error) {
+func (r *issueCountSearchRepository) searchUnionWithCounts(ctx context.Context, query string, filter types.IssueFilter, wispDepsExist bool) (domain.SearchCountsPage, error) {
 	outerOrderBy := unionOrderBySQL(filter.SortBy, filter.SortDesc)
 	window := searchWindowForFilter(filter)
 	legWindow := legWindowSQL(outerOrderBy, window)
 
-	iSub, iArgs, err := r.buildUnionSubquery(query, filter, issuesFilterTables, "i", legWindow)
+	iSub, iArgs, err := r.search.buildUnionSubquery(query, filter, issuesFilterTables, "i", legWindow)
 	if err != nil {
 		return domain.SearchCountsPage{}, fmt.Errorf("search union with counts (issues): %w", err)
 	}
-	wSub, wArgs, err := r.buildUnionSubquery(query, filter, wispsFilterTables, "w", legWindow)
+	wSub, wArgs, err := r.search.buildUnionSubquery(query, filter, wispsFilterTables, "w", legWindow)
 	if err != nil {
 		return domain.SearchCountsPage{}, fmt.Errorf("search union with counts (wisps): %w", err)
 	}
@@ -92,8 +104,8 @@ func (r *issueSQLRepositoryImpl) searchUnionWithCounts(ctx context.Context, quer
 	if err != nil {
 		return domain.SearchCountsPage{}, fmt.Errorf("search union with counts: %w", err)
 	}
-	page.sortGoSide(filter.SortBy, filter.SortDesc)
-	hasMore, err := page.finishWindow(window)
+	page.SortGoSide(filter.SortBy, filter.SortDesc)
+	hasMore, err := page.FinishWindow(window)
 	if err != nil {
 		return domain.SearchCountsPage{}, err
 	}
@@ -134,12 +146,13 @@ func readyHydrationFor(filter types.WorkFilter) sqlbuild.CountsHydration {
 // clause would silently couple to the subquery's internal alias. The IDs are
 // chunked so the by-IDs form's up-to-eightfold placeholder binding stays
 // within per-statement limits (mirrors issueops.runReadyCountsInTx).
-func (r *issueSQLRepositoryImpl) fetchCountsByIDs(ctx context.Context, ids []string, tables filterTables, includeWispReverseDeps bool, hyd sqlbuild.CountsHydration) (map[string]*types.IssueWithCounts, error) {
+func (r *issueCountSearchRepository) fetchCountsByIDs(ctx context.Context, ids []string, tables filterTables, includeWispReverseDeps bool, hyd sqlbuild.CountsHydration) (map[string]*types.IssueWithCounts, error) {
 	out := make(map[string]*types.IssueWithCounts, len(ids))
-	for start := 0; start < len(ids); start += queryBatchSize {
+	idsLen := len(ids)
+	for start := 0; start < idsLen; start += queryBatchSize {
 		end := start + queryBatchSize
-		if end > len(ids) {
-			end = len(ids)
+		if end > idsLen {
+			end = idsLen
 		}
 		countsSQL, args := sqlbuild.SearchCountsSQL(tables, ids[start:end], "", "", "", includeWispReverseDeps, hyd)
 		items, err := r.scanCountsQuery(ctx, tables, countsSQL, args, hyd)
@@ -156,7 +169,7 @@ func (r *issueSQLRepositoryImpl) fetchCountsByIDs(ctx context.Context, ids []str
 	return out, nil
 }
 
-func (r *issueSQLRepositoryImpl) runFilterSearchQuery(ctx context.Context, query string, filter types.IssueFilter, tables filterTables, includeWispReverseDeps bool) ([]*types.IssueWithCounts, error) {
+func (r *issueCountSearchRepository) runFilterSearchQuery(ctx context.Context, query string, filter types.IssueFilter, tables filterTables, includeWispReverseDeps bool) ([]*types.IssueWithCounts, error) {
 	whereClauses, args, err := buildIssueFilterClauses(query, filter, tables)
 	if err != nil {
 		return nil, err
@@ -170,14 +183,14 @@ func (r *issueSQLRepositoryImpl) runFilterSearchQuery(ctx context.Context, query
 }
 
 //nolint:gosec // G201: SQL fragments are built from hardcoded table names and parameterized filters.
-func (r *issueSQLRepositoryImpl) runSearchQuery(ctx context.Context, tables filterTables, whereSQL, orderBySQL, limitSQL string, args []any, includeWispReverseDeps bool, hyd sqlbuild.CountsHydration) ([]*types.IssueWithCounts, error) {
+func (r *issueCountSearchRepository) runSearchQuery(ctx context.Context, tables filterTables, whereSQL, orderBySQL, limitSQL string, args []any, includeWispReverseDeps bool, hyd sqlbuild.CountsHydration) ([]*types.IssueWithCounts, error) {
 	searchSQL, _ := sqlbuild.SearchCountsSQL(tables, nil, whereSQL, orderBySQL, limitSQL, includeWispReverseDeps, hyd)
 	return r.scanCountsQuery(ctx, tables, searchSQL, args, hyd)
 }
 
 // scanCountsQuery runs a prebuilt counts mega-query and hydrates each row,
 // deduping by issue ID (mirrors issueops.scanCountsRowsInTx).
-func (r *issueSQLRepositoryImpl) scanCountsQuery(ctx context.Context, tables filterTables, query string, args []any, hyd sqlbuild.CountsHydration) ([]*types.IssueWithCounts, error) {
+func (r *issueCountSearchRepository) scanCountsQuery(ctx context.Context, tables filterTables, query string, args []any, hyd sqlbuild.CountsHydration) ([]*types.IssueWithCounts, error) {
 	rows, err := r.runner.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search count %s: %w", tables.Main, err)
@@ -206,10 +219,10 @@ func (r *issueSQLRepositoryImpl) scanCountsQuery(ctx context.Context, tables fil
 	return out, nil
 }
 
-func (r *issueSQLRepositoryImpl) optionalTableExists(ctx context.Context, table string) (bool, error) {
+func optionalTableExists(ctx context.Context, runner Runner, table string) (bool, error) {
 	var probe int
 	//nolint:gosec // G201: table is a hardcoded constant from caller (issues, wisps, dependencies, wisp_dependencies, ...).
-	err := r.runner.QueryRowContext(ctx, fmt.Sprintf("SELECT 1 FROM %s LIMIT 1", table)).Scan(&probe)
+	err := runner.QueryRowContext(ctx, fmt.Sprintf("SELECT 1 FROM %s LIMIT 1", table)).Scan(&probe)
 	switch {
 	case err == nil:
 		return true, nil

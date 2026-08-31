@@ -14,10 +14,73 @@ func TestHasRepository(t *testing.T) {
 	}{
 		{name: "missing root", want: false},
 		{
+			name: "root file",
+			setup: func(t *testing.T, beadsDir string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(beadsDir, "embeddeddolt"), nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: false,
+		},
+		{
+			name: "root symlink",
+			setup: func(t *testing.T, beadsDir string) {
+				t.Helper()
+				target := t.TempDir()
+				if err := os.Symlink(target, filepath.Join(beadsDir, "embeddeddolt")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: false,
+		},
+		{
 			name: "empty root",
 			setup: func(t *testing.T, beadsDir string) {
 				t.Helper()
 				if err := os.Mkdir(filepath.Join(beadsDir, "embeddeddolt"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: false,
+		},
+		{
+			name: "database file",
+			setup: func(t *testing.T, beadsDir string) {
+				t.Helper()
+				root := filepath.Join(beadsDir, "embeddeddolt")
+				if err := os.Mkdir(root, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(root, "beads"), nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: false,
+		},
+		{
+			name: "database symlink",
+			setup: func(t *testing.T, beadsDir string) {
+				t.Helper()
+				root := filepath.Join(beadsDir, "embeddeddolt")
+				if err := os.Mkdir(root, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(t.TempDir(), filepath.Join(root, "beads")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: false,
+		},
+		{
+			name: "repository marker file",
+			setup: func(t *testing.T, beadsDir string) {
+				t.Helper()
+				databaseDir := filepath.Join(beadsDir, "embeddeddolt", "beads")
+				if err := os.MkdirAll(databaseDir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(databaseDir, ".dolt"), nil, 0o600); err != nil {
 					t.Fatal(err)
 				}
 			},

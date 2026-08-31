@@ -19,7 +19,7 @@ func TestIsBlockedBatchEmbedded(t *testing.T) {
 	ctx := t.Context()
 
 	mk := func(id string) {
-		iss := &types.Issue{ID: id, Title: id, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+		iss := &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 		if err := te.store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("create %s: %v", id, err)
 		}

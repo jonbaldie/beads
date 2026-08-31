@@ -30,11 +30,17 @@ func TestWispIDSetInTx_Scoped_ReturnsOnlyInputIDs(t *testing.T) {
 	wispIDs := make([]string, 0, 5)
 	for i := 0; i < 5; i++ {
 		iss := &types.Issue{
-			Title:     fmt.Sprintf("wisp %d", i),
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Ephemeral: true,
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("wisp %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		}
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("create wisp %d: %v", i, err)
@@ -84,11 +90,17 @@ func TestWispIDSetInTx_Scoped_AcrossBatchBoundary(t *testing.T) {
 	wispIDs := make([]string, 0, n)
 	for i := 0; i < n; i++ {
 		iss := &types.Issue{
-			Title:     fmt.Sprintf("batch-wisp %d", i),
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Ephemeral: true,
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("batch-wisp %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		}
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("create wisp %d: %v", i, err)
@@ -127,11 +139,17 @@ func TestWispIDSetInTx_Scoped_UnknownIDsReturnEmpty(t *testing.T) {
 
 	// Seed one wisp to prove the query would find something if it was unscoped.
 	bait := &types.Issue{
-		Title:     "bait wisp",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueContent: types.IssueContent{
+			Title: "bait wisp",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, bait, "tester"); err != nil {
 		t.Fatalf("create bait: %v", err)
@@ -169,11 +187,17 @@ func TestGetLabelsForIssuesInTx_SmallInputLargeWispTable(t *testing.T) {
 
 	// Seed one permanent issue with a label.
 	perm := &types.Issue{
-		ID:        "smallN-perm-1",
-		Title:     "perm",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "smallN-perm-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "perm",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, perm, "tester"); err != nil {
 		t.Fatalf("create perm: %v", err)
@@ -184,11 +208,17 @@ func TestGetLabelsForIssuesInTx_SmallInputLargeWispTable(t *testing.T) {
 
 	// Seed one target wisp with its own label.
 	target := &types.Issue{
-		Title:     "target wisp",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueContent: types.IssueContent{
+			Title: "target wisp",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, target, "tester"); err != nil {
 		t.Fatalf("create target wisp: %v", err)
@@ -203,11 +233,17 @@ func TestGetLabelsForIssuesInTx_SmallInputLargeWispTable(t *testing.T) {
 	noiseIDs := make([]string, 0, noiseCount)
 	for i := 0; i < noiseCount; i++ {
 		iss := &types.Issue{
-			Title:     fmt.Sprintf("noise wisp %d", i),
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Ephemeral: true,
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("noise wisp %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		}
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("create noise %d: %v", i, err)
@@ -256,22 +292,34 @@ func TestGetIssuesByIDsInTx_SmallInputLargeWispTable(t *testing.T) {
 	defer cancel()
 
 	perm := &types.Issue{
-		ID:        "smallN-issue-perm",
-		Title:     "perm",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "smallN-issue-perm",
+		},
+		IssueContent: types.IssueContent{
+			Title: "perm",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, perm, "tester"); err != nil {
 		t.Fatalf("create perm: %v", err)
 	}
 
 	target := &types.Issue{
-		Title:     "target wisp",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueContent: types.IssueContent{
+			Title: "target wisp",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, target, "tester"); err != nil {
 		t.Fatalf("create target wisp: %v", err)
@@ -280,11 +328,17 @@ func TestGetIssuesByIDsInTx_SmallInputLargeWispTable(t *testing.T) {
 	const noiseCount = 20
 	for i := 0; i < noiseCount; i++ {
 		iss := &types.Issue{
-			Title:     fmt.Sprintf("noise wisp %d", i),
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Ephemeral: true,
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("noise wisp %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		}
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("create noise %d: %v", i, err)

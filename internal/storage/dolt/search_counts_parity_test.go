@@ -34,16 +34,16 @@ func TestSearchCountsFilterBeforeJoinParity(t *testing.T) {
 		filter types.IssueFilter
 	}{
 		{name: "no filter, default order"},
-		{name: "status open", filter: types.IssueFilter{Statuses: []types.Status{types.StatusOpen}}},
-		{name: "priority 1", filter: types.IssueFilter{Priority: ptr(1)}},
-		{name: "label alpha", filter: types.IssueFilter{Labels: []string{"alpha"}}},
+		{name: "status open", filter: types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Statuses: []types.Status{types.StatusOpen}}}},
+		{name: "priority 1", filter: types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Priority: ptr(1)}}},
+		{name: "label alpha", filter: types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Labels: []string{"alpha"}}}},
 		{name: "substring search", query: "counts-parity"},
-		{name: "limit 2 default order", filter: types.IssueFilter{Limit: 2}},
-		{name: "limit 3 order created", filter: types.IssueFilter{Limit: 3, SortBy: "created"}},
-		{name: "order title", filter: types.IssueFilter{SortBy: "title"}},
-		{name: "order status desc", filter: types.IssueFilter{SortBy: "status", SortDesc: true}},
-		{name: "skip labels", filter: types.IssueFilter{SkipLabels: true}},
-		{name: "limit 1 priority", filter: types.IssueFilter{Limit: 1, SortBy: "priority"}},
+		{name: "limit 2 default order", filter: types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 2}}},
+		{name: "limit 3 order created", filter: types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 3}, IssueFilterPage: types.IssueFilterPage{SortBy: "created"}}},
+		{name: "order title", filter: types.IssueFilter{IssueFilterPage: types.IssueFilterPage{SortBy: "title"}}},
+		{name: "order status desc", filter: types.IssueFilter{IssueFilterPage: types.IssueFilterPage{SortBy: "status", SortDesc: true}}},
+		{name: "skip labels", filter: types.IssueFilter{IssueFilterHydrate: types.IssueFilterHydrate{SkipLabels: true}}},
+		{name: "limit 1 priority", filter: types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 1}, IssueFilterPage: types.IssueFilterPage{SortBy: "priority"}}},
 	}
 
 	for _, tc := range cases {
@@ -147,11 +147,11 @@ func seedSearchCountsFixture(ctx context.Context, t *testing.T, store *DoltStore
 	t.Helper()
 
 	issues := []*types.Issue{
-		{ID: "counts-parity-a", Title: "alpha root", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
-		{ID: "counts-parity-b", Title: "beta child", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: "counts-parity-c", Title: "gamma blocker", Status: types.StatusInProgress, Priority: 1, IssueType: types.TypeBug},
-		{ID: "counts-parity-d", Title: "delta closed", Status: types.StatusOpen, Priority: 3, IssueType: types.TypeTask},
-		{ID: "counts-parity-e", Title: "epsilon leaf", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+		{IssueID: types.IssueID{ID: "counts-parity-a"}, IssueContent: types.IssueContent{Title: "alpha root"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "counts-parity-b"}, IssueContent: types.IssueContent{Title: "beta child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "counts-parity-c"}, IssueContent: types.IssueContent{Title: "gamma blocker"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress, Priority: 1, IssueType: types.TypeBug}},
+		{IssueID: types.IssueID{ID: "counts-parity-d"}, IssueContent: types.IssueContent{Title: "delta closed"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 3, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "counts-parity-e"}, IssueContent: types.IssueContent{Title: "epsilon leaf"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
 	}
 	for _, issue := range issues {
 		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {

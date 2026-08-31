@@ -39,13 +39,15 @@ func baseAutoStartCfg(t *testing.T, database string, serverPort int, source dolt
 	t.Helper()
 	t.Setenv("BEADS_TEST_MODE", "1")
 	return &Config{
-		Database:         database,
-		Path:             t.TempDir(),
-		ServerHost:       "127.0.0.1",
-		ServerPort:       serverPort,
-		ServerPortSource: source,
-		AutoStart:        true,
-		DisableAutoStart: false,
+		Database: database,
+		Path:     t.TempDir(),
+		ServerOptions: ServerOptions{
+			ServerHost:       "127.0.0.1",
+			ServerPort:       serverPort,
+			ServerPortSource: source,
+			AutoStart:        true,
+			DisableAutoStart: false,
+		},
 	}
 }
 
@@ -278,13 +280,15 @@ func TestNewServerMode_AuthoritativeSource_FailClosed_RestoresAbsentPortFile(t *
 	const newPort = 54401
 	t.Setenv("BEADS_TEST_MODE", "1")
 	cfg := &Config{
-		Database:         "test_port_provenance_restore_absent",
-		BeadsDir:         beadsDir,
-		Path:             filepath.Join(beadsDir, "dolt"),
-		ServerHost:       "127.0.0.1",
-		ServerPort:       configuredPort,
-		ServerPortSource: doltserver.PortSourceConfigYaml,
-		AutoStart:        true,
+		Database: "test_port_provenance_restore_absent",
+		BeadsDir: beadsDir,
+		Path:     filepath.Join(beadsDir, "dolt"),
+		ServerOptions: ServerOptions{
+			ServerHost:       "127.0.0.1",
+			ServerPort:       configuredPort,
+			ServerPortSource: doltserver.PortSourceConfigYaml,
+			AutoStart:        true,
+		},
 	}
 	stubEnsureRunningDetailedWithPortFileWrite(t, newPort, false)
 
@@ -321,13 +325,15 @@ func TestNewServerMode_AuthoritativeSource_FailClosed_RestoresPriorPortFileBytes
 	}
 
 	cfg := &Config{
-		Database:         "test_port_provenance_restore_bytes",
-		BeadsDir:         beadsDir,
-		Path:             filepath.Join(beadsDir, "dolt"),
-		ServerHost:       "127.0.0.1",
-		ServerPort:       configuredPort,
-		ServerPortSource: doltserver.PortSourceConfigYaml,
-		AutoStart:        true,
+		Database: "test_port_provenance_restore_bytes",
+		BeadsDir: beadsDir,
+		Path:     filepath.Join(beadsDir, "dolt"),
+		ServerOptions: ServerOptions{
+			ServerHost:       "127.0.0.1",
+			ServerPort:       configuredPort,
+			ServerPortSource: doltserver.PortSourceConfigYaml,
+			AutoStart:        true,
+		},
 	}
 	stubEnsureRunningDetailedWithPortFileWrite(t, newPort, false)
 
@@ -361,14 +367,16 @@ func TestNewServerMode_SharedServer_FailClosed_RestoresPortFile(t *testing.T) {
 	}
 
 	cfg := &Config{
-		Database:               "test_port_provenance_shared_restore",
-		BeadsDir:               beadsDir,
-		Path:                   filepath.Join(beadsDir, "dolt"),
-		ServerHost:             "127.0.0.1",
-		ServerPort:             configuredPort,
-		ServerPortSource:       doltserver.PortSourcePortFile,
-		ServerPortSharedServer: true,
-		AutoStart:              true,
+		Database: "test_port_provenance_shared_restore",
+		BeadsDir: beadsDir,
+		Path:     filepath.Join(beadsDir, "dolt"),
+		ServerOptions: ServerOptions{
+			ServerHost:             "127.0.0.1",
+			ServerPort:             configuredPort,
+			ServerPortSource:       doltserver.PortSourcePortFile,
+			ServerPortSharedServer: true,
+			AutoStart:              true,
+		},
 	}
 	stubEnsureRunningDetailedWithPortFileWrite(t, newPort, false)
 
@@ -428,14 +436,16 @@ func TestNewServerMode_AuthoritativeSource_SecondCallStillFailsClosed(t *testing
 			// Not a test-mode database name: this test deliberately runs
 			// with BEADS_TEST_MODE=0 to exercise the untracked (non-test)
 			// auto-start-stop path in newServerMode/undoRejectedAutoStart.
-			Database:               database,
-			BeadsDir:               beadsDir,
-			Path:                   doltDir,
-			ServerHost:             dc.Host,
-			ServerPort:             dc.Port,
-			ServerPortSource:       dc.PortSource,
-			ServerPortSharedServer: dc.PortSharedServer,
-			AutoStart:              true,
+			Database: database,
+			BeadsDir: beadsDir,
+			Path:     doltDir,
+			ServerOptions: ServerOptions{
+				ServerHost:             dc.Host,
+				ServerPort:             dc.Port,
+				ServerPortSource:       dc.PortSource,
+				ServerPortSharedServer: dc.PortSharedServer,
+				AutoStart:              true,
+			},
 		}
 	}
 

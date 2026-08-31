@@ -24,18 +24,21 @@ func TestEveryRepositoryMutatorJournals(t *testing.T) {
 	// Repository receiver types that own work-bead state. issue/dependency/label
 	// reimplement issueops SQL; comment writes the comments bead table.
 	beadReceivers := map[string]bool{
-		"issueSQLRepositoryImpl":      true,
-		"dependencySQLRepositoryImpl": true,
-		"labelSQLRepositoryImpl":      true,
-		"commentSQLRepositoryImpl":    true,
+		"issueSQLRepositoryImpl":         true,
+		"dependencyInsertRepository":     true,
+		"dependencyDeleteRepository":     true,
+		"dependencyValidationRepository": true,
+		"dependencyBulkRepository":       true,
+		"labelSQLRepositoryImpl":         true,
+		"commentSQLRepositoryImpl":       true,
 	}
 
 	// Bead-mutating methods that legitimately do NOT journal, each with a reason.
 	// The staleness check below fails if any of these stops being a bead mutator,
 	// so a rename or refactor cannot silently strand an exemption.
 	exempt := map[string]string{
-		"labelSQLRepositoryImpl.DeleteAllForIDs":              "bulk label cleanup runs under a parent issue delete; the surviving journal record is the node delete",
-		"dependencySQLRepositoryImpl.markDirectBlockedSource": "maintains the derived is_blocked column as a side effect of a journaled dependency insert",
+		"labelSQLRepositoryImpl.DeleteAllForIDs":                 "bulk label cleanup runs under a parent issue delete; the surviving journal record is the node delete",
+		"dependencyValidationRepository.markDirectBlockedSource": "maintains the derived is_blocked column as a side effect of a journaled dependency insert",
 	}
 
 	// Direct emit helpers and the issueops functions that journal the mutation

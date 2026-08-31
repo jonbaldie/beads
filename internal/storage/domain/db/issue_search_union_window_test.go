@@ -53,7 +53,7 @@ func (s *testSuite) unionGoSideSortKeepsTheRightSubset() {
 
 	const limit = 5
 	page, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: prefix + "-", SortBy: "id", Limit: limit})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: prefix + "-", Limit: limit}, IssueFilterPage: types.IssueFilterPage{SortBy: "id"}})
 	s.Require().NoError(err)
 
 	// The ids are zero-padded, so byte order and natural order agree and the
@@ -80,7 +80,7 @@ func (s *testSuite) unionCountsGoSideSortKeepsTheRightSubset() {
 
 	const limit = 5
 	page, err := r.SearchAcrossIssuesAndWispsWithCounts(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: prefix + "-", SortBy: "id", Limit: limit})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: prefix + "-", Limit: limit}, IssueFilterPage: types.IssueFilterPage{SortBy: "id"}})
 	s.Require().NoError(err)
 
 	got := make([]string, 0, len(page.Items))
@@ -113,12 +113,12 @@ func (s *testSuite) unionComposedQueryWithBoundedLegs() {
 		filter types.IssueFilter
 		want   int
 	}{
-		{"ordered and bounded", "", types.IssueFilter{IDPrefix: prefix + "-", SortBy: "created", Limit: 4}, 4},
-		{"ordered, bounded, with an offset", "", types.IssueFilter{IDPrefix: prefix + "-", SortBy: "priority", Limit: 3, Offset: 2}, 3},
-		{"ordered and bounded with a text term", "row", types.IssueFilter{IDPrefix: prefix + "-", SortBy: "updated", Limit: 4}, 4},
-		{"the default order, bounded", "", types.IssueFilter{IDPrefix: prefix + "-", Limit: 5}, 5},
-		{"ordered and unbounded", "", types.IssueFilter{IDPrefix: prefix + "-", SortBy: "created"}, 12},
-		{"a Go-side sort, bounded", "", types.IssueFilter{IDPrefix: prefix + "-", SortBy: "id", Limit: 4}, 4},
+		{"ordered and bounded", "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: prefix + "-", Limit: 4}, IssueFilterPage: types.IssueFilterPage{SortBy: "created"}}, 4},
+		{"ordered, bounded, with an offset", "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: prefix + "-", Limit: 3}, IssueFilterHydrate: types.IssueFilterHydrate{Offset: 2}, IssueFilterPage: types.IssueFilterPage{SortBy: "priority"}}, 3},
+		{"ordered and bounded with a text term", "row", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: prefix + "-", Limit: 4}, IssueFilterPage: types.IssueFilterPage{SortBy: "updated"}}, 4},
+		{"the default order, bounded", "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: prefix + "-", Limit: 5}}, 5},
+		{"ordered and unbounded", "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: prefix + "-"}, IssueFilterPage: types.IssueFilterPage{SortBy: "created"}}, 12},
+		{"a Go-side sort, bounded", "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: prefix + "-", Limit: 4}, IssueFilterPage: types.IssueFilterPage{SortBy: "id"}}, 4},
 	} {
 		s.Run(tc.what, func() {
 			page, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), tc.query, tc.filter)
@@ -141,7 +141,7 @@ func (s *testSuite) unionLegsCarryTheWindow() {
 	s.seedTwoPlanes(prefix, 20) // 20 durable + 20 wisps
 	r := NewIssueSQLRepository(s.Runner()).(*issueSQLRepositoryImpl)
 
-	filter := types.IssueFilter{IDPrefix: prefix + "-", SortBy: "created", Limit: 4}
+	filter := types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: prefix + "-", Limit: 4}, IssueFilterPage: types.IssueFilterPage{SortBy: "created"}}
 	outerOrderBy := unionOrderBySQL(filter.SortBy, filter.SortDesc)
 	s.Require().NotEmpty(outerOrderBy, "this case needs a sort SQL can express")
 	window := searchWindowForFilter(filter)
@@ -182,7 +182,7 @@ func (s *testSuite) unionLegsCarryTheWindow() {
 // express must not get one — a bounded leg with no ORDER BY is precisely the F5
 // bug, moved one level down and made harder to see.
 func (s *testSuite) unionLegsStayUnboundedUnderGoSideSort() {
-	filter := types.IssueFilter{IDPrefix: "bd-uw-none-", SortBy: "id", Limit: 4}
+	filter := types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-uw-none-", Limit: 4}, IssueFilterPage: types.IssueFilterPage{SortBy: "id"}}
 	outerOrderBy := unionOrderBySQL(filter.SortBy, filter.SortDesc)
 	s.Empty(outerOrderBy, "sortBy=id is the Go-side sort: SQL renders no ORDER BY for it")
 

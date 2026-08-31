@@ -23,7 +23,7 @@ func TestEventsJournal_EmbeddedPlumbing(t *testing.T) {
 	clearJournal(t, store)
 
 	mk := func(id string) *types.Issue {
-		return &types.Issue{ID: id, Title: "t-" + id, IssueType: types.TypeTask, Status: types.StatusOpen}
+		return &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: "t-" + id}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}}
 	}
 	must := func(err error, what string) {
 		t.Helper()
@@ -74,7 +74,7 @@ func TestEventsJournal_NoPhantomDeletes(t *testing.T) {
 	enableJournalForTest(t, store)
 
 	mk := func(id string) *types.Issue {
-		return &types.Issue{ID: id, Title: "t-" + id, IssueType: types.TypeTask, Status: types.StatusOpen}
+		return &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: "t-" + id}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}}
 	}
 	if err := store.CreateIssue(ctx, mk("bd-pd-1"), "actor"); err != nil {
 		t.Fatalf("create 1: %v", err)
@@ -115,10 +115,31 @@ func TestEventsJournal_RunInTransactionMixedBuckets(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	regular := &types.Issue{
-		ID: "bd-jtx-regular", Title: "regular", IssueType: types.TypeTask, Status: types.StatusOpen,
+		IssueID: types.IssueID{
+			ID: "bd-jtx-regular",
+		},
+		IssueContent: types.IssueContent{
+			Title: "regular",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
 	}
 	wisp := &types.Issue{
-		ID: "bd-jtx-wisp", Title: "wisp", IssueType: types.TypeTask, Status: types.StatusOpen, Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: "bd-jtx-wisp",
+		},
+		IssueContent: types.IssueContent{
+			Title: "wisp",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.RunInTransaction(ctx, "test: journal mixed buckets", func(tx storage.Transaction) error {
 		return tx.CreateIssues(ctx, []*types.Issue{regular, wisp}, "actor")
@@ -153,7 +174,19 @@ func TestEventsJournal_RunInTransactionWispOnly(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	wisp := &types.Issue{
-		ID: "bd-jtx-wisp-only", Title: "wisp", IssueType: types.TypeTask, Status: types.StatusOpen, Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: "bd-jtx-wisp-only",
+		},
+		IssueContent: types.IssueContent{
+			Title: "wisp",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.RunInTransaction(ctx, "test: journal wisp only", func(tx storage.Transaction) error {
 		return tx.CreateIssue(ctx, wisp, "actor")
@@ -185,7 +218,7 @@ func TestEventsJournal_StaleSeqCounterSelfHeals(t *testing.T) {
 	clearJournal(t, store)
 
 	mk := func(id string) *types.Issue {
-		return &types.Issue{ID: id, Title: "t-" + id, IssueType: types.TypeTask, Status: types.StatusOpen}
+		return &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: "t-" + id}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}}
 	}
 	for _, id := range []string{"bd-heal-1", "bd-heal-2", "bd-heal-3"} {
 		if err := store.CreateIssue(ctx, mk(id), "actor"); err != nil {
@@ -249,7 +282,7 @@ func TestEventsJournal_TxAtomicity(t *testing.T) {
 	ctx := context.Background()
 	enableJournalForTest(t, store)
 
-	issue := &types.Issue{ID: "bd-atom-1", Title: "atomic", IssueType: types.TypeTask, Status: types.StatusOpen}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "bd-atom-1"}, IssueContent: types.IssueContent{Title: "atomic"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}}
 	if err := store.CreateIssue(ctx, issue, "actor"); err != nil {
 		t.Fatalf("create: %v", err)
 	}

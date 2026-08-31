@@ -25,11 +25,17 @@ import (
 func createPerm(t *testing.T, ctx context.Context, store *DoltStore, id string) {
 	t.Helper()
 	issue := &types.Issue{
-		ID:        id,
-		Title:     "perm " + id,
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: "perm " + id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("create perm %s: %v", id, err)
@@ -40,12 +46,20 @@ func createPerm(t *testing.T, ctx context.Context, store *DoltStore, id string) 
 func createWisp(t *testing.T, ctx context.Context, store *DoltStore, id string) {
 	t.Helper()
 	issue := &types.Issue{
-		ID:        id,
-		Title:     "wisp " + id,
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: "wisp " + id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("create wisp %s: %v", id, err)

@@ -40,11 +40,13 @@ func TestDoltNew_RemoteMigrateGate_BlocksReopen(t *testing.T) {
 
 	// Create and fully migrate the database.
 	store, err := New(ctx, &Config{
-		Path:            tmpDir,
-		CommitterName:   "test",
-		CommitterEmail:  "test@example.com",
-		Database:        dbName,
-		CreateIfMissing: true,
+		Path:           tmpDir,
+		CommitterName:  "test",
+		CommitterEmail: "test@example.com",
+		Database:       dbName,
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
 	})
 	if err != nil {
 		t.Fatalf("New (create): %v", err)
@@ -141,7 +143,11 @@ func TestDoltStore_hasPersistedCLIRemote(t *testing.T) {
 	root := t.TempDir()
 	// serverMode + empty beadsDir makes CLIDir() == filepath.Join(dbPath, database),
 	// independent of shared-server resolution.
-	s := &DoltStore{dbPath: root, database: "testdb", serverMode: true}
+	s := &DoltStore{
+		dbPath:                       root,
+		database:                     "testdb",
+		doltStoreVersionControlState: doltStoreVersionControlState{serverMode: true},
+	}
 
 	cliDir := s.CLIDir()
 	initLocalDoltRepoForRemote(t, cliDir)

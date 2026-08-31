@@ -1,12 +1,44 @@
 package git
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
+	"testing"
 
 	"github.com/jonbaldie/beads/internal/storage/domain"
 )
+
+func TestCommandFailuresAreReported(t *testing.T) {
+	repo := &gitRepositoryImpl{workDir: filepath.Join(t.TempDir(), "missing")}
+	ctx := context.Background()
+
+	checks := []struct {
+		name string
+		run  func() error
+	}{
+		{"IsGitRepo", func() error { _, err := repo.IsGitRepo(ctx); return err }},
+		{"IsBareGitRepo", func() error { _, err := repo.IsBareGitRepo(ctx); return err }},
+		{"GetConfig", func() error { _, _, err := repo.GetConfig(ctx, "beads.role"); return err }},
+		{"SetConfig", func() error { return repo.SetConfig(ctx, "beads.role", "maintainer") }},
+		{"GetRemoteURL", func() error { _, _, err := repo.GetRemoteURL(ctx, "origin"); return err }},
+		{"ListRemoteNames", func() error { _, err := repo.ListRemoteNames(ctx); return err }},
+		{"CurrentBranch", func() error { _, err := repo.CurrentBranch(ctx); return err }},
+		{"Add", func() error { return repo.Add(ctx, "file") }},
+		{"Commit", func() error {
+			_, err := repo.Commit(ctx, domain.GitCommitParams{Message: "message"})
+			return err
+		}},
+	}
+	for _, check := range checks {
+		t.Run(check.name, func(t *testing.T) {
+			if err := check.run(); err == nil {
+				t.Fatal("command failure returned nil error")
+			}
+		})
+	}
+}
 
 func (s *testSuite) TestIsGitRepo_FalseOutsideRepo() {
 	ok, err := s.repo.IsGitRepo(s.Ctx())
@@ -32,6 +64,13 @@ func (s *testSuite) TestIsBareGitRepo_FalseOutsideRepo() {
 	bare, err := s.repo.IsBareGitRepo(s.Ctx())
 	s.Require().NoError(err)
 	s.False(bare)
+}
+
+func (s *testSuite) TestIsBareGitRepo_TrueForBareRepo() {
+	s.run("git", "init", "--bare", "-q")
+	bare, err := s.repo.IsBareGitRepo(s.Ctx())
+	s.Require().NoError(err)
+	s.True(bare)
 }
 
 func (s *testSuite) TestInit_CreatesRepo() {
@@ -145,6 +184,7 @@ func (s *testSuite) TestAdd_StageAndCommitFile() {
 	result, err := s.repo.Commit(s.Ctx(), domain.GitCommitParams{Message: "test"})
 	s.Require().NoError(err)
 	s.True(result.DidCommit)
+	s.NotEmpty(result.Output)
 }
 
 func (s *testSuite) TestCommit_NoVerifyBypassesHook() {

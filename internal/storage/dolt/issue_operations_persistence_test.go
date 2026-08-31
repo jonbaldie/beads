@@ -13,14 +13,14 @@ func TestMoveIssuePersistenceInTxMovesAggregateAndReportsTables(t *testing.T) {
 	store, cleanup := setupTestStore(t)
 	defer cleanup()
 	ctx := context.Background()
-	issue := &types.Issue{ID: "persist-move", Title: "move", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Labels: []string{"label"}}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "persist-move"}, IssueContent: types.IssueContent{Title: "move"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueGraph: types.IssueGraph{Labels: []string{"label"}}}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.AddIssueComment(ctx, issue.ID, "tester", "comment"); err != nil {
 		t.Fatal(err)
 	}
-	depender := &types.Issue{ID: "persist-depender", Title: "depender", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	depender := &types.Issue{IssueID: types.IssueID{ID: "persist-depender"}, IssueContent: types.IssueContent{Title: "depender"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := store.CreateIssue(ctx, depender, "tester"); err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestMoveIssuePersistenceInTxSameModeIsNoop(t *testing.T) {
 	store, cleanup := setupTestStore(t)
 	defer cleanup()
 	ctx := context.Background()
-	issue := &types.Issue{ID: "persist-noop", Title: "noop", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "persist-noop"}, IssueContent: types.IssueContent{Title: "noop"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestMoveIssuePersistenceInTxTransitions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			issue := &types.Issue{ID: "transition-" + transition.name, Title: transition.name, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: ephemeral, NoHistory: noHistory}
+			issue := &types.Issue{IssueID: types.IssueID{ID: "transition-" + transition.name}, IssueContent: types.IssueContent{Title: transition.name}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: ephemeral, NoHistory: noHistory}}
 			if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 				t.Fatal(err)
 			}
@@ -148,7 +148,7 @@ func TestMoveIssuePersistenceInTxTransitions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			wantEphemeral, wantNoHistory, _, err := types.NormalizePersistenceMode(types.Issue{Ephemeral: ephemeral, NoHistory: noHistory}, transition.to)
+			wantEphemeral, wantNoHistory, _, err := types.NormalizePersistenceMode(types.Issue{IssueWisp: types.IssueWisp{Ephemeral: ephemeral, NoHistory: noHistory}}, transition.to)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -163,7 +163,7 @@ func TestMoveIssuePersistenceInTxRefusesUnversionedDemotion(t *testing.T) {
 	store, cleanup := setupTestStore(t)
 	defer cleanup()
 	ctx := context.Background()
-	issue := &types.Issue{ID: "unversioned", Title: "unversioned", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, StorageClass: types.StorageClassUnversioned}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "unversioned"}, IssueContent: types.IssueContent{Title: "unversioned"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{StorageClass: types.StorageClassUnversioned}}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestMoveIssuePersistenceInTxDeletesLeaseOnDemotion(t *testing.T) {
 	store, cleanup := setupTestStore(t)
 	defer cleanup()
 	ctx := context.Background()
-	issue := &types.Issue{ID: "persist-lease", Title: "lease", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "persist-lease"}, IssueContent: types.IssueContent{Title: "lease"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestMoveIssuePersistenceInTxTargetCollisionRollsBackSource(t *testing.T) {
 	store, cleanup := setupTestStore(t)
 	defer cleanup()
 	ctx := context.Background()
-	issue := &types.Issue{ID: "persist-collision", Title: "source", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Labels: []string{"source-label"}}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "persist-collision"}, IssueContent: types.IssueContent{Title: "source"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueGraph: types.IssueGraph{Labels: []string{"source-label"}}}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +250,7 @@ func TestMoveIssuePersistenceInTxLateCounterConflictRollsBack(t *testing.T) {
 	store, cleanup := setupTestStore(t)
 	defer cleanup()
 	ctx := context.Background()
-	issue := &types.Issue{ID: "persist-late-rollback", Title: "source", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Labels: []string{"source-label"}}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "persist-late-rollback"}, IssueContent: types.IssueContent{Title: "source"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueGraph: types.IssueGraph{Labels: []string{"source-label"}}}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +318,7 @@ func TestMoveIssuePersistenceInTxRepairsFlagsInTheIssuesPlane(t *testing.T) {
 	store, cleanup := setupTestStore(t)
 	defer cleanup()
 	ctx := context.Background()
-	issue := &types.Issue{ID: "persist-repair", Title: "repair", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "persist-repair"}, IssueContent: types.IssueContent{Title: "repair"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatal(err)
 	}

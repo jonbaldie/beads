@@ -22,11 +22,17 @@ func TestFindWispDependentsRecursive(t *testing.T) {
 
 	// Create a parent wisp (simulates a formula root)
 	parent := &types.Issue{
-		Title:     "parent formula wisp",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueContent: types.IssueContent{
+			Title: "parent formula wisp",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, parent, "test"); err != nil {
 		t.Fatalf("create parent wisp: %v", err)
@@ -34,18 +40,30 @@ func TestFindWispDependentsRecursive(t *testing.T) {
 
 	// Create child wisps (simulate formula step wisps that depend on parent)
 	child1 := &types.Issue{
-		Title:     "step 1",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueContent: types.IssueContent{
+			Title: "step 1",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	child2 := &types.Issue{
-		Title:     "step 2",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueContent: types.IssueContent{
+			Title: "step 2",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, child1, "test"); err != nil {
 		t.Fatalf("create child1: %v", err)
@@ -56,11 +74,17 @@ func TestFindWispDependentsRecursive(t *testing.T) {
 
 	// Create a grandchild (step that depends on child1)
 	grandchild := &types.Issue{
-		Title:     "substep of step 1",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueContent: types.IssueContent{
+			Title: "substep of step 1",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, grandchild, "test"); err != nil {
 		t.Fatalf("create grandchild: %v", err)
@@ -224,11 +248,17 @@ func TestDeleteWispBatch_LargeBatch(t *testing.T) {
 func createTestWisp(t *testing.T, ctx context.Context, store *DoltStore, title string) *types.Issue {
 	t.Helper()
 	w := &types.Issue{
-		Title:     title,
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueContent: types.IssueContent{
+			Title: title,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, w, "test"); err != nil {
 		t.Fatalf("CreateIssue (wisp) %q: %v", title, err)
@@ -288,10 +318,14 @@ func TestRunInTransaction_DoesNotCorruptConfig(t *testing.T) {
 	}
 
 	issue := &types.Issue{
-		Title:     "test issue for GH#2455",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "test issue for GH#2455",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -438,11 +472,17 @@ func TestWispGC_SkipsNoHistoryBeads(t *testing.T) {
 
 	// Create a NoHistory bead: stored in wisps table, but NOT GC-eligible.
 	noHistoryBead := &types.Issue{
-		Title:     "no-history bead (must survive GC)",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		NoHistory: true,
+		IssueContent: types.IssueContent{
+			Title: "no-history bead (must survive GC)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			NoHistory: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, noHistoryBead, "test"); err != nil {
 		t.Fatalf("create no-history bead: %v", err)
@@ -450,11 +490,17 @@ func TestWispGC_SkipsNoHistoryBeads(t *testing.T) {
 
 	// Create a normal ephemeral wisp: should be visible to GC.
 	ephemeralWisp := &types.Issue{
-		Title:     "normal ephemeral wisp (GC-eligible)",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueContent: types.IssueContent{
+			Title: "normal ephemeral wisp (GC-eligible)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, ephemeralWisp, "test"); err != nil {
 		t.Fatalf("create ephemeral wisp: %v", err)
@@ -463,8 +509,12 @@ func TestWispGC_SkipsNoHistoryBeads(t *testing.T) {
 	// Query with Ephemeral=true — the exact filter used by wisp GC.
 	ephemeralTrue := true
 	filter := types.IssueFilter{
-		Ephemeral: &ephemeralTrue,
-		Limit:     5000,
+		IssueFilterCore: types.IssueFilterCore{
+			Limit: 5000,
+		},
+		IssueFilterFlags: types.IssueFilterFlags{
+			Ephemeral: &ephemeralTrue,
+		},
 	}
 	issues, err := store.SearchIssues(ctx, "", filter)
 	if err != nil {
@@ -498,11 +548,17 @@ func TestFindWispDependentsRecursive_NoDependents(t *testing.T) {
 	defer cancel()
 
 	wisp := &types.Issue{
-		Title:     "lone wisp",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueContent: types.IssueContent{
+			Title: "lone wisp",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, wisp, "test"); err != nil {
 		t.Fatalf("create wisp: %v", err)

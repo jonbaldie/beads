@@ -39,32 +39,30 @@ func (s *EmbeddedDoltStore) cleanGitRemoteCacheGarbage() {
 	}
 
 	cutoff := time.Now().Add(-tmpPackMinAge)
+	_ = filepath.WalkDir(cacheBase, staleCacheEntryRemover(cutoff))
+}
 
-	_ = filepath.WalkDir(cacheBase, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
+func staleCacheEntryRemover(cutoff time.Time) func(string, os.DirEntry, error) error {
+	return func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil || entry.IsDir() {
 			return nil // best-effort: skip unreadable entries
 		}
-		if d.IsDir() {
-			return nil
-		}
-		name := d.Name()
+		name := entry.Name()
 		if !strings.HasPrefix(name, "tmp_pack_") && !strings.HasPrefix(name, "tmp_idx_") {
 			return nil
 		}
-		info, err := d.Info()
-		if err != nil {
+		info, err := entry.Info()
+		if err != nil || !info.ModTime().Before(cutoff) {
 			return nil
 		}
-		if info.ModTime().Before(cutoff) {
-			// #nosec G122 -- path is under .dolt/git-remote-cache/ which is
-			// owned by the user running bd. A TOCTOU symlink swap would
-			// require write access to that directory; in that case the
-			// attacker already controls the Dolt data. The tmp_pack_/tmp_idx_
-			// prefix check further narrows the scope to files Dolt itself writes.
-			_ = os.Remove(path)
-		}
+		// #nosec G122 -- path is under .dolt/git-remote-cache/ which is
+		// owned by the user running bd. A TOCTOU symlink swap would
+		// require write access to that directory; in that case the
+		// attacker already controls the Dolt data. The tmp_pack_/tmp_idx_
+		// prefix check further narrows the scope to files Dolt itself writes.
+		_ = os.Remove(path)
 		return nil
-	})
+	}
 }
 
 const (

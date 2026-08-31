@@ -56,15 +56,21 @@ func TestHistory_NullTextColumns(t *testing.T) {
 	// (b) Commit an issue under the pre-0049 TEXT schema. This becomes the
 	// OLDER history entry.
 	issue := &types.Issue{
-		ID:                 "null-hist-1",
-		Title:              "Null history test",
-		Description:        "original description",
-		Design:             "original design",
-		AcceptanceCriteria: "original AC",
-		Notes:              "original notes",
-		Status:             types.StatusOpen,
-		Priority:           2,
-		IssueType:          types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "null-hist-1",
+		},
+		IssueContent: types.IssueContent{
+			Title:              "Null history test",
+			Description:        "original description",
+			Design:             "original design",
+			AcceptanceCriteria: "original AC",
+			Notes:              "original notes",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)

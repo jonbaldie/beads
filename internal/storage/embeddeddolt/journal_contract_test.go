@@ -67,7 +67,16 @@ func newEmbeddedJournalFixture(t *testing.T, te *testEnv, prefix string) conform
 		Mutations: conformance.JournalMutations{
 			Create: func(ctx context.Context, id string) error {
 				return store.CreateIssue(ctx, &types.Issue{
-					ID: id, Title: "t-" + id, IssueType: types.TypeTask, Status: types.StatusOpen,
+					IssueID: types.IssueID{
+						ID: id,
+					},
+					IssueContent: types.IssueContent{
+						Title: "t-" + id,
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						IssueType: types.TypeTask,
+						Status:    types.StatusOpen,
+					},
 				}, "actor")
 			},
 			Update: func(ctx context.Context, id string) error {

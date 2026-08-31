@@ -379,12 +379,20 @@ func TestGetReadyWorkIncludesNoHistoryWispsByDefault(t *testing.T) {
 	defer cancel()
 
 	noHistory := &types.Issue{
-		ID:        "mixed-ready-no-history",
-		Title:     "no-history ready work",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		NoHistory: true,
+		IssueID: types.IssueID{
+			ID: "mixed-ready-no-history",
+		},
+		IssueContent: types.IssueContent{
+			Title: "no-history ready work",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			NoHistory: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, noHistory, "tester"); err != nil {
 		t.Fatalf("CreateIssue no-history: %v", err)
@@ -412,12 +420,20 @@ func TestGetReadyWorkExcludesBlockedNoHistoryWisp(t *testing.T) {
 	defer cancel()
 
 	noHistory := &types.Issue{
-		ID:        "mixed-ready-blocked-no-history",
-		Title:     "blocked no-history ready work",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		NoHistory: true,
+		IssueID: types.IssueID{
+			ID: "mixed-ready-blocked-no-history",
+		},
+		IssueContent: types.IssueContent{
+			Title: "blocked no-history ready work",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			NoHistory: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, noHistory, "tester"); err != nil {
 		t.Fatalf("CreateIssue no-history: %v", err)
@@ -450,12 +466,20 @@ func TestGetReadyWorkExcludesPermBlockedByNoHistoryWisp(t *testing.T) {
 
 	createPerm(t, ctx, store, "mixed-ready-blocked-perm")
 	noHistory := &types.Issue{
-		ID:        "mixed-ready-blocking-no-history",
-		Title:     "no-history blocker",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		NoHistory: true,
+		IssueID: types.IssueID{
+			ID: "mixed-ready-blocking-no-history",
+		},
+		IssueContent: types.IssueContent{
+			Title: "no-history blocker",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			NoHistory: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, noHistory, "tester"); err != nil {
 		t.Fatalf("CreateIssue no-history blocker: %v", err)
@@ -545,12 +569,20 @@ func TestIsBlockedReportsNoHistoryWispBlocker(t *testing.T) {
 
 	createPerm(t, ctx, store, "mixed-is-blocked-perm")
 	noHistory := &types.Issue{
-		ID:        "mixed-is-blocked-no-history",
-		Title:     "no-history blocker",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		NoHistory: true,
+		IssueID: types.IssueID{
+			ID: "mixed-is-blocked-no-history",
+		},
+		IssueContent: types.IssueContent{
+			Title: "no-history blocker",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			NoHistory: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, noHistory, "tester"); err != nil {
 		t.Fatalf("CreateIssue no-history blocker: %v", err)
@@ -584,12 +616,20 @@ func TestGetNewlyUnblockedByCloseIncludesNoHistoryWispCandidate(t *testing.T) {
 
 	createPerm(t, ctx, store, "mixed-close-blocker")
 	noHistory := &types.Issue{
-		ID:        "mixed-close-unblocked-no-history",
-		Title:     "no-history candidate",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		NoHistory: true,
+		IssueID: types.IssueID{
+			ID: "mixed-close-unblocked-no-history",
+		},
+		IssueContent: types.IssueContent{
+			Title: "no-history candidate",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			NoHistory: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, noHistory, "tester"); err != nil {
 		t.Fatalf("CreateIssue no-history candidate: %v", err)
@@ -621,12 +661,20 @@ func TestGetNewlyUnblockedByCloseKeepsCandidateBlockedByNoHistoryWisp(t *testing
 	createPerm(t, ctx, store, "mixed-close-primary-blocker")
 	createPerm(t, ctx, store, "mixed-close-still-blocked")
 	noHistory := &types.Issue{
-		ID:        "mixed-close-remaining-no-history",
-		Title:     "remaining no-history blocker",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		NoHistory: true,
+		IssueID: types.IssueID{
+			ID: "mixed-close-remaining-no-history",
+		},
+		IssueContent: types.IssueContent{
+			Title: "remaining no-history blocker",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			NoHistory: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, noHistory, "tester"); err != nil {
 		t.Fatalf("CreateIssue remaining no-history blocker: %v", err)
@@ -696,12 +744,20 @@ func TestDeleteIssuesNonCascadeDetectsNoHistoryWispDependent(t *testing.T) {
 
 	createPerm(t, ctx, store, "mixed-delete-parent")
 	noHistory := &types.Issue{
-		ID:        "mixed-delete-wisp-child",
-		Title:     "wisp child",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		NoHistory: true,
+		IssueID: types.IssueID{
+			ID: "mixed-delete-wisp-child",
+		},
+		IssueContent: types.IssueContent{
+			Title: "wisp child",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			NoHistory: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, noHistory, "tester"); err != nil {
 		t.Fatalf("CreateIssue no-history child: %v", err)
@@ -732,12 +788,20 @@ func TestDeleteIssuesCascadeDeletesNoHistoryWispDependent(t *testing.T) {
 
 	createPerm(t, ctx, store, "mixed-delete-cascade-parent")
 	noHistory := &types.Issue{
-		ID:        "mixed-delete-cascade-wisp-child",
-		Title:     "wisp child",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		NoHistory: true,
+		IssueID: types.IssueID{
+			ID: "mixed-delete-cascade-wisp-child",
+		},
+		IssueContent: types.IssueContent{
+			Title: "wisp child",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			NoHistory: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, noHistory, "tester"); err != nil {
 		t.Fatalf("CreateIssue no-history child: %v", err)

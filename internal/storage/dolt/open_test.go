@@ -156,7 +156,11 @@ func TestApplyCLIAutoStart_DisableAutoStartWins(t *testing.T) {
 		t.Fatalf("save metadata.json: %v", err)
 	}
 
-	storeCfg := &Config{DisableAutoStart: true}
+	storeCfg := &Config{
+		ServerOptions: ServerOptions{
+			DisableAutoStart: true,
+		},
+	}
 	ApplyCLIAutoStart(beadsDir, storeCfg)
 	if storeCfg.AutoStart {
 		t.Fatal("DisableAutoStart should suppress CLI auto-start defaults")
@@ -178,10 +182,18 @@ func TestConfigConstructorsRejectNonDoltBackends(t *testing.T) {
 
 			constructors := map[string]func() (*DoltStore, error){
 				"standard": func() (*DoltStore, error) {
-					return NewFromConfigWithOptions(t.Context(), beadsDir, &Config{DisableAutoStart: true})
+					return NewFromConfigWithOptions(t.Context(), beadsDir, &Config{
+						ServerOptions: ServerOptions{
+							DisableAutoStart: true,
+						},
+					})
 				},
 				"cli": func() (*DoltStore, error) {
-					return NewFromConfigWithCLIOptions(t.Context(), beadsDir, &Config{DisableAutoStart: true})
+					return NewFromConfigWithCLIOptions(t.Context(), beadsDir, &Config{
+						ServerOptions: ServerOptions{
+							DisableAutoStart: true,
+						},
+					})
 				},
 			}
 			for name, construct := range constructors {
@@ -213,10 +225,10 @@ func TestCLIDirUsesSharedDoltRootInSharedServerMode(t *testing.T) {
 	t.Setenv("BEADS_SHARED_SERVER_DIR", sharedRoot)
 
 	store := &DoltStore{
-		serverMode: true,
-		beadsDir:   filepath.Join(t.TempDir(), ".beads"),
-		dbPath:     filepath.Join(t.TempDir(), ".beads", "dolt"),
-		database:   "shared_db",
+		doltStoreVersionControlState: doltStoreVersionControlState{serverMode: true},
+		beadsDir:                     filepath.Join(t.TempDir(), ".beads"),
+		dbPath:                       filepath.Join(t.TempDir(), ".beads", "dolt"),
+		database:                     "shared_db",
 	}
 
 	want := filepath.Join(sharedRoot, "dolt", "shared_db")
@@ -230,10 +242,10 @@ func TestCLIDirUsesDbPathOutsideSharedServerMode(t *testing.T) {
 
 	dbPath := filepath.Join(t.TempDir(), ".beads", "dolt")
 	store := &DoltStore{
-		serverMode: true,
-		beadsDir:   filepath.Join(t.TempDir(), ".beads"),
-		dbPath:     dbPath,
-		database:   "local_db",
+		doltStoreVersionControlState: doltStoreVersionControlState{serverMode: true},
+		beadsDir:                     filepath.Join(t.TempDir(), ".beads"),
+		dbPath:                       dbPath,
+		database:                     "local_db",
 	}
 
 	want := filepath.Join(dbPath, "local_db")
@@ -344,11 +356,13 @@ func TestApplyResolvedConfig(t *testing.T) {
 			DoltDatabase: "beads_codex",
 		}
 		cfg := &Config{
-			BeadsDir:   "/override/.beads",
-			Database:   "caller_db",
-			ServerHost: "10.0.0.9",
-			ServerPort: 15432,
-			ServerUser: "custom",
+			BeadsDir: "/override/.beads",
+			Database: "caller_db",
+			ServerOptions: ServerOptions{
+				ServerHost: "10.0.0.9",
+				ServerPort: 15432,
+				ServerUser: "custom",
+			},
 		}
 
 		if err := applyResolvedConfig(context.Background(), beadsDir, fileCfg, cfg); err != nil {
@@ -391,7 +405,11 @@ func TestApplyResolvedConfig(t *testing.T) {
 
 	t.Run("caller-set pool timeouts win over env vars", func(t *testing.T) {
 		t.Setenv("BEADS_DOLT_POOL_READ_TIMEOUT", "90s")
-		cfg := &Config{PoolReadTimeout: 2 * time.Minute}
+		cfg := &Config{
+			PoolOptions: PoolOptions{
+				PoolReadTimeout: 2 * time.Minute,
+			},
+		}
 
 		if err := applyResolvedConfig(context.Background(), t.TempDir(), &configfile.Config{Backend: configfile.BackendDolt}, cfg); err != nil {
 			t.Fatalf("applyResolvedConfig: %v", err)

@@ -23,11 +23,17 @@ import (
 
 func crossTierRegularIssue(id, title string) *types.Issue {
 	return &types.Issue{
-		ID:        id,
-		Title:     title,
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: title,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 }
 

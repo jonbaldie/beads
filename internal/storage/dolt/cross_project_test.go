@@ -59,18 +59,22 @@ func setupTwoProjectStores(t *testing.T, prefixA, prefixB string) (storeA, store
 	dbNameB := uniqueTestDBName(t) + "_b"
 
 	cfgA := &Config{
-		Path:            tmpDirA,
-		CommitterName:   "project-a",
-		CommitterEmail:  "a@test.com",
-		Database:        dbNameA,
-		CreateIfMissing: true,
+		Path:           tmpDirA,
+		CommitterName:  "project-a",
+		CommitterEmail: "a@test.com",
+		Database:       dbNameA,
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
 	}
 	cfgB := &Config{
-		Path:            tmpDirB,
-		CommitterName:   "project-b",
-		CommitterEmail:  "b@test.com",
-		Database:        dbNameB,
-		CreateIfMissing: true,
+		Path:           tmpDirB,
+		CommitterName:  "project-b",
+		CommitterEmail: "b@test.com",
+		Database:       dbNameB,
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
 	}
 
 	storeA, err = New(ctx, cfgA)
@@ -130,11 +134,15 @@ func TestCrossProject_ReadIsolation_DifferentPrefixes(t *testing.T) {
 	aIDs := make([]string, numIssuesPerProject)
 	for i := 0; i < numIssuesPerProject; i++ {
 		issue := &types.Issue{
-			Title:       fmt.Sprintf("Alpha Issue %d", i),
-			Description: fmt.Sprintf("Created by project A, issue %d", i),
-			Status:      types.StatusOpen,
-			Priority:    2,
-			IssueType:   types.TypeTask,
+			IssueContent: types.IssueContent{
+				Title:       fmt.Sprintf("Alpha Issue %d", i),
+				Description: fmt.Sprintf("Created by project A, issue %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := storeA.CreateIssue(ctx, issue, "project-a"); err != nil {
 			t.Fatalf("project A failed to create issue %d: %v", i, err)
@@ -145,11 +153,15 @@ func TestCrossProject_ReadIsolation_DifferentPrefixes(t *testing.T) {
 	bIDs := make([]string, numIssuesPerProject)
 	for i := 0; i < numIssuesPerProject; i++ {
 		issue := &types.Issue{
-			Title:       fmt.Sprintf("Beta Issue %d", i),
-			Description: fmt.Sprintf("Created by project B, issue %d", i),
-			Status:      types.StatusOpen,
-			Priority:    3,
-			IssueType:   types.TypeTask,
+			IssueContent: types.IssueContent{
+				Title:       fmt.Sprintf("Beta Issue %d", i),
+				Description: fmt.Sprintf("Created by project B, issue %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  3,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := storeB.CreateIssue(ctx, issue, "project-b"); err != nil {
 			t.Fatalf("project B failed to create issue %d: %v", i, err)
@@ -226,18 +238,22 @@ func TestCrossProject_PortCollision_SameDatabase(t *testing.T) {
 	}
 
 	cfgA := &Config{
-		Path:            tmpDirA,
-		CommitterName:   "project-a",
-		CommitterEmail:  "a@test.com",
-		Database:        sharedDB,
-		CreateIfMissing: true,
+		Path:           tmpDirA,
+		CommitterName:  "project-a",
+		CommitterEmail: "a@test.com",
+		Database:       sharedDB,
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
 	}
 	cfgB := &Config{
-		Path:            tmpDirB,
-		CommitterName:   "project-b",
-		CommitterEmail:  "b@test.com",
-		Database:        sharedDB,
-		CreateIfMissing: true,
+		Path:           tmpDirB,
+		CommitterName:  "project-b",
+		CommitterEmail: "b@test.com",
+		Database:       sharedDB,
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
 	}
 
 	storeA, err := New(ctx, cfgA)
@@ -277,22 +293,30 @@ func TestCrossProject_PortCollision_SameDatabase(t *testing.T) {
 	}()
 
 	issueA := &types.Issue{
-		Title:       "Project A's secret issue",
-		Description: "This should only be visible to project A",
-		Status:      types.StatusOpen,
-		Priority:    1,
-		IssueType:   types.TypeBug,
+		IssueContent: types.IssueContent{
+			Title:       "Project A's secret issue",
+			Description: "This should only be visible to project A",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeBug,
+		},
 	}
 	if err := storeA.CreateIssue(ctx, issueA, "project-a"); err != nil {
 		t.Fatalf("project A create: %v", err)
 	}
 
 	issueB := &types.Issue{
-		Title:       "Project B's secret issue",
-		Description: "This should only be visible to project B",
-		Status:      types.StatusOpen,
-		Priority:    1,
-		IssueType:   types.TypeBug,
+		IssueContent: types.IssueContent{
+			Title:       "Project B's secret issue",
+			Description: "This should only be visible to project B",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeBug,
+		},
 	}
 	if err := storeB.CreateIssue(ctx, issueB, "project-b"); err != nil {
 		t.Fatalf("project B create: %v", err)
@@ -344,22 +368,30 @@ func TestCrossProject_ReadIsolation_SamePrefix(t *testing.T) {
 	defer cancel()
 
 	issueA := &types.Issue{
-		Title:       "Project A Issue",
-		Description: "Belongs to project A only",
-		Status:      types.StatusOpen,
-		Priority:    1,
-		IssueType:   types.TypeBug,
+		IssueContent: types.IssueContent{
+			Title:       "Project A Issue",
+			Description: "Belongs to project A only",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeBug,
+		},
 	}
 	if err := storeA.CreateIssue(ctx, issueA, "project-a"); err != nil {
 		t.Fatalf("project A create failed: %v", err)
 	}
 
 	issueB := &types.Issue{
-		Title:       "Project B Issue",
-		Description: "Belongs to project B only",
-		Status:      types.StatusOpen,
-		Priority:    1,
-		IssueType:   types.TypeBug,
+		IssueContent: types.IssueContent{
+			Title:       "Project B Issue",
+			Description: "Belongs to project B only",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeBug,
+		},
 	}
 	if err := storeB.CreateIssue(ctx, issueB, "project-b"); err != nil {
 		t.Fatalf("project B create failed: %v", err)
@@ -422,11 +454,15 @@ func TestCrossProject_ConcurrentWrites(t *testing.T) {
 			defer wg.Done()
 			for attempt := 0; attempt <= maxRetries; attempt++ {
 				issue := &types.Issue{
-					Title:       fmt.Sprintf("A-concurrent-%d", n),
-					Description: fmt.Sprintf("Project A goroutine %d", n),
-					Status:      types.StatusOpen,
-					Priority:    2,
-					IssueType:   types.TypeTask,
+					IssueContent: types.IssueContent{
+						Title:       fmt.Sprintf("A-concurrent-%d", n),
+						Description: fmt.Sprintf("Project A goroutine %d", n),
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Status:    types.StatusOpen,
+						Priority:  2,
+						IssueType: types.TypeTask,
+					},
 				}
 				err := storeA.CreateIssue(ctx, issue, fmt.Sprintf("a-worker-%d", n))
 				if err == nil {
@@ -449,11 +485,15 @@ func TestCrossProject_ConcurrentWrites(t *testing.T) {
 			defer wg.Done()
 			for attempt := 0; attempt <= maxRetries; attempt++ {
 				issue := &types.Issue{
-					Title:       fmt.Sprintf("B-concurrent-%d", n),
-					Description: fmt.Sprintf("Project B goroutine %d", n),
-					Status:      types.StatusOpen,
-					Priority:    3,
-					IssueType:   types.TypeTask,
+					IssueContent: types.IssueContent{
+						Title:       fmt.Sprintf("B-concurrent-%d", n),
+						Description: fmt.Sprintf("Project B goroutine %d", n),
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Status:    types.StatusOpen,
+						Priority:  3,
+						IssueType: types.TypeTask,
+					},
 				}
 				err := storeB.CreateIssue(ctx, issue, fmt.Sprintf("b-worker-%d", n))
 				if err == nil {
@@ -555,21 +595,29 @@ func TestCrossProject_ConcurrentReadWriteMix(t *testing.T) {
 	const seedIssues = 3
 	for i := 0; i < seedIssues; i++ {
 		issueA := &types.Issue{
-			Title:       fmt.Sprintf("A-seed-%d", i),
-			Description: "Seeded by project A",
-			Status:      types.StatusOpen,
-			Priority:    2,
-			IssueType:   types.TypeTask,
+			IssueContent: types.IssueContent{
+				Title:       fmt.Sprintf("A-seed-%d", i),
+				Description: "Seeded by project A",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := storeA.CreateIssue(ctx, issueA, "seed-a"); err != nil {
 			t.Fatalf("seed A issue %d: %v", i, err)
 		}
 		issueB := &types.Issue{
-			Title:       fmt.Sprintf("B-seed-%d", i),
-			Description: "Seeded by project B",
-			Status:      types.StatusOpen,
-			Priority:    3,
-			IssueType:   types.TypeTask,
+			IssueContent: types.IssueContent{
+				Title:       fmt.Sprintf("B-seed-%d", i),
+				Description: "Seeded by project B",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  3,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := storeB.CreateIssue(ctx, issueB, "seed-b"); err != nil {
 			t.Fatalf("seed B issue %d: %v", i, err)
@@ -585,11 +633,15 @@ func TestCrossProject_ConcurrentReadWriteMix(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < iterations; i++ {
 			issue := &types.Issue{
-				Title:       fmt.Sprintf("A-concurrent-write-%d", i),
-				Description: "Written by A during concurrent read-write",
-				Status:      types.StatusOpen,
-				Priority:    2,
-				IssueType:   types.TypeTask,
+				IssueContent: types.IssueContent{
+					Title:       fmt.Sprintf("A-concurrent-write-%d", i),
+					Description: "Written by A during concurrent read-write",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  2,
+					IssueType: types.TypeTask,
+				},
 			}
 			if err := storeA.CreateIssue(ctx, issue, "a-writer"); err != nil {
 				if !isSerializationError(err) {
@@ -623,11 +675,15 @@ func TestCrossProject_ConcurrentReadWriteMix(t *testing.T) {
 		defer wg.Done()
 		for i := 0; i < iterations; i++ {
 			issue := &types.Issue{
-				Title:       fmt.Sprintf("B-concurrent-write-%d", i),
-				Description: "Written by B during concurrent read-write",
-				Status:      types.StatusOpen,
-				Priority:    3,
-				IssueType:   types.TypeTask,
+				IssueContent: types.IssueContent{
+					Title:       fmt.Sprintf("B-concurrent-write-%d", i),
+					Description: "Written by B during concurrent read-write",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  3,
+					IssueType: types.TypeTask,
+				},
 			}
 			if err := storeB.CreateIssue(ctx, issue, "b-writer"); err != nil {
 				if !isSerializationError(err) {
@@ -725,12 +781,14 @@ func (f *identityTestFixture) saveLocalProjectID(t *testing.T, projectID string)
 
 func (f *identityTestFixture) config() *Config {
 	return &Config{
-		Path:            filepath.Join(f.tmpDir, "dolt"),
-		BeadsDir:        f.beadsDir,
-		CommitterName:   "test",
-		CommitterEmail:  "test@test.com",
-		Database:        f.dbName,
-		CreateIfMissing: true,
+		Path:           filepath.Join(f.tmpDir, "dolt"),
+		BeadsDir:       f.beadsDir,
+		CommitterName:  "test",
+		CommitterEmail: "test@test.com",
+		Database:       f.dbName,
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
 	}
 }
 

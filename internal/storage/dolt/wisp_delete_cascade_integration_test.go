@@ -50,16 +50,22 @@ func setupWispCascadeStore(t *testing.T) *DoltStore {
 	defer cancel()
 
 	cfg := &Config{
-		Path:            filepath.Join(beadsDir, "store"),
-		BeadsDir:        beadsDir,
-		ServerHost:      "127.0.0.1",
-		ServerPort:      state.Port,
-		ServerUser:      "root",
-		Database:        "wisp_cascade_test",
-		CreateIfMissing: true,
-		MaxOpenConns:    1,
-		CommitterName:   "Beads Test",
-		CommitterEmail:  "beads@example.com",
+		Path:     filepath.Join(beadsDir, "store"),
+		BeadsDir: beadsDir,
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: state.Port,
+			ServerUser: "root",
+		},
+		Database: "wisp_cascade_test",
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 1,
+		},
+		CommitterName:  "Beads Test",
+		CommitterEmail: "beads@example.com",
 	}
 	store, err := New(ctx, cfg)
 	if err != nil {

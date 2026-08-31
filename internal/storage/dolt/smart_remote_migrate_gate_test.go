@@ -43,12 +43,17 @@ func TestDoltNew_SmartRemoteMigrateGate_RealDolt(t *testing.T) {
 	dbName := uniqueTestDBName(t)
 
 	store, err := New(ctx, &Config{
-		Path:            tmpDir,
-		CommitterName:   "test",
-		CommitterEmail:  "test@example.com",
-		Database:        dbName,
-		CreateIfMissing: true,
-		MaxOpenConns:    1, // single session so working-set regressions are visible to the gate reads
+		Path:           tmpDir,
+		CommitterName:  "test",
+		CommitterEmail: "test@example.com",
+		Database:       dbName,
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 1,
+		},
+		// single session so working-set regressions are visible to the gate reads,
 	})
 	if err != nil {
 		t.Fatalf("New (create): %v", err)
@@ -191,12 +196,17 @@ func TestDoltNew_SmartRemoteMigrateGate_AutoFastForward_RealDolt(t *testing.T) {
 	sourceDB := uniqueTestDBName(t)
 
 	source, err := New(ctx, &Config{
-		Path:            tmpDir,
-		CommitterName:   "test",
-		CommitterEmail:  "test@example.com",
-		Database:        sourceDB,
-		CreateIfMissing: true,
-		MaxOpenConns:    1, // single session so working-set regressions are visible to the gate reads
+		Path:           tmpDir,
+		CommitterName:  "test",
+		CommitterEmail: "test@example.com",
+		Database:       sourceDB,
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 1,
+		},
+		// single session so working-set regressions are visible to the gate reads,
 	})
 	if err != nil {
 		t.Fatalf("New (source): %v", err)
@@ -332,12 +342,16 @@ func TestDoltNew_SmartRemoteMigrateGate_UnpushedCommitDegrades_RealDolt(t *testi
 	sourceDB := uniqueTestDBName(t)
 
 	source, err := New(ctx, &Config{
-		Path:            tmpDir,
-		CommitterName:   "test",
-		CommitterEmail:  "test@example.com",
-		Database:        sourceDB,
-		CreateIfMissing: true,
-		MaxOpenConns:    1,
+		Path:           tmpDir,
+		CommitterName:  "test",
+		CommitterEmail: "test@example.com",
+		Database:       sourceDB,
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 1,
+		},
 	})
 	if err != nil {
 		t.Fatalf("New (source): %v", err)
@@ -459,12 +473,16 @@ func TestDoltNew_SmartRemoteMigrateGate_BelowLatestDegrades_RealDolt(t *testing.
 	sourceDB := uniqueTestDBName(t)
 
 	source, err := New(ctx, &Config{
-		Path:            tmpDir,
-		CommitterName:   "test",
-		CommitterEmail:  "test@example.com",
-		Database:        sourceDB,
-		CreateIfMissing: true,
-		MaxOpenConns:    1,
+		Path:           tmpDir,
+		CommitterName:  "test",
+		CommitterEmail: "test@example.com",
+		Database:       sourceDB,
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 1,
+		},
 	})
 	if err != nil {
 		t.Fatalf("New (source): %v", err)

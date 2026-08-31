@@ -66,12 +66,20 @@ func TestAPredicateQueryFindsAMatchBeyondTheOldWindow(t *testing.T) {
 func seedWindowIssue(t *testing.T, ctx context.Context, store *DoltStore, id string, issueType types.IssueType, priority int, label string) {
 	t.Helper()
 	issue := &types.Issue{
-		ID:        id,
-		Title:     id,
-		Status:    types.StatusOpen,
-		Priority:  priority,
-		IssueType: issueType,
-		Labels:    []string{label},
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  priority,
+			IssueType: issueType,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{label},
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "seed"); err != nil {
 		t.Fatalf("seed issue %s: %v", id, err)

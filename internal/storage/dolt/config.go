@@ -38,20 +38,7 @@ func (s *DoltStore) SetConfig(ctx context.Context, key, value string) error {
 // transaction that later rolls back is harmless: the lazy reload just
 // re-reads the committed state.
 func (s *DoltStore) invalidateConfigCaches(key string) {
-	s.cacheMu.Lock()
-	switch key {
-	case "status.custom":
-		s.customStatusCached = false
-		s.customStatusCache = nil
-		s.customStatusDetailedCache = nil
-	case "types.custom":
-		s.customTypeCached = false
-		s.customTypeCache = nil
-	case "types.infra":
-		s.infraTypeCached = false
-		s.infraTypeCache = nil
-	}
-	s.cacheMu.Unlock()
+	invalidateDoltConfigCaches(s, key)
 }
 
 // GetConfig retrieves a configuration value
@@ -122,12 +109,9 @@ func (s *DoltStore) GetLocalMetadata(ctx context.Context, key string) (string, e
 }
 
 func (s *DoltStore) loadCustomConfigCache(ctx context.Context) {
-	s.cacheMu.Lock()
-	if s.customStatusCached && s.customTypeCached {
-		s.cacheMu.Unlock()
+	if doltCustomConfigCacheReady(s) {
 		return
 	}
-	s.cacheMu.Unlock()
 
 	var statuses []types.CustomStatus
 	var customTypes []string
@@ -146,31 +130,17 @@ func (s *DoltStore) loadCustomConfigCache(ctx context.Context) {
 		}
 	}
 
-	s.cacheMu.Lock()
-	if !s.customStatusCached {
-		s.customStatusDetailedCache = statuses
-		s.customStatusCache = types.CustomStatusNames(statuses)
-		s.customStatusCached = true
-	}
-	if !s.customTypeCached {
-		s.customTypeCache = customTypes
-		s.customTypeCached = true
-	}
-	s.cacheMu.Unlock()
+	setDoltCustomConfigCache(s, statuses, customTypes)
 }
 
 func (s *DoltStore) GetCustomStatuses(ctx context.Context) ([]string, error) {
 	s.loadCustomConfigCache(ctx)
-	s.cacheMu.Lock()
-	defer s.cacheMu.Unlock()
-	return s.customStatusCache, nil
+	return doltCachedCustomStatuses(s), nil
 }
 
 func (s *DoltStore) GetCustomStatusesDetailed(ctx context.Context) ([]types.CustomStatus, error) {
 	s.loadCustomConfigCache(ctx)
-	s.cacheMu.Lock()
-	defer s.cacheMu.Unlock()
-	return s.customStatusDetailedCache, nil
+	return doltCachedCustomStatusesDetailed(s), nil
 }
 
 // GetCustomTypes returns custom issue type values from config.
@@ -180,9 +150,7 @@ func (s *DoltStore) GetCustomStatusesDetailed(ctx context.Context) ([]types.Cust
 // updates the "types.custom" key.
 func (s *DoltStore) GetCustomTypes(ctx context.Context) ([]string, error) {
 	s.loadCustomConfigCache(ctx)
-	s.cacheMu.Lock()
-	defer s.cacheMu.Unlock()
-	return s.customTypeCache, nil
+	return doltCachedCustomTypes(s), nil
 }
 
 // GetInfraTypes returns infrastructure type names from config.
@@ -193,13 +161,9 @@ func (s *DoltStore) GetCustomTypes(ctx context.Context) ([]string, error) {
 // Results are cached per DoltStore lifetime and invalidated when SetConfig
 // updates the "types.infra" key.
 func (s *DoltStore) GetInfraTypes(ctx context.Context) map[string]bool {
-	s.cacheMu.Lock()
-	if s.infraTypeCached {
-		result := s.infraTypeCache
-		s.cacheMu.Unlock()
+	if result, ok := doltCachedInfraTypes(s); ok {
 		return result
 	}
-	s.cacheMu.Unlock()
 
 	var result map[string]bool
 	if err := s.withReadTx(ctx, func(tx *sql.Tx) error {
@@ -219,10 +183,7 @@ func (s *DoltStore) GetInfraTypes(ctx context.Context) map[string]bool {
 		}
 	}
 
-	s.cacheMu.Lock()
-	s.infraTypeCache = result
-	s.infraTypeCached = true
-	s.cacheMu.Unlock()
+	setDoltInfraTypesCache(s, result)
 
 	return result
 }

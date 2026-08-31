@@ -637,11 +637,14 @@ func setupEmbeddedGitRemote(t *testing.T) (*DoltStore, *gitRemoteSetup, func()) 
 
 	dbName := uniqueTestDBName(t)
 	store, err := New(ctx, &Config{
-		Path:            doltDir,
-		CommitterName:   "test",
-		CommitterEmail:  "test@example.com",
-		Database:        dbName,
-		CreateIfMissing: true, // test creates a fresh database
+		Path:           doltDir,
+		CommitterName:  "test",
+		CommitterEmail: "test@example.com",
+		Database:       dbName,
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
+		// test creates a fresh database,
 	})
 	if err != nil {
 		os.RemoveAll(baseDir)
@@ -686,11 +689,17 @@ func TestGitRemoteEmbeddedPushPull(t *testing.T) {
 
 	// Create test data via embedded store
 	issue := &types.Issue{
-		ID:        "emb-git-001",
-		Title:     "Embedded git remote test",
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		Priority:  2,
+		IssueID: types.IssueID{
+			ID: "emb-git-001",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Embedded git remote test",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+			Priority:  2,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("CreateIssue failed: %v", err)
@@ -799,11 +808,17 @@ func TestGitRemotePushSkipsUserPrePushHook(t *testing.T) {
 	// First push: materialises the cache-mirror at
 	// <doltDir>/<db>/.dolt/git-remote-cache/<hash>/repo.git/.
 	first := &types.Issue{
-		ID:        "hookpush-001",
-		Title:     "Materialise cache mirror",
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		Priority:  2,
+		IssueID: types.IssueID{
+			ID: "hookpush-001",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Materialise cache mirror",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+			Priority:  2,
+		},
 	}
 	if err := store.CreateIssue(ctx, first, "tester"); err != nil {
 		t.Fatalf("first CreateIssue failed: %v", err)
@@ -838,11 +853,17 @@ func TestGitRemotePushSkipsUserPrePushHook(t *testing.T) {
 
 	// Second push: should succeed despite the failing pre-push hook.
 	second := &types.Issue{
-		ID:        "hookpush-002",
-		Title:     "Push past failing pre-push hook",
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		Priority:  2,
+		IssueID: types.IssueID{
+			ID: "hookpush-002",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Push past failing pre-push hook",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+			Priority:  2,
+		},
 	}
 	if err := store.CreateIssue(ctx, second, "tester"); err != nil {
 		t.Fatalf("second CreateIssue failed: %v", err)
@@ -912,11 +933,17 @@ func TestGitRemoteSyncRoundTrip(t *testing.T) {
 	// Step 1: Source creates data and pushes
 	for i := 1; i <= 3; i++ {
 		issue := &types.Issue{
-			ID:        fmt.Sprintf("rt-src-%03d", i),
-			Title:     fmt.Sprintf("Source issue %d", i),
-			IssueType: types.TypeTask,
-			Status:    types.StatusOpen,
-			Priority:  2,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("rt-src-%03d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Source issue %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				IssueType: types.TypeTask,
+				Status:    types.StatusOpen,
+				Priority:  2,
+			},
 		}
 		if err := sourceStore.CreateIssue(ctx, issue, "tester"); err != nil {
 			t.Fatalf("source CreateIssue %d failed: %v", i, err)
@@ -946,11 +973,14 @@ func TestGitRemoteSyncRoundTrip(t *testing.T) {
 	}
 
 	cloneStore, err := New(ctx, &Config{
-		Path:            cloneDoltDir,
-		CommitterName:   "clone-user",
-		CommitterEmail:  "clone@example.com",
-		Database:        cloneDBName,
-		CreateIfMissing: true, // clone creates a new database
+		Path:           cloneDoltDir,
+		CommitterName:  "clone-user",
+		CommitterEmail: "clone@example.com",
+		Database:       cloneDBName,
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
+		// clone creates a new database,
 	})
 	if err != nil {
 		t.Fatalf("failed to open cloned store: %v", err)
@@ -974,11 +1004,17 @@ func TestGitRemoteSyncRoundTrip(t *testing.T) {
 
 	// Step 3: Clone adds data and pushes back
 	cloneIssue := &types.Issue{
-		ID:        "rt-clone-001",
-		Title:     "Clone-originated issue",
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		Priority:  2,
+		IssueID: types.IssueID{
+			ID: "rt-clone-001",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Clone-originated issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+			Priority:  2,
+		},
 	}
 	if err := cloneStore.CreateIssue(ctx, cloneIssue, "clone-user"); err != nil {
 		t.Fatalf("clone CreateIssue failed: %v", err)
@@ -996,11 +1032,14 @@ func TestGitRemoteSyncRoundTrip(t *testing.T) {
 
 	// Step 4: Re-open source and pull — verify bidirectional sync
 	sourceStore2, err := New(ctx, &Config{
-		Path:            filepath.Join(setup.baseDir, "embedded-dolt"),
-		CommitterName:   "test",
-		CommitterEmail:  "test@example.com",
-		Database:        findClonedDBName(t, filepath.Join(setup.baseDir, "embedded-dolt")),
-		CreateIfMissing: true, // re-open may use dynamically discovered DB name
+		Path:           filepath.Join(setup.baseDir, "embedded-dolt"),
+		CommitterName:  "test",
+		CommitterEmail: "test@example.com",
+		Database:       findClonedDBName(t, filepath.Join(setup.baseDir, "embedded-dolt")),
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
+		// re-open may use dynamically discovered DB name,
 	})
 	if err != nil {
 		t.Fatalf("failed to re-open source store: %v", err)
@@ -1044,11 +1083,17 @@ func TestCreateIssueAfterPull(t *testing.T) {
 
 	// Create an issue via the store API (generates UUID event rows)
 	sourceIssue := &types.Issue{
-		ID:        "ai-src-001",
-		Title:     "Source issue before push",
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		Priority:  2,
+		IssueID: types.IssueID{
+			ID: "ai-src-001",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Source issue before push",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+			Priority:  2,
+		},
 	}
 	if err := store.CreateIssue(ctx, sourceIssue, "tester"); err != nil {
 		t.Fatalf("source CreateIssue failed: %v", err)
@@ -1084,11 +1129,17 @@ func TestCreateIssueAfterPull(t *testing.T) {
 	}
 
 	postPullIssue := &types.Issue{
-		ID:        "ai-src-002",
-		Title:     "Source issue after pull",
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		Priority:  2,
+		IssueID: types.IssueID{
+			ID: "ai-src-002",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Source issue after pull",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+			Priority:  2,
+		},
 	}
 	if err := store.CreateIssue(ctx, postPullIssue, "tester"); err != nil {
 		t.Fatalf("CreateIssue after pull failed: %v", err)
@@ -1208,17 +1259,21 @@ func TestGitRemoteExternalServerRouting(t *testing.T) {
 	}
 
 	store, err := New(ctx, &Config{
-		Path:            clientDataDir,
-		Database:        "testdb",
-		ServerHost:      "127.0.0.1",
-		ServerPort:      port,
-		ServerUser:      "root",
-		CommitterName:   "test",
-		CommitterEmail:  "test@test.com",
-		AutoStart:       false,
-		CreateIfMissing: false,
-		Remote:          "origin",
-		RemoteUser:      "testuser",
+		Path:     clientDataDir,
+		Database: "testdb",
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: port,
+			ServerUser: "root",
+			AutoStart:  false,
+		},
+		CommitterName:  "test",
+		CommitterEmail: "test@test.com",
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: false,
+			RemoteUser:      "testuser",
+		},
+		Remote: "origin",
 	})
 	if err != nil {
 		t.Fatalf("failed to create DoltStore: %v", err)
@@ -1318,16 +1373,20 @@ func TestSQLRemotePersistsAcrossExternalServerRestart(t *testing.T) {
 	openStore := func(ctx context.Context) *DoltStore {
 		t.Helper()
 		store, err := New(ctx, &Config{
-			Path:            clientDataDir,
-			Database:        "testdb",
-			ServerHost:      "127.0.0.1",
-			ServerPort:      port,
-			ServerUser:      "root",
-			CommitterName:   "test",
-			CommitterEmail:  "test@test.com",
-			AutoStart:       false,
-			CreateIfMissing: false,
-			Remote:          "origin",
+			Path:     clientDataDir,
+			Database: "testdb",
+			ServerOptions: ServerOptions{
+				ServerHost: "127.0.0.1",
+				ServerPort: port,
+				ServerUser: "root",
+				AutoStart:  false,
+			},
+			CommitterName:  "test",
+			CommitterEmail: "test@test.com",
+			RemoteOptions: RemoteOptions{
+				CreateIfMissing: false,
+			},
+			Remote: "origin",
 		})
 		if err != nil {
 			t.Fatalf("failed to create DoltStore: %v", err)
@@ -1464,18 +1523,24 @@ func TestCredentialCLIRoutingE2E(t *testing.T) {
 
 	// 6. Create DoltStore in server mode with credentials
 	store, err := New(ctx, &Config{
-		Path:            clientDataDir,
-		Database:        "testdb",
-		ServerHost:      "127.0.0.1",
-		ServerPort:      port,
-		ServerUser:      "root",
-		CommitterName:   "test",
-		CommitterEmail:  "test@test.com",
-		AutoStart:       false,
-		CreateIfMissing: false,
-		Remote:          "origin",
-		RemoteUser:      "testuser",     // triggers credential CLI routing
-		RemotePassword:  "testpassword", // passed via applyToCmd to subprocess env
+		Path:     clientDataDir,
+		Database: "testdb",
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: port,
+			ServerUser: "root",
+			AutoStart:  false,
+		},
+		CommitterName:  "test",
+		CommitterEmail: "test@test.com",
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: false,
+			RemoteUser:      "testuser",
+			// triggers credential CLI routing
+			RemotePassword: "testpassword",
+		},
+		Remote: "origin",
+		// passed via applyToCmd to subprocess env,
 	})
 	if err != nil {
 		t.Fatalf("failed to create DoltStore: %v", err)

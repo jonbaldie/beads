@@ -139,12 +139,16 @@ func TestCreateGuard_MissingDB_DefaultConfig(t *testing.T) {
 	assertDatabaseNotExists(t, testServerPort, dbName)
 
 	cfg := &Config{
-		Path:         t.TempDir(),
-		ServerHost:   "127.0.0.1",
-		ServerPort:   testServerPort,
-		Database:     dbName,
-		MaxOpenConns: 1,
-		// CreateIfMissing is NOT set — defaults to false
+		Path: t.TempDir(),
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: testServerPort,
+		},
+		Database: dbName,
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 1,
+		},
+		// CreateIfMissing is NOT set — defaults to false,
 	}
 
 	_, err := New(ctx, cfg)
@@ -173,12 +177,18 @@ func TestCreateGuard_MissingDB_CreateIfMissing(t *testing.T) {
 	t.Cleanup(func() { dropTestDatabase(t, testServerPort, dbName) })
 
 	cfg := &Config{
-		Path:            t.TempDir(),
-		ServerHost:      "127.0.0.1",
-		ServerPort:      testServerPort,
-		Database:        dbName,
-		MaxOpenConns:    1,
-		CreateIfMissing: true,
+		Path: t.TempDir(),
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: testServerPort,
+		},
+		Database: dbName,
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 1,
+		},
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
 	}
 
 	store, err := New(ctx, cfg)
@@ -202,11 +212,15 @@ func TestCreateGuard_ExistingDB_NoFlag(t *testing.T) {
 	t.Cleanup(func() { dropTestDatabase(t, testServerPort, dbName) })
 
 	cfg := &Config{
-		Path:         t.TempDir(),
-		ServerHost:   "127.0.0.1",
-		ServerPort:   testServerPort,
-		Database:     dbName,
-		MaxOpenConns: 1,
+		Path: t.TempDir(),
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: testServerPort,
+		},
+		Database: dbName,
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 1,
+		},
 	}
 
 	store, err := New(ctx, cfg)
@@ -233,12 +247,16 @@ func TestCreateGuard_ExistingDB_DoesNotCreateMissingBeadsDir(t *testing.T) {
 	t.Cleanup(func() { dropTestDatabase(t, testServerPort, dbName) })
 
 	cfg := &Config{
-		Path:         dbPath,
-		BeadsDir:     beadsDir,
-		ServerHost:   "127.0.0.1",
-		ServerPort:   testServerPort,
-		Database:     dbName,
-		MaxOpenConns: 1,
+		Path:     dbPath,
+		BeadsDir: beadsDir,
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: testServerPort,
+		},
+		Database: dbName,
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 1,
+		},
 	}
 
 	store, err := New(ctx, cfg)
@@ -271,12 +289,19 @@ func TestCreateGuard_ExistingDB_WithData(t *testing.T) {
 
 	// First connection: create store and write data
 	store1, err := New(ctx, &Config{
-		Path:            t.TempDir(),
-		ServerHost:      "127.0.0.1",
-		ServerPort:      testServerPort,
-		Database:        dbName,
-		MaxOpenConns:    1,
-		CreateIfMissing: true, // init path
+		Path: t.TempDir(),
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: testServerPort,
+		},
+		Database: dbName,
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 1,
+		},
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
+		// init path,
 	})
 	if err != nil {
 		t.Fatalf("first connection failed: %v", err)
@@ -289,11 +314,15 @@ func TestCreateGuard_ExistingDB_WithData(t *testing.T) {
 
 	// Second connection: open WITHOUT CreateIfMissing, verify data persists
 	store2, err := New(ctx, &Config{
-		Path:         t.TempDir(),
-		ServerHost:   "127.0.0.1",
-		ServerPort:   testServerPort,
-		Database:     dbName,
-		MaxOpenConns: 1,
+		Path: t.TempDir(),
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: testServerPort,
+		},
+		Database: dbName,
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 1,
+		},
 	})
 	if err != nil {
 		t.Fatalf("second connection failed: %v", err)
@@ -319,13 +348,17 @@ func TestCreateGuard_ReadOnly_MissingDB(t *testing.T) {
 	assertDatabaseNotExists(t, testServerPort, dbName)
 
 	cfg := &Config{
-		Path:         t.TempDir(),
-		ServerHost:   "127.0.0.1",
-		ServerPort:   testServerPort,
-		Database:     dbName,
-		MaxOpenConns: 1,
-		ReadOnly:     true,
-		// CreateIfMissing=false (default)
+		Path: t.TempDir(),
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: testServerPort,
+		},
+		Database: dbName,
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 1,
+		},
+		ReadOnly: true,
+		// CreateIfMissing=false (default),
 	}
 
 	_, err := New(ctx, cfg)
@@ -359,11 +392,15 @@ func TestCreateGuard_UnderscoreInName(t *testing.T) {
 	assertDatabaseNotExists(t, testServerPort, targetName)
 
 	cfg := &Config{
-		Path:         t.TempDir(),
-		ServerHost:   "127.0.0.1",
-		ServerPort:   testServerPort,
-		Database:     targetName,
-		MaxOpenConns: 1,
+		Path: t.TempDir(),
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: testServerPort,
+		},
+		Database: targetName,
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 1,
+		},
 	}
 
 	_, err := New(ctx, cfg)
@@ -397,12 +434,18 @@ func TestCreateGuard_UnderscoreBothExist(t *testing.T) {
 	// doesn't false-match similarName and incorrectly report the DB as existing
 	// when it isn't the right one.
 	cfg := &Config{
-		Path:            t.TempDir(),
-		ServerHost:      "127.0.0.1",
-		ServerPort:      testServerPort,
-		Database:        targetName,
-		MaxOpenConns:    1,
-		CreateIfMissing: true,
+		Path: t.TempDir(),
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: testServerPort,
+		},
+		Database: targetName,
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 1,
+		},
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
 	}
 
 	store, err := New(ctx, cfg)
@@ -426,11 +469,15 @@ func TestCreateGuard_ErrorMessage(t *testing.T) {
 	assertDatabaseNotExists(t, testServerPort, dbName)
 
 	cfg := &Config{
-		Path:         t.TempDir(),
-		ServerHost:   "127.0.0.1",
-		ServerPort:   testServerPort,
-		Database:     dbName,
-		MaxOpenConns: 1,
+		Path: t.TempDir(),
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: testServerPort,
+		},
+		Database: dbName,
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 1,
+		},
 	}
 
 	_, err := New(ctx, cfg)

@@ -53,9 +53,13 @@ func (s *testSuite) useCaseMintHashMode() {
 
 	res, err := uc.CreateIssue(s.Ctx(), domain.CreateIssueParams{
 		Issue: &types.Issue{
-			Title:     "fresh top-level",
-			IssueType: types.TypeTask,
-			Priority:  2,
+			IssueContent: types.IssueContent{
+				Title: "fresh top-level",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				IssueType: types.TypeTask,
+				Priority:  2,
+			},
 		},
 	}, "tester")
 	s.Require().NoError(err)
@@ -72,13 +76,13 @@ func (s *testSuite) useCaseMintCounterMode() {
 	uc := s.issueUseCase()
 
 	first, err := uc.CreateIssue(s.Ctx(), domain.CreateIssueParams{
-		Issue: &types.Issue{Title: "one", IssueType: types.TypeTask, Priority: 2},
+		Issue: &types.Issue{IssueContent: types.IssueContent{Title: "one"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}},
 	}, "tester")
 	s.Require().NoError(err)
 	s.Equal("ucCnt-1", first.Issue.ID)
 
 	second, err := uc.CreateIssue(s.Ctx(), domain.CreateIssueParams{
-		Issue: &types.Issue{Title: "two", IssueType: types.TypeTask, Priority: 2},
+		Issue: &types.Issue{IssueContent: types.IssueContent{Title: "two"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}},
 	}, "tester")
 	s.Require().NoError(err)
 	s.Equal("ucCnt-2", second.Issue.ID)
@@ -90,10 +94,16 @@ func (s *testSuite) useCaseMintWispIgnoresCounterMode() {
 
 	res, err := uc.CreateWisp(s.Ctx(), domain.CreateIssueParams{
 		Issue: &types.Issue{
-			Title:     "wisp",
-			IssueType: types.TypeTask,
-			Priority:  2,
-			Ephemeral: true,
+			IssueContent: types.IssueContent{
+				Title: "wisp",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				IssueType: types.TypeTask,
+				Priority:  2,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		},
 	}, "tester")
 	s.Require().NoError(err)
@@ -106,10 +116,16 @@ func (s *testSuite) useCaseMintRespectsPrefixOverride() {
 
 	res, err := uc.CreateIssue(s.Ctx(), domain.CreateIssueParams{
 		Issue: &types.Issue{
-			Title:          "overridden",
-			IssueType:      types.TypeTask,
-			Priority:       2,
-			PrefixOverride: "spec",
+			IssueContent: types.IssueContent{
+				Title: "overridden",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				IssueType: types.TypeTask,
+				Priority:  2,
+			},
+			IssueGraph: types.IssueGraph{
+				PrefixOverride: "spec",
+			},
 		},
 	}, "tester")
 	s.Require().NoError(err)
@@ -122,10 +138,16 @@ func (s *testSuite) useCaseMintRespectsIDPrefix() {
 
 	res, err := uc.CreateIssue(s.Ctx(), domain.CreateIssueParams{
 		Issue: &types.Issue{
-			Title:     "subprefixed",
-			IssueType: types.TypeTask,
-			Priority:  2,
-			IDPrefix:  "exp",
+			IssueContent: types.IssueContent{
+				Title: "subprefixed",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				IssueType: types.TypeTask,
+				Priority:  2,
+			},
+			IssueGraph: types.IssueGraph{
+				IDPrefix: "exp",
+			},
 		},
 	}, "tester")
 	s.Require().NoError(err)
@@ -138,10 +160,16 @@ func (s *testSuite) useCaseMintWispPrefix() {
 
 	res, err := uc.CreateWisp(s.Ctx(), domain.CreateIssueParams{
 		Issue: &types.Issue{
-			Title:     "wispy",
-			IssueType: types.TypeTask,
-			Priority:  2,
-			Ephemeral: true,
+			IssueContent: types.IssueContent{
+				Title: "wispy",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				IssueType: types.TypeTask,
+				Priority:  2,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		},
 	}, "tester")
 	s.Require().NoError(err)
@@ -152,7 +180,7 @@ func (s *testSuite) useCaseMintMissingPrefix() {
 	s.resetMintConfig("", "")
 	uc := s.issueUseCase()
 	_, err := uc.CreateIssue(s.Ctx(), domain.CreateIssueParams{
-		Issue: &types.Issue{Title: "no prefix", IssueType: types.TypeTask, Priority: 2},
+		Issue: &types.Issue{IssueContent: types.IssueContent{Title: "no prefix"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}},
 	}, "tester")
 	s.Require().Error(err)
 	s.Contains(err.Error(), "issue_prefix")
@@ -163,14 +191,14 @@ func (s *testSuite) useCaseExplicitIDPrefixGuard() {
 	uc := s.issueUseCase()
 
 	upsert, err := uc.CreateIssue(s.Ctx(), domain.CreateIssueParams{
-		Issue:      &types.Issue{Title: "foreign upsert", IssueType: types.TypeTask, Priority: 2},
+		Issue:      &types.Issue{IssueContent: types.IssueContent{Title: "foreign upsert"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}},
 		ExplicitID: "foreign-upsert-1",
 	}, "tester")
 	s.Require().NoError(err)
 	s.Equal("foreign-upsert-1", upsert.Issue.ID)
 
 	_, err = uc.CreateIssue(s.Ctx(), domain.CreateIssueParams{
-		Issue:      &types.Issue{Title: "foreign", IssueType: types.TypeTask, Priority: 2},
+		Issue:      &types.Issue{IssueContent: types.IssueContent{Title: "foreign"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}},
 		ExplicitID: "foreign-1",
 		CreateOnly: true,
 	}, "tester")
@@ -179,7 +207,7 @@ func (s *testSuite) useCaseExplicitIDPrefixGuard() {
 	s.Require().NoError(NewConfigSQLRepository(s.Runner()).SetConfig(s.Ctx(), "allowed_prefixes", "allowed"))
 
 	allowed, err := uc.CreateIssue(s.Ctx(), domain.CreateIssueParams{
-		Issue:      &types.Issue{Title: "allowed", IssueType: types.TypeTask, Priority: 2},
+		Issue:      &types.Issue{IssueContent: types.IssueContent{Title: "allowed"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}},
 		ExplicitID: "allowed-1",
 		CreateOnly: true,
 	}, "tester")
@@ -187,7 +215,7 @@ func (s *testSuite) useCaseExplicitIDPrefixGuard() {
 	s.Equal("allowed-1", allowed.Issue.ID)
 
 	created, err := uc.CreateIssue(s.Ctx(), domain.CreateIssueParams{
-		Issue:       &types.Issue{Title: "forced", IssueType: types.TypeTask, Priority: 2},
+		Issue:       &types.Issue{IssueContent: types.IssueContent{Title: "forced"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}},
 		ExplicitID:  "foreign-1",
 		ForcePrefix: true,
 		CreateOnly:  true,
@@ -200,14 +228,14 @@ func (s *testSuite) useCaseCreateOnlyRefusesOccupiedID() {
 	s.resetMintConfig("createonly", "")
 	uc := s.issueUseCase()
 	params := domain.CreateIssueParams{
-		Issue:      &types.Issue{Title: "first", IssueType: types.TypeTask, Priority: 2},
+		Issue:      &types.Issue{IssueContent: types.IssueContent{Title: "first"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}},
 		ExplicitID: "createonly-1",
 		CreateOnly: true,
 	}
 	_, err := uc.CreateIssue(s.Ctx(), params, "tester")
 	s.Require().NoError(err)
 
-	params.Issue = &types.Issue{Title: "replacement", IssueType: types.TypeTask, Priority: 2}
+	params.Issue = &types.Issue{IssueContent: types.IssueContent{Title: "replacement"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}}
 	_, err = uc.CreateIssue(s.Ctx(), params, "tester")
 	s.Require().Error(err)
 	s.True(errors.Is(err, storage.ErrAlreadyExists), "want ErrAlreadyExists, got %v", err)
@@ -221,7 +249,7 @@ func (s *testSuite) useCaseCreateAttachesNormalizedComments() {
 	s.resetMintConfig("comments", "")
 	createdAt := time.Date(2025, time.February, 3, 4, 5, 6, 0, time.UTC)
 	params := domain.CreateIssueParams{
-		Issue:      &types.Issue{Title: "with comments", IssueType: types.TypeTask, Priority: 2},
+		Issue:      &types.Issue{IssueContent: types.IssueContent{Title: "with comments"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}},
 		ExplicitID: "comments-1",
 		Comments: []*types.Comment{
 			{Text: "defaulted"},
@@ -269,12 +297,12 @@ func (s *testSuite) mixedReverseDependencySourceTier() {
 	s.resetMintConfig("reverse", "")
 	uc := s.issueUseCase()
 	regular, err := uc.CreateIssue(s.Ctx(), domain.CreateIssueParams{
-		Issue: &types.Issue{Title: "regular source", IssueType: types.TypeTask, Priority: 2},
+		Issue: &types.Issue{IssueContent: types.IssueContent{Title: "regular source"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}},
 	}, "tester")
 	s.Require().NoError(err)
 
 	wisp, err := uc.CreateWisp(s.Ctx(), domain.CreateIssueParams{
-		Issue: &types.Issue{Title: "wisp target", IssueType: types.TypeTask, Priority: 2, Ephemeral: true},
+		Issue: &types.Issue{IssueContent: types.IssueContent{Title: "wisp target"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}, IssueWisp: types.IssueWisp{Ephemeral: true}},
 		Dependencies: []domain.DependencySpec{{
 			Type:          types.DepRelated,
 			TargetID:      regular.Issue.ID,
@@ -296,13 +324,13 @@ func (s *testSuite) mixedWispChildOfRegularParent() {
 	uc := s.issueUseCase()
 
 	pRes, err := uc.CreateIssue(s.Ctx(), domain.CreateIssueParams{
-		Issue: &types.Issue{Title: "regular parent", IssueType: types.TypeEpic, Priority: 2},
+		Issue: &types.Issue{IssueContent: types.IssueContent{Title: "regular parent"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeEpic, Priority: 2}},
 	}, "tester")
 	s.Require().NoError(err)
 	parentID := pRes.Issue.ID
 
 	cRes, err := uc.CreateWisp(s.Ctx(), domain.CreateIssueParams{
-		Issue:    &types.Issue{Title: "wisp child", IssueType: types.TypeTask, Priority: 2, Ephemeral: true},
+		Issue:    &types.Issue{IssueContent: types.IssueContent{Title: "wisp child"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}, IssueWisp: types.IssueWisp{Ephemeral: true}},
 		ParentID: parentID,
 	}, "tester")
 	s.Require().NoError(err)
@@ -340,15 +368,15 @@ func (s *testSuite) mixedDepTargetClassification() {
 	depRepo := NewDependencySQLRepository(s.Runner())
 
 	src, err := uc.CreateIssue(s.Ctx(), domain.CreateIssueParams{
-		Issue: &types.Issue{Title: "source", IssueType: types.TypeTask, Priority: 2},
+		Issue: &types.Issue{IssueContent: types.IssueContent{Title: "source"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}},
 	}, "tester")
 	s.Require().NoError(err)
 	regular, err := uc.CreateIssue(s.Ctx(), domain.CreateIssueParams{
-		Issue: &types.Issue{Title: "regular target", IssueType: types.TypeTask, Priority: 2},
+		Issue: &types.Issue{IssueContent: types.IssueContent{Title: "regular target"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}},
 	}, "tester")
 	s.Require().NoError(err)
 	wisp, err := uc.CreateWisp(s.Ctx(), domain.CreateIssueParams{
-		Issue: &types.Issue{Title: "wisp target", IssueType: types.TypeTask, Priority: 2, Ephemeral: true},
+		Issue: &types.Issue{IssueContent: types.IssueContent{Title: "wisp target"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}, IssueWisp: types.IssueWisp{Ephemeral: true}},
 	}, "tester")
 	s.Require().NoError(err)
 
@@ -421,9 +449,13 @@ func newGraphNode(key, title string) domain.GraphNode {
 	return domain.GraphNode{
 		Key: key,
 		Issue: &types.Issue{
-			Title:     title,
-			IssueType: types.TypeTask,
-			Priority:  2,
+			IssueContent: types.IssueContent{
+				Title: title,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				IssueType: types.TypeTask,
+				Priority:  2,
+			},
 		},
 	}
 }

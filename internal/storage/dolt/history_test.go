@@ -35,11 +35,17 @@ func TestHistory_UsesDedicatedLongTimeoutConnection(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "history-timeout-test",
-		Title:     "v1",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "history-timeout-test",
+		},
+		IssueContent: types.IssueContent{
+			Title: "v1",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -110,12 +116,18 @@ func TestGetIssueHistory(t *testing.T) {
 
 	// Create an issue
 	issue := &types.Issue{
-		ID:          "history-test",
-		Title:       "Original Title",
-		Description: "Original description",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "history-test",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Original Title",
+			Description: "Original description",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -187,12 +199,18 @@ func TestGetIssueAsOf(t *testing.T) {
 
 	// Create an issue
 	issue := &types.Issue{
-		ID:          "asof-test",
-		Title:       "Original Title",
-		Description: "Original",
-		Status:      types.StatusOpen,
-		Priority:    1,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "asof-test",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Original Title",
+			Description: "Original",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -269,11 +287,17 @@ func TestGetIssueAsOf_NonExistentIssue(t *testing.T) {
 
 	// Create and commit something to have a valid ref
 	issue := &types.Issue{
-		ID:        "asof-other",
-		Title:     "Other",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "asof-other",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Other",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)

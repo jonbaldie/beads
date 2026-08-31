@@ -34,13 +34,17 @@ func TestCLIBundleMatchesRuntimeCommittedSchema(t *testing.T) {
 		t.Fatalf("create runtime schema dir: %v", err)
 	}
 	store, err := New(ctx, &Config{
-		Path:            runtimeDir,
-		CommitterName:   "test",
-		CommitterEmail:  "test@example.com",
-		ServerHost:      "127.0.0.1",
-		ServerPort:      testServerPort,
-		Database:        dbName,
-		CreateIfMissing: true,
+		Path:           runtimeDir,
+		CommitterName:  "test",
+		CommitterEmail: "test@example.com",
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: testServerPort,
+		},
+		Database: dbName,
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
 	})
 	if err != nil {
 		t.Fatalf("create runtime store: %v", err)

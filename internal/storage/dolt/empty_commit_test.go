@@ -39,9 +39,9 @@ func TestDoltAddAndCommitSkipsEmptyCommitWithUnrelatedDirtyTable(t *testing.T) {
 	ctx, cancel := testContext(t)
 	defer cancel()
 
-	a := &types.Issue{ID: "pc-a", Title: "A", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
-	b := &types.Issue{ID: "pc-b", Title: "B", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
-	c := &types.Issue{ID: "pc-c", Title: "C", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	a := &types.Issue{IssueID: types.IssueID{ID: "pc-a"}, IssueContent: types.IssueContent{Title: "A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
+	b := &types.Issue{IssueID: types.IssueID{ID: "pc-b"}, IssueContent: types.IssueContent{Title: "B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
+	c := &types.Issue{IssueID: types.IssueID{ID: "pc-c"}, IssueContent: types.IssueContent{Title: "C"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	for _, iss := range []*types.Issue{a, b, c} {
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("create %s: %v", iss.ID, err)
@@ -123,7 +123,7 @@ func TestClaimAndCloseNoRegressionWithUnrelatedDirtyTable(t *testing.T) {
 	defer cancel()
 
 	mk := func(id string) *types.Issue {
-		return &types.Issue{ID: id, Title: id, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+		return &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	}
 	for _, id := range []string{"pc-claim", "pc-close"} {
 		if err := store.CreateIssue(ctx, mk(id), "tester"); err != nil {

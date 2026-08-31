@@ -69,7 +69,7 @@ func TestDoltStoreCommenterOnAWispSweepsNoPendingRow(t *testing.T) {
 	ctx, cancel := testContext(t)
 	defer cancel()
 	seedIssues(ctx, t, store, "test-comment-neighbor")
-	wisp := &types.Issue{ID: "test-comment-wisp", Title: "wisp", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true}
+	wisp := &types.Issue{IssueID: types.IssueID{ID: "test-comment-wisp"}, IssueContent: types.IssueContent{Title: "wisp"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}
 	if err := store.CreateIssue(ctx, wisp, "seed"); err != nil {
 		t.Fatalf("create wisp: %v", err)
 	}

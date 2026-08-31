@@ -225,6 +225,15 @@ func GetBackendFromConfig(beadsDir string) string {
 // server-backed even when older metadata.json files omit dolt_mode. It returns an
 // error only when a configured server credential command fails (fail-closed).
 func applyResolvedConfig(ctx context.Context, beadsDir string, fileCfg *configfile.Config, cfg *Config) error {
+	applyResolvedPathAndServerDefaults(beadsDir, fileCfg, cfg)
+	if err := applyResolvedCredentials(ctx, fileCfg, cfg); err != nil {
+		return err
+	}
+	applyResolvedPoolConfig(cfg)
+	return nil
+}
+
+func applyResolvedPathAndServerDefaults(beadsDir string, fileCfg *configfile.Config, cfg *Config) {
 	cfg.Path = fileCfg.DatabasePath(beadsDir)
 	if cfg.BeadsDir == "" {
 		cfg.BeadsDir = beadsDir
@@ -253,6 +262,9 @@ func applyResolvedConfig(ctx context.Context, beadsDir string, fileCfg *configfi
 		// falls back to 3307 which is wrong for standalone repos.
 		cfg.ServerPort = doltserver.DefaultConfig(beadsDir).Port
 	}
+}
+
+func applyResolvedCredentials(ctx context.Context, fileCfg *configfile.Config, cfg *Config) error {
 	// Resolve the server-mode credential (the connection username). In server mode a
 	// configured credential command takes precedence over the static user; it fails
 	// closed (see ApplyGatewayCredential). The command runs only in server mode — an
@@ -283,7 +295,15 @@ func applyResolvedConfig(ctx context.Context, beadsDir string, fileCfg *configfi
 	if !cfg.ServerTLS {
 		cfg.ServerTLS = fileCfg.GetDoltServerTLS()
 	}
+	return nil
+}
 
+func applyResolvedPoolConfig(cfg *Config) {
+	applyMaxOpenConns(cfg)
+	applyPoolTimeouts(cfg)
+}
+
+func applyMaxOpenConns(cfg *Config) {
 	// Pool size: env var > config.yaml > caller override > default (10).
 	// Useful for shared-server setups with many worktrees (GH#3140).
 	if cfg.MaxOpenConns == 0 {
@@ -300,7 +320,9 @@ func applyResolvedConfig(ctx context.Context, beadsDir string, fileCfg *configfi
 			}
 		}
 	}
+}
 
+func applyPoolTimeouts(cfg *Config) {
 	// Pool per-I/O deadlines: caller override > env var > config.yaml > default
 	// (10s, see buildServerDSN). The default fast-fail is right for healthy
 	// local servers; overloaded shared-server deployments raise it so ordinary
@@ -317,8 +339,6 @@ func applyResolvedConfig(ctx context.Context, beadsDir string, fileCfg *configfi
 	if cfg.PoolWriteTimeout == 0 {
 		cfg.PoolWriteTimeout = parseTimeout(config.GetString("dolt.pool-write-timeout"), 0)
 	}
-
-	return nil
 }
 
 // applyCentralConfigDefaults loads the central server config from

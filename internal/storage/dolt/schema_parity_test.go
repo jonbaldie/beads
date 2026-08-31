@@ -235,17 +235,27 @@ func TestSearchWispsFilterParity(t *testing.T) {
 	future := now.Add(24 * time.Hour)
 	externalRef := "https://linear.app/example-org/issue/EX-1"
 	wisp := &types.Issue{
-		Title:       "test wisp for filter parity",
-		Description: "description text here",
-		Notes:       "some notes content",
-		ExternalRef: &externalRef,
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   "task",
-		Assignee:    "tester",
-		Ephemeral:   true,
-		DueAt:       &future,
-		DeferUntil:  &future,
+		IssueContent: types.IssueContent{
+			Title:       "test wisp for filter parity",
+			Description: "description text here",
+			Notes:       "some notes content",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: "task",
+			Assignee:  "tester",
+		},
+		IssueLease: types.IssueLease{
+			DueAt:      &future,
+			DeferUntil: &future,
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: &externalRef,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, wisp, "test-actor"); err != nil {
 		t.Fatalf("failed to create test wisp: %v", err)
@@ -280,50 +290,50 @@ func TestSearchWispsFilterParity(t *testing.T) {
 	taskType := types.TypeTask
 
 	// Test each filter field individually
-	search("Status", types.IssueFilter{Status: &openStatus})
-	search("ExcludeStatus", types.IssueFilter{ExcludeStatus: []types.Status{closedStatus}})
-	search("IssueType", types.IssueFilter{IssueType: &taskType})
-	search("ExcludeTypes", types.IssueFilter{ExcludeTypes: []types.IssueType{"bug"}})
-	search("Assignee", types.IssueFilter{Assignee: &assignee})
-	search("Priority", types.IssueFilter{Priority: &priority2})
-	search("PriorityMin", types.IssueFilter{PriorityMin: &priority1})
-	search("PriorityMax", types.IssueFilter{PriorityMax: &priority3})
-	search("IDs", types.IssueFilter{IDs: []string{wisp.ID}})
-	search("IDPrefix", types.IssueFilter{IDPrefix: "test-wisp"})
-	search("SpecIDPrefix", types.IssueFilter{SpecIDPrefix: "spec"})
-	search("TitleSearch", types.IssueFilter{TitleSearch: "test"})
-	search("TitleContains", types.IssueFilter{TitleContains: "parity"})
-	search("DescriptionContains", types.IssueFilter{DescriptionContains: "description"})
-	search("NotesContains", types.IssueFilter{NotesContains: "notes"})
-	search("ExternalRefContains", types.IssueFilter{ExternalRefContains: "linear"})
-	search("Labels", types.IssueFilter{Labels: []string{"test-label"}})
-	search("LabelsAny", types.IssueFilter{LabelsAny: []string{"test-label", "other"}})
-	search("Pinned true", types.IssueFilter{Pinned: &boolTrue})
-	search("Pinned false", types.IssueFilter{Pinned: &boolFalse})
-	search("SourceRepo", types.IssueFilter{SourceRepo: strPtr("example/repo")})
-	search("IsTemplate true", types.IssueFilter{IsTemplate: &boolTrue})
-	search("IsTemplate false", types.IssueFilter{IsTemplate: &boolFalse})
-	search("EmptyDescription", types.IssueFilter{EmptyDescription: true})
-	search("NoAssignee", types.IssueFilter{NoAssignee: true})
-	search("NoLabels", types.IssueFilter{NoLabels: true})
-	search("NoParent", types.IssueFilter{NoParent: true})
-	search("Deferred", types.IssueFilter{Deferred: true})
-	search("Overdue", types.IssueFilter{Overdue: true})
+	search("Status", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Status: &openStatus}})
+	search("ExcludeStatus", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{ExcludeStatus: []types.Status{closedStatus}}})
+	search("IssueType", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IssueType: &taskType}})
+	search("ExcludeTypes", types.IssueFilter{IssueFilterHydrate: types.IssueFilterHydrate{ExcludeTypes: []types.IssueType{"bug"}}})
+	search("Assignee", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Assignee: &assignee}})
+	search("Priority", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Priority: &priority2}})
+	search("PriorityMin", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{PriorityMin: &priority1}})
+	search("PriorityMax", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{PriorityMax: &priority3}})
+	search("IDs", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDs: []string{wisp.ID}}})
+	search("IDPrefix", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "test-wisp"}})
+	search("SpecIDPrefix", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{SpecIDPrefix: "spec"}})
+	search("TitleSearch", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{TitleSearch: "test"}})
+	search("TitleContains", types.IssueFilter{IssueFilterMatch: types.IssueFilterMatch{TitleContains: "parity"}})
+	search("DescriptionContains", types.IssueFilter{IssueFilterMatch: types.IssueFilterMatch{DescriptionContains: "description"}})
+	search("NotesContains", types.IssueFilter{IssueFilterMatch: types.IssueFilterMatch{NotesContains: "notes"}})
+	search("ExternalRefContains", types.IssueFilter{IssueFilterMatch: types.IssueFilterMatch{ExternalRefContains: "linear"}})
+	search("Labels", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Labels: []string{"test-label"}}})
+	search("LabelsAny", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{LabelsAny: []string{"test-label", "other"}}})
+	search("Pinned true", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{Pinned: &boolTrue}})
+	search("Pinned false", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{Pinned: &boolFalse}})
+	search("SourceRepo", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{SourceRepo: strPtr("example/repo")}})
+	search("IsTemplate true", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{IsTemplate: &boolTrue}})
+	search("IsTemplate false", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{IsTemplate: &boolFalse}})
+	search("EmptyDescription", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{EmptyDescription: true}})
+	search("NoAssignee", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{NoAssignee: true}})
+	search("NoLabels", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{NoLabels: true}})
+	search("NoParent", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{NoParent: true}})
+	search("Deferred", types.IssueFilter{IssueFilterHydrate: types.IssueFilterHydrate{Deferred: true}})
+	search("Overdue", types.IssueFilter{IssueFilterHydrate: types.IssueFilterHydrate{Overdue: true}})
 
 	// Time-range filters (critical for wisp GC)
-	search("CreatedAfter", types.IssueFilter{CreatedAfter: &past})
-	search("CreatedBefore", types.IssueFilter{CreatedBefore: &future})
-	search("UpdatedAfter", types.IssueFilter{UpdatedAfter: &past})
-	search("UpdatedBefore", types.IssueFilter{UpdatedBefore: &future})
-	search("ClosedAfter", types.IssueFilter{ClosedAfter: &past})
-	search("ClosedBefore", types.IssueFilter{ClosedBefore: &future})
-	search("DeferAfter", types.IssueFilter{DeferAfter: &past})
-	search("DeferBefore", types.IssueFilter{DeferBefore: &future})
-	search("DueAfter", types.IssueFilter{DueAfter: &past})
-	search("DueBefore", types.IssueFilter{DueBefore: &future})
+	search("CreatedAfter", types.IssueFilter{IssueFilterMatch: types.IssueFilterMatch{CreatedAfter: &past}})
+	search("CreatedBefore", types.IssueFilter{IssueFilterMatch: types.IssueFilterMatch{CreatedBefore: &future}})
+	search("UpdatedAfter", types.IssueFilter{IssueFilterMatch: types.IssueFilterMatch{UpdatedAfter: &past}})
+	search("UpdatedBefore", types.IssueFilter{IssueFilterMatch: types.IssueFilterMatch{UpdatedBefore: &future}})
+	search("ClosedAfter", types.IssueFilter{IssueFilterMatch: types.IssueFilterMatch{ClosedAfter: &past}})
+	search("ClosedBefore", types.IssueFilter{IssueFilterMatch: types.IssueFilterMatch{ClosedBefore: &future}})
+	search("DeferAfter", types.IssueFilter{IssueFilterHydrate: types.IssueFilterHydrate{DeferAfter: &past}})
+	search("DeferBefore", types.IssueFilter{IssueFilterHydrate: types.IssueFilterHydrate{DeferBefore: &future}})
+	search("DueAfter", types.IssueFilter{IssueFilterHydrate: types.IssueFilterHydrate{DueAfter: &past}})
+	search("DueBefore", types.IssueFilter{IssueFilterHydrate: types.IssueFilterHydrate{DueBefore: &future}})
 
 	// Verify time-range filters actually return results when they should
-	results, err := store.searchWisps(ctx, "", types.IssueFilter{CreatedAfter: &past})
+	results, err := store.searchWisps(ctx, "", types.IssueFilter{IssueFilterMatch: types.IssueFilterMatch{CreatedAfter: &past}})
 	if err != nil {
 		t.Fatalf("CreatedAfter search failed: %v", err)
 	}

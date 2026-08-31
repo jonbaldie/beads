@@ -46,7 +46,20 @@ func TestEmbeddedClaimIssueWrapperClaimsTheWispPlane(t *testing.T) {
 	createWisp := func(t *testing.T, id string) {
 		t.Helper()
 		if err := te.store.CreateIssue(ctx, &types.Issue{
-			ID: id, Title: id, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		}, "tester"); err != nil {
 			t.Fatalf("create wisp %s: %v", id, err)
 		}

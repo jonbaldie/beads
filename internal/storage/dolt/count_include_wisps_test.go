@@ -27,11 +27,17 @@ func seedCountWispCorpus(t *testing.T, ctx context.Context, store *DoltStore, p 
 	mk := func(id string, mut func(*types.Issue)) {
 		t.Helper()
 		issue := &types.Issue{
-			ID:        p + "-" + id,
-			Title:     id,
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: p + "-" + id,
+			},
+			IssueContent: types.IssueContent{
+				Title: id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if mut != nil {
 			mut(issue)
@@ -80,14 +86,14 @@ func TestCountIssuesMergedMatchesSearch(t *testing.T) {
 		// 4 issues + 2 no_history wisps + 1 ephemeral wisp.
 		{"merged_all", types.IssueFilter{}, 7},
 		// Durable tier only (today's bd count default).
-		{"durable_only", types.IssueFilter{SkipWisps: true}, 4},
+		{"durable_only", types.IssueFilter{IssueFilterHydrate: types.IssueFilterHydrate{SkipWisps: true}}, 4},
 		// Type filter applies identically to both tables.
-		{"merged_type_task", types.IssueFilter{IssueType: &task}, 5},
+		{"merged_type_task", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IssueType: &task}}, 5},
 		// Template exclusion (bd list default) drops cm-perm-tpl.
-		{"merged_no_templates", types.IssueFilter{IsTemplate: &noTemplate}, 6},
-		{"merged_no_templates_task", types.IssueFilter{IsTemplate: &noTemplate, IssueType: &task}, 4},
+		{"merged_no_templates", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{IsTemplate: &noTemplate}}, 6},
+		{"merged_no_templates_task", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IssueType: &task}, IssueFilterFlags: types.IssueFilterFlags{IsTemplate: &noTemplate}}, 4},
 		// Ephemeral-only routes to the wisps tier (bd list --type <infra>).
-		{"ephemeral_only", types.IssueFilter{Ephemeral: &ephemeral}, 1},
+		{"ephemeral_only", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{Ephemeral: &ephemeral}}, 1},
 	}
 
 	for _, tc := range cases {
@@ -132,11 +138,17 @@ func TestCountIssuesEphemeralFallsThroughToDurable(t *testing.T) {
 	// A durable, non-ephemeral task that the Ephemeral=true filter must exclude,
 	// so the test proves the filter is applied rather than counting everything.
 	if err := store.CreateIssue(ctx, &types.Issue{
-		ID:        "ed-task-1",
-		Title:     "durable task",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "ed-task-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "durable task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}, "tester"); err != nil {
 		t.Fatalf("create durable task: %v", err)
 	}
@@ -149,7 +161,7 @@ func TestCountIssuesEphemeralFallsThroughToDurable(t *testing.T) {
 	}
 
 	ephemeral := true
-	filter := types.IssueFilter{Ephemeral: &ephemeral}
+	filter := types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{Ephemeral: &ephemeral}}
 
 	results, err := store.SearchIssues(ctx, "", filter)
 	if err != nil {
@@ -202,7 +214,7 @@ func TestCountIssuesByGroupIncludesWisps(t *testing.T) {
 	})
 
 	t.Run("by_type_durable_only", func(t *testing.T) {
-		counts, err := store.CountIssuesByGroup(ctx, types.IssueFilter{SkipWisps: true}, "type")
+		counts, err := store.CountIssuesByGroup(ctx, types.IssueFilter{IssueFilterHydrate: types.IssueFilterHydrate{SkipWisps: true}}, "type")
 		if err != nil {
 			t.Fatalf("CountIssuesByGroup: %v", err)
 		}
@@ -244,7 +256,7 @@ func TestCountIssuesByGroupIncludesWisps(t *testing.T) {
 
 	t.Run("by_type_ephemeral_only", func(t *testing.T) {
 		ephemeral := true
-		counts, err := store.CountIssuesByGroup(ctx, types.IssueFilter{Ephemeral: &ephemeral}, "type")
+		counts, err := store.CountIssuesByGroup(ctx, types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{Ephemeral: &ephemeral}}, "type")
 		if err != nil {
 			t.Fatalf("CountIssuesByGroup: %v", err)
 		}
@@ -266,11 +278,17 @@ func seedDurableEphemeralRow(t *testing.T, ctx context.Context, store *DoltStore
 	// A durable, non-ephemeral task that the Ephemeral=true filter must exclude,
 	// so the test proves the filter is applied rather than counting everything.
 	if err := store.CreateIssue(ctx, &types.Issue{
-		ID:        p + "-task-1",
-		Title:     "durable task",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: p + "-task-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "durable task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}, "tester"); err != nil {
 		t.Fatalf("create durable task: %v", err)
 	}
@@ -301,7 +319,7 @@ func TestCountIssuesByGroupEphemeralFallsThroughToDurable(t *testing.T) {
 	infraID := seedDurableEphemeralRow(t, ctx, store, "eg")
 
 	ephemeral := true
-	filter := types.IssueFilter{Ephemeral: &ephemeral}
+	filter := types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{Ephemeral: &ephemeral}}
 
 	groups, err := store.CountIssuesByGroup(ctx, filter, "type")
 	if err != nil {
@@ -346,7 +364,7 @@ func TestSearchIssuesWithCountsEphemeralFallsThroughToDurable(t *testing.T) {
 	infraID := seedDurableEphemeralRow(t, ctx, store, "es")
 
 	ephemeral := true
-	filter := types.IssueFilter{Ephemeral: &ephemeral}
+	filter := types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{Ephemeral: &ephemeral}}
 
 	withCounts, err := store.SearchIssuesWithCounts(ctx, "", filter)
 	if err != nil {

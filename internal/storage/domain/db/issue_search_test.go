@@ -29,7 +29,7 @@ func (s *testSuite) searchAcrossMergesTables() {
 	w.Ephemeral = true
 	s.Require().NoError(r.Insert(s.Ctx(), w, "tester", domain.InsertIssueOpts{UseWispsTable: true}))
 
-	out, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "", types.IssueFilter{IDPrefix: "bd-srx-merge-"})
+	out, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-srx-merge-"}})
 	s.Require().NoError(err)
 	gotIDs := idsFrom(out)
 	s.Contains(gotIDs, "bd-srx-merge-perm")
@@ -46,7 +46,7 @@ func (s *testSuite) searchAcrossSkipWisps() {
 	s.Require().NoError(r.Insert(s.Ctx(), w, "tester", domain.InsertIssueOpts{UseWispsTable: true}))
 
 	out, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-srx-skip-", SkipWisps: true})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-srx-skip-"}, IssueFilterHydrate: types.IssueFilterHydrate{SkipWisps: true}})
 	s.Require().NoError(err)
 	gotIDs := idsFrom(out)
 	s.Contains(gotIDs, "bd-srx-skip-perm")
@@ -64,7 +64,7 @@ func (s *testSuite) searchAcrossEphemeralTrueOnlyWisps() {
 
 	ephTrue := true
 	out, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-srx-eph-", Ephemeral: &ephTrue})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-srx-eph-"}, IssueFilterFlags: types.IssueFilterFlags{Ephemeral: &ephTrue}})
 	s.Require().NoError(err)
 	gotIDs := idsFrom(out)
 	s.Contains(gotIDs, "bd-srx-eph-wisp")
@@ -87,7 +87,7 @@ func (s *testSuite) searchAcrossStatusFilter() {
 
 	closed := types.StatusClosed
 	out, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-srx-st-", Status: &closed})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-srx-st-", Status: &closed}})
 	s.Require().NoError(err)
 	gotIDs := idsFrom(out)
 	s.ElementsMatch([]string{"bd-srx-st-closed", "bd-srx-st-wclosed"}, gotIDs)
@@ -111,7 +111,7 @@ func (s *testSuite) searchAcrossLabelFilter() {
 	s.Require().NoError(labelRepo.Insert(s.Ctx(), "bd-srx-lbl-whot", "hot", "tester", domain.LabelOpts{UseWispsTable: true}))
 
 	out, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-srx-lbl-", Labels: []string{"hot"}})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-srx-lbl-", Labels: []string{"hot"}}})
 	s.Require().NoError(err)
 	gotIDs := idsFrom(out)
 	s.ElementsMatch([]string{"bd-srx-lbl-hot", "bd-srx-lbl-whot"}, gotIDs)
@@ -127,7 +127,7 @@ func (s *testSuite) searchAcrossLabelHydration() {
 	s.Require().NoError(labelRepo.Insert(s.Ctx(), "bd-srx-hyd-1", "beta", "tester", domain.LabelOpts{}))
 
 	out, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-srx-hyd-"})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-srx-hyd-"}})
 	s.Require().NoError(err)
 	s.Require().Len(out.Items, 1)
 	s.ElementsMatch([]string{"alpha", "beta"}, out.Items[0].Labels)
@@ -141,7 +141,7 @@ func (s *testSuite) searchAcrossLimitRespected() {
 			"tester", domain.InsertIssueOpts{}))
 	}
 	out, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-srx-lim-", Limit: 3, SkipWisps: true})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-srx-lim-", Limit: 3}, IssueFilterHydrate: types.IssueFilterHydrate{SkipWisps: true}})
 	s.Require().NoError(err)
 	s.Len(out.Items, 3)
 }
@@ -166,7 +166,7 @@ func (s *testSuite) searchAcrossCollisionKeepsTheWispCopy() {
 	s.Require().NoError(r.Insert(s.Ctx(), w, "tester", domain.InsertIssueOpts{UseWispsTable: true}))
 
 	out, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-srx-collision-"})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-srx-collision-"}})
 	s.Require().NoError(err)
 	s.Require().Len(out.Items, 1, "the id must come back once, not once per plane")
 	s.Equal(id, out.Items[0].ID)
@@ -182,7 +182,7 @@ func (s *testSuite) searchAcrossSkipLabels() {
 	s.Require().NoError(labelRepo.Insert(s.Ctx(), "bd-srx-nolbl-1", "gamma", "tester", domain.LabelOpts{}))
 
 	out, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-srx-nolbl-", SkipLabels: true, SkipWisps: true})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-srx-nolbl-"}, IssueFilterHydrate: types.IssueFilterHydrate{SkipLabels: true, SkipWisps: true}})
 	s.Require().NoError(err)
 	s.Require().Len(out.Items, 1)
 	s.Empty(out.Items[0].Labels, "SkipLabels must leave Labels nil/empty")
@@ -277,7 +277,7 @@ func (s *testSuite) paginationSearchSingleLimit() {
 	r := s.issueRepo()
 
 	page, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-pgs-l-", Limit: 3, SkipWisps: true})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-pgs-l-", Limit: 3}, IssueFilterHydrate: types.IssueFilterHydrate{SkipWisps: true}})
 	s.Require().NoError(err)
 	s.Equal(expected[:3], idsFrom(page))
 	s.True(page.HasMore, "HasMore must be true when more matches exist")
@@ -288,7 +288,7 @@ func (s *testSuite) paginationSearchSingleOffset() {
 	r := s.issueRepo()
 
 	page, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-pgs-o-", Limit: 100, Offset: 4, SkipWisps: true})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-pgs-o-", Limit: 100}, IssueFilterHydrate: types.IssueFilterHydrate{Offset: 4, SkipWisps: true}})
 	s.Require().NoError(err)
 	s.Equal(expected[4:], idsFrom(page))
 	s.False(page.HasMore, "HasMore must be false when page covers tail")
@@ -299,7 +299,7 @@ func (s *testSuite) paginationSearchSingleLimitOffset() {
 	r := s.issueRepo()
 
 	page, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-pgs-lo-", Limit: 3, Offset: 3, SkipWisps: true})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-pgs-lo-", Limit: 3}, IssueFilterHydrate: types.IssueFilterHydrate{Offset: 3, SkipWisps: true}})
 	s.Require().NoError(err)
 	s.Equal(expected[3:6], idsFrom(page))
 	s.True(page.HasMore, "HasMore must be true when more matches follow")
@@ -310,13 +310,13 @@ func (s *testSuite) paginationSearchSingleHasMore() {
 	r := s.issueRepo()
 
 	page, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-pgs-hm-", Limit: 3, Offset: 2, SkipWisps: true})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-pgs-hm-", Limit: 3}, IssueFilterHydrate: types.IssueFilterHydrate{Offset: 2, SkipWisps: true}})
 	s.Require().NoError(err)
 	s.Equal(expected[2:], idsFrom(page))
 	s.False(page.HasMore, "HasMore=false when Offset+Limit covers exactly the remainder")
 
 	page2, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-pgs-hm-", Limit: 2, Offset: 2, SkipWisps: true})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-pgs-hm-", Limit: 2}, IssueFilterHydrate: types.IssueFilterHydrate{Offset: 2, SkipWisps: true}})
 	s.Require().NoError(err)
 	s.Equal(expected[2:4], idsFrom(page2))
 	s.True(page2.HasMore, "HasMore=true when more rows follow the page")
@@ -331,7 +331,7 @@ func (s *testSuite) paginationSearchSinglePageWalk() {
 	offset := 0
 	for {
 		page, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "",
-			types.IssueFilter{IDPrefix: "bd-pgs-pw-", Limit: pageSize, Offset: offset, SkipWisps: true})
+			types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-pgs-pw-", Limit: pageSize}, IssueFilterHydrate: types.IssueFilterHydrate{Offset: offset, SkipWisps: true}})
 		s.Require().NoError(err)
 		walked = append(walked, idsFrom(page)...)
 		if !page.HasMore {
@@ -402,7 +402,7 @@ func (s *testSuite) paginationSearchUnionLimit() {
 	r := s.issueRepo()
 
 	page, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-pgu-l", Limit: 4})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-pgu-l", Limit: 4}})
 	s.Require().NoError(err)
 	s.Equal(expected[:4], idsFrom(page))
 	s.True(page.HasMore)
@@ -413,7 +413,7 @@ func (s *testSuite) paginationSearchUnionOffset() {
 	r := s.issueRepo()
 
 	page, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-pgu-o", Limit: 100, Offset: 6})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-pgu-o", Limit: 100}, IssueFilterHydrate: types.IssueFilterHydrate{Offset: 6}})
 	s.Require().NoError(err)
 	s.Equal(expected[6:], idsFrom(page))
 	s.False(page.HasMore)
@@ -424,7 +424,7 @@ func (s *testSuite) paginationSearchUnionLimitOffset() {
 	r := s.issueRepo()
 
 	page, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-pgu-lo", Limit: 3, Offset: 3})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-pgu-lo", Limit: 3}, IssueFilterHydrate: types.IssueFilterHydrate{Offset: 3}})
 	s.Require().NoError(err)
 	s.Equal(expected[3:6], idsFrom(page))
 	s.True(page.HasMore)
@@ -439,7 +439,7 @@ func (s *testSuite) paginationSearchUnionPageWalk() {
 	offset := 0
 	for {
 		page, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "",
-			types.IssueFilter{IDPrefix: "bd-pgu-pw", Limit: pageSize, Offset: offset})
+			types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-pgu-pw", Limit: pageSize}, IssueFilterHydrate: types.IssueFilterHydrate{Offset: offset}})
 		s.Require().NoError(err)
 		walked = append(walked, idsFrom(page)...)
 		if !page.HasMore {
@@ -477,7 +477,7 @@ func (s *testSuite) paginationSearchUnionInterleaved() {
 	}
 
 	page, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-pgu-int-"})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-pgu-int-"}})
 	s.Require().NoError(err)
 	s.Equal(wantOrder, idsFrom(page), "UNION must interleave issues/wisps by global ORDER BY")
 }
@@ -490,7 +490,7 @@ func (s *testSuite) paginationSearchSortDesc() {
 	_ = expected
 
 	page, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-pgs-sd-", SkipWisps: true, SortDesc: true})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-pgs-sd-"}, IssueFilterHydrate: types.IssueFilterHydrate{SkipWisps: true}, IssueFilterPage: types.IssueFilterPage{SortDesc: true}})
 	s.Require().NoError(err)
 	s.Equal(reversedExpected, idsFrom(page))
 }
@@ -555,7 +555,7 @@ func (s *testSuite) paginationSearchSortByCreated() {
 	var walked []string
 	for off := 0; ; off += 2 {
 		page, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "",
-			types.IssueFilter{IDPrefix: "bd-pgs-sc-", Limit: 2, Offset: off, SkipWisps: true, SortBy: "created"})
+			types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-pgs-sc-", Limit: 2}, IssueFilterHydrate: types.IssueFilterHydrate{Offset: off, SkipWisps: true}, IssueFilterPage: types.IssueFilterPage{SortBy: "created"}})
 		s.Require().NoError(err)
 		walked = append(walked, idsFrom(page)...)
 		if !page.HasMore {
@@ -570,7 +570,7 @@ func (s *testSuite) paginationCountsSingleLimitOffset() {
 	r := s.issueRepo()
 
 	page, err := r.SearchAcrossIssuesAndWispsWithCounts(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-pgc-s-", Limit: 3, Offset: 2, SkipWisps: true})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-pgc-s-", Limit: 3}, IssueFilterHydrate: types.IssueFilterHydrate{Offset: 2, SkipWisps: true}})
 	s.Require().NoError(err)
 	s.Equal(expected[2:5], iwcIDs(page))
 	s.True(page.HasMore)
@@ -581,7 +581,7 @@ func (s *testSuite) paginationCountsUnionLimitOffset() {
 	r := s.issueRepo()
 
 	page, err := r.SearchAcrossIssuesAndWispsWithCounts(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: "bd-pgc-u", Limit: 3, Offset: 2})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-pgc-u", Limit: 3}, IssueFilterHydrate: types.IssueFilterHydrate{Offset: 2}})
 	s.Require().NoError(err)
 	s.Equal(expected[2:5], iwcIDs(page))
 	s.True(page.HasMore)
@@ -596,7 +596,7 @@ func (s *testSuite) paginationCountsUnionPageWalk() {
 	offset := 0
 	for {
 		page, err := r.SearchAcrossIssuesAndWispsWithCounts(s.Ctx(), "",
-			types.IssueFilter{IDPrefix: "bd-pgc-pw", Limit: pageSize, Offset: offset})
+			types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "bd-pgc-pw", Limit: pageSize}, IssueFilterHydrate: types.IssueFilterHydrate{Offset: offset}})
 		s.Require().NoError(err)
 		walked = append(walked, iwcIDs(page)...)
 		if !page.HasMore {
@@ -630,10 +630,14 @@ func (s *testSuite) paginationReadyLimitOffset() {
 	r := s.issueRepo()
 
 	page, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{
-		Labels:     []string{label},
-		Limit:      4,
-		Offset:     2,
-		SortPolicy: types.SortPolicyPriority,
+		WorkFilterCore: types.WorkFilterCore{
+			Labels:     []string{label},
+			Limit:      4,
+			SortPolicy: types.SortPolicyPriority,
+		},
+		WorkFilterExtra: types.WorkFilterExtra{
+			Offset: 2,
+		},
 	})
 	s.Require().NoError(err)
 	s.Equal(expected[2:6], idsFrom(page))
@@ -646,20 +650,28 @@ func (s *testSuite) paginationReadyHasMoreBoundary() {
 	r := s.issueRepo()
 
 	page, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{
-		Labels:     []string{label},
-		Limit:      3,
-		Offset:     3,
-		SortPolicy: types.SortPolicyPriority,
+		WorkFilterCore: types.WorkFilterCore{
+			Labels:     []string{label},
+			Limit:      3,
+			SortPolicy: types.SortPolicyPriority,
+		},
+		WorkFilterExtra: types.WorkFilterExtra{
+			Offset: 3,
+		},
 	})
 	s.Require().NoError(err)
 	s.Equal(expected[3:], idsFrom(page))
 	s.False(page.HasMore)
 
 	page2, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{
-		Labels:     []string{label},
-		Limit:      2,
-		Offset:     3,
-		SortPolicy: types.SortPolicyPriority,
+		WorkFilterCore: types.WorkFilterCore{
+			Labels:     []string{label},
+			Limit:      2,
+			SortPolicy: types.SortPolicyPriority,
+		},
+		WorkFilterExtra: types.WorkFilterExtra{
+			Offset: 3,
+		},
 	})
 	s.Require().NoError(err)
 	s.Equal(expected[3:5], idsFrom(page2))
@@ -714,10 +726,14 @@ func (s *testSuite) paginationReadyCountsLimitOffset() {
 	r := s.issueRepo()
 
 	page, err := r.GetReadyWorkWithCounts(s.Ctx(), types.WorkFilter{
-		Labels:     []string{label},
-		Limit:      3,
-		Offset:     2,
-		SortPolicy: types.SortPolicyPriority,
+		WorkFilterCore: types.WorkFilterCore{
+			Labels:     []string{label},
+			Limit:      3,
+			SortPolicy: types.SortPolicyPriority,
+		},
+		WorkFilterExtra: types.WorkFilterExtra{
+			Offset: 2,
+		},
 	})
 	s.Require().NoError(err)
 	s.Equal(expected[2:5], iwcIDs(page))
@@ -739,10 +755,14 @@ func (s *testSuite) readyPageWalkByLabel(r domain.IssueSQLRepository, label stri
 	offset := 0
 	for {
 		page, err := r.GetReadyWork(s.Ctx(), types.WorkFilter{
-			Labels:     []string{label},
-			Limit:      pageSize,
-			Offset:     offset,
-			SortPolicy: policy,
+			WorkFilterCore: types.WorkFilterCore{
+				Labels:     []string{label},
+				Limit:      pageSize,
+				SortPolicy: policy,
+			},
+			WorkFilterExtra: types.WorkFilterExtra{
+				Offset: offset,
+			},
 		})
 		s.Require().NoError(err)
 		for _, id := range idsFrom(page) {
@@ -766,10 +786,14 @@ func (s *testSuite) readyCountsPageWalkByLabel(r domain.IssueSQLRepository, labe
 	offset := 0
 	for {
 		page, err := r.GetReadyWorkWithCounts(s.Ctx(), types.WorkFilter{
-			Labels:     []string{label},
-			Limit:      pageSize,
-			Offset:     offset,
-			SortPolicy: policy,
+			WorkFilterCore: types.WorkFilterCore{
+				Labels:     []string{label},
+				Limit:      pageSize,
+				SortPolicy: policy,
+			},
+			WorkFilterExtra: types.WorkFilterExtra{
+				Offset: offset,
+			},
 		})
 		s.Require().NoError(err)
 		for _, id := range iwcIDs(page) {

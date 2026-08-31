@@ -3,16 +3,12 @@ package fs
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/jonbaldie/beads/internal/beads"
-	"github.com/jonbaldie/beads/internal/config"
-	"github.com/jonbaldie/beads/internal/configfile"
 	"github.com/jonbaldie/beads/internal/storage/domain"
 	"github.com/jonbaldie/beads/internal/utils"
 )
@@ -43,81 +39,6 @@ func resolveBeadsDir(workDir string) (string, bool) {
 	return beads.ResolveBeadsDirForRepo(workDir), false
 }
 
-func (r *beadsDirFSRepositoryImpl) ResolveBeadsDirPath(ctx context.Context) domain.BeadsDirResolution {
-	return domain.BeadsDirResolution{BeadsDir: r.beadsDir, HasExplicit: r.hasExplicit}
-}
-
-func (r *beadsDirFSRepositoryImpl) BeadsDirIsLocal(ctx context.Context) bool {
-	workDir := filepath.Clean(utils.CanonicalizePath(r.workDir))
-	beadsDir := filepath.Clean(utils.CanonicalizePath(r.beadsDir))
-	if beadsDir == workDir {
-		return true
-	}
-	rel, err := filepath.Rel(workDir, beadsDir)
-	if err != nil {
-		return false
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
-func (r *beadsDirFSRepositoryImpl) CreateBeadsDir(ctx context.Context) error {
-	if r.beadsDir == "" {
-		return fmt.Errorf("fs: CreateBeadsDir: beadsDir not resolved")
-	}
-	if err := os.MkdirAll(r.beadsDir, config.BeadsDirPerm); err != nil {
-		return fmt.Errorf("fs: CreateBeadsDir: mkdir %s: %w", r.beadsDir, err)
-	}
-	if _, err := config.FixBeadsDirPermissions(r.beadsDir); err != nil {
-		return fmt.Errorf("fs: CreateBeadsDir: fix perms %s: %w", r.beadsDir, err)
-	}
-	return nil
-}
-
-func (r *beadsDirFSRepositoryImpl) BeadsDirExists(ctx context.Context) (bool, error) {
-	info, err := os.Stat(r.beadsDir)
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("fs: BeadsDirExists: stat %s: %w", r.beadsDir, err)
-	}
-	return info.IsDir(), nil
-}
-
-func (r *beadsDirFSRepositoryImpl) WriteBeadsGitignore(ctx context.Context) error {
-	if r.templates.BeadsGitignore == "" {
-		return fmt.Errorf("fs: WriteBeadsGitignore: template not configured")
-	}
-	path := filepath.Join(r.beadsDir, ".gitignore")
-	// #nosec G304 -- path joined under bound beadsDir
-	existing, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		if werr := os.WriteFile(path, []byte(r.templates.BeadsGitignore), 0600); werr != nil {
-			return fmt.Errorf("fs: WriteBeadsGitignore: %w", werr)
-		}
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("fs: WriteBeadsGitignore: read: %w", err)
-	}
-	// Existing file: append-only. A wholesale rewrite to the template
-	// destroys local rules (e.g. export negations) the user added — the
-	// gitignore is shared state, not bd-owned (bd-kaaz3).
-	missing := missingTemplatePatternLines(string(existing), r.templates.BeadsGitignore)
-	if len(missing) == 0 {
-		return nil
-	}
-	content := string(existing)
-	if len(content) > 0 && !strings.HasSuffix(content, "\n") {
-		content += "\n"
-	}
-	content += "\n# Added by bd (missing required patterns)\n" + strings.Join(missing, "\n") + "\n"
-	if err := os.WriteFile(path, []byte(content), 0600); err != nil {
-		return fmt.Errorf("fs: WriteBeadsGitignore: %w", err)
-	}
-	return nil
-}
-
 // missingTemplatePatternLines returns the template's pattern lines (non-blank,
 // non-comment) that existing does not already contain as an exact trimmed line.
 func missingTemplatePatternLines(existing, template string) []string {
@@ -134,164 +55,6 @@ func missingTemplatePatternLines(existing, template string) []string {
 		missing = append(missing, trimmed)
 	}
 	return missing
-}
-
-func (r *beadsDirFSRepositoryImpl) BeadsGitignoreExists(ctx context.Context) (bool, error) {
-	return fileExists(filepath.Join(r.beadsDir, ".gitignore"), "fs: BeadsGitignoreExists")
-}
-
-func (r *beadsDirFSRepositoryImpl) WriteProjectGitignore(ctx context.Context) error {
-	if r.workDir == "" {
-		return fmt.Errorf("fs: WriteProjectGitignore: workDir not set")
-	}
-	if len(r.templates.ProjectGitignorePatterns) == 0 {
-		return fmt.Errorf("fs: WriteProjectGitignore: patterns not configured")
-	}
-	path := filepath.Join(r.workDir, ".gitignore")
-	// #nosec G304 -- path joined under bound workDir
-	existing, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("fs: WriteProjectGitignore: read: %w", err)
-	}
-
-	var toAdd []string
-	for _, pattern := range r.templates.ProjectGitignorePatterns {
-		if !containsLine(existing, pattern) {
-			toAdd = append(toAdd, pattern)
-		}
-	}
-	if len(toAdd) == 0 {
-		return nil
-	}
-
-	var buf bytes.Buffer
-	buf.Write(existing)
-	if len(existing) > 0 && !bytes.HasSuffix(existing, []byte("\n")) {
-		buf.WriteByte('\n')
-	}
-	if header := r.templates.ProjectGitignoreHeader; header != "" && !containsLine(existing, header) {
-		if len(existing) > 0 {
-			buf.WriteByte('\n')
-		}
-		buf.WriteString(header + "\n")
-	}
-	for _, pattern := range toAdd {
-		buf.WriteString(pattern + "\n")
-	}
-
-	// #nosec G306 -- .gitignore must be world-readable so users can read/edit it
-	if err := os.WriteFile(path, buf.Bytes(), 0644); err != nil {
-		return fmt.Errorf("fs: WriteProjectGitignore: write: %w", err)
-	}
-	return nil
-}
-
-func (r *beadsDirFSRepositoryImpl) ProjectGitignoreExists(ctx context.Context) (bool, error) {
-	return fileExists(filepath.Join(r.workDir, ".gitignore"), "fs: ProjectGitignoreExists")
-}
-
-func (r *beadsDirFSRepositoryImpl) WriteInteractionsLog(ctx context.Context) error {
-	path := filepath.Join(r.beadsDir, "interactions.jsonl")
-	switch _, err := os.Stat(path); {
-	case err == nil:
-		return nil
-	case !errors.Is(err, os.ErrNotExist):
-		return fmt.Errorf("fs: WriteInteractionsLog: stat: %w", err)
-	}
-	// #nosec G306 -- interactions log is consumed by user tooling
-	if err := os.WriteFile(path, []byte{}, 0644); err != nil {
-		return fmt.Errorf("fs: WriteInteractionsLog: write: %w", err)
-	}
-	return nil
-}
-
-func (r *beadsDirFSRepositoryImpl) WriteReadme(ctx context.Context) error {
-	if r.templates.Readme == "" {
-		return fmt.Errorf("fs: WriteReadme: template not configured")
-	}
-	path := filepath.Join(r.beadsDir, "README.md")
-	if _, err := os.Stat(path); err == nil {
-		return nil // preserve any user edits
-	}
-	// #nosec G306 -- README should be world-readable
-	if err := os.WriteFile(path, []byte(r.templates.Readme), 0644); err != nil {
-		return fmt.Errorf("fs: WriteReadme: %w", err)
-	}
-	return nil
-}
-
-func (r *beadsDirFSRepositoryImpl) WriteMetadataJSON(ctx context.Context, content []byte) error {
-	path := filepath.Join(r.beadsDir, "metadata.json")
-	if err := os.WriteFile(path, content, 0600); err != nil {
-		return fmt.Errorf("fs: WriteMetadataJSON: %w", err)
-	}
-	return nil
-}
-
-func (r *beadsDirFSRepositoryImpl) ReadMetadataJSON(ctx context.Context) ([]byte, error) {
-	path := filepath.Join(r.beadsDir, "metadata.json")
-	// #nosec G304 -- path joined under bound beadsDir
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("fs: ReadMetadataJSON: %w", err)
-	}
-	return data, nil
-}
-
-func (r *beadsDirFSRepositoryImpl) WriteConfigYAML(ctx context.Context, content []byte) error {
-	path := filepath.Join(r.beadsDir, "config.yaml")
-	if err := os.WriteFile(path, content, 0600); err != nil {
-		return fmt.Errorf("fs: WriteConfigYAML: %w", err)
-	}
-	return nil
-}
-
-func (r *beadsDirFSRepositoryImpl) ReadConfigYAML(ctx context.Context) ([]byte, error) {
-	path := filepath.Join(r.beadsDir, "config.yaml")
-	// #nosec G304 -- path joined under bound beadsDir
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("fs: ReadConfigYAML: %w", err)
-	}
-	return data, nil
-}
-
-func (r *beadsDirFSRepositoryImpl) ReadBeadsConfig(ctx context.Context) (*configfile.Config, error) {
-	if r.beadsDir == "" {
-		return nil, fmt.Errorf("fs: ReadBeadsConfig: beadsDir not resolved")
-	}
-	cfg, err := configfile.Load(r.beadsDir)
-	if err != nil {
-		return nil, fmt.Errorf("fs: ReadBeadsConfig: %w", err)
-	}
-	return cfg, nil
-}
-
-func (r *beadsDirFSRepositoryImpl) WriteProxiedServerClientInfo(ctx context.Context, info *configfile.ProxiedServerClientInfo) error {
-	if r.beadsDir == "" {
-		return fmt.Errorf("fs: WriteProxiedServerClientInfo: beadsDir not resolved")
-	}
-	if err := configfile.SaveProxiedServerClientInfo(r.beadsDir, info); err != nil {
-		return fmt.Errorf("fs: WriteProxiedServerClientInfo: %w", err)
-	}
-	return nil
-}
-
-func (r *beadsDirFSRepositoryImpl) ReadProxiedServerClientInfo(ctx context.Context) (*configfile.ProxiedServerClientInfo, error) {
-	if r.beadsDir == "" {
-		return nil, fmt.Errorf("fs: ReadProxiedServerClientInfo: beadsDir not resolved")
-	}
-	info, err := configfile.LoadProxiedServerClientInfo(r.beadsDir)
-	if err != nil {
-		return nil, fmt.Errorf("fs: ReadProxiedServerClientInfo: %w", err)
-	}
-	return info, nil
 }
 
 func fileExists(path, opLabel string) (bool, error) {

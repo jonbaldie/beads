@@ -55,7 +55,7 @@ func (s *testSuite) perTableGoSideSortKeepsTheRightSubset() {
 
 	const limit = 3
 	page, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: prefix + "-", SortBy: "id", Limit: limit})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: prefix + "-", Limit: limit}, IssueFilterPage: types.IssueFilterPage{SortBy: "id"}})
 	s.Require().NoError(err)
 
 	// NOTE: a weak witness by itself — Dolt's engine order for a PK-clustered
@@ -77,7 +77,7 @@ func (s *testSuite) perTableGoSideSortDescKeepsTheByteLastRows() {
 	r := s.issueRepo()
 
 	page, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: prefix + "-", SortBy: "id", SortDesc: true, Limit: 3})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: prefix + "-", Limit: 3}, IssueFilterPage: types.IssueFilterPage{SortBy: "id", SortDesc: true}})
 	s.Require().NoError(err)
 
 	s.Equal([]string{ids[9], ids[8], ids[7]}, idsFrom(page),
@@ -100,9 +100,9 @@ func (s *testSuite) perTableRoutesAnswerOnePage() {
 		route  string
 		filter types.IssueFilter
 	}{
-		{"the wisps-empty probe route", types.IssueFilter{IDPrefix: prefix + "-", SortBy: "id", SortDesc: true, Limit: 3}},
-		{"the SkipWisps route", types.IssueFilter{IDPrefix: prefix + "-", SortBy: "id", SortDesc: true, Limit: 3, SkipWisps: true}},
-		{"the wide path", types.IssueFilter{IDPrefix: prefix + "-", SortBy: "id", SortDesc: true, Limit: 3, NoIDShrink: true}},
+		{"the wisps-empty probe route", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: prefix + "-", Limit: 3}, IssueFilterPage: types.IssueFilterPage{SortBy: "id", SortDesc: true}}},
+		{"the SkipWisps route", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: prefix + "-", Limit: 3}, IssueFilterHydrate: types.IssueFilterHydrate{SkipWisps: true}, IssueFilterPage: types.IssueFilterPage{SortBy: "id", SortDesc: true}}},
+		{"the wide path", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: prefix + "-", Limit: 3}, IssueFilterHydrate: types.IssueFilterHydrate{NoIDShrink: true}, IssueFilterPage: types.IssueFilterPage{SortBy: "id", SortDesc: true}}},
 	} {
 		page, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "", tc.filter)
 		s.Require().NoError(err, tc.route)
@@ -111,7 +111,7 @@ func (s *testSuite) perTableRoutesAnswerOnePage() {
 	}
 
 	counts, err := r.SearchAcrossIssuesAndWispsWithCounts(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: prefix + "-", SortBy: "id", SortDesc: true, Limit: 3})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: prefix + "-", Limit: 3}, IssueFilterPage: types.IssueFilterPage{SortBy: "id", SortDesc: true}})
 	s.Require().NoError(err)
 	got := make([]string, 0, len(counts.Items))
 	for _, item := range counts.Items {
@@ -132,7 +132,7 @@ func (s *testSuite) unionGoSideSortDescKeepsTheByteLastRows() {
 	r := s.issueRepo()
 
 	page, err := r.SearchAcrossIssuesAndWisps(s.Ctx(), "",
-		types.IssueFilter{IDPrefix: prefix + "-", SortBy: "id", SortDesc: true, Limit: 5})
+		types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: prefix + "-", Limit: 5}, IssueFilterPage: types.IssueFilterPage{SortBy: "id", SortDesc: true}})
 	s.Require().NoError(err)
 
 	want := []string{ids[11], ids[10], ids[9], ids[8], ids[7]}

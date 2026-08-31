@@ -22,7 +22,16 @@ func createIssues(t *testing.T, ctx context.Context, env *testEnv, prefix string
 	for i := range n {
 		id := prefix + "-" + string(rune('a'+i))
 		if err := env.store.CreateIssue(ctx, &types.Issue{
-			ID: id, Title: "t-" + id, IssueType: types.TypeTask, Status: types.StatusOpen,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: "t-" + id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				IssueType: types.TypeTask,
+				Status:    types.StatusOpen,
+			},
 		}, "actor"); err != nil {
 			t.Fatalf("create %s: %v", id, err)
 		}

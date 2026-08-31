@@ -179,35 +179,41 @@ func (s *DoltStore) GetDependenciesWithMetadata(ctx context.Context, issueID str
 	if err != nil {
 		return nil, fmt.Errorf("failed to get dependencies with metadata: %w", err)
 	}
-
-	// Collect dep metadata first, then close rows before fetching issues.
-	// This avoids connection pool deadlock when MaxOpenConns=1 (embedded dolt).
-	type depMeta struct {
-		depID, depType string
+	deps, err := scanDependencyMetadataRows(rows)
+	if err != nil {
+		return nil, err
 	}
-	var deps []depMeta
+	if len(deps) == 0 {
+		return nil, nil
+	}
+	return s.hydrateDependencyMetadata(ctx, deps)
+}
+
+type dependencyMetadata struct {
+	depID, depType string
+}
+
+func scanDependencyMetadataRows(rows *sql.Rows) ([]dependencyMetadata, error) {
+	// Collect metadata before fetching issues so rows are closed first. This
+	// avoids connection-pool deadlock when MaxOpenConns=1 (embedded dolt).
+	defer func() { _ = rows.Close() }()
+	var deps []dependencyMetadata
 	for rows.Next() {
 		var depID, depType, createdBy string
 		var createdAt sql.NullTime
 		var metadata, threadID sql.NullString
-
 		if err := rows.Scan(&depID, &depType, &createdAt, &createdBy, &metadata, &threadID); err != nil {
-			_ = rows.Close() // Best effort cleanup on error path
 			return nil, fmt.Errorf("failed to scan dependency: %w", err)
 		}
-		deps = append(deps, depMeta{depID: depID, depType: depType})
+		deps = append(deps, dependencyMetadata{depID: depID, depType: depType})
 	}
 	if err := rows.Err(); err != nil {
-		_ = rows.Close() // Best effort cleanup on error path
 		return nil, wrapQueryError("get dependencies with metadata: rows", err)
 	}
-	_ = rows.Close() // Redundant close for safety (rows already iterated)
+	return deps, nil
+}
 
-	if len(deps) == 0 {
-		return nil, nil
-	}
-
-	// Batch-fetch all issues after rows are closed (connection released)
+func (s *DoltStore) hydrateDependencyMetadata(ctx context.Context, deps []dependencyMetadata) ([]*types.IssueWithDependencyMetadata, error) {
 	ids := make([]string, len(deps))
 	for i, d := range deps {
 		ids[i] = d.depID

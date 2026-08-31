@@ -12,10 +12,16 @@ import (
 func (s *testSuite) TestIssueUpdateRejectsInvalidCanonicalFields() {
 	created, err := s.issueUseCase().CreateIssue(s.Ctx(), domain.CreateIssueParams{
 		Issue: &types.Issue{
-			ID:        "bd-domain-invalid-update",
-			Title:     "valid incumbent",
-			IssueType: types.TypeTask,
-			Priority:  2,
+			IssueID: types.IssueID{
+				ID: "bd-domain-invalid-update",
+			},
+			IssueContent: types.IssueContent{
+				Title: "valid incumbent",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				IssueType: types.TypeTask,
+				Priority:  2,
+			},
 		},
 	}, "tester")
 	s.Require().NoError(err)
@@ -78,10 +84,16 @@ func (s *testSuite) TestIssueUpdateRejectsUnsupportedCanonicalFieldTypes() {
 		s.Run(check.name, func() {
 			created, err := s.issueUseCase().CreateIssue(s.Ctx(), domain.CreateIssueParams{
 				Issue: &types.Issue{
-					ID:        check.id,
-					Title:     "valid incumbent",
-					IssueType: types.TypeTask,
-					Priority:  2,
+					IssueID: types.IssueID{
+						ID: check.id,
+					},
+					IssueContent: types.IssueContent{
+						Title: "valid incumbent",
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						IssueType: types.TypeTask,
+						Priority:  2,
+					},
 				},
 			}, "tester")
 			s.Require().NoError(err)
@@ -120,10 +132,16 @@ func (s *testSuite) TestIssueUpdateRejectsUnsupportedCanonicalFieldTypes() {
 func (s *testSuite) TestApplyUpdateValidatesFieldsBeforeClaim() {
 	created, err := s.issueUseCase().CreateIssue(s.Ctx(), domain.CreateIssueParams{
 		Issue: &types.Issue{
-			ID:        "bd-domain-validate-before-claim",
-			Title:     "valid incumbent",
-			IssueType: types.TypeTask,
-			Priority:  2,
+			IssueID: types.IssueID{
+				ID: "bd-domain-validate-before-claim",
+			},
+			IssueContent: types.IssueContent{
+				Title: "valid incumbent",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				IssueType: types.TypeTask,
+				Priority:  2,
+			},
 		},
 	}, "tester")
 	s.Require().NoError(err)
@@ -163,10 +181,16 @@ func (s *testSuite) TestApplyUpdateValidatesFieldsBeforeClaim() {
 func (s *testSuite) TestApplyUpdateValidatesIssueTypeBeforeClaim() {
 	created, err := s.issueUseCase().CreateIssue(s.Ctx(), domain.CreateIssueParams{
 		Issue: &types.Issue{
-			ID:        "bd-domain-validate-type-before-claim",
-			Title:     "valid incumbent",
-			IssueType: types.TypeTask,
-			Priority:  2,
+			IssueID: types.IssueID{
+				ID: "bd-domain-validate-type-before-claim",
+			},
+			IssueContent: types.IssueContent{
+				Title: "valid incumbent",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				IssueType: types.TypeTask,
+				Priority:  2,
+			},
 		},
 	}, "tester")
 	s.Require().NoError(err)
@@ -215,10 +239,16 @@ func (s *testSuite) TestIssueUpdateAcceptsLegacyIssueTypeRepresentations() {
 		s.Run(check.name, func() {
 			created, err := s.issueUseCase().CreateIssue(s.Ctx(), domain.CreateIssueParams{
 				Issue: &types.Issue{
-					ID:        check.id,
-					Title:     "legacy type representation",
-					IssueType: types.TypeTask,
-					Priority:  2,
+					IssueID: types.IssueID{
+						ID: check.id,
+					},
+					IssueContent: types.IssueContent{
+						Title: "legacy type representation",
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						IssueType: types.TypeTask,
+						Priority:  2,
+					},
 				},
 			}, "tester")
 			s.Require().NoError(err)

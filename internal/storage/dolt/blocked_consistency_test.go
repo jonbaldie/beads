@@ -139,7 +139,7 @@ func TestRecomputeAllIsBlocked_CascadesThroughParentChild(t *testing.T) {
 	// bm-w blocked on open bm-x; bm-y is a child of bm-w, so bm-y inherits
 	// blocked. All maintained by the normal write path.
 	seedBlockedPair(ctx, t, store, true)
-	child := &types.Issue{ID: "bm-y", Title: "bm-y", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	child := &types.Issue{IssueID: types.IssueID{ID: "bm-y"}, IssueContent: types.IssueContent{Title: "bm-y"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := store.CreateIssue(ctx, child, "tester"); err != nil {
 		t.Fatalf("create child: %v", err)
 	}

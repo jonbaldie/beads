@@ -55,45 +55,50 @@ func (s *deleter) Delete(ctx context.Context, req issueops.DeleteRequest) (issue
 		return issueops.DeleteResult{}, err
 	}
 	req.IDs = workapi.NormalizeDeleteIDs(req.IDs)
+	if req.DryRun {
+		return s.deleteDryRun(ctx, req)
+	}
+	return s.deleteWrite(ctx, req)
+}
 
+func (s *deleter) deleteDryRun(ctx context.Context, req issueops.DeleteRequest) (issueops.DeleteResult, error) {
 	var result issueops.DeleteResult
-	run := func(tx *sql.Tx) error {
+	if err := s.store.withReadTx(ctx, func(tx *sql.Tx) error {
 		var err error
 		result, err = storeops.DeleteInTx(ctx, tx, req)
 		return err
-	}
-	if req.DryRun {
-		if err := s.store.withReadTx(ctx, run); err != nil {
-			return issueops.DeleteResult{}, err
-		}
-		return result, nil
-	}
-
-	if err := s.store.withWriteTx(ctx, func(tx *sql.Tx) error {
-		if err := run(tx); err != nil {
-			return err
-		}
-		if result.Deleted == 0 {
-			return nil
-		}
-		// Batch/off auto-commit (bd-4wamg): defer the version commit to an
-		// explicit commit point, matching doltAddAndCommitInTx.
-		if storeops.VersionCommitDeferred(ctx) {
-			return nil
-		}
-		// The same tables a sweep stages; the neighbor rewrite lands in
-		// `issues`, which is already on the list.
-		for _, table := range sweptTables {
-			_ = schema.DrainCall(ctx, tx, "CALL DOLT_ADD(?)", table)
-		}
-		msg := fmt.Sprintf("bd: delete %d issue(s)", result.Deleted)
-		if err := schema.DrainCall(ctx, tx, "CALL DOLT_COMMIT('-m', ?, '--author', ?)",
-			msg, s.store.commitAuthorString()); err != nil && !isDoltNothingToCommit(err) {
-			return fmt.Errorf("dolt commit: %w", err)
-		}
-		return nil
 	}); err != nil {
 		return issueops.DeleteResult{}, err
 	}
 	return result, nil
+}
+
+func (s *deleter) deleteWrite(ctx context.Context, req issueops.DeleteRequest) (issueops.DeleteResult, error) {
+	var result issueops.DeleteResult
+	if err := s.store.withWriteTx(ctx, func(tx *sql.Tx) error {
+		var err error
+		result, err = storeops.DeleteInTx(ctx, tx, req)
+		if err != nil {
+			return err
+		}
+		return s.commitDelete(ctx, tx, result.Deleted)
+	}); err != nil {
+		return issueops.DeleteResult{}, err
+	}
+	return result, nil
+}
+
+func (s *deleter) commitDelete(ctx context.Context, tx *sql.Tx, deleted int) error {
+	if deleted == 0 || storeops.VersionCommitDeferred(ctx) {
+		return nil
+	}
+	for _, table := range sweptTables {
+		_ = schema.DrainCall(ctx, tx, "CALL DOLT_ADD(?)", table)
+	}
+	msg := fmt.Sprintf("bd: delete %d issue(s)", deleted)
+	if err := schema.DrainCall(ctx, tx, "CALL DOLT_COMMIT('-m', ?, '--author', ?)",
+		msg, s.store.commitAuthorString()); err != nil && !isDoltNothingToCommit(err) {
+		return fmt.Errorf("dolt commit: %w", err)
+	}
+	return nil
 }

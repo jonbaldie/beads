@@ -45,7 +45,7 @@ func TestUpdateIssueIDRekeysDependencySource(t *testing.T) {
 	}
 
 	// Rename the source issue rk-old -> rk-new.
-	if err := store.UpdateIssueID(ctx, "rk-old", "rk-new", &types.Issue{ID: "rk-new", Title: "rk-new"}, "alice"); err != nil {
+	if err := store.UpdateIssueID(ctx, "rk-old", "rk-new", &types.Issue{IssueID: types.IssueID{ID: "rk-new"}, IssueContent: types.IssueContent{Title: "rk-new"}}, "alice"); err != nil {
 		t.Fatalf("UpdateIssueID: %v", err)
 	}
 

@@ -21,8 +21,8 @@ func TestAddDependencyCreatedAtUsesUTC(t *testing.T) {
 	}
 
 	for _, issue := range []*types.Issue{
-		{ID: "dep-utc-source", Title: "Source", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: "dep-utc-target", Title: "Target", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+		{IssueID: types.IssueID{ID: "dep-utc-source"}, IssueContent: types.IssueContent{Title: "Source"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "dep-utc-target"}, IssueContent: types.IssueContent{Title: "Target"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
 	} {
 		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 			t.Fatalf("create issue %s: %v", issue.ID, err)
@@ -80,11 +80,17 @@ func TestGetDependenciesWithMetadata_NoResults(t *testing.T) {
 
 	// Create an issue with no dependencies
 	issue := &types.Issue{
-		ID:        "no-deps-issue",
-		Title:     "No Dependencies",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "no-deps-issue",
+		},
+		IssueContent: types.IssueContent{
+			Title: "No Dependencies",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -113,33 +119,51 @@ func TestGetDependencyRecords(t *testing.T) {
 
 	// Create issues
 	issue := &types.Issue{
-		ID:        "records-main",
-		Title:     "Main Issue",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "records-main",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Main Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
 	}
 
 	dep1 := &types.Issue{
-		ID:        "records-dep1",
-		Title:     "Dependency 1",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "records-dep1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Dependency 1",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, dep1, "tester"); err != nil {
 		t.Fatalf("failed to create dep1: %v", err)
 	}
 
 	dep2 := &types.Issue{
-		ID:        "records-dep2",
-		Title:     "Dependency 2",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "records-dep2",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Dependency 2",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, dep2, "tester"); err != nil {
 		t.Fatalf("failed to create dep2: %v", err)
@@ -193,9 +217,9 @@ func TestGetAllDependencyRecords(t *testing.T) {
 	defer cancel()
 
 	// Create several issues with dependencies
-	issueA := &types.Issue{ID: "all-deps-a", Title: "Issue A", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
-	issueB := &types.Issue{ID: "all-deps-b", Title: "Issue B", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
-	issueC := &types.Issue{ID: "all-deps-c", Title: "Issue C", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
+	issueA := &types.Issue{IssueID: types.IssueID{ID: "all-deps-a"}, IssueContent: types.IssueContent{Title: "Issue A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}}
+	issueB := &types.Issue{IssueID: types.IssueID{ID: "all-deps-b"}, IssueContent: types.IssueContent{Title: "Issue B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}}
+	issueC := &types.Issue{IssueID: types.IssueID{ID: "all-deps-c"}, IssueContent: types.IssueContent{Title: "Issue C"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}}
 
 	for _, issue := range []*types.Issue{issueA, issueB, issueC} {
 		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
@@ -245,10 +269,10 @@ func TestGetDependencyCounts(t *testing.T) {
 	defer cancel()
 
 	// Create issues: root blocks mid1 and mid2, mid1 blocks leaf
-	root := &types.Issue{ID: "counts-root", Title: "Root", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
-	mid1 := &types.Issue{ID: "counts-mid1", Title: "Mid 1", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
-	mid2 := &types.Issue{ID: "counts-mid2", Title: "Mid 2", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
-	leaf := &types.Issue{ID: "counts-leaf", Title: "Leaf", Status: types.StatusOpen, Priority: 3, IssueType: types.TypeTask}
+	root := &types.Issue{IssueID: types.IssueID{ID: "counts-root"}, IssueContent: types.IssueContent{Title: "Root"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}}
+	mid1 := &types.Issue{IssueID: types.IssueID{ID: "counts-mid1"}, IssueContent: types.IssueContent{Title: "Mid 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
+	mid2 := &types.Issue{IssueID: types.IssueID{ID: "counts-mid2"}, IssueContent: types.IssueContent{Title: "Mid 2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
+	leaf := &types.Issue{IssueID: types.IssueID{ID: "counts-leaf"}, IssueContent: types.IssueContent{Title: "Leaf"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 3, IssueType: types.TypeTask}}
 
 	for _, issue := range []*types.Issue{root, mid1, mid2, leaf} {
 		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
@@ -329,9 +353,9 @@ func TestGetDependencyTree(t *testing.T) {
 	defer cancel()
 
 	// Create a simple tree: root -> child1, root -> child2
-	root := &types.Issue{ID: "tree-root", Title: "Root", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
-	child1 := &types.Issue{ID: "tree-child1", Title: "Child 1", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
-	child2 := &types.Issue{ID: "tree-child2", Title: "Child 2", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	root := &types.Issue{IssueID: types.IssueID{ID: "tree-root"}, IssueContent: types.IssueContent{Title: "Root"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}}
+	child1 := &types.Issue{IssueID: types.IssueID{ID: "tree-child1"}, IssueContent: types.IssueContent{Title: "Child 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
+	child2 := &types.Issue{IssueID: types.IssueID{ID: "tree-child2"}, IssueContent: types.IssueContent{Title: "Child 2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 
 	for _, issue := range []*types.Issue{root, child1, child2} {
 		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
@@ -376,9 +400,9 @@ func TestGetDependencyTree_Reverse(t *testing.T) {
 	defer cancel()
 
 	// Create chain: leaf -> mid -> root
-	root := &types.Issue{ID: "rtree-root", Title: "Root", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
-	mid := &types.Issue{ID: "rtree-mid", Title: "Mid", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
-	leaf := &types.Issue{ID: "rtree-leaf", Title: "Leaf", Status: types.StatusOpen, Priority: 3, IssueType: types.TypeTask}
+	root := &types.Issue{IssueID: types.IssueID{ID: "rtree-root"}, IssueContent: types.IssueContent{Title: "Root"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}}
+	mid := &types.Issue{IssueID: types.IssueID{ID: "rtree-mid"}, IssueContent: types.IssueContent{Title: "Mid"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
+	leaf := &types.Issue{IssueID: types.IssueID{ID: "rtree-leaf"}, IssueContent: types.IssueContent{Title: "Leaf"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 3, IssueType: types.TypeTask}}
 
 	for _, issue := range []*types.Issue{root, mid, leaf} {
 		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
@@ -421,9 +445,9 @@ func TestDetectCycles_NoCycle(t *testing.T) {
 	defer cancel()
 
 	// Create linear chain: A -> B -> C
-	issueA := &types.Issue{ID: "nocycle-a", Title: "A", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
-	issueB := &types.Issue{ID: "nocycle-b", Title: "B", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
-	issueC := &types.Issue{ID: "nocycle-c", Title: "C", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
+	issueA := &types.Issue{IssueID: types.IssueID{ID: "nocycle-a"}, IssueContent: types.IssueContent{Title: "A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}}
+	issueB := &types.Issue{IssueID: types.IssueID{ID: "nocycle-b"}, IssueContent: types.IssueContent{Title: "B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}}
+	issueC := &types.Issue{IssueID: types.IssueID{ID: "nocycle-c"}, IssueContent: types.IssueContent{Title: "C"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}}
 
 	for _, issue := range []*types.Issue{issueA, issueB, issueC} {
 		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
@@ -460,9 +484,9 @@ func TestDetectCycles_WithCycle(t *testing.T) {
 	defer cancel()
 
 	// Create cycle: A -> B -> C -> A
-	issueA := &types.Issue{ID: "cycle-a", Title: "A", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
-	issueB := &types.Issue{ID: "cycle-b", Title: "B", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
-	issueC := &types.Issue{ID: "cycle-c", Title: "C", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
+	issueA := &types.Issue{IssueID: types.IssueID{ID: "cycle-a"}, IssueContent: types.IssueContent{Title: "A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}}
+	issueB := &types.Issue{IssueID: types.IssueID{ID: "cycle-b"}, IssueContent: types.IssueContent{Title: "B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}}
+	issueC := &types.Issue{IssueID: types.IssueID{ID: "cycle-c"}, IssueContent: types.IssueContent{Title: "C"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}}
 
 	for _, issue := range []*types.Issue{issueA, issueB, issueC} {
 		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
@@ -510,32 +534,56 @@ func TestGetNewlyUnblockedByClose(t *testing.T) {
 
 	// Create blocker and two blocked issues
 	blocker := &types.Issue{
-		ID:        "unblock-blocker",
-		Title:     "Blocker",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "unblock-blocker",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocker",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	blockedOnly := &types.Issue{
-		ID:        "unblock-only",
-		Title:     "Blocked Only by One",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "unblock-only",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocked Only by One",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	blockedMultiple := &types.Issue{
-		ID:        "unblock-multi",
-		Title:     "Blocked by Multiple",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "unblock-multi",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocked by Multiple",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	otherBlocker := &types.Issue{
-		ID:        "unblock-other",
-		Title:     "Other Blocker",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "unblock-other",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Other Blocker",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, issue := range []*types.Issue{blocker, blockedOnly, blockedMultiple, otherBlocker} {
@@ -582,18 +630,30 @@ func TestGetNewlyUnblockedByClose_ClosedDependent(t *testing.T) {
 
 	// Create issues where the dependent is already closed
 	blocker := &types.Issue{
-		ID:        "unblock-closed-blocker",
-		Title:     "Blocker",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "unblock-closed-blocker",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocker",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	closedDependent := &types.Issue{
-		ID:        "unblock-closed-dep",
-		Title:     "Already Closed",
-		Status:    types.StatusClosed,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "unblock-closed-dep",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Already Closed",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, issue := range []*types.Issue{blocker, closedDependent} {
@@ -643,18 +703,30 @@ func TestIsBlocked_CustomStatusBlocker(t *testing.T) {
 
 	// Create a blocker with custom status 'review'
 	blocker := &types.Issue{
-		ID:        "custom-blocker",
-		Title:     "Blocker in Review",
-		Status:    types.Status("review"),
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "custom-blocker",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocker in Review",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.Status("review"),
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	blocked := &types.Issue{
-		ID:        "custom-blocked",
-		Title:     "Blocked by Custom Status",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "custom-blocked",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocked by Custom Status",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	for _, issue := range []*types.Issue{blocker, blocked} {
 		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
@@ -696,18 +768,30 @@ func TestGetNewlyUnblockedByClose_CustomStatusCandidate(t *testing.T) {
 	}
 
 	blocker := &types.Issue{
-		ID:        "cs-unblock-blocker",
-		Title:     "Blocker",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "cs-unblock-blocker",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocker",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	candidate := &types.Issue{
-		ID:        "cs-unblock-candidate",
-		Title:     "Custom Status Candidate",
-		Status:    types.Status("awaiting_review"),
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "cs-unblock-candidate",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Custom Status Candidate",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.Status("awaiting_review"),
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	for _, issue := range []*types.Issue{blocker, candidate} {
 		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
@@ -747,11 +831,17 @@ func TestAddDependency_ExternalReference(t *testing.T) {
 
 	// Create a local issue
 	issue := &types.Issue{
-		ID:        "ext-dep-issue",
-		Title:     "Issue with External Dependency",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "ext-dep-issue",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Issue with External Dependency",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -793,11 +883,17 @@ func TestAddDependency_MultipleExternalReferences(t *testing.T) {
 
 	// Create a convoy-like issue
 	convoy := &types.Issue{
-		ID:        "convoy-test",
-		Title:     "Test Convoy",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "convoy-test",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Test Convoy",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
 	}
 	if err := store.CreateIssue(ctx, convoy, "tester"); err != nil {
 		t.Fatalf("failed to create convoy: %v", err)
@@ -870,11 +966,17 @@ func TestAddDependency_CrossPrefix_SkipsTargetExistence(t *testing.T) {
 
 	// Create a source issue with prefix "test-"
 	source := &types.Issue{
-		ID:        "test-source",
-		Title:     "Source Issue",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-source",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Source Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, source, "tester"); err != nil {
 		t.Fatalf("failed to create source issue: %v", err)
@@ -918,11 +1020,17 @@ func TestAddDependency_SamePrefix_RequiresTargetExistence(t *testing.T) {
 
 	// Create a source issue
 	source := &types.Issue{
-		ID:        "test-source2",
-		Title:     "Source Issue",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-source2",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Source Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, source, "tester"); err != nil {
 		t.Fatalf("failed to create source issue: %v", err)
@@ -960,18 +1068,30 @@ func TestAddDependency_BlocksCrossType_TaskBlocksEpic_Unrelated(t *testing.T) {
 	defer cancel()
 
 	task := &types.Issue{
-		ID:        "ct-task-1",
-		Title:     "A task",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "ct-task-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "A task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	epic := &types.Issue{
-		ID:        "ct-epic-1",
-		Title:     "An epic",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "ct-epic-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "An epic",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
 	}
 	if err := store.CreateIssue(ctx, task, "tester"); err != nil {
 		t.Fatalf("failed to create task: %v", err)
@@ -999,18 +1119,30 @@ func TestAddDependency_BlocksCrossType_EpicBlocksTask_Unrelated(t *testing.T) {
 	defer cancel()
 
 	task := &types.Issue{
-		ID:        "ct-task-2",
-		Title:     "A task",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "ct-task-2",
+		},
+		IssueContent: types.IssueContent{
+			Title: "A task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	epic := &types.Issue{
-		ID:        "ct-epic-2",
-		Title:     "An epic",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "ct-epic-2",
+		},
+		IssueContent: types.IssueContent{
+			Title: "An epic",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
 	}
 	if err := store.CreateIssue(ctx, task, "tester"); err != nil {
 		t.Fatalf("failed to create task: %v", err)
@@ -1038,18 +1170,30 @@ func TestAddDependency_Blocks_ChildBlocksParent_Rejected(t *testing.T) {
 	defer cancel()
 
 	epic := &types.Issue{
-		ID:        "sh-epic-1",
-		Title:     "Parent epic",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "sh-epic-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Parent epic",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
 	}
 	task := &types.Issue{
-		ID:        "sh-task-1",
-		Title:     "Child task",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "sh-task-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Child task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, epic, "tester"); err != nil {
 		t.Fatalf("failed to create epic: %v", err)
@@ -1089,18 +1233,30 @@ func TestAddDependency_Blocks_ParentBlocksChild_Rejected(t *testing.T) {
 	defer cancel()
 
 	epic := &types.Issue{
-		ID:        "sh-epic-2",
-		Title:     "Parent epic",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "sh-epic-2",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Parent epic",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
 	}
 	task := &types.Issue{
-		ID:        "sh-task-2",
-		Title:     "Child task",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "sh-task-2",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Child task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, epic, "tester"); err != nil {
 		t.Fatalf("failed to create epic: %v", err)
@@ -1144,9 +1300,9 @@ func TestAddDependency_Blocks_AncestorBlocksDescendant_Rejected(t *testing.T) {
 	ctx, cancel := testContext(t)
 	defer cancel()
 
-	grandparent := &types.Issue{ID: "sh-gp-1", Title: "Grandparent", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic}
-	parent := &types.Issue{ID: "sh-p-1", Title: "Parent", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic}
-	child := &types.Issue{ID: "sh-c-1", Title: "Child", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
+	grandparent := &types.Issue{IssueID: types.IssueID{ID: "sh-gp-1"}, IssueContent: types.IssueContent{Title: "Grandparent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic}}
+	parent := &types.Issue{IssueID: types.IssueID{ID: "sh-p-1"}, IssueContent: types.IssueContent{Title: "Parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic}}
+	child := &types.Issue{IssueID: types.IssueID{ID: "sh-c-1"}, IssueContent: types.IssueContent{Title: "Child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}}
 	for _, iss := range []*types.Issue{grandparent, parent, child} {
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("create %s: %v", iss.ID, err)
@@ -1190,18 +1346,30 @@ func TestAddDependency_Blocks_DeepCrossTypeChain(t *testing.T) {
 	const levels = 4
 	for i := 1; i <= levels; i++ {
 		epic := &types.Issue{
-			ID:        fmt.Sprintf("dc-e%d", i),
-			Title:     fmt.Sprintf("Epic %d", i),
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeEpic,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("dc-e%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Epic %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeEpic,
+			},
 		}
 		task := &types.Issue{
-			ID:        fmt.Sprintf("dc-t%d", i),
-			Title:     fmt.Sprintf("Task %d", i),
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("dc-t%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Task %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, epic, "tester"); err != nil {
 			t.Fatalf("create epic %d: %v", i, err)
@@ -1254,10 +1422,10 @@ func TestAddDependency_CombinedGraphCycle_BlocksClosesLoop(t *testing.T) {
 	defer cancel()
 
 	issues := []*types.Issue{
-		{ID: "cgc-e1", Title: "Epic 1", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic},
-		{ID: "cgc-e2", Title: "Epic 2", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic},
-		{ID: "cgc-t0", Title: "Task 0", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
-		{ID: "cgc-t1", Title: "Task 1", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
+		{IssueID: types.IssueID{ID: "cgc-e1"}, IssueContent: types.IssueContent{Title: "Epic 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic}},
+		{IssueID: types.IssueID{ID: "cgc-e2"}, IssueContent: types.IssueContent{Title: "Epic 2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic}},
+		{IssueID: types.IssueID{ID: "cgc-t0"}, IssueContent: types.IssueContent{Title: "Task 0"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "cgc-t1"}, IssueContent: types.IssueContent{Title: "Task 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
 	}
 	for _, iss := range issues {
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
@@ -1300,10 +1468,10 @@ func TestAddDependency_CombinedGraphCycle_ParentChildClosesLoop(t *testing.T) {
 	defer cancel()
 
 	issues := []*types.Issue{
-		{ID: "cgp-e1", Title: "Epic 1", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic},
-		{ID: "cgp-e2", Title: "Epic 2", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic},
-		{ID: "cgp-t0", Title: "Task 0", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
-		{ID: "cgp-t1", Title: "Task 1", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
+		{IssueID: types.IssueID{ID: "cgp-e1"}, IssueContent: types.IssueContent{Title: "Epic 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic}},
+		{IssueID: types.IssueID{ID: "cgp-e2"}, IssueContent: types.IssueContent{Title: "Epic 2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic}},
+		{IssueID: types.IssueID{ID: "cgp-t0"}, IssueContent: types.IssueContent{Title: "Task 0"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "cgp-t1"}, IssueContent: types.IssueContent{Title: "Task 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
 	}
 	for _, iss := range issues {
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
@@ -1343,18 +1511,30 @@ func TestAddDependency_BlocksSameType_TaskBlocksTask(t *testing.T) {
 	defer cancel()
 
 	task1 := &types.Issue{
-		ID:        "ct-task-3a",
-		Title:     "Task A",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "ct-task-3a",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Task A",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	task2 := &types.Issue{
-		ID:        "ct-task-3b",
-		Title:     "Task B",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "ct-task-3b",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Task B",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, task1, "tester"); err != nil {
 		t.Fatalf("failed to create task1: %v", err)
@@ -1382,18 +1562,30 @@ func TestAddDependency_BlocksSameType_EpicBlocksEpic(t *testing.T) {
 	defer cancel()
 
 	epic1 := &types.Issue{
-		ID:        "ct-epic-4a",
-		Title:     "Epic A",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "ct-epic-4a",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Epic A",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
 	}
 	epic2 := &types.Issue{
-		ID:        "ct-epic-4b",
-		Title:     "Epic B",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "ct-epic-4b",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Epic B",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
 	}
 	if err := store.CreateIssue(ctx, epic1, "tester"); err != nil {
 		t.Fatalf("failed to create epic1: %v", err)
@@ -1421,18 +1613,30 @@ func TestAddDependency_ParentChild_CrossType_Allowed(t *testing.T) {
 	defer cancel()
 
 	task := &types.Issue{
-		ID:        "ct-task-5",
-		Title:     "A task",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "ct-task-5",
+		},
+		IssueContent: types.IssueContent{
+			Title: "A task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	epic := &types.Issue{
-		ID:        "ct-epic-5",
-		Title:     "An epic",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "ct-epic-5",
+		},
+		IssueContent: types.IssueContent{
+			Title: "An epic",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
 	}
 	if err := store.CreateIssue(ctx, task, "tester"); err != nil {
 		t.Fatalf("failed to create task: %v", err)
@@ -1464,11 +1668,17 @@ func TestAddDependency_SelfDependencyRejected(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "self-dep-issue",
-		Title:     "Self Dependency Test",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "self-dep-issue",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Self Dependency Test",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -1501,8 +1711,8 @@ func TestDetectCycles_ConditionalBlocksCycle(t *testing.T) {
 	defer cancel()
 
 	// Conditional-blocks should also be detected as cycles
-	issueA := &types.Issue{ID: "cb-cycle-a", Title: "A", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
-	issueB := &types.Issue{ID: "cb-cycle-b", Title: "B", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
+	issueA := &types.Issue{IssueID: types.IssueID{ID: "cb-cycle-a"}, IssueContent: types.IssueContent{Title: "A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}}
+	issueB := &types.Issue{IssueID: types.IssueID{ID: "cb-cycle-b"}, IssueContent: types.IssueContent{Title: "B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}}
 
 	for _, issue := range []*types.Issue{issueA, issueB} {
 		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
@@ -1535,9 +1745,9 @@ func TestDetectCycles_MixedBlocksAndConditionalBlocks(t *testing.T) {
 	defer cancel()
 
 	// Mixed: A blocks B, B conditional-blocks C, C blocks A = cycle
-	issueA := &types.Issue{ID: "mixed-cycle-a", Title: "A", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
-	issueB := &types.Issue{ID: "mixed-cycle-b", Title: "B", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
-	issueC := &types.Issue{ID: "mixed-cycle-c", Title: "C", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
+	issueA := &types.Issue{IssueID: types.IssueID{ID: "mixed-cycle-a"}, IssueContent: types.IssueContent{Title: "A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}}
+	issueB := &types.Issue{IssueID: types.IssueID{ID: "mixed-cycle-b"}, IssueContent: types.IssueContent{Title: "B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}}
+	issueC := &types.Issue{IssueID: types.IssueID{ID: "mixed-cycle-c"}, IssueContent: types.IssueContent{Title: "C"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}}
 
 	for _, issue := range []*types.Issue{issueA, issueB, issueC} {
 		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
@@ -1576,11 +1786,17 @@ func TestAddDependencyCycleCheckTerminatesOnExistingCycleAndDiamond(t *testing.T
 	ids := []string{"union-term-a", "union-term-b", "union-term-c", "union-term-d", "union-term-e"}
 	for _, id := range ids {
 		if err := store.CreateIssue(ctx, &types.Issue{
-			ID:        id,
-			Title:     id,
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
 		}, "tester"); err != nil {
 			t.Fatalf("create issue %s: %v", id, err)
 		}
@@ -1622,8 +1838,8 @@ func TestDetectCycles_WaitsForDoesNotCreateCycle(t *testing.T) {
 	defer cancel()
 
 	// waits-for should NOT trigger cycle detection (gate semantics)
-	issueA := &types.Issue{ID: "wf-nocycle-a", Title: "A", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
-	issueB := &types.Issue{ID: "wf-nocycle-b", Title: "B", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
+	issueA := &types.Issue{IssueID: types.IssueID{ID: "wf-nocycle-a"}, IssueContent: types.IssueContent{Title: "A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}}
+	issueB := &types.Issue{IssueID: types.IssueID{ID: "wf-nocycle-b"}, IssueContent: types.IssueContent{Title: "B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}}
 
 	for _, issue := range []*types.Issue{issueA, issueB} {
 		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
@@ -1661,11 +1877,17 @@ func TestAddDependency_SelfDependencyAllTypes(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "self-dep-all",
-		Title:     "Self Dep All Types",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "self-dep-all",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Self Dep All Types",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -1704,8 +1926,8 @@ func TestGetReadyWork_WithConditionalBlocks(t *testing.T) {
 	defer cancel()
 
 	// A conditional-blocks B: B should be blocked, A should be ready
-	issueA := &types.Issue{ID: "cb-ready-a", Title: "Blocker", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
-	issueB := &types.Issue{ID: "cb-ready-b", Title: "Blocked", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	issueA := &types.Issue{IssueID: types.IssueID{ID: "cb-ready-a"}, IssueContent: types.IssueContent{Title: "Blocker"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}}
+	issueB := &types.Issue{IssueID: types.IssueID{ID: "cb-ready-b"}, IssueContent: types.IssueContent{Title: "Blocked"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 
 	for _, issue := range []*types.Issue{issueA, issueB} {
 		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
@@ -1718,7 +1940,7 @@ func TestGetReadyWork_WithConditionalBlocks(t *testing.T) {
 		t.Fatalf("failed to add dependency: %v", err)
 	}
 
-	readyIssues, err := store.GetReadyWork(ctx, types.WorkFilter{Status: types.StatusOpen})
+	readyIssues, err := store.GetReadyWork(ctx, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Status: types.StatusOpen}})
 	if err != nil {
 		t.Fatalf("GetReadyWork failed: %v", err)
 	}
@@ -1744,8 +1966,8 @@ func TestGetBlockedIssues_WithBlockerDetails(t *testing.T) {
 	ctx, cancel := testContext(t)
 	defer cancel()
 
-	blocker := &types.Issue{ID: "blk-detail-a", Title: "The Blocker", Status: types.StatusOpen, Priority: 0, IssueType: types.TypeBug}
-	blocked := &types.Issue{ID: "blk-detail-b", Title: "Waiting on fix", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	blocker := &types.Issue{IssueID: types.IssueID{ID: "blk-detail-a"}, IssueContent: types.IssueContent{Title: "The Blocker"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 0, IssueType: types.TypeBug}}
+	blocked := &types.Issue{IssueID: types.IssueID{ID: "blk-detail-b"}, IssueContent: types.IssueContent{Title: "Waiting on fix"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 
 	for _, issue := range []*types.Issue{blocker, blocked} {
 		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {

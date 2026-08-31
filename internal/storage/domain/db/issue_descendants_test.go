@@ -64,7 +64,7 @@ func (s *testSuite) TestGetDescendantsDottedOrphans() {
 	}, ids, "dotted-ID orphans must be walked like classic's ParentID fallback; "+
 		"bd-tree-r.9 has a parent-child edge elsewhere and must stay out")
 
-	skip := types.IssueFilter{SkipWisps: true}
+	skip := types.IssueFilter{IssueFilterHydrate: types.IssueFilterHydrate{SkipWisps: true}}
 	got, err = r.GetDescendants(s.Ctx(), "bd-tree-r", skip)
 	s.Require().NoError(err)
 	ids = ids[:0]
@@ -108,7 +108,7 @@ func (s *testSuite) TestGetDescendantsFilteredByStatus() {
 	}
 
 	st := types.StatusOpen
-	got, err := r.GetDescendants(s.Ctx(), "bd-f-r", types.IssueFilter{Status: &st})
+	got, err := r.GetDescendants(s.Ctx(), "bd-f-r", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Status: &st}})
 	s.Require().NoError(err) // dolt analyzer bug surfaces here without the named-CTE hoist
 
 	ids := make([]string, len(got))

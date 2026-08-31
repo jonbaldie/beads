@@ -24,54 +24,84 @@ func TestCreateWispValidation(t *testing.T) {
 		{
 			name: "valid wisp creates successfully",
 			issue: &types.Issue{
-				Title:     "a valid wisp",
-				Status:    types.StatusOpen,
-				Priority:  2,
-				IssueType: types.TypeTask,
-				Ephemeral: true,
+				IssueContent: types.IssueContent{
+					Title: "a valid wisp",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  2,
+					IssueType: types.TypeTask,
+				},
+				IssueWisp: types.IssueWisp{
+					Ephemeral: true,
+				},
 			},
 		},
 		{
 			name: "empty title rejected",
 			issue: &types.Issue{
-				Title:     "",
-				Status:    types.StatusOpen,
-				Priority:  2,
-				IssueType: types.TypeTask,
-				Ephemeral: true,
+				IssueContent: types.IssueContent{
+					Title: "",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  2,
+					IssueType: types.TypeTask,
+				},
+				IssueWisp: types.IssueWisp{
+					Ephemeral: true,
+				},
 			},
 			wantErr: "title is required",
 		},
 		{
 			name: "invalid status rejected",
 			issue: &types.Issue{
-				Title:     "bad status wisp",
-				Status:    types.Status("bogus_status"),
-				Priority:  2,
-				IssueType: types.TypeTask,
-				Ephemeral: true,
+				IssueContent: types.IssueContent{
+					Title: "bad status wisp",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.Status("bogus_status"),
+					Priority:  2,
+					IssueType: types.TypeTask,
+				},
+				IssueWisp: types.IssueWisp{
+					Ephemeral: true,
+				},
 			},
 			wantErr: "invalid status",
 		},
 		{
 			name: "invalid type rejected",
 			issue: &types.Issue{
-				Title:     "bad type wisp",
-				Status:    types.StatusOpen,
-				Priority:  2,
-				IssueType: types.IssueType("nonexistent_type"),
-				Ephemeral: true,
+				IssueContent: types.IssueContent{
+					Title: "bad type wisp",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  2,
+					IssueType: types.IssueType("nonexistent_type"),
+				},
+				IssueWisp: types.IssueWisp{
+					Ephemeral: true,
+				},
 			},
 			wantErr: "invalid issue type",
 		},
 		{
 			name: "event type accepted without custom config",
 			issue: &types.Issue{
-				Title:     "wisp event",
-				Status:    types.StatusOpen,
-				Priority:  4,
-				IssueType: types.TypeEvent,
-				Ephemeral: true,
+				IssueContent: types.IssueContent{
+					Title: "wisp event",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  4,
+					IssueType: types.TypeEvent,
+				},
+				IssueWisp: types.IssueWisp{
+					Ephemeral: true,
+				},
 			},
 		},
 	}

@@ -48,11 +48,17 @@ func readLeaseState(t *testing.T, ctx context.Context, store *DoltStore, id stri
 func seedClaimedIssue(t *testing.T, ctx context.Context, store *DoltStore, id, owner string, ttl time.Duration) {
 	t.Helper()
 	issue := &types.Issue{
-		ID:        id,
-		Title:     "lease " + id,
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: "lease " + id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "seeder"); err != nil {
 		t.Fatalf("seed %s: %v", id, err)
@@ -256,11 +262,17 @@ func TestBareUpdateClaimDoesNotArmLease(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "lease-handdole",
-		Title:     "hand-dole claim",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "lease-handdole",
+		},
+		IssueContent: types.IssueContent{
+			Title: "hand-dole claim",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "seeder"); err != nil {
 		t.Fatalf("seed: %v", err)

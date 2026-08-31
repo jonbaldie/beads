@@ -499,9 +499,9 @@ func TestEnsureCredentialKeyAlreadyInitialized(t *testing.T) {
 	tmpDir := t.TempDir()
 	key := []byte("0123456789abcdef0123456789abcdef")
 	store := &DoltStore{
-		dbPath:        filepath.Join(tmpDir, "dolt"),
-		beadsDir:      tmpDir,
-		credentialKey: append([]byte(nil), key...),
+		dbPath:                 filepath.Join(tmpDir, "dolt"),
+		beadsDir:               tmpDir,
+		doltStoreIdentityState: doltStoreIdentityState{credentialKey: append([]byte(nil), key...)},
 	}
 
 	if err := store.ensureCredentialKey(t.Context()); err != nil {
@@ -704,13 +704,19 @@ func TestFederationPeerCredentialLifecycleLazyKeyInit(t *testing.T) {
 	t.Cleanup(func() { dropTestDatabase(t, testServerPort, dbName) })
 
 	store, err := New(ctx, &Config{
-		Path:            filepath.Join(beadsDir, "dolt"),
-		BeadsDir:        beadsDir,
-		ServerHost:      "127.0.0.1",
-		ServerPort:      testServerPort,
-		Database:        dbName,
-		MaxOpenConns:    1,
-		CreateIfMissing: true,
+		Path:     filepath.Join(beadsDir, "dolt"),
+		BeadsDir: beadsDir,
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: testServerPort,
+		},
+		Database: dbName,
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 1,
+		},
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -765,12 +771,18 @@ func openCloudAuthTestStore(t *testing.T, dbSuffix string) *DoltStore {
 	t.Cleanup(func() { dropTestDatabase(t, testServerPort, dbName) })
 
 	store, err := New(ctx, &Config{
-		Path:            filepath.Join(t.TempDir(), "dolt"),
-		ServerHost:      "127.0.0.1",
-		ServerPort:      testServerPort,
-		Database:        dbName,
-		MaxOpenConns:    1,
-		CreateIfMissing: true,
+		Path: filepath.Join(t.TempDir(), "dolt"),
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: testServerPort,
+		},
+		Database: dbName,
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 1,
+		},
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -891,7 +903,9 @@ func TestCloudAuthCLIRoutingStructural(t *testing.T) {
 	t.Run("embedded mode", func(t *testing.T) {
 		// serverMode=false short-circuits before any DB access, so no real
 		// store is required for this case.
-		store := &DoltStore{serverMode: false, remote: "origin"}
+		store := &DoltStore{
+			doltStoreVersionControlState: doltStoreVersionControlState{serverMode: false, remote: "origin"},
+		}
 		t.Setenv("AZURE_STORAGE_ACCOUNT", "myaccount")
 		if store.shouldUseCLIForCloudAuth(context.Background(), store.remote) {
 			t.Error("expected false in embedded mode")

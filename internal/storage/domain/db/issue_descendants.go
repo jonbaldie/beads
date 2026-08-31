@@ -23,6 +23,11 @@ type predBundle struct {
 	args       []any
 }
 
+type issueSearchDescendantRepository struct {
+	*issueRepositoryCore
+	hydrator *issueSearchHydrator
+}
+
 func buildDescendantsPred(table, alias, cteName string, clauses []string, args []any) predBundle {
 	if len(clauses) == 0 {
 		return predBundle{}
@@ -35,7 +40,24 @@ func buildDescendantsPred(table, alias, cteName string, clauses []string, args [
 	}
 }
 
-func (r *issueSQLRepositoryImpl) GetDescendants(ctx context.Context, rootID string, filter types.IssueFilter) ([]*types.Issue, error) {
+func (r *issueSearchDescendantRepository) GetDescendants(ctx context.Context, rootID string, filter types.IssueFilter) ([]*types.Issue, error) {
+	plan, err := r.prepareDescendantQuery(ctx, rootID, filter)
+	if err != nil {
+		return nil, err
+	}
+	page, err := r.queryDescendantPage(ctx, plan)
+	if err != nil {
+		return nil, err
+	}
+	return r.hydrateDescendantPage(ctx, page, filter)
+}
+
+type descendantQueryPlan struct {
+	cte  string
+	args []any
+}
+
+func (r *issueSearchDescendantRepository) prepareDescendantQuery(ctx context.Context, rootID string, filter types.IssueFilter) (descendantQueryPlan, error) {
 	levelFilter := filter
 	levelFilter.ParentID = nil
 	levelFilter.Limit = 0
@@ -43,20 +65,12 @@ func (r *issueSQLRepositoryImpl) GetDescendants(ctx context.Context, rootID stri
 
 	issueWhereClauses, issueArgs, err := buildIssueFilterClauses("", levelFilter, issuesFilterTables)
 	if err != nil {
-		return nil, fmt.Errorf("descendants: issues filter: %w", err)
+		return descendantQueryPlan{}, fmt.Errorf("descendants: issues filter: %w", err)
 	}
 
-	wispDepsExist, err := r.optionalTableExists(ctx, "wisp_dependencies")
+	walkWisps, err := r.shouldWalkDescendantWisps(ctx, filter)
 	if err != nil {
-		return nil, fmt.Errorf("descendants: wisp_dependencies probe: %w", err)
-	}
-	walkWisps := wispDepsExist && !filter.SkipWisps
-	if walkWisps {
-		empty, probeErr := r.wispsTableEmptyOrMissing(ctx)
-		if probeErr != nil {
-			return nil, fmt.Errorf("descendants: wisps table probe: %w", probeErr)
-		}
-		walkWisps = !empty
+		return descendantQueryPlan{}, err
 	}
 
 	var wispWhereClauses []string
@@ -64,7 +78,7 @@ func (r *issueSQLRepositoryImpl) GetDescendants(ctx context.Context, rootID stri
 	if walkWisps {
 		wispWhereClauses, wispArgs, err = buildIssueFilterClauses("", levelFilter, wispsFilterTables)
 		if err != nil {
-			return nil, fmt.Errorf("descendants: wisps filter: %w", err)
+			return descendantQueryPlan{}, fmt.Errorf("descendants: wisps filter: %w", err)
 		}
 	}
 
@@ -75,24 +89,48 @@ func (r *issueSQLRepositoryImpl) GetDescendants(ctx context.Context, rootID stri
 	}
 
 	cte, allArgs := buildDescendantsCTE(rootID, walkWisps, issuePred, wispPred)
+	return descendantQueryPlan{cte: cte, args: allArgs}, nil
+}
 
-	rows, err := r.runner.QueryContext(ctx, cte, allArgs...)
+func (r *issueSearchDescendantRepository) shouldWalkDescendantWisps(ctx context.Context, filter types.IssueFilter) (bool, error) {
+	if filter.SkipWisps {
+		return false, nil
+	}
+	wispDepsExist, err := optionalTableExists(ctx, r.issueRepositoryCore.runner, "wisp_dependencies")
 	if err != nil {
-		return nil, fmt.Errorf("descendants: query: %w", err)
+		return false, fmt.Errorf("descendants: wisp_dependencies probe: %w", err)
+	}
+	if !wispDepsExist {
+		return false, nil
+	}
+	empty, err := wispsTableEmptyOrMissing(ctx, r.issueRepositoryCore.runner)
+	if err != nil {
+		return false, fmt.Errorf("descendants: wisps table probe: %w", err)
+	}
+	return !empty, nil
+}
+
+func (r *issueSearchDescendantRepository) queryDescendantPage(ctx context.Context, plan descendantQueryPlan) (idSrcPage, error) {
+	rows, err := r.runner.QueryContext(ctx, plan.cte, plan.args...)
+	if err != nil {
+		return idSrcPage{}, fmt.Errorf("descendants: query: %w", err)
 	}
 	page, err := scanIDSrcPage(rows)
 	if err != nil {
-		return nil, fmt.Errorf("descendants: %w", err)
+		return idSrcPage{}, fmt.Errorf("descendants: %w", err)
 	}
+	return page, nil
+}
 
-	issuesByID, err := r.fetchIssuesByIDs(ctx, page.issueIDs, issuesFilterTables, filter)
+func (r *issueSearchDescendantRepository) hydrateDescendantPage(ctx context.Context, page idSrcPage, filter types.IssueFilter) ([]*types.Issue, error) {
+	issuesByID, err := r.hydrator.fetchIssuesByIDs(ctx, page.issueIDs, issuesFilterTables, filter)
 	if err != nil {
 		return nil, fmt.Errorf("descendants: hydrate issues: %w", err)
 	}
 
 	var wispsByID map[string]*types.Issue
 	if len(page.wispIDs) > 0 {
-		wispsByID, err = r.fetchIssuesByIDs(ctx, page.wispIDs, wispsFilterTables, filter)
+		wispsByID, err = r.hydrator.fetchIssuesByIDs(ctx, page.wispIDs, wispsFilterTables, filter)
 		if err != nil && !dberrors.IsTableNotExist(err) {
 			return nil, fmt.Errorf("descendants: hydrate wisps: %w", err)
 		}

@@ -43,10 +43,8 @@ func newTransactionPhaseFixture(t *testing.T) (*DoltStore, *sql.Conn, *doltTrans
 		t.Fatalf("begin ignored sqlmock transaction: %v", err)
 	}
 
-	return &DoltStore{}, regularConn, &doltTransaction{
-		regularTx: regularTx,
-		ignoredTx: ignoredTx,
-	}, regularMock, ignoredMock
+	tx := newDoltTransaction(regularTx, ignoredTx, nil)
+	return &DoltStore{}, regularConn, tx, regularMock, ignoredMock
 }
 
 func requireTransactionPhaseMocks(t *testing.T, regularMock, ignoredMock sqlmock.Sqlmock) {
@@ -61,7 +59,7 @@ func requireTransactionPhaseMocks(t *testing.T, regularMock, ignoredMock sqlmock
 
 func TestRunInTransactionStageFailureAfterRegularCommitIsIndeterminateAndNotReplayed(t *testing.T) {
 	store, conn, tx, regularMock, ignoredMock := newTransactionPhaseFixture(t)
-	tx.dirty.MarkDirty("issues")
+	tx.resources.dirty.MarkDirty("issues")
 	regularMock.ExpectCommit()
 	regularMock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM dolt_status s").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))

@@ -94,7 +94,7 @@ func (s *testSuite) ucClaimReadyFilter() {
 	s.Require().NoError(r.Insert(s.Ctx(), high, "tester", domain.InsertIssueOpts{}))
 
 	p := 1
-	res, err := uc.ClaimReadyIssue(s.Ctx(), types.WorkFilter{Priority: &p}, "alice")
+	res, err := uc.ClaimReadyIssue(s.Ctx(), types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Priority: &p}}, "alice")
 	s.Require().NoError(err)
 	s.Require().True(res.Claimed)
 	s.Equal("bd-uccr-hi", res.Issue.ID, "UC must pass the filter through to the repo")
@@ -175,7 +175,7 @@ func (s *testSuite) ucBlockedParentFilter() {
 		newDep("bd-ucblp-out", "bd-ucblp-blocker", types.DepBlocks), "tester", domain.DepInsertOpts{}))
 
 	pid := "bd-ucblp-parent"
-	out, err := uc.GetBlockedIssues(s.Ctx(), types.WorkFilter{ParentID: &pid})
+	out, err := uc.GetBlockedIssues(s.Ctx(), types.WorkFilter{WorkFilterCore: types.WorkFilterCore{ParentID: &pid}})
 	s.Require().NoError(err)
 	ids := blockedIDs(out)
 	s.Contains(ids, "bd-ucblp-parent.1")
@@ -298,7 +298,7 @@ func (s *testSuite) ucReadyWorkPaginationRoundTrip() {
 		s.Require().NoError(r.Insert(s.Ctx(), iss, "tester", domain.InsertIssueOpts{}))
 		s.Require().NoError(labelRepo.Insert(s.Ctx(), id, isoLabel, "tester", domain.LabelOpts{}))
 	}
-	base := types.WorkFilter{Labels: []string{isoLabel}, SortPolicy: types.SortPolicyPriority}
+	base := types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Labels: []string{isoLabel}, SortPolicy: types.SortPolicyPriority}}
 
 	page, err := uc.GetReadyWork(s.Ctx(), withOffsetLimit(base, 2, 2))
 	s.Require().NoError(err)

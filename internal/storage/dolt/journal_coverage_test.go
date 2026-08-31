@@ -115,7 +115,7 @@ func TestEventsJournal_SeamEntryPoints(t *testing.T) {
 	enableJournalForTest(t, store)
 
 	mk := func(id string) *types.Issue {
-		return &types.Issue{ID: id, Title: "t-" + id, IssueType: types.TypeTask, Status: types.StatusOpen}
+		return &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: "t-" + id}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}}
 	}
 
 	t.Run("rename", func(t *testing.T) {
@@ -138,7 +138,7 @@ func TestEventsJournal_SeamEntryPoints(t *testing.T) {
 
 	t.Run("wisp create/update/close", func(t *testing.T) {
 		clearJournal(t, store)
-		w := &types.Issue{Title: "wisp work", IssueType: types.TypeTask, Status: types.StatusOpen, Ephemeral: true}
+		w := &types.Issue{IssueContent: types.IssueContent{Title: "wisp work"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}, IssueWisp: types.IssueWisp{Ephemeral: true}}
 		if err := store.CreateIssue(ctx, w, "actor"); err != nil {
 			t.Fatalf("create wisp: %v", err)
 		}
@@ -157,7 +157,7 @@ func TestEventsJournal_SeamEntryPoints(t *testing.T) {
 	})
 
 	t.Run("active wisp delete", func(t *testing.T) {
-		w := &types.Issue{Title: "wisp doomed", IssueType: types.TypeTask, Status: types.StatusOpen, Ephemeral: true}
+		w := &types.Issue{IssueContent: types.IssueContent{Title: "wisp doomed"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}, IssueWisp: types.IssueWisp{Ephemeral: true}}
 		if err := store.CreateIssue(ctx, w, "actor"); err != nil {
 			t.Fatalf("create wisp: %v", err)
 		}
@@ -175,7 +175,7 @@ func TestEventsJournal_SeamEntryPoints(t *testing.T) {
 		// which mint their own transaction rather than going through
 		// withWriteTx. That branch journaled nothing while the identical
 		// permanent-issue branch journaled fine — the asymmetry this covers.
-		w := &types.Issue{Title: "wisp slots", IssueType: types.TypeTask, Status: types.StatusOpen, Ephemeral: true}
+		w := &types.Issue{IssueContent: types.IssueContent{Title: "wisp slots"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}, IssueWisp: types.IssueWisp{Ephemeral: true}}
 		if err := store.CreateIssue(ctx, w, "actor"); err != nil {
 			t.Fatalf("create wisp: %v", err)
 		}
@@ -433,7 +433,7 @@ func TestEventsJournal_RenameRelationshipDeltas(t *testing.T) {
 	enableJournalForTest(t, store)
 
 	mk := func(id string) *types.Issue {
-		return &types.Issue{ID: id, Title: id, IssueType: types.TypeTask, Status: types.StatusOpen}
+		return &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}}
 	}
 	for _, id := range []string{"bd-rn-old", "bd-rn-out", "bd-rn-in"} {
 		if err := store.CreateIssue(ctx, mk(id), "actor"); err != nil {
@@ -486,7 +486,7 @@ func TestEventsJournal_DeleteRelationshipDeltas(t *testing.T) {
 	enableJournalForTest(t, store)
 
 	mk := func(id string) *types.Issue {
-		return &types.Issue{ID: id, Title: id, IssueType: types.TypeTask, Status: types.StatusOpen}
+		return &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}}
 	}
 	for _, id := range []string{"bd-del-center", "bd-del-in", "bd-del-out"} {
 		if err := store.CreateIssue(ctx, mk(id), "actor"); err != nil {
@@ -532,7 +532,7 @@ func TestEventsJournal_CascadeDeleteJournalsEveryChild(t *testing.T) {
 	enableJournalForTest(t, store)
 
 	mk := func(id string) *types.Issue {
-		return &types.Issue{ID: id, Title: id, IssueType: types.TypeTask, Status: types.StatusOpen}
+		return &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}}
 	}
 	for _, id := range []string{"bd-cd-parent", "bd-cd-child", "bd-cd-grandchild"} {
 		if err := store.CreateIssue(ctx, mk(id), "actor"); err != nil {
@@ -572,7 +572,7 @@ func TestEventsJournal_ReplayFromZero(t *testing.T) {
 	clearJournal(t, store)
 
 	mk := func(id string) *types.Issue {
-		return &types.Issue{ID: id, Title: "t-" + id, IssueType: types.TypeTask, Status: types.StatusOpen}
+		return &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: "t-" + id}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}}
 	}
 	must := func(err error, what string) {
 		t.Helper()
@@ -628,7 +628,7 @@ func TestEventsJournal_DependencySnapshotsFollowBlockedState(t *testing.T) {
 	enableJournalForTest(t, store)
 
 	mk := func(id string) *types.Issue {
-		return &types.Issue{ID: id, Title: id, IssueType: types.TypeTask, Status: types.StatusOpen}
+		return &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}}
 	}
 	for _, id := range []string{"bd-js-source", "bd-js-target"} {
 		if err := store.CreateIssue(ctx, mk(id), "actor"); err != nil {
@@ -690,7 +690,7 @@ func TestEventsJournal_DerivedBlockedStateChanges(t *testing.T) {
 	enableJournalForTest(t, store)
 
 	mk := func(id string) *types.Issue {
-		return &types.Issue{ID: id, Title: id, IssueType: types.TypeTask, Status: types.StatusOpen}
+		return &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}}
 	}
 	mustCreate := func(tb testing.TB, ids ...string) {
 		tb.Helper()
@@ -796,7 +796,7 @@ func TestEventsJournal_CommentPayloads(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 	enableJournalForTest(t, store)
-	issue := &types.Issue{ID: "bd-jc", Title: "comments", IssueType: types.TypeTask, Status: types.StatusOpen}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "bd-jc"}, IssueContent: types.IssueContent{Title: "comments"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}}
 	if err := store.CreateIssue(ctx, issue, "actor"); err != nil {
 		t.Fatal(err)
 	}

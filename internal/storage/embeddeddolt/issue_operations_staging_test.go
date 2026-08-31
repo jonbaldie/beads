@@ -33,7 +33,7 @@ func TestEmbeddedIssueOperationsUpdateClaimPatchAppliesAfterClaim(t *testing.T) 
 	skipUnlessEmbeddedDolt(t)
 	te := newTestEnv(t, "ops_staging_claim_patch")
 	ctx := t.Context()
-	issue := &types.Issue{ID: "ops-staging-claim-patch", Title: "claim patch", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "ops-staging-claim-patch"}, IssueContent: types.IssueContent{Title: "claim patch"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := te.store.CreateIssue(ctx, issue, "seed"); err != nil {
 		t.Fatal(err)
 	}
@@ -67,9 +67,9 @@ func TestEmbeddedIssueOperationsCreateEmptyIDPreservesParentAndReverseDependenci
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent := &types.Issue{ID: "ops-staging-embedded-parent", Title: "parent", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}
-	durableSource := &types.Issue{ID: "test-staging-embedded-durable", Title: "durable source", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
-	wispSource := &types.Issue{ID: "test-staging-embedded-wisp", Title: "wisp source", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true}
+	parent := &types.Issue{IssueID: types.IssueID{ID: "ops-staging-embedded-parent"}, IssueContent: types.IssueContent{Title: "parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}}
+	durableSource := &types.Issue{IssueID: types.IssueID{ID: "test-staging-embedded-durable"}, IssueContent: types.IssueContent{Title: "durable source"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
+	wispSource := &types.Issue{IssueID: types.IssueID{ID: "test-staging-embedded-wisp"}, IssueContent: types.IssueContent{Title: "wisp source"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}
 	for _, issue := range []*types.Issue{parent, durableSource, wispSource} {
 		if err := te.store.CreateIssue(ctx, issue, "seed"); err != nil {
 			t.Fatal(err)
@@ -79,7 +79,7 @@ func TestEmbeddedIssueOperationsCreateEmptyIDPreservesParentAndReverseDependenci
 	child, err := operations.Create(ctx, publicops.CreateRequest{
 		Actor:         "writer",
 		ForceIDPrefix: true,
-		Issue:         &types.Issue{Title: "child", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+		Issue:         &types.Issue{IssueContent: types.IssueContent{Title: "child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
 		ParentID:      parent.ID,
 	})
 	if err != nil {
@@ -92,7 +92,7 @@ func TestEmbeddedIssueOperationsCreateEmptyIDPreservesParentAndReverseDependenci
 	generatedWisp, err := operations.Create(ctx, publicops.CreateRequest{
 		Actor:         "writer",
 		ForceIDPrefix: true,
-		Issue:         &types.Issue{Title: "generated wisp", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true},
+		Issue:         &types.Issue{IssueContent: types.IssueContent{Title: "generated wisp"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}},
 		Dependencies:  []publicops.CreateDependency{{TargetID: durableSource.ID, Type: types.DepRelatesTo, Reverse: true, Metadata: `{"direction":"durable"}`, ThreadID: "durable-thread"}},
 	})
 	if err != nil {
@@ -110,7 +110,7 @@ func TestEmbeddedIssueOperationsCreateEmptyIDPreservesParentAndReverseDependenci
 	generatedDurable, err := operations.Create(ctx, publicops.CreateRequest{
 		Actor:         "writer",
 		ForceIDPrefix: true,
-		Issue:         &types.Issue{Title: "generated durable", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+		Issue:         &types.Issue{IssueContent: types.IssueContent{Title: "generated durable"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
 		Dependencies:  []publicops.CreateDependency{{TargetID: wispSource.ID, Type: types.DepRelatesTo, Reverse: true, Metadata: `{"direction":"wisp"}`, ThreadID: "wisp-thread"}},
 	})
 	if err != nil {
@@ -178,7 +178,7 @@ func TestEmbeddedIssueOperationsUpdateInvalidIssueTypePreservesValidationSentine
 	skipUnlessEmbeddedDolt(t)
 	te := newTestEnv(t, "ops_staging_invalid_type")
 	ctx := t.Context()
-	issue := &types.Issue{ID: "ops-staging-invalid-type", Title: "invalid type", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "ops-staging-invalid-type"}, IssueContent: types.IssueContent{Title: "invalid type"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := te.store.CreateIssue(ctx, issue, "seed"); err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestEmbeddedIssueOperationsUpdateNotesConflictPreservesValidationSentinel(t
 	skipUnlessEmbeddedDolt(t)
 	te := newTestEnv(t, "ops_staging_notes_conflict")
 	ctx := t.Context()
-	issue := &types.Issue{ID: "ops-staging-notes-conflict", Title: "notes conflict", Notes: "before", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "ops-staging-notes-conflict"}, IssueContent: types.IssueContent{Title: "notes conflict", Notes: "before"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := te.store.CreateIssue(ctx, issue, "seed"); err != nil {
 		t.Fatal(err)
 	}
@@ -210,8 +210,7 @@ func TestEmbeddedIssueOperationsUpdateNotesConflictPreservesValidationSentinel(t
 		Actor:   "writer",
 		IssueID: issue.ID,
 		Patch: publicops.IssuePatch{
-			Notes:       publicops.Field[string]{Set: true, Value: "replacement"},
-			AppendNotes: publicops.Field[string]{Set: true, Value: "append"},
+			Notes: publicops.Field[string]{Set: true, Value: "replacement"}, IssuePatchDetails: publicops.IssuePatchDetails{AppendNotes: publicops.Field[string]{Set: true, Value: "append"}},
 		},
 	})
 	if !errors.Is(err, publicops.ErrValidation) {
@@ -228,11 +227,11 @@ func TestEmbeddedIssueOperationsUpdateParentStagesBlockedStateAndRollsBackFailur
 	te := newTestEnv(t, "ops_staging_parent_state")
 	ctx := t.Context()
 	issues := []*types.Issue{
-		{ID: "ops-staging-parent-blocker", Title: "blocker", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: "ops-staging-parent-clean", Title: "clean parent", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic},
-		{ID: "ops-staging-parent-blocked", Title: "blocked parent", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic},
-		{ID: "ops-staging-parent-child", Title: "child", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: "ops-staging-parent-rollback", Title: "rollback child", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+		{IssueID: types.IssueID{ID: "ops-staging-parent-blocker"}, IssueContent: types.IssueContent{Title: "blocker"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "ops-staging-parent-clean"}, IssueContent: types.IssueContent{Title: "clean parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}},
+		{IssueID: types.IssueID{ID: "ops-staging-parent-blocked"}, IssueContent: types.IssueContent{Title: "blocked parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}},
+		{IssueID: types.IssueID{ID: "ops-staging-parent-child"}, IssueContent: types.IssueContent{Title: "child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "ops-staging-parent-rollback"}, IssueContent: types.IssueContent{Title: "rollback child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
 	}
 	for _, issue := range issues {
 		if err := te.store.CreateIssue(ctx, issue, "seed"); err != nil {

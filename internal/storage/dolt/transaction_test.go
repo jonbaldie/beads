@@ -169,10 +169,14 @@ func TestRunInTransactionSerializationConflictInvokesCallbacksOnce(t *testing.T)
 		Path:           t.TempDir(),
 		CommitterName:  "test",
 		CommitterEmail: "test@example.com",
-		ServerHost:     "127.0.0.1",
-		ServerPort:     testServerPort,
-		Database:       storeA.database,
-		MaxOpenConns:   2,
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: testServerPort,
+		},
+		Database: storeA.database,
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 2,
+		},
 	})
 	if err != nil {
 		t.Fatalf("open second store for %s: %v", storeA.database, err)
@@ -180,12 +184,18 @@ func TestRunInTransactionSerializationConflictInvokesCallbacksOnce(t *testing.T)
 	defer storeB.Close()
 
 	issue := &types.Issue{
-		ID:          "test-tx-at-most-once",
-		Title:       "at-most-once transaction",
-		Description: "initial",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-tx-at-most-once",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "at-most-once transaction",
+			Description: "initial",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := storeA.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("create issue: %v", err)
@@ -297,12 +307,20 @@ func TestRunInTransactionIgnoredWritesStayOnActiveBranch(t *testing.T) {
 
 	wispID := "test-wisp-branch-local"
 	wisp := &types.Issue{
-		ID:        wispID,
-		Title:     "branch-local ignored tx wisp",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: wispID,
+		},
+		IssueContent: types.IssueContent{
+			Title: "branch-local ignored tx wisp",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.RunInTransaction(ctx, "test: create branch-local wisp", func(tx storage.Transaction) error {
 		return tx.CreateIssue(ctx, wisp, "tester")
@@ -332,18 +350,28 @@ func TestRunInTransactionWispCreatePersistsInitialSideTables(t *testing.T) {
 
 	createdAt := time.Date(2026, 5, 22, 6, 0, 0, 0, time.UTC)
 	wisp := &types.Issue{
-		ID:        "test-wisp-tx-side-tables",
-		Title:     "transactional wisp with initial side tables",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
-		Labels:    []string{"alpha", "beta"},
-		Comments: []*types.Comment{{
-			Author:    "tester",
-			Text:      "seed comment",
-			CreatedAt: createdAt,
-		}},
+		IssueID: types.IssueID{
+			ID: "test-wisp-tx-side-tables",
+		},
+		IssueContent: types.IssueContent{
+			Title: "transactional wisp with initial side tables",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"alpha", "beta"},
+			Comments: []*types.Comment{{
+				Author:    "tester",
+				Text:      "seed comment",
+				CreatedAt: createdAt,
+			}},
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.RunInTransaction(ctx, "test: create wisp side tables", func(tx storage.Transaction) error {
 		return tx.CreateIssue(ctx, wisp, "tester")
@@ -375,12 +403,18 @@ func TestRunInTransactionCloseIssueEmitsEvent(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:          "test-tx-close-event",
-		Title:       "transaction close emits event",
-		Description: "exercise doltTransaction.CloseIssue",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-tx-close-event",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "transaction close emits event",
+			Description: "exercise doltTransaction.CloseIssue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -403,12 +437,18 @@ func TestRunInTransactionAlreadyClosedDoesNotCommitUnrelatedEvent(t *testing.T) 
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:          "test-tx-close-noop-event",
-		Title:       "transaction no-op close leaves events alone",
-		Description: "exercise doltTransaction.CloseIssue already-closed path",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-tx-close-noop-event",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "transaction no-op close leaves events alone",
+			Description: "exercise doltTransaction.CloseIssue already-closed path",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -456,12 +496,18 @@ func TestRunInTransactionAddLabelEmitsEvent(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:          "test-tx-add-label-event",
-		Title:       "transaction add label emits event",
-		Description: "exercise doltTransaction.AddLabel",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-tx-add-label-event",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "transaction add label emits event",
+			Description: "exercise doltTransaction.AddLabel",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -484,12 +530,18 @@ func TestRunInTransactionRemoveLabelEmitsEvent(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:          "test-tx-remove-label-event",
-		Title:       "transaction remove label emits event",
-		Description: "exercise doltTransaction.RemoveLabel",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-tx-remove-label-event",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "transaction remove label emits event",
+			Description: "exercise doltTransaction.RemoveLabel",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -552,20 +604,36 @@ func TestRunInTransactionCreateIssuesMixedWispReadYourWrites(t *testing.T) {
 	defer cancel()
 
 	regular := &types.Issue{
-		ID:        "test-mixed-batch-regular",
-		Title:     "regular issue in mixed transaction batch",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-mixed-batch-regular",
+		},
+		IssueContent: types.IssueContent{
+			Title: "regular issue in mixed transaction batch",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	wisp := &types.Issue{
-		ID:        "test-mixed-batch-wisp",
-		Title:     "wisp issue in mixed transaction batch",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
-		Labels:    []string{"seed"},
+		IssueID: types.IssueID{
+			ID: "test-mixed-batch-wisp",
+		},
+		IssueContent: types.IssueContent{
+			Title: "wisp issue in mixed transaction batch",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"seed"},
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.RunInTransaction(ctx, "test: create mixed transaction batch", func(tx storage.Transaction) error {
 		if err := tx.CreateIssues(ctx, []*types.Issue{regular, wisp}, "tester"); err != nil {
@@ -606,20 +674,36 @@ func TestRunInTransactionCreateIssuesAllWispBatchReconcilesChildCounters(t *test
 	defer cancel()
 
 	parent := &types.Issue{
-		ID:        "test-tx-wisp-parent",
-		Title:     "transactional wisp parent",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: "test-tx-wisp-parent",
+		},
+		IssueContent: types.IssueContent{
+			Title: "transactional wisp parent",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	child := &types.Issue{
-		ID:        parent.ID + ".3",
-		Title:     "transactional wisp child",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: parent.ID + ".3",
+		},
+		IssueContent: types.IssueContent{
+			Title: "transactional wisp child",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.RunInTransaction(ctx, "test: create wisp transaction batch", func(tx storage.Transaction) error {
 		return tx.CreateIssues(ctx, []*types.Issue{parent, child}, "tester")
@@ -640,10 +724,10 @@ func TestRunInTransactionCreateIssuesAllWispBatchReconcilesChildCounters(t *test
 }
 
 func TestValidateCreateIssuesMixedBucketDependenciesRejectsCrossBucketEdges(t *testing.T) {
-	regularA := &types.Issue{ID: "test-regular-a", IssueType: types.TypeTask}
-	regularB := &types.Issue{ID: "test-regular-b", IssueType: types.TypeTask}
-	wispA := &types.Issue{ID: "test-wisp-a", IssueType: types.TypeTask, Ephemeral: true}
-	wispB := &types.Issue{ID: "test-wisp-b", IssueType: types.TypeTask, Ephemeral: true}
+	regularA := &types.Issue{IssueID: types.IssueID{ID: "test-regular-a"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask}}
+	regularB := &types.Issue{IssueID: types.IssueID{ID: "test-regular-b"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask}}
+	wispA := &types.Issue{IssueID: types.IssueID{ID: "test-wisp-a"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}
+	wispB := &types.Issue{IssueID: types.IssueID{ID: "test-wisp-b"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}
 
 	tests := []struct {
 		name      string
@@ -654,12 +738,18 @@ func TestValidateCreateIssuesMixedBucketDependenciesRejectsCrossBucketEdges(t *t
 		{
 			name: "regular to wisp",
 			regulars: []*types.Issue{{
-				ID:        regularA.ID,
-				IssueType: types.TypeTask,
-				Dependencies: []*types.Dependency{{
-					DependsOnID: wispA.ID,
-					Type:        types.DepBlocks,
-				}},
+				IssueID: types.IssueID{
+					ID: regularA.ID,
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: types.TypeTask,
+				},
+				IssueGraph: types.IssueGraph{
+					Dependencies: []*types.Dependency{{
+						DependsOnID: wispA.ID,
+						Type:        types.DepBlocks,
+					}},
+				},
 			}},
 			wisps:     []*types.Issue{wispA},
 			wantError: true,
@@ -668,13 +758,21 @@ func TestValidateCreateIssuesMixedBucketDependenciesRejectsCrossBucketEdges(t *t
 			name:     "wisp to regular",
 			regulars: []*types.Issue{regularA},
 			wisps: []*types.Issue{{
-				ID:        wispA.ID,
-				IssueType: types.TypeTask,
-				Ephemeral: true,
-				Dependencies: []*types.Dependency{{
-					DependsOnID: regularA.ID,
-					Type:        types.DepBlocks,
-				}},
+				IssueID: types.IssueID{
+					ID: wispA.ID,
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: types.TypeTask,
+				},
+				IssueGraph: types.IssueGraph{
+					Dependencies: []*types.Dependency{{
+						DependsOnID: regularA.ID,
+						Type:        types.DepBlocks,
+					}},
+				},
+				IssueWisp: types.IssueWisp{
+					Ephemeral: true,
+				},
 			}},
 			wantError: true,
 		},
@@ -683,24 +781,38 @@ func TestValidateCreateIssuesMixedBucketDependenciesRejectsCrossBucketEdges(t *t
 			regulars: []*types.Issue{
 				regularB,
 				{
-					ID:        regularA.ID,
-					IssueType: types.TypeTask,
-					Dependencies: []*types.Dependency{{
-						DependsOnID: regularB.ID,
-						Type:        types.DepBlocks,
-					}},
+					IssueID: types.IssueID{
+						ID: regularA.ID,
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						IssueType: types.TypeTask,
+					},
+					IssueGraph: types.IssueGraph{
+						Dependencies: []*types.Dependency{{
+							DependsOnID: regularB.ID,
+							Type:        types.DepBlocks,
+						}},
+					},
 				},
 			},
 			wisps: []*types.Issue{
 				wispB,
 				{
-					ID:        wispA.ID,
-					IssueType: types.TypeTask,
-					Ephemeral: true,
-					Dependencies: []*types.Dependency{{
-						DependsOnID: wispB.ID,
-						Type:        types.DepBlocks,
-					}},
+					IssueID: types.IssueID{
+						ID: wispA.ID,
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						IssueType: types.TypeTask,
+					},
+					IssueGraph: types.IssueGraph{
+						Dependencies: []*types.Dependency{{
+							DependsOnID: wispB.ID,
+							Type:        types.DepBlocks,
+						}},
+					},
+					IssueWisp: types.IssueWisp{
+						Ephemeral: true,
+					},
 				},
 			},
 		},
@@ -731,23 +843,39 @@ func TestRunInTransactionCreateIssuesRejectsRegularToWispBatchDependency(t *test
 	defer cancel()
 
 	regular := &types.Issue{
-		ID:        "test-mixed-batch-regular-dep-source",
-		Title:     "regular issue with wisp dependency",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Dependencies: []*types.Dependency{{
-			DependsOnID: "test-mixed-batch-wisp-dep-target",
-			Type:        types.DepBlocks,
-		}},
+		IssueID: types.IssueID{
+			ID: "test-mixed-batch-regular-dep-source",
+		},
+		IssueContent: types.IssueContent{
+			Title: "regular issue with wisp dependency",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Dependencies: []*types.Dependency{{
+				DependsOnID: "test-mixed-batch-wisp-dep-target",
+				Type:        types.DepBlocks,
+			}},
+		},
 	}
 	wisp := &types.Issue{
-		ID:        "test-mixed-batch-wisp-dep-target",
-		Title:     "wisp dependency target",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: "test-mixed-batch-wisp-dep-target",
+		},
+		IssueContent: types.IssueContent{
+			Title: "wisp dependency target",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	err := store.RunInTransaction(ctx, "test: reject regular-to-wisp batch dependency", func(tx storage.Transaction) error {
 		return tx.CreateIssues(ctx, []*types.Issue{regular, wisp}, "tester")
@@ -768,23 +896,39 @@ func TestRunInTransactionCreateIssuesRejectsWispToRegularBatchDependency(t *test
 	defer cancel()
 
 	regular := &types.Issue{
-		ID:        "test-mixed-batch-regular-dep-target",
-		Title:     "regular dependency target",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-mixed-batch-regular-dep-target",
+		},
+		IssueContent: types.IssueContent{
+			Title: "regular dependency target",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	wisp := &types.Issue{
-		ID:        "test-mixed-batch-wisp-dep-source",
-		Title:     "wisp issue with regular dependency",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
-		Dependencies: []*types.Dependency{{
-			DependsOnID: regular.ID,
-			Type:        types.DepBlocks,
-		}},
+		IssueID: types.IssueID{
+			ID: "test-mixed-batch-wisp-dep-source",
+		},
+		IssueContent: types.IssueContent{
+			Title: "wisp issue with regular dependency",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Dependencies: []*types.Dependency{{
+				DependsOnID: regular.ID,
+				Type:        types.DepBlocks,
+			}},
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	err := store.RunInTransaction(ctx, "test: reject wisp-to-regular batch dependency", func(tx storage.Transaction) error {
 		return tx.CreateIssues(ctx, []*types.Issue{regular, wisp}, "tester")
@@ -805,11 +949,17 @@ func TestRunInTransactionCreateIssuesSkipsExplicitIDPrefixValidation(t *testing.
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "foreign-explicit-batch-id",
-		Title:     "explicit ID outside configured prefix",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "foreign-explicit-batch-id",
+		},
+		IssueContent: types.IssueContent{
+			Title: "explicit ID outside configured prefix",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.RunInTransaction(ctx, "test: create explicit id batch", func(tx storage.Transaction) error {
 		return tx.CreateIssues(ctx, []*types.Issue{issue}, "tester")

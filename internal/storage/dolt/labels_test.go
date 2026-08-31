@@ -21,18 +21,30 @@ func TestGetLabelsForIssues(t *testing.T) {
 
 	// Create issues with labels
 	issue1 := &types.Issue{
-		ID:        "labels-issue1",
-		Title:     "Issue 1",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "labels-issue1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Issue 1",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	issue2 := &types.Issue{
-		ID:        "labels-issue2",
-		Title:     "Issue 2",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "labels-issue2",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Issue 2",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, issue := range []*types.Issue{issue1, issue2} {
@@ -86,19 +98,33 @@ func TestGetLabelsForIssues_MixedWispAndPermanent(t *testing.T) {
 	defer cancel()
 
 	perm := &types.Issue{
-		ID:        "mixed-perm",
-		Title:     "Permanent",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "mixed-perm",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Permanent",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	wisp := &types.Issue{
-		ID:        "mixed-wisp",
-		Title:     "Wisp",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: "mixed-wisp",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Wisp",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 
 	if err := store.CreateIssue(ctx, perm, "tester"); err != nil {
@@ -159,11 +185,17 @@ func TestGetLabelsForIssues_NoLabels(t *testing.T) {
 
 	// Create issue without labels
 	issue := &types.Issue{
-		ID:        "nolabels-issue",
-		Title:     "Issue without labels",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "nolabels-issue",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Issue without labels",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -200,11 +232,17 @@ func TestGetIssuesByLabel_NoMatches(t *testing.T) {
 
 	// Create issue with a different label
 	issue := &types.Issue{
-		ID:        "nomatch-issue",
-		Title:     "Issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "nomatch-issue",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -237,11 +275,17 @@ func TestAddAndRemoveLabel(t *testing.T) {
 
 	// Create issue
 	issue := &types.Issue{
-		ID:        "crud-label-issue",
-		Title:     "Label CRUD Test",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "crud-label-issue",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Label CRUD Test",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -285,11 +329,17 @@ func TestAddLabel_Duplicate(t *testing.T) {
 
 	// Create issue
 	issue := &types.Issue{
-		ID:        "dup-label-issue",
-		Title:     "Duplicate Label Test",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "dup-label-issue",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Duplicate Label Test",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)

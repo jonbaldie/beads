@@ -44,7 +44,7 @@ func TestIssueOperationsCreateAggregatesEveryRelationItWasGiven(t *testing.T) {
 	}
 
 	for _, id := range []string{"ops-parent", "ops-spawner", "ops-target"} {
-		if err := store.CreateIssue(ctx, &types.Issue{ID: id, Title: id, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, "seed"); err != nil {
+		if err := store.CreateIssue(ctx, &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}, "seed"); err != nil {
 			t.Fatalf("seed %s: %v", id, err)
 		}
 	}
@@ -52,7 +52,7 @@ func TestIssueOperationsCreateAggregatesEveryRelationItWasGiven(t *testing.T) {
 	result, err := operations.Create(ctx, publicops.CreateRequest{
 		Actor:         "writer",
 		ForceIDPrefix: true,
-		Issue:         &types.Issue{ID: "foreign-aggregate", Title: "aggregate", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+		Issue:         &types.Issue{IssueID: types.IssueID{ID: "foreign-aggregate"}, IssueContent: types.IssueContent{Title: "aggregate"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
 		ParentID:      "ops-parent",
 		WaitsFor:      &publicops.WaitsFor{SpawnerID: "ops-spawner"},
 		Dependencies:  []publicops.CreateDependency{{TargetID: "ops-target", Type: types.DepRelated}},
@@ -112,7 +112,7 @@ func TestIssueOperationsUpdateRefusesIncoherentClaimRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	create := func(id string, wisp bool) *types.Issue {
-		issue := &types.Issue{ID: id, Title: id, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: wisp}
+		issue := &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: wisp}}
 		if err := store.CreateIssue(ctx, issue, "seed"); err != nil {
 			t.Fatal(err)
 		}
@@ -165,7 +165,7 @@ func TestIssueOperationsCloseAndReopenAWisp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wisp := &types.Issue{ID: "ops-life-wisp", Title: "ops-life-wisp", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true}
+	wisp := &types.Issue{IssueID: types.IssueID{ID: "ops-life-wisp"}, IssueContent: types.IssueContent{Title: "ops-life-wisp"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}
 	if err := store.CreateIssue(ctx, wisp, "seed"); err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestIssueOperationsUpdateAllScalarAndPointerFieldsReportChanged(t *testing.
 	when := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
 	minutes, external := 15, "external"
 	base := func(id string) *types.Issue {
-		return &types.Issue{ID: id, Title: "title", Description: "description", Design: "design", AcceptanceCriteria: "criteria", Notes: "notes", SpecID: "spec", AwaitID: "await", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Assignee: "worker", Owner: "owner", ClosedBySession: "session", EstimatedMinutes: &minutes, ExternalRef: &external, DueAt: &when, DeferUntil: &when}
+		return &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: "title", Description: "description", Design: "design", AcceptanceCriteria: "criteria", Notes: "notes", SpecID: "spec"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Assignee: "worker", Owner: "owner", EstimatedMinutes: &minutes}, IssueTimes: types.IssueTimes{ClosedBySession: "session"}, IssueLease: types.IssueLease{DueAt: &when, DeferUntil: &when}, IssueMeta: types.IssueMeta{ExternalRef: &external}, IssueCoord: types.IssueCoord{AwaitID: "await"}}
 	}
 	cases := []struct {
 		name  string
@@ -226,19 +226,19 @@ func TestIssueOperationsUpdateAllScalarAndPointerFieldsReportChanged(t *testing.
 	}{
 		{"title", publicops.IssuePatch{Title: publicops.Field[string]{Set: true, Value: "changed"}}, func(i *types.Issue) bool { return i.Title == "changed" }},
 		{"description clear", publicops.IssuePatch{Description: publicops.Field[string]{Set: true}}, func(i *types.Issue) bool { return i.Description == "" }},
-		{"design clear", publicops.IssuePatch{Design: publicops.Field[string]{Set: true}}, func(i *types.Issue) bool { return i.Design == "" }},
-		{"acceptance criteria clear", publicops.IssuePatch{AcceptanceCriteria: publicops.Field[string]{Set: true}}, func(i *types.Issue) bool { return i.AcceptanceCriteria == "" }},
+		{"design clear", publicops.IssuePatch{IssuePatchDetails: publicops.IssuePatchDetails{Design: publicops.Field[string]{Set: true}}}, func(i *types.Issue) bool { return i.Design == "" }},
+		{"acceptance criteria clear", publicops.IssuePatch{IssuePatchDetails: publicops.IssuePatchDetails{AcceptanceCriteria: publicops.Field[string]{Set: true}}}, func(i *types.Issue) bool { return i.AcceptanceCriteria == "" }},
 		{"notes clear", publicops.IssuePatch{Notes: publicops.Field[string]{Set: true}}, func(i *types.Issue) bool { return i.Notes == "" }},
-		{"append notes", publicops.IssuePatch{AppendNotes: publicops.Field[string]{Set: true, Value: "later"}}, func(i *types.Issue) bool { return i.Notes == "notes\nlater" }},
-		{"spec ID clear", publicops.IssuePatch{SpecID: publicops.Field[string]{Set: true}}, func(i *types.Issue) bool { return i.SpecID == "" }},
-		{"await ID clear", publicops.IssuePatch{AwaitID: publicops.Field[string]{Set: true}}, func(i *types.Issue) bool { return i.AwaitID == "" }},
+		{"append notes", publicops.IssuePatch{IssuePatchDetails: publicops.IssuePatchDetails{AppendNotes: publicops.Field[string]{Set: true, Value: "later"}}}, func(i *types.Issue) bool { return i.Notes == "notes\nlater" }},
+		{"spec ID clear", publicops.IssuePatch{IssuePatchDetails: publicops.IssuePatchDetails{SpecID: publicops.Field[string]{Set: true}}}, func(i *types.Issue) bool { return i.SpecID == "" }},
+		{"await ID clear", publicops.IssuePatch{IssuePatchDetails: publicops.IssuePatchDetails{AwaitID: publicops.Field[string]{Set: true}}}, func(i *types.Issue) bool { return i.AwaitID == "" }},
 		{"status", publicops.IssuePatch{Status: publicops.Field[publicops.Status]{Set: true, Value: publicops.StatusInProgress}}, func(i *types.Issue) bool { return i.Status == publicops.StatusInProgress }},
 		{"priority zero", publicops.IssuePatch{Priority: publicops.Field[int]{Set: true}}, func(i *types.Issue) bool { return i.Priority == 0 }},
 		{"issue type", publicops.IssuePatch{IssueType: publicops.Field[publicops.IssueType]{Set: true, Value: types.TypeBug}}, func(i *types.Issue) bool { return i.IssueType == types.TypeBug }},
 		{"assignee clear", publicops.IssuePatch{Assignee: publicops.Field[string]{Set: true}}, func(i *types.Issue) bool { return i.Assignee == "" }},
-		{"owner clear", publicops.IssuePatch{Owner: publicops.Field[string]{Set: true}}, func(i *types.Issue) bool { return i.Owner == "" }},
-		{"closed by session clear", publicops.IssuePatch{ClosedBySession: publicops.Field[string]{Set: true}}, func(i *types.Issue) bool { return i.ClosedBySession == "" }},
-		{"estimated minutes clear", publicops.IssuePatch{EstimatedMinutes: publicops.Field[*int]{Set: true}}, func(i *types.Issue) bool { return i.EstimatedMinutes == nil }},
+		{"owner clear", publicops.IssuePatch{IssuePatchDetails: publicops.IssuePatchDetails{Owner: publicops.Field[string]{Set: true}}}, func(i *types.Issue) bool { return i.Owner == "" }},
+		{"closed by session clear", publicops.IssuePatch{IssuePatchDetails: publicops.IssuePatchDetails{ClosedBySession: publicops.Field[string]{Set: true}}}, func(i *types.Issue) bool { return i.ClosedBySession == "" }},
+		{"estimated minutes clear", publicops.IssuePatch{IssuePatchDetails: publicops.IssuePatchDetails{EstimatedMinutes: publicops.Field[*int]{Set: true}}}, func(i *types.Issue) bool { return i.EstimatedMinutes == nil }},
 		{"external ref clear", publicops.IssuePatch{ExternalRef: publicops.Field[*string]{Set: true}}, func(i *types.Issue) bool { return i.ExternalRef == nil }},
 		{"due at clear", publicops.IssuePatch{DueAt: publicops.Field[*time.Time]{Set: true}}, func(i *types.Issue) bool { return i.DueAt == nil }},
 		{"defer until clear", publicops.IssuePatch{DeferUntil: publicops.Field[*time.Time]{Set: true}}, func(i *types.Issue) bool { return i.DeferUntil == nil }},
@@ -275,7 +275,7 @@ func TestIssueOperationsUpdateAllScalarAndPointerFieldsReportChanged(t *testing.
 	if err := store.CreateIssue(ctx, issue, "seed"); err != nil {
 		t.Fatal(err)
 	}
-	_, err = ops.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: issue.ID, Patch: publicops.IssuePatch{Title: publicops.Field[string]{Set: true, Value: "must rollback"}, Notes: publicops.Field[string]{Set: true, Value: "replace"}, AppendNotes: publicops.Field[string]{Set: true, Value: "append"}}})
+	_, err = ops.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: issue.ID, Patch: publicops.IssuePatch{Title: publicops.Field[string]{Set: true, Value: "must rollback"}, Notes: publicops.Field[string]{Set: true, Value: "replace"}, IssuePatchDetails: publicops.IssuePatchDetails{AppendNotes: publicops.Field[string]{Set: true, Value: "append"}}}})
 	if err == nil {
 		t.Fatal("Notes plus AppendNotes succeeded")
 	}
@@ -302,23 +302,23 @@ func TestIssueOperationsUpdatePersistenceContributionAndRollback(t *testing.T) {
 		id := "ops-persistence-" + string(transition.from) + "-" + string(transition.to)
 		ephemeral := transition.from == publicops.PersistenceModeEphemeral
 		noHistory := transition.from == publicops.PersistenceModeNoHistory
-		if err := store.CreateIssue(ctx, &types.Issue{ID: id, Title: id, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: ephemeral, NoHistory: noHistory}, "seed"); err != nil {
+		if err := store.CreateIssue(ctx, &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: ephemeral, NoHistory: noHistory}}, "seed"); err != nil {
 			t.Fatal(err)
 		}
-		result, err := ops.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: id, Patch: publicops.IssuePatch{Persistence: publicops.Field[publicops.PersistenceMode]{Set: true, Value: transition.to}}})
+		result, err := ops.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: id, Patch: publicops.IssuePatch{IssuePatchDetails: publicops.IssuePatchDetails{Persistence: publicops.Field[publicops.PersistenceMode]{Set: true, Value: transition.to}}}})
 		if err != nil || !result.Changed || result.Issue.Ephemeral != (transition.to == publicops.PersistenceModeEphemeral) || result.Issue.NoHistory != (transition.to == publicops.PersistenceModeNoHistory) {
 			t.Fatalf("transition %s->%s = %#v, %v", transition.from, transition.to, result, err)
 		}
-		noOp, err := ops.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: id, Patch: publicops.IssuePatch{Persistence: publicops.Field[publicops.PersistenceMode]{Set: true, Value: transition.to}}})
+		noOp, err := ops.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: id, Patch: publicops.IssuePatch{IssuePatchDetails: publicops.IssuePatchDetails{Persistence: publicops.Field[publicops.PersistenceMode]{Set: true, Value: transition.to}}}})
 		if err != nil || noOp.Changed {
 			t.Fatalf("same persistence %s = %#v, %v", transition.to, noOp, err)
 		}
 	}
-	unversioned := &types.Issue{ID: "ops-persistence-rollback", Title: "original", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, StorageClass: types.StorageClassUnversioned, Labels: []string{"keep"}, Metadata: json.RawMessage(`{"keep":true}`)}
+	unversioned := &types.Issue{IssueID: types.IssueID{ID: "ops-persistence-rollback"}, IssueContent: types.IssueContent{Title: "original"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueMeta: types.IssueMeta{Metadata: json.RawMessage(`{"keep":true}`)}, IssueGraph: types.IssueGraph{Labels: []string{"keep"}}, IssueWisp: types.IssueWisp{StorageClass: types.StorageClassUnversioned}}
 	if err := store.CreateIssue(ctx, unversioned, "seed"); err != nil {
 		t.Fatal(err)
 	}
-	_, err = ops.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: unversioned.ID, Patch: publicops.IssuePatch{Title: publicops.Field[string]{Set: true, Value: "must rollback"}, Labels: publicops.LabelPatch{Add: []string{"must-rollback"}}, Metadata: publicops.MetadataPatch{Set: map[string]json.RawMessage{"must_rollback": json.RawMessage(`true`)}}, Persistence: publicops.Field[publicops.PersistenceMode]{Set: true, Value: publicops.PersistenceModeEphemeral}}})
+	_, err = ops.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: unversioned.ID, Patch: publicops.IssuePatch{Title: publicops.Field[string]{Set: true, Value: "must rollback"}, Labels: publicops.LabelPatch{Add: []string{"must-rollback"}}, Metadata: publicops.MetadataPatch{Set: map[string]json.RawMessage{"must_rollback": json.RawMessage(`true`)}}, IssuePatchDetails: publicops.IssuePatchDetails{Persistence: publicops.Field[publicops.PersistenceMode]{Set: true, Value: publicops.PersistenceModeEphemeral}}}})
 	if err == nil {
 		t.Fatal("unversioned demotion succeeded")
 	}
@@ -338,11 +338,11 @@ func TestIssueOperationsWispAggregateLifecycleAndResultDetachment(t *testing.T) 
 		t.Fatal(err)
 	}
 	external := "external"
-	wisp := &types.Issue{ID: "ops-wisp-detached", Title: "wisp", Notes: "before", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true, Labels: []string{"keep"}, Metadata: json.RawMessage(`{"keep":true}`), ExternalRef: &external}
+	wisp := &types.Issue{IssueID: types.IssueID{ID: "ops-wisp-detached"}, IssueContent: types.IssueContent{Title: "wisp", Notes: "before"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueMeta: types.IssueMeta{Metadata: json.RawMessage(`{"keep":true}`), ExternalRef: &external}, IssueGraph: types.IssueGraph{Labels: []string{"keep"}}, IssueWisp: types.IssueWisp{Ephemeral: true}}
 	if err := store.CreateIssue(ctx, wisp, "seed"); err != nil {
 		t.Fatal(err)
 	}
-	updated, err := ops.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: wisp.ID, Patch: publicops.IssuePatch{AppendNotes: publicops.Field[string]{Set: true, Value: "after"}, Labels: publicops.LabelPatch{Add: []string{"added"}}, Metadata: publicops.MetadataPatch{Set: map[string]json.RawMessage{"added": json.RawMessage(`true`)}}}})
+	updated, err := ops.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: wisp.ID, Patch: publicops.IssuePatch{IssuePatchDetails: publicops.IssuePatchDetails{AppendNotes: publicops.Field[string]{Set: true, Value: "after"}}, Labels: publicops.LabelPatch{Add: []string{"added"}}, Metadata: publicops.MetadataPatch{Set: map[string]json.RawMessage{"added": json.RawMessage(`true`)}}}})
 	if err != nil || !updated.Changed || updated.Issue.Notes != "before\nafter" || strings.Join(updated.Issue.Labels, ",") != "added,keep" {
 		t.Fatalf("wisp update = %#v, %v", updated, err)
 	}

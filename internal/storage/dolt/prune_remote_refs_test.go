@@ -25,12 +25,16 @@ func TestDoltNew_PruneRemoteRefs_RealDolt(t *testing.T) {
 	dbName := uniqueTestDBName(t)
 
 	store, err := New(ctx, &Config{
-		Path:            tmpDir,
-		CommitterName:   "test",
-		CommitterEmail:  "test@example.com",
-		Database:        dbName,
-		CreateIfMissing: true,
-		MaxOpenConns:    1,
+		Path:           tmpDir,
+		CommitterName:  "test",
+		CommitterEmail: "test@example.com",
+		Database:       dbName,
+		RemoteOptions: RemoteOptions{
+			CreateIfMissing: true,
+		},
+		PoolOptions: PoolOptions{
+			MaxOpenConns: 1,
+		},
 	})
 	if err != nil {
 		t.Fatalf("New (create): %v", err)

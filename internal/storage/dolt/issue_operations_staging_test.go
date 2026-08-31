@@ -21,14 +21,14 @@ func TestIssueOperationsCreateIgnoresDerivedFieldsAndRejectsMalformedAggregate(t
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	created, err := operations.Create(ctx, publicops.CreateRequest{Actor: "writer", ForceIDPrefix: true, Issue: &types.Issue{ID: "ops-staging-create", Title: "create", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, RowVersion: 91, LeaseExpiresAt: &now, ContentHash: "derived"}})
+	created, err := operations.Create(ctx, publicops.CreateRequest{Actor: "writer", ForceIDPrefix: true, Issue: &types.Issue{IssueID: types.IssueID{ID: "ops-staging-create", ContentHash: "derived"}, IssueContent: types.IssueContent{Title: "create"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueLease: types.IssueLease{RowVersion: 91, LeaseExpiresAt: &now}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if created.Issue.RowVersion == 91 || created.Issue.LeaseExpiresAt != nil || created.Issue.ContentHash == "derived" {
 		t.Fatalf("derived fields persisted: %#v", created.Issue)
 	}
-	_, err = operations.Create(ctx, publicops.CreateRequest{Actor: "writer", ForceIDPrefix: true, Issue: &types.Issue{ID: "ops-staging-invalid-create", Title: "invalid", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, Dependencies: []publicops.CreateDependency{{TargetID: "ops-staging-invalid-create", Type: types.DepBlocks}}})
+	_, err = operations.Create(ctx, publicops.CreateRequest{Actor: "writer", ForceIDPrefix: true, Issue: &types.Issue{IssueID: types.IssueID{ID: "ops-staging-invalid-create"}, IssueContent: types.IssueContent{Title: "invalid"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}, Dependencies: []publicops.CreateDependency{{TargetID: "ops-staging-invalid-create", Type: types.DepBlocks}}})
 	if !errors.Is(err, publicops.ErrValidation) {
 		t.Fatalf("malformed aggregate error = %v, want ErrValidation", err)
 	}
@@ -46,7 +46,7 @@ func TestIssueOperationsCreateEmptyIDUsesChildIDAndStagesCounter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent := &types.Issue{ID: "ops-staging-create-parent", Title: "parent", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}
+	parent := &types.Issue{IssueID: types.IssueID{ID: "ops-staging-create-parent"}, IssueContent: types.IssueContent{Title: "parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}}
 	if err := store.CreateIssue(ctx, parent, "seed"); err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestIssueOperationsCreateEmptyIDUsesChildIDAndStagesCounter(t *testing.T) {
 		result, err := operations.Create(ctx, publicops.CreateRequest{
 			Actor:         "writer",
 			ForceIDPrefix: true,
-			Issue:         &types.Issue{Title: title, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+			Issue:         &types.Issue{IssueContent: types.IssueContent{Title: title}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
 			ParentID:      parent.ID,
 		})
 		if err != nil {
@@ -95,8 +95,8 @@ func TestIssueOperationsCreateEmptyIDPersistsReverseDependenciesInSourceTier(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	durableSource := &types.Issue{ID: "test-staging-durable-source", Title: "durable source", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
-	wispSource := &types.Issue{ID: "test-staging-wisp-source", Title: "wisp source", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true}
+	durableSource := &types.Issue{IssueID: types.IssueID{ID: "test-staging-durable-source"}, IssueContent: types.IssueContent{Title: "durable source"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
+	wispSource := &types.Issue{IssueID: types.IssueID{ID: "test-staging-wisp-source"}, IssueContent: types.IssueContent{Title: "wisp source"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}
 	for _, issue := range []*types.Issue{durableSource, wispSource} {
 		if err := store.CreateIssue(ctx, issue, "seed"); err != nil {
 			t.Fatal(err)
@@ -107,7 +107,7 @@ func TestIssueOperationsCreateEmptyIDPersistsReverseDependenciesInSourceTier(t *
 		result, err := operations.Create(ctx, publicops.CreateRequest{
 			Actor:         "writer",
 			ForceIDPrefix: true,
-			Issue:         &types.Issue{Title: "generated wisp", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true},
+			Issue:         &types.Issue{IssueContent: types.IssueContent{Title: "generated wisp"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}},
 			Dependencies:  []publicops.CreateDependency{{TargetID: durableSource.ID, Type: types.DepBlocks, Reverse: true, Metadata: `{"direction":"durable"}`, ThreadID: "durable-thread"}},
 		})
 		if err != nil {
@@ -129,7 +129,7 @@ func TestIssueOperationsCreateEmptyIDPersistsReverseDependenciesInSourceTier(t *
 		result, err := operations.Create(ctx, publicops.CreateRequest{
 			Actor:         "writer",
 			ForceIDPrefix: true,
-			Issue:         &types.Issue{Title: "generated durable", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+			Issue:         &types.Issue{IssueContent: types.IssueContent{Title: "generated durable"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
 			Dependencies:  []publicops.CreateDependency{{TargetID: wispSource.ID, Type: types.DepBlocks, Reverse: true, Metadata: `{"direction":"wisp"}`, ThreadID: "wisp-thread"}},
 		})
 		if err != nil {
@@ -281,7 +281,7 @@ func TestIssueOperationsUpdateClaimPatchAppliesAfterClaim(t *testing.T) {
 	ctx, cancel := testContext(t)
 	defer cancel()
 
-	issue := &types.Issue{ID: "ops-staging-claim-patch", Title: "claim patch", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "ops-staging-claim-patch"}, IssueContent: types.IssueContent{Title: "claim patch"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := store.CreateIssue(ctx, issue, "seed"); err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +313,7 @@ func TestIssueOperationsUpdateInvalidIssueTypePreservesValidationSentinel(t *tes
 	ctx, cancel := testContext(t)
 	defer cancel()
 
-	issue := &types.Issue{ID: "ops-staging-invalid-type", Title: "invalid type", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "ops-staging-invalid-type"}, IssueContent: types.IssueContent{Title: "invalid type"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := store.CreateIssue(ctx, issue, "seed"); err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +334,7 @@ func TestIssueOperationsUpdateNotesConflictPreservesValidationSentinel(t *testin
 	ctx, cancel := testContext(t)
 	defer cancel()
 
-	issue := &types.Issue{ID: "ops-staging-notes-conflict", Title: "notes conflict", Notes: "before", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "ops-staging-notes-conflict"}, IssueContent: types.IssueContent{Title: "notes conflict", Notes: "before"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := store.CreateIssue(ctx, issue, "seed"); err != nil {
 		t.Fatal(err)
 	}
@@ -347,8 +347,7 @@ func TestIssueOperationsUpdateNotesConflictPreservesValidationSentinel(t *testin
 		Actor:   "writer",
 		IssueID: issue.ID,
 		Patch: publicops.IssuePatch{
-			Notes:       publicops.Field[string]{Set: true, Value: "replacement"},
-			AppendNotes: publicops.Field[string]{Set: true, Value: "append"},
+			Notes: publicops.Field[string]{Set: true, Value: "replacement"}, IssuePatchDetails: publicops.IssuePatchDetails{AppendNotes: publicops.Field[string]{Set: true, Value: "append"}},
 		},
 	})
 	if !errors.Is(err, publicops.ErrValidation) {
@@ -367,11 +366,11 @@ func TestIssueOperationsUpdateParentStagesBlockedStateAndRollsBackFailure(t *tes
 	defer cancel()
 
 	issues := []*types.Issue{
-		{ID: "ops-staging-parent-blocker", Title: "blocker", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: "ops-staging-parent-clean", Title: "clean parent", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic},
-		{ID: "ops-staging-parent-blocked", Title: "blocked parent", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic},
-		{ID: "ops-staging-parent-child", Title: "child", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: "ops-staging-parent-rollback", Title: "rollback child", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+		{IssueID: types.IssueID{ID: "ops-staging-parent-blocker"}, IssueContent: types.IssueContent{Title: "blocker"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "ops-staging-parent-clean"}, IssueContent: types.IssueContent{Title: "clean parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}},
+		{IssueID: types.IssueID{ID: "ops-staging-parent-blocked"}, IssueContent: types.IssueContent{Title: "blocked parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeEpic}},
+		{IssueID: types.IssueID{ID: "ops-staging-parent-child"}, IssueContent: types.IssueContent{Title: "child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "ops-staging-parent-rollback"}, IssueContent: types.IssueContent{Title: "rollback child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
 	}
 	for _, issue := range issues {
 		if err := store.CreateIssue(ctx, issue, "seed"); err != nil {

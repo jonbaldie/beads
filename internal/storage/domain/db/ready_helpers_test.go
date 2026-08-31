@@ -72,7 +72,7 @@ func (s *testSuite) claimReadyClaimsFirst() {
 	b.Priority = 2
 	s.Require().NoError(r.Insert(s.Ctx(), b, "tester", domain.InsertIssueOpts{}))
 
-	out, err := r.ClaimReadyIssue(s.Ctx(), types.WorkFilter{SortPolicy: types.SortPolicyPriority}, "alice")
+	out, err := r.ClaimReadyIssue(s.Ctx(), types.WorkFilter{WorkFilterCore: types.WorkFilterCore{SortPolicy: types.SortPolicyPriority}}, "alice")
 	s.Require().NoError(err)
 	s.Require().NotNil(out)
 	s.Equal("bd-clr-a", out.ID, "first ready by priority should be claimed")
@@ -113,7 +113,7 @@ func (s *testSuite) claimReadySkipsForeign() {
 	free.Priority = 2
 	s.Require().NoError(r.Insert(s.Ctx(), free, "tester", domain.InsertIssueOpts{}))
 
-	out, err := r.ClaimReadyIssue(s.Ctx(), types.WorkFilter{SortPolicy: types.SortPolicyPriority}, "alice")
+	out, err := r.ClaimReadyIssue(s.Ctx(), types.WorkFilter{WorkFilterCore: types.WorkFilterCore{SortPolicy: types.SortPolicyPriority}}, "alice")
 	s.Require().NoError(err)
 	s.Require().NotNil(out)
 	s.Equal("bd-clr-skip-free", out.ID, "must pass over in-progress issue owned by another actor")
@@ -129,7 +129,7 @@ func (s *testSuite) claimReadyPriorityFilter() {
 	s.Require().NoError(r.Insert(s.Ctx(), high, "tester", domain.InsertIssueOpts{}))
 
 	p := 1
-	out, err := r.ClaimReadyIssue(s.Ctx(), types.WorkFilter{Priority: &p}, "alice")
+	out, err := r.ClaimReadyIssue(s.Ctx(), types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Priority: &p}}, "alice")
 	s.Require().NoError(err)
 	s.Require().NotNil(out)
 	s.Equal("bd-clr-pri-high", out.ID)
@@ -147,7 +147,7 @@ func (s *testSuite) claimReadyExcludesBlocked() {
 	s.Require().NoError(dr.Insert(s.Ctx(),
 		newDep("bd-clr-blk-src", "bd-clr-blk-tgt", types.DepBlocks), "tester", domain.DepInsertOpts{}))
 
-	out, err := r.ClaimReadyIssue(s.Ctx(), types.WorkFilter{SortPolicy: types.SortPolicyPriority}, "alice")
+	out, err := r.ClaimReadyIssue(s.Ctx(), types.WorkFilter{WorkFilterCore: types.WorkFilterCore{SortPolicy: types.SortPolicyPriority}}, "alice")
 	s.Require().NoError(err)
 	s.Require().NotNil(out)
 	s.Equal("bd-clr-blk-tgt", out.ID, "blocked issue must be skipped even if higher priority")
@@ -318,7 +318,7 @@ func (s *testSuite) blockedParentIDFilter() {
 		newDep("bd-blf-out", "bd-blf-blocker", types.DepBlocks), "tester", domain.DepInsertOpts{}))
 
 	pid := "bd-blf-parent"
-	out, err := r.GetBlockedIssues(s.Ctx(), types.WorkFilter{ParentID: &pid})
+	out, err := r.GetBlockedIssues(s.Ctx(), types.WorkFilter{WorkFilterCore: types.WorkFilterCore{ParentID: &pid}})
 	s.Require().NoError(err)
 	gotIDs := blockedIDs(out)
 	s.Contains(gotIDs, "bd-blf-parent.1")

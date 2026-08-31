@@ -15,10 +15,16 @@ import (
 func (s *testSuite) TestUpdateRefusesUnpoppedClosePolicyOverride() {
 	created, err := s.issueUseCase().CreateIssue(s.Ctx(), domain.CreateIssueParams{
 		Issue: &types.Issue{
-			ID:        "bd-domain-unpopped-override",
-			Title:     "override transport",
-			IssueType: types.TypeTask,
-			Priority:  2,
+			IssueID: types.IssueID{
+				ID: "bd-domain-unpopped-override",
+			},
+			IssueContent: types.IssueContent{
+				Title: "override transport",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				IssueType: types.TypeTask,
+				Priority:  2,
+			},
 		},
 	}, "tester")
 	s.Require().NoError(err)
@@ -55,7 +61,7 @@ func (s *testSuite) TestUpdateRefusesUnreadableStatusInsteadOfSkippingClosePolic
 	const parent, child = "bd-domain-unreadable-parent", "bd-domain-unreadable-child"
 	for _, id := range []string{parent, child} {
 		_, err := s.issueUseCase().CreateIssue(s.Ctx(), domain.CreateIssueParams{
-			Issue: &types.Issue{ID: id, Title: "unreadable status", IssueType: types.TypeTask, Priority: 2},
+			Issue: &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: "unreadable status"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}},
 		}, "tester")
 		s.Require().NoError(err)
 	}

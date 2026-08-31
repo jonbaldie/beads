@@ -22,9 +22,9 @@ func TestEventsSinceEmbedded(t *testing.T) {
 	ctx := t.Context()
 
 	for _, issue := range []*types.Issue{
-		{ID: "es-a", Title: "durable a", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: "es-b", Title: "durable b", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: "es-w", Title: "wisp", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true},
+		{IssueID: types.IssueID{ID: "es-a"}, IssueContent: types.IssueContent{Title: "durable a"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "es-b"}, IssueContent: types.IssueContent{Title: "durable b"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "es-w"}, IssueContent: types.IssueContent{Title: "wisp"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}},
 	} {
 		if err := te.store.CreateIssue(ctx, issue, "tester"); err != nil {
 			t.Fatalf("CreateIssue %s: %v", issue.ID, err)

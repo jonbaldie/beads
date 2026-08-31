@@ -38,11 +38,17 @@ func TestRigIssueIsPersistentButHiddenFromReady(t *testing.T) {
 	defer cancel()
 
 	rig := &types.Issue{
-		ID:        "rw-rig-durable",
-		Title:     "Rig identity",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.IssueType("rig"),
+		IssueID: types.IssueID{
+			ID: "rw-rig-durable",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Rig identity",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.IssueType("rig"),
+		},
 	}
 	if err := store.CreateIssue(ctx, rig, "tester"); err != nil {
 		t.Fatalf("CreateIssue rig: %v", err)
@@ -94,11 +100,17 @@ func TestGetReadyWork_ExcludesClosedIssues(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "rw-closed",
-		Title:     "Closed Issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "rw-closed",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Closed Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -126,18 +138,30 @@ func TestGetReadyWork_StatusFilter(t *testing.T) {
 	defer cancel()
 
 	open := &types.Issue{
-		ID:        "rw-open",
-		Title:     "Open Issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "rw-open",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Open Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	inProgress := &types.Issue{
-		ID:        "rw-inprog",
-		Title:     "In Progress",
-		Status:    types.StatusInProgress,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "rw-inprog",
+		},
+		IssueContent: types.IssueContent{
+			Title: "In Progress",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusInProgress,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, iss := range []*types.Issue{open, inProgress} {
@@ -147,7 +171,7 @@ func TestGetReadyWork_StatusFilter(t *testing.T) {
 	}
 
 	// Filter by in_progress only
-	work, err := store.GetReadyWork(ctx, types.WorkFilter{Status: types.StatusInProgress})
+	work, err := store.GetReadyWork(ctx, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Status: types.StatusInProgress}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -178,18 +202,30 @@ func TestGetReadyWork_PriorityFilter(t *testing.T) {
 	defer cancel()
 
 	p1 := &types.Issue{
-		ID:        "rw-p1",
-		Title:     "Priority 1",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "rw-p1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Priority 1",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	p3 := &types.Issue{
-		ID:        "rw-p3",
-		Title:     "Priority 3",
-		Status:    types.StatusOpen,
-		Priority:  3,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "rw-p3",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Priority 3",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  3,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, iss := range []*types.Issue{p1, p3} {
@@ -199,7 +235,7 @@ func TestGetReadyWork_PriorityFilter(t *testing.T) {
 	}
 
 	priority := 1
-	work, err := store.GetReadyWork(ctx, types.WorkFilter{Priority: &priority})
+	work, err := store.GetReadyWork(ctx, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Priority: &priority}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -219,12 +255,20 @@ func TestGetReadyWork_ExcludesPinnedIssues(t *testing.T) {
 	defer cancel()
 
 	pinned := &types.Issue{
-		ID:        "rw-pinned",
-		Title:     "Pinned Context",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
-		Pinned:    true,
+		IssueID: types.IssueID{
+			ID: "rw-pinned",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Pinned Context",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Pinned: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, pinned, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -249,18 +293,30 @@ func TestGetReadyWork_ExcludesBlockedIssues(t *testing.T) {
 	defer cancel()
 
 	blocker := &types.Issue{
-		ID:        "rw-blocker",
-		Title:     "Blocker",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "rw-blocker",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocker",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	blocked := &types.Issue{
-		ID:        "rw-blocked",
-		Title:     "Blocked",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "rw-blocked",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocked",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, iss := range []*types.Issue{blocker, blocked} {
@@ -298,19 +354,31 @@ func TestGetReadyWork_UnassignedFilter(t *testing.T) {
 	defer cancel()
 
 	assigned := &types.Issue{
-		ID:        "rw-assigned",
-		Title:     "Assigned Issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Assignee:  "alice",
+		IssueID: types.IssueID{
+			ID: "rw-assigned",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Assigned Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+			Assignee:  "alice",
+		},
 	}
 	unassigned := &types.Issue{
-		ID:        "rw-unassigned",
-		Title:     "Unassigned Issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "rw-unassigned",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Unassigned Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, iss := range []*types.Issue{assigned, unassigned} {
@@ -319,7 +387,7 @@ func TestGetReadyWork_UnassignedFilter(t *testing.T) {
 		}
 	}
 
-	work, err := store.GetReadyWork(ctx, types.WorkFilter{Unassigned: true})
+	work, err := store.GetReadyWork(ctx, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Unassigned: true}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -340,18 +408,24 @@ func TestGetReadyWork_LimitFilter(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		iss := &types.Issue{
-			ID:        fmt.Sprintf("rw-limit-%d", i),
-			Title:     fmt.Sprintf("Limit Issue %d", i),
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("rw-limit-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Limit Issue %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("failed to create issue: %v", err)
 		}
 	}
 
-	work, err := store.GetReadyWork(ctx, types.WorkFilter{Limit: 2})
+	work, err := store.GetReadyWork(ctx, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Limit: 2}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -368,41 +442,71 @@ func TestGetReadyWork_LimitSkipsBlockedCandidates(t *testing.T) {
 	defer cancel()
 
 	blocker := &types.Issue{
-		ID:        "rw-page-blocker",
-		Title:     "Blocking Gate",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeGate,
+		IssueID: types.IssueID{
+			ID: "rw-page-blocker",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocking Gate",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeGate,
+		},
 	}
 	issues := []*types.Issue{
 		blocker,
 		{
-			ID:        "rw-page-blocked-1",
-			Title:     "Blocked 1",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "rw-page-blocked-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Blocked 1",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
 		},
 		{
-			ID:        "rw-page-blocked-2",
-			Title:     "Blocked 2",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "rw-page-blocked-2",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Blocked 2",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
 		},
 		{
-			ID:        "rw-page-ready-1",
-			Title:     "Ready 1",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "rw-page-ready-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Ready 1",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
 		},
 		{
-			ID:        "rw-page-ready-2",
-			Title:     "Ready 2",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "rw-page-ready-2",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Ready 2",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
 		},
 	}
 	for _, iss := range issues {
@@ -421,7 +525,7 @@ func TestGetReadyWork_LimitSkipsBlockedCandidates(t *testing.T) {
 		}
 	}
 
-	work, err := store.GetReadyWork(ctx, types.WorkFilter{Limit: 2, SortPolicy: types.SortPolicyOldest})
+	work, err := store.GetReadyWork(ctx, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Limit: 2, SortPolicy: types.SortPolicyOldest}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -450,29 +554,47 @@ func TestGetReadyWork_LimitScansMultipleCandidatePages(t *testing.T) {
 	const blockedCount = 220
 	const readyCount = 10
 	blocker := &types.Issue{
-		ID:        "rw-multi-blocker",
-		Title:     "Blocking Gate",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeGate,
+		IssueID: types.IssueID{
+			ID: "rw-multi-blocker",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocking Gate",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeGate,
+		},
 	}
 	issues := []*types.Issue{blocker}
 	for i := 0; i < blockedCount; i++ {
 		issues = append(issues, &types.Issue{
-			ID:        fmt.Sprintf("rw-multi-blocked-%03d", i),
-			Title:     fmt.Sprintf("Blocked %03d", i),
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("rw-multi-blocked-%03d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Blocked %03d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
 		})
 	}
 	for i := 0; i < readyCount; i++ {
 		issues = append(issues, &types.Issue{
-			ID:        fmt.Sprintf("rw-multi-ready-%03d", i),
-			Title:     fmt.Sprintf("Ready %03d", i),
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("rw-multi-ready-%03d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Ready %03d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
 		})
 	}
 
@@ -495,7 +617,7 @@ func TestGetReadyWork_LimitScansMultipleCandidatePages(t *testing.T) {
 		t.Fatalf("seed multi-page ready work: %v", err)
 	}
 
-	limited, err := store.GetReadyWork(ctx, types.WorkFilter{Limit: readyCount, SortPolicy: types.SortPolicyOldest})
+	limited, err := store.GetReadyWork(ctx, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Limit: readyCount, SortPolicy: types.SortPolicyOldest}})
 	if err != nil {
 		t.Fatalf("limited ready work: %v", err)
 	}
@@ -510,7 +632,7 @@ func TestGetReadyWork_LimitScansMultipleCandidatePages(t *testing.T) {
 		}
 	}
 
-	unbounded, err := store.GetReadyWork(ctx, types.WorkFilter{SortPolicy: types.SortPolicyOldest})
+	unbounded, err := store.GetReadyWork(ctx, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{SortPolicy: types.SortPolicyOldest}})
 	if err != nil {
 		t.Fatalf("unbounded ready work: %v", err)
 	}
@@ -536,20 +658,20 @@ func TestGetReadyWork_LimitCandidateGraphSemantics(t *testing.T) {
 		// This blocker is intentionally a blocked epic instead of the older open
 		// gate fixture: current dependency validation rejects gate->epic block
 		// edges, and the test only needs a non-ready blocker for the parent chain.
-		{ID: "rw-graph-parent-blocker", Title: "Parent blocker", Status: types.StatusBlocked, Priority: 1, IssueType: types.TypeEpic},
-		{ID: "rw-graph-parent", Title: "Blocked parent", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic},
-		{ID: "rw-graph-parent-child", Title: "Child of blocked parent", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
-		{ID: "rw-graph-all-waiter", Title: "All waiter", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
-		{ID: "rw-graph-all-spawner", Title: "All spawner", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeGate},
-		{ID: "rw-graph-all-child", Title: "All active child", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeGate},
-		{ID: "rw-graph-any-blocked", Title: "Any blocked waiter", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
-		{ID: "rw-graph-any-blocked-spawner", Title: "Any blocked spawner", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeGate},
-		{ID: "rw-graph-any-blocked-child", Title: "Any blocked active child", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeGate},
-		{ID: "rw-graph-any-ready", Title: "Any ready waiter", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
-		{ID: "rw-graph-any-ready-spawner", Title: "Any ready spawner", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeGate},
-		{ID: "rw-graph-any-ready-child-closed", Title: "Any ready closed child", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeGate},
-		{ID: "rw-graph-any-ready-child-active", Title: "Any ready active child", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeGate},
-		{ID: "rw-graph-ready", Title: "Ready control", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
+		{IssueID: types.IssueID{ID: "rw-graph-parent-blocker"}, IssueContent: types.IssueContent{Title: "Parent blocker"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusBlocked, Priority: 1, IssueType: types.TypeEpic}},
+		{IssueID: types.IssueID{ID: "rw-graph-parent"}, IssueContent: types.IssueContent{Title: "Blocked parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic}},
+		{IssueID: types.IssueID{ID: "rw-graph-parent-child"}, IssueContent: types.IssueContent{Title: "Child of blocked parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "rw-graph-all-waiter"}, IssueContent: types.IssueContent{Title: "All waiter"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "rw-graph-all-spawner"}, IssueContent: types.IssueContent{Title: "All spawner"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeGate}},
+		{IssueID: types.IssueID{ID: "rw-graph-all-child"}, IssueContent: types.IssueContent{Title: "All active child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeGate}},
+		{IssueID: types.IssueID{ID: "rw-graph-any-blocked"}, IssueContent: types.IssueContent{Title: "Any blocked waiter"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "rw-graph-any-blocked-spawner"}, IssueContent: types.IssueContent{Title: "Any blocked spawner"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeGate}},
+		{IssueID: types.IssueID{ID: "rw-graph-any-blocked-child"}, IssueContent: types.IssueContent{Title: "Any blocked active child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeGate}},
+		{IssueID: types.IssueID{ID: "rw-graph-any-ready"}, IssueContent: types.IssueContent{Title: "Any ready waiter"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "rw-graph-any-ready-spawner"}, IssueContent: types.IssueContent{Title: "Any ready spawner"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeGate}},
+		{IssueID: types.IssueID{ID: "rw-graph-any-ready-child-closed"}, IssueContent: types.IssueContent{Title: "Any ready closed child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeGate}},
+		{IssueID: types.IssueID{ID: "rw-graph-any-ready-child-active"}, IssueContent: types.IssueContent{Title: "Any ready active child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeGate}},
+		{IssueID: types.IssueID{ID: "rw-graph-ready"}, IssueContent: types.IssueContent{Title: "Ready control"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
 	}
 	err := store.RunInTransaction(ctx, "test: seed candidate graph ready work", func(tx storage.Transaction) error {
 		if err := tx.CreateIssues(ctx, issues, "tester"); err != nil {
@@ -577,7 +699,7 @@ func TestGetReadyWork_LimitCandidateGraphSemantics(t *testing.T) {
 		t.Fatalf("seed candidate graph ready work: %v", err)
 	}
 
-	work, err := store.GetReadyWork(ctx, types.WorkFilter{Limit: 2, SortPolicy: types.SortPolicyOldest})
+	work, err := store.GetReadyWork(ctx, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Limit: 2, SortPolicy: types.SortPolicyOldest}})
 	if err != nil {
 		t.Fatalf("limited ready work: %v", err)
 	}
@@ -624,9 +746,9 @@ func TestGetReadyWork_LimitMatchesUnboundedForChildrenOfInactiveParents(t *testi
 		blockerID := prefix + "-blocker"
 		childIDs = append(childIDs, childID)
 		issues = append(issues,
-			&types.Issue{ID: parentID, Title: sc.name + " parent", Status: sc.parentStatus, Priority: 1, IssueType: types.TypeTask, Pinned: sc.parentStatus == types.StatusPinned},
-			&types.Issue{ID: childID, Title: sc.name + " child", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
-			&types.Issue{ID: blockerID, Title: sc.name + " blocker", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
+			&types.Issue{IssueID: types.IssueID{ID: parentID}, IssueContent: types.IssueContent{Title: sc.name + " parent"}, IssueWorkflow: types.IssueWorkflow{Status: sc.parentStatus, Priority: 1, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Pinned: sc.parentStatus == types.StatusPinned}},
+			&types.Issue{IssueID: types.IssueID{ID: childID}, IssueContent: types.IssueContent{Title: sc.name + " child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
+			&types.Issue{IssueID: types.IssueID{ID: blockerID}, IssueContent: types.IssueContent{Title: sc.name + " blocker"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
 		)
 		deps = append(deps,
 			&types.Dependency{IssueID: childID, DependsOnID: parentID, Type: types.DepParentChild},
@@ -635,11 +757,17 @@ func TestGetReadyWork_LimitMatchesUnboundedForChildrenOfInactiveParents(t *testi
 		if sc.depType == types.DepWaitsFor {
 			spawnedChildID := prefix + "-spawned-child"
 			issues = append(issues, &types.Issue{
-				ID:        spawnedChildID,
-				Title:     sc.name + " spawned child",
-				Status:    types.StatusOpen,
-				Priority:  1,
-				IssueType: types.TypeTask,
+				IssueID: types.IssueID{
+					ID: spawnedChildID,
+				},
+				IssueContent: types.IssueContent{
+					Title: sc.name + " spawned child",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  1,
+					IssueType: types.TypeTask,
+				},
 			})
 			deps = append(deps, &types.Dependency{
 				IssueID:     spawnedChildID,
@@ -664,11 +792,11 @@ func TestGetReadyWork_LimitMatchesUnboundedForChildrenOfInactiveParents(t *testi
 		t.Fatalf("seed inactive parent ready work: %v", err)
 	}
 
-	limited, err := store.GetReadyWork(ctx, types.WorkFilter{Limit: 100, SortPolicy: types.SortPolicyOldest})
+	limited, err := store.GetReadyWork(ctx, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Limit: 100, SortPolicy: types.SortPolicyOldest}})
 	if err != nil {
 		t.Fatalf("limited ready work: %v", err)
 	}
-	unbounded, err := store.GetReadyWork(ctx, types.WorkFilter{SortPolicy: types.SortPolicyOldest})
+	unbounded, err := store.GetReadyWork(ctx, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{SortPolicy: types.SortPolicyOldest}})
 	if err != nil {
 		t.Fatalf("unbounded ready work: %v", err)
 	}
@@ -694,26 +822,46 @@ func TestGetReadyWork_LimitIncludeEphemeralWispBlocker(t *testing.T) {
 	defer cancel()
 
 	wispBlocker := &types.Issue{
-		ID:        "rw-eph-wisp-blocker",
-		Title:     "Ephemeral blocker",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeGate,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: "rw-eph-wisp-blocker",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Ephemeral blocker",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeGate,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	blocked := &types.Issue{
-		ID:        "rw-eph-blocked",
-		Title:     "Blocked by wisp",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "rw-eph-blocked",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocked by wisp",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	ready := &types.Issue{
-		ID:        "rw-eph-ready",
-		Title:     "Ready",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "rw-eph-ready",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Ready",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	for _, iss := range []*types.Issue{wispBlocker, blocked, ready} {
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
@@ -728,7 +876,7 @@ func TestGetReadyWork_LimitIncludeEphemeralWispBlocker(t *testing.T) {
 		t.Fatalf("add wisp blocker dependency: %v", err)
 	}
 
-	work, err := store.GetReadyWork(ctx, types.WorkFilter{Limit: 1, IncludeEphemeral: true, SortPolicy: types.SortPolicyOldest})
+	work, err := store.GetReadyWork(ctx, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Limit: 1, SortPolicy: types.SortPolicyOldest}, WorkFilterExtra: types.WorkFilterExtra{IncludeEphemeral: true}})
 	if err != nil {
 		t.Fatalf("limited ready work with wisps: %v", err)
 	}
@@ -750,13 +898,23 @@ func TestGetReadyWork_LimitIncludeEphemeralHonorsOldestSortAcrossWispPages(t *te
 
 	now := time.Now().UTC()
 	lowPriorityOld := &types.Issue{
-		ID:        "rw-eph-oldest-low-priority",
-		Title:     "Oldest low priority wisp",
-		Status:    types.StatusOpen,
-		Priority:  4,
-		IssueType: types.TypeTask,
-		CreatedAt: now.Add(-72 * time.Hour),
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: "rw-eph-oldest-low-priority",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Oldest low priority wisp",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  4,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now.Add(-72 * time.Hour),
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, lowPriorityOld, "tester"); err != nil {
 		t.Fatalf("create old wisp: %v", err)
@@ -764,13 +922,23 @@ func TestGetReadyWork_LimitIncludeEphemeralHonorsOldestSortAcrossWispPages(t *te
 
 	for i := 0; i < 101; i++ {
 		iss := &types.Issue{
-			ID:        fmt.Sprintf("rw-eph-priority-noise-%03d", i),
-			Title:     fmt.Sprintf("Priority noise %03d", i),
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
-			CreatedAt: now.Add(time.Duration(i) * time.Minute),
-			Ephemeral: true,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("rw-eph-priority-noise-%03d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Priority noise %03d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: now.Add(time.Duration(i) * time.Minute),
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		}
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("create priority noise %03d: %v", i, err)
@@ -778,9 +946,13 @@ func TestGetReadyWork_LimitIncludeEphemeralHonorsOldestSortAcrossWispPages(t *te
 	}
 
 	work, err := store.GetReadyWork(ctx, types.WorkFilter{
-		Limit:            1,
-		IncludeEphemeral: true,
-		SortPolicy:       types.SortPolicyOldest,
+		WorkFilterCore: types.WorkFilterCore{
+			Limit:      1,
+			SortPolicy: types.SortPolicyOldest,
+		},
+		WorkFilterExtra: types.WorkFilterExtra{
+			IncludeEphemeral: true,
+		},
 	})
 	if err != nil {
 		t.Fatalf("limited oldest ready work with wisps: %v", err)
@@ -800,21 +972,35 @@ func TestGetReadyWork_IncludeEphemeralPropagatesWispSearchError(t *testing.T) {
 	defer cancel()
 
 	if err := store.CreateIssue(ctx, &types.Issue{
-		ID:        "rw-wisp-error-ready",
-		Title:     "Ready control",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "rw-wisp-error-ready",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Ready control",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}, "tester"); err != nil {
 		t.Fatalf("create ready issue: %v", err)
 	}
 	if err := store.CreateIssue(ctx, &types.Issue{
-		ID:        "rw-wisp-error-wisp",
-		Title:     "Wisp control",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: "rw-wisp-error-wisp",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Wisp control",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}, "tester"); err != nil {
 		t.Fatalf("create wisp: %v", err)
 	}
@@ -822,7 +1008,7 @@ func TestGetReadyWork_IncludeEphemeralPropagatesWispSearchError(t *testing.T) {
 		t.Fatalf("damage wisps table for regression test: %v", err)
 	}
 
-	_, err := store.GetReadyWork(ctx, types.WorkFilter{IncludeEphemeral: true})
+	_, err := store.GetReadyWork(ctx, types.WorkFilter{WorkFilterExtra: types.WorkFilterExtra{IncludeEphemeral: true}})
 	if err == nil {
 		t.Fatal("expected IncludeEphemeral ready work to propagate wisp search error")
 	}
@@ -839,26 +1025,42 @@ func TestGetReadyWork_DottedHasMetadataKey(t *testing.T) {
 	defer cancel()
 
 	matching := &types.Issue{
-		ID:        "test-rw-meta-dotted",
-		Title:     "Dotted metadata",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
-		Metadata:  []byte(`{"gc.routed_to":"beads/workflows.codex-max"}`),
+		IssueID: types.IssueID{
+			ID: "test-rw-meta-dotted",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Dotted metadata",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: []byte(`{"gc.routed_to":"beads/workflows.codex-max"}`),
+		},
 	}
 	nonMatching := &types.Issue{
-		ID:        "test-rw-meta-nested",
-		Title:     "Nested metadata",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
-		Metadata:  []byte(`{"gc":{"routed_to":"beads/workflows.codex-max"}}`),
+		IssueID: types.IssueID{
+			ID: "test-rw-meta-nested",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Nested metadata",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: []byte(`{"gc":{"routed_to":"beads/workflows.codex-max"}}`),
+		},
 	}
 	if err := store.CreateIssues(ctx, []*types.Issue{matching, nonMatching}, "tester"); err != nil {
 		t.Fatalf("create metadata issues: %v", err)
 	}
 
-	work, err := store.GetReadyWork(ctx, types.WorkFilter{HasMetadataKey: "gc.routed_to"})
+	work, err := store.GetReadyWork(ctx, types.WorkFilter{WorkFilterExtra: types.WorkFilterExtra{HasMetadataKey: "gc.routed_to"}})
 	if err != nil {
 		t.Fatalf("ready work with dotted metadata key: %v", err)
 	}
@@ -880,20 +1082,22 @@ func TestGetReadyWork_TypePriorityLimitUsesDoltSafeTypePredicate(t *testing.T) {
 
 	priority := 1
 	issues := []*types.Issue{
-		{ID: "test-rw-type-task", Title: "Task", Status: types.StatusOpen, Priority: priority, IssueType: types.TypeTask},
-		{ID: "test-rw-type-bug-1", Title: "Bug 1", Status: types.StatusOpen, Priority: priority, IssueType: types.TypeBug},
-		{ID: "test-rw-type-bug-2", Title: "Bug 2", Status: types.StatusOpen, Priority: priority, IssueType: types.TypeBug},
+		{IssueID: types.IssueID{ID: "test-rw-type-task"}, IssueContent: types.IssueContent{Title: "Task"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: priority, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "test-rw-type-bug-1"}, IssueContent: types.IssueContent{Title: "Bug 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: priority, IssueType: types.TypeBug}},
+		{IssueID: types.IssueID{ID: "test-rw-type-bug-2"}, IssueContent: types.IssueContent{Title: "Bug 2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: priority, IssueType: types.TypeBug}},
 	}
 	if err := store.CreateIssues(ctx, issues, "tester"); err != nil {
 		t.Fatalf("create typed issues: %v", err)
 	}
 
 	work, err := store.GetReadyWork(ctx, types.WorkFilter{
-		Type:       string(types.TypeBug),
-		Status:     types.StatusOpen,
-		Priority:   &priority,
-		Limit:      2,
-		SortPolicy: types.SortPolicyOldest,
+		WorkFilterCore: types.WorkFilterCore{
+			Type:       string(types.TypeBug),
+			Status:     types.StatusOpen,
+			Priority:   &priority,
+			Limit:      2,
+			SortPolicy: types.SortPolicyOldest,
+		},
 	})
 	if err != nil {
 		t.Fatalf("ready work with type+status+priority+limit: %v", err)
@@ -921,18 +1125,30 @@ func TestGetReadyWork_TypeFilter(t *testing.T) {
 	defer cancel()
 
 	task := &types.Issue{
-		ID:        "rw-task",
-		Title:     "A Task",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "rw-task",
+		},
+		IssueContent: types.IssueContent{
+			Title: "A Task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	bug := &types.Issue{
-		ID:        "rw-bug",
-		Title:     "A Bug",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeBug,
+		IssueID: types.IssueID{
+			ID: "rw-bug",
+		},
+		IssueContent: types.IssueContent{
+			Title: "A Bug",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeBug,
+		},
 	}
 
 	for _, iss := range []*types.Issue{task, bug} {
@@ -941,7 +1157,7 @@ func TestGetReadyWork_TypeFilter(t *testing.T) {
 		}
 	}
 
-	work, err := store.GetReadyWork(ctx, types.WorkFilter{Type: string(types.TypeBug)})
+	work, err := store.GetReadyWork(ctx, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Type: string(types.TypeBug)}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -976,25 +1192,43 @@ func TestGetReadyWork_ExcludeTypeFilter(t *testing.T) {
 	defer cancel()
 
 	epic := &types.Issue{
-		ID:        "rw-ex-epic",
-		Title:     "An Epic",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "rw-ex-epic",
+		},
+		IssueContent: types.IssueContent{
+			Title: "An Epic",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeEpic,
+		},
 	}
 	task := &types.Issue{
-		ID:        "rw-ex-task",
-		Title:     "A Task",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "rw-ex-task",
+		},
+		IssueContent: types.IssueContent{
+			Title: "A Task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	bug := &types.Issue{
-		ID:        "rw-ex-bug",
-		Title:     "A Bug",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeBug,
+		IssueID: types.IssueID{
+			ID: "rw-ex-bug",
+		},
+		IssueContent: types.IssueContent{
+			Title: "A Bug",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeBug,
+		},
 	}
 
 	for _, iss := range []*types.Issue{epic, task, bug} {
@@ -1005,7 +1239,9 @@ func TestGetReadyWork_ExcludeTypeFilter(t *testing.T) {
 
 	// Single-type exclusion.
 	work, err := store.GetReadyWork(ctx, types.WorkFilter{
-		ExcludeTypes: []types.IssueType{types.TypeEpic},
+		WorkFilterExtra: types.WorkFilterExtra{
+			ExcludeTypes: []types.IssueType{types.TypeEpic},
+		},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1018,7 +1254,9 @@ func TestGetReadyWork_ExcludeTypeFilter(t *testing.T) {
 
 	// Multi-type exclusion.
 	work, err = store.GetReadyWork(ctx, types.WorkFilter{
-		ExcludeTypes: []types.IssueType{types.TypeEpic, types.TypeTask},
+		WorkFilterExtra: types.WorkFilterExtra{
+			ExcludeTypes: []types.IssueType{types.TypeEpic, types.TypeTask},
+		},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1053,25 +1291,43 @@ func TestGetReadyWork_ParentFilterReturnsDescendants(t *testing.T) {
 	defer cancel()
 
 	epic := &types.Issue{
-		ID:        "rw-pd-epic",
-		Title:     "Epic",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "rw-pd-epic",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Epic",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeEpic,
+		},
 	}
 	phase := &types.Issue{
-		ID:        "rw-pd-phase",
-		Title:     "Phase",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "rw-pd-phase",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Phase",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeEpic,
+		},
 	}
 	leaf := &types.Issue{
-		ID:        "rw-pd-leaf",
-		Title:     "Leaf Task",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "rw-pd-leaf",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Leaf Task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, iss := range []*types.Issue{epic, phase, leaf} {
@@ -1092,7 +1348,7 @@ func TestGetReadyWork_ParentFilterReturnsDescendants(t *testing.T) {
 
 	// Direct parent filter still works (control).
 	parentPhase := phase.ID
-	workPhase, err := store.GetReadyWork(ctx, types.WorkFilter{ParentID: &parentPhase})
+	workPhase, err := store.GetReadyWork(ctx, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{ParentID: &parentPhase}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1108,7 +1364,7 @@ func TestGetReadyWork_ParentFilterReturnsDescendants(t *testing.T) {
 
 	// Grandparent filter: leaf must appear (the bug under test).
 	parentEpic := epic.ID
-	workEpic, err := store.GetReadyWork(ctx, types.WorkFilter{ParentID: &parentEpic})
+	workEpic, err := store.GetReadyWork(ctx, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{ParentID: &parentEpic}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1138,11 +1394,17 @@ func TestGetReadyWork_ParentFilterReturnsDeepDescendants(t *testing.T) {
 	defer cancel()
 
 	root := &types.Issue{
-		ID:        "rw-deep-root",
-		Title:     "Deep Root",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "rw-deep-root",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Deep Root",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeEpic,
+		},
 	}
 	if err := store.CreateIssue(ctx, root, "tester"); err != nil {
 		t.Fatalf("failed to create root: %v", err)
@@ -1152,11 +1414,17 @@ func TestGetReadyWork_ParentFilterReturnsDeepDescendants(t *testing.T) {
 	const depth = 105
 	for i := 1; i <= depth; i++ {
 		issue := &types.Issue{
-			ID:        fmt.Sprintf("rw-deep-%03d", i),
-			Title:     fmt.Sprintf("Deep child %03d", i),
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("rw-deep-%03d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Deep child %03d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 			t.Fatalf("failed to create issue %s: %v", issue.ID, err)
@@ -1172,7 +1440,7 @@ func TestGetReadyWork_ParentFilterReturnsDeepDescendants(t *testing.T) {
 	}
 
 	rootID := root.ID
-	work, err := store.GetReadyWork(ctx, types.WorkFilter{ParentID: &rootID})
+	work, err := store.GetReadyWork(ctx, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{ParentID: &rootID}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1204,18 +1472,30 @@ func TestGetReadyWork_CustomStatusBlockerStillBlocks(t *testing.T) {
 	}
 
 	blocker := &types.Issue{
-		ID:        "rw-cs-blocker",
-		Title:     "Custom Status Blocker",
-		Status:    types.Status("review"),
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "rw-cs-blocker",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Custom Status Blocker",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.Status("review"),
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	blocked := &types.Issue{
-		ID:        "rw-cs-blocked",
-		Title:     "Blocked by Custom Status",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "rw-cs-blocked",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocked by Custom Status",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, iss := range []*types.Issue{blocker, blocked} {
@@ -1259,11 +1539,17 @@ func TestGetReadyWork_PastDeferredIssueIsReady(t *testing.T) {
 
 	// Create an issue and set defer_until to 1 hour in the past (UTC).
 	pastDeferred := &types.Issue{
-		ID:        "rw-past-deferred",
-		Title:     "Past Deferred Task",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "rw-past-deferred",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Past Deferred Task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, pastDeferred, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -1277,11 +1563,17 @@ func TestGetReadyWork_PastDeferredIssueIsReady(t *testing.T) {
 
 	// Create a normal issue (no defer) as a control.
 	normal := &types.Issue{
-		ID:        "rw-normal",
-		Title:     "Normal Task",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "rw-normal",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Normal Task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, normal, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -1320,11 +1612,17 @@ func TestGetReadyWork_FutureDeferredIssueExcluded(t *testing.T) {
 	defer cancel()
 
 	futureDeferred := &types.Issue{
-		ID:        "rw-future-deferred",
-		Title:     "Future Deferred Task",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "rw-future-deferred",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Future Deferred Task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, futureDeferred, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -1376,18 +1674,30 @@ func TestGetBlockedIssues_ReturnsBlockedWithBlockers(t *testing.T) {
 	defer cancel()
 
 	blocker := &types.Issue{
-		ID:        "bi-blocker",
-		Title:     "Blocker Issue",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "bi-blocker",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocker Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	blocked := &types.Issue{
-		ID:        "bi-blocked",
-		Title:     "Blocked Issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "bi-blocked",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocked Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, iss := range []*types.Issue{blocker, blocked} {
@@ -1435,18 +1745,30 @@ func TestGetBlockedIssues_ExcludesClosedBlockers(t *testing.T) {
 	defer cancel()
 
 	blocker := &types.Issue{
-		ID:        "bi-closeblocker",
-		Title:     "Closed Blocker",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "bi-closeblocker",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Closed Blocker",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	blocked := &types.Issue{
-		ID:        "bi-wouldbeblocked",
-		Title:     "Would Be Blocked",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "bi-wouldbeblocked",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Would Be Blocked",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, iss := range []*types.Issue{blocker, blocked} {
@@ -1489,25 +1811,43 @@ func TestGetBlockedIssues_MultipleBlockers(t *testing.T) {
 	defer cancel()
 
 	blockerA := &types.Issue{
-		ID:        "bi-blockerA",
-		Title:     "Blocker A",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "bi-blockerA",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocker A",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	blockerB := &types.Issue{
-		ID:        "bi-blockerB",
-		Title:     "Blocker B",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "bi-blockerB",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocker B",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	blocked := &types.Issue{
-		ID:        "bi-multiblocked",
-		Title:     "Multi Blocked",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "bi-multiblocked",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Multi Blocked",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, iss := range []*types.Issue{blockerA, blockerB, blocked} {
@@ -1549,25 +1889,44 @@ func TestGetBlockedIssues_IncludesChildrenOfBlockedParents(t *testing.T) {
 	defer cancel()
 
 	blocker := &types.Issue{
-		ID:        "bi-preblocker",
-		Title:     "Prerequisite",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic, // must match blocked type for DepBlocks (GH#1495)
+		IssueID: types.IssueID{
+			ID: "bi-preblocker",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Prerequisite",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
+		// must match blocked type for DepBlocks (GH#1495),
 	}
 	epic := &types.Issue{
-		ID:        "bi-epic",
-		Title:     "Gated Epic",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "bi-epic",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Gated Epic",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeEpic,
+		},
 	}
 	child := &types.Issue{
-		ID:        "bi-epic.1",
-		Title:     "Child Task",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "bi-epic.1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Child Task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, iss := range []*types.Issue{blocker, epic, child} {
@@ -1661,11 +2020,17 @@ func TestSearchIssues_ByTitle(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "si-title",
-		Title:     "Unique Searchable Title",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "si-title",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Unique Searchable Title",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -1694,12 +2059,18 @@ func TestSearchIssues_ByDescription(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:          "si-desc",
-		Title:       "Normal Title",
-		Description: "Special unique description text",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "si-desc",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Normal Title",
+			Description: "Special unique description text",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -1715,7 +2086,7 @@ func TestSearchIssues_ByDescription(t *testing.T) {
 	}
 
 	// DescriptionContains filter should still find it.
-	results, err = store.SearchIssues(ctx, "", types.IssueFilter{DescriptionContains: "Special unique description"})
+	results, err = store.SearchIssues(ctx, "", types.IssueFilter{IssueFilterMatch: types.IssueFilterMatch{DescriptionContains: "Special unique description"}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1740,12 +2111,20 @@ func TestSearchIssues_ByExternalRef(t *testing.T) {
 
 	linearURL := "https://linear.app/example-org/issue/BE-1521"
 	issue := &types.Issue{
-		ID:          "si-extref-xyz",
-		Title:       "Migrate EmailUtils across all services",
-		ExternalRef: &linearURL,
-		Status:      types.StatusOpen,
-		Priority:    3,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "si-extref-xyz",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Migrate EmailUtils across all services",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  3,
+			IssueType: types.TypeTask,
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: &linearURL,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -1764,7 +2143,7 @@ func TestSearchIssues_ByExternalRef(t *testing.T) {
 	}
 
 	// ExternalRefContains filter should also find it.
-	results, err = store.SearchIssues(ctx, "", types.IssueFilter{ExternalRefContains: "BE-1521"})
+	results, err = store.SearchIssues(ctx, "", types.IssueFilter{IssueFilterMatch: types.IssueFilterMatch{ExternalRefContains: "BE-1521"}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1785,7 +2164,7 @@ func TestSearchIssues_ByExternalRef(t *testing.T) {
 	}
 
 	// ExternalRef exact match should find the issue.
-	results, err = store.SearchIssues(ctx, "", types.IssueFilter{ExternalRef: &linearURL})
+	results, err = store.SearchIssues(ctx, "", types.IssueFilter{IssueFilterMatch: types.IssueFilterMatch{ExternalRef: &linearURL}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1798,7 +2177,7 @@ func TestSearchIssues_ByExternalRef(t *testing.T) {
 
 	// ExternalRef exact match with wrong value should return nothing.
 	wrongRef := "jira-WRONG-123"
-	results, err = store.SearchIssues(ctx, "", types.IssueFilter{ExternalRef: &wrongRef})
+	results, err = store.SearchIssues(ctx, "", types.IssueFilter{IssueFilterMatch: types.IssueFilterMatch{ExternalRef: &wrongRef}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1815,11 +2194,17 @@ func TestSearchIssues_ByID(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "si-searchbyid-xyz",
-		Title:     "ID Search",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "si-searchbyid-xyz",
+		},
+		IssueContent: types.IssueContent{
+			Title: "ID Search",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -1842,11 +2227,17 @@ func TestSearchIssues_NoMatch(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "si-nomatch",
-		Title:     "Existing Issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "si-nomatch",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Existing Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -1869,20 +2260,32 @@ func TestSearchIssues_StatusFilter(t *testing.T) {
 	defer cancel()
 
 	open := &types.Issue{
-		ID:          "si-stat-open",
-		Title:       "Status Filter Test",
-		Description: "Open issue",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "si-stat-open",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Status Filter Test",
+			Description: "Open issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	closed := &types.Issue{
-		ID:          "si-stat-closed",
-		Title:       "Status Filter Test Closed",
-		Description: "Closed issue",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "si-stat-closed",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Status Filter Test Closed",
+			Description: "Closed issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, iss := range []*types.Issue{open, closed} {
@@ -1895,7 +2298,7 @@ func TestSearchIssues_StatusFilter(t *testing.T) {
 	}
 
 	openStatus := types.StatusOpen
-	results, err := store.SearchIssues(ctx, "Status Filter Test", types.IssueFilter{Status: &openStatus})
+	results, err := store.SearchIssues(ctx, "Status Filter Test", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Status: &openStatus}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1916,19 +2319,33 @@ func TestSearchIssues_ExcludesPinnedByDefault(t *testing.T) {
 	defer cancel()
 
 	regular := &types.Issue{
-		ID:        "si-reg",
-		Title:     "Regular Issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "si-reg",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Regular Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	pinned := &types.Issue{
-		ID:        "si-pinned",
-		Title:     "Pinned Reference",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Pinned:    true,
+		IssueID: types.IssueID{
+			ID: "si-pinned",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Pinned Reference",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Pinned: true,
+		},
 	}
 
 	for _, iss := range []*types.Issue{regular, pinned} {
@@ -1940,7 +2357,7 @@ func TestSearchIssues_ExcludesPinnedByDefault(t *testing.T) {
 	// Filter with pinned=false (as bd list now does by default) should exclude pinned beads
 	openStatus := types.StatusOpen
 	notPinned := false
-	results, err := store.SearchIssues(ctx, "", types.IssueFilter{Status: &openStatus, Pinned: &notPinned})
+	results, err := store.SearchIssues(ctx, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Status: &openStatus}, IssueFilterFlags: types.IssueFilterFlags{Pinned: &notPinned}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1969,18 +2386,30 @@ func TestSearchIssues_PriorityFilter(t *testing.T) {
 	defer cancel()
 
 	p1 := &types.Issue{
-		ID:        "si-pri-1",
-		Title:     "Priority Filter",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "si-pri-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Priority Filter",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	p4 := &types.Issue{
-		ID:        "si-pri-4",
-		Title:     "Priority Filter Low",
-		Status:    types.StatusOpen,
-		Priority:  4,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "si-pri-4",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Priority Filter Low",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  4,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, iss := range []*types.Issue{p1, p4} {
@@ -1990,7 +2419,7 @@ func TestSearchIssues_PriorityFilter(t *testing.T) {
 	}
 
 	priority := 1
-	results, err := store.SearchIssues(ctx, "Priority Filter", types.IssueFilter{Priority: &priority})
+	results, err := store.SearchIssues(ctx, "Priority Filter", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Priority: &priority}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2012,18 +2441,24 @@ func TestSearchIssues_LimitFilter(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		iss := &types.Issue{
-			ID:        fmt.Sprintf("si-limit-%d", i),
-			Title:     "Limit Test Issue",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("si-limit-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: "Limit Test Issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("failed to create issue: %v", err)
 		}
 	}
 
-	results, err := store.SearchIssues(ctx, "Limit Test", types.IssueFilter{Limit: 3})
+	results, err := store.SearchIssues(ctx, "Limit Test", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 3}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2040,18 +2475,30 @@ func TestSearchIssues_LabelFilter(t *testing.T) {
 	defer cancel()
 
 	labeled := &types.Issue{
-		ID:        "si-labeled",
-		Title:     "Label Filter Test",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "si-labeled",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Label Filter Test",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	unlabeled := &types.Issue{
-		ID:        "si-unlabeled",
-		Title:     "Label Filter Test No Label",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "si-unlabeled",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Label Filter Test No Label",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, iss := range []*types.Issue{labeled, unlabeled} {
@@ -2064,7 +2511,7 @@ func TestSearchIssues_LabelFilter(t *testing.T) {
 		t.Fatalf("failed to add label: %v", err)
 	}
 
-	results, err := store.SearchIssues(ctx, "Label Filter Test", types.IssueFilter{Labels: []string{"important"}})
+	results, err := store.SearchIssues(ctx, "Label Filter Test", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Labels: []string{"important"}}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2085,11 +2532,17 @@ func TestSearchIssues_EmptyQuery(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		iss := &types.Issue{
-			ID:        fmt.Sprintf("si-empty-%d", i),
-			Title:     fmt.Sprintf("Empty Query Issue %d", i),
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("si-empty-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Empty Query Issue %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("failed to create issue: %v", err)
@@ -2113,18 +2566,30 @@ func TestSearchIssues_IssueTypeFilter(t *testing.T) {
 	defer cancel()
 
 	task := &types.Issue{
-		ID:        "si-type-task",
-		Title:     "Type Filter",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "si-type-task",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Type Filter",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	bug := &types.Issue{
-		ID:        "si-type-bug",
-		Title:     "Type Filter Bug",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeBug,
+		IssueID: types.IssueID{
+			ID: "si-type-bug",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Type Filter Bug",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeBug,
+		},
 	}
 
 	for _, iss := range []*types.Issue{task, bug} {
@@ -2134,7 +2599,7 @@ func TestSearchIssues_IssueTypeFilter(t *testing.T) {
 	}
 
 	bugType := types.TypeBug
-	results, err := store.SearchIssues(ctx, "Type Filter", types.IssueFilter{IssueType: &bugType})
+	results, err := store.SearchIssues(ctx, "Type Filter", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IssueType: &bugType}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2154,25 +2619,43 @@ func TestSearchIssues_IncludeDependencies(t *testing.T) {
 	defer cancel()
 
 	parent := &types.Issue{
-		ID:        "si-dep-parent",
-		Title:     "DepHydration Parent",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "si-dep-parent",
+		},
+		IssueContent: types.IssueContent{
+			Title: "DepHydration Parent",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	child := &types.Issue{
-		ID:        "si-dep-child",
-		Title:     "DepHydration Child",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "si-dep-child",
+		},
+		IssueContent: types.IssueContent{
+			Title: "DepHydration Child",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	standalone := &types.Issue{
-		ID:        "si-dep-standalone",
-		Title:     "DepHydration Standalone",
-		Status:    types.StatusOpen,
-		Priority:  3,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "si-dep-standalone",
+		},
+		IssueContent: types.IssueContent{
+			Title: "DepHydration Standalone",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  3,
+			IssueType: types.TypeTask,
+		},
 	}
 	for _, iss := range []*types.Issue{parent, child, standalone} {
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
@@ -2203,7 +2686,9 @@ func TestSearchIssues_IncludeDependencies(t *testing.T) {
 
 	t.Run("true_hydrates_deps", func(t *testing.T) {
 		results, err := store.SearchIssues(ctx, "DepHydration", types.IssueFilter{
-			IncludeDependencies: true,
+			IssueFilterHydrate: types.IssueFilterHydrate{
+				IncludeDependencies: true,
+			},
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -2280,11 +2765,11 @@ func TestGetStatistics_CountsByStatus(t *testing.T) {
 	defer cancel()
 
 	issues := []*types.Issue{
-		{ID: "stat-open-1", Title: "Open 1", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
-		{ID: "stat-open-2", Title: "Open 2", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: "stat-inprog", Title: "In Progress", Status: types.StatusInProgress, Priority: 1, IssueType: types.TypeTask},
-		{ID: "stat-closed-1", Title: "Closed 1", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
-		{ID: "stat-closed-2", Title: "Closed 2", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+		{IssueID: types.IssueID{ID: "stat-open-1"}, IssueContent: types.IssueContent{Title: "Open 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "stat-open-2"}, IssueContent: types.IssueContent{Title: "Open 2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "stat-inprog"}, IssueContent: types.IssueContent{Title: "In Progress"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress, Priority: 1, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "stat-closed-1"}, IssueContent: types.IssueContent{Title: "Closed 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "stat-closed-2"}, IssueContent: types.IssueContent{Title: "Closed 2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
 	}
 	for _, iss := range issues {
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
@@ -2326,18 +2811,30 @@ func TestGetStatistics_BlockedCount(t *testing.T) {
 	defer cancel()
 
 	blocker := &types.Issue{
-		ID:        "stat-blocker",
-		Title:     "Blocker",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "stat-blocker",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocker",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	blocked := &types.Issue{
-		ID:        "stat-blocked",
-		Title:     "Blocked",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "stat-blocked",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocked",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, iss := range []*types.Issue{blocker, blocked} {
@@ -2377,12 +2874,20 @@ func TestGetStatistics_PinnedCount(t *testing.T) {
 	defer cancel()
 
 	pinned := &types.Issue{
-		ID:        "stat-pinned",
-		Title:     "Pinned Issue",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
-		Pinned:    true,
+		IssueID: types.IssueID{
+			ID: "stat-pinned",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Pinned Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Pinned: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, pinned, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -2406,11 +2911,17 @@ func TestGetStatistics_DeferredCount(t *testing.T) {
 	defer cancel()
 
 	deferred := &types.Issue{
-		ID:        "stat-deferred",
-		Title:     "Deferred Issue",
-		Status:    types.StatusDeferred,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "stat-deferred",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Deferred Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusDeferred,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, deferred, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -2434,25 +2945,43 @@ func TestGetStatistics_ReadyIssuesExcludesBlocked(t *testing.T) {
 	defer cancel()
 
 	blocker := &types.Issue{
-		ID:        "stat-r-blocker",
-		Title:     "Blocker",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "stat-r-blocker",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocker",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	blocked := &types.Issue{
-		ID:        "stat-r-blocked",
-		Title:     "Blocked",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "stat-r-blocked",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocked",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	ready := &types.Issue{
-		ID:        "stat-r-ready",
-		Title:     "Ready",
-		Status:    types.StatusOpen,
-		Priority:  3,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "stat-r-ready",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Ready",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  3,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, iss := range []*types.Issue{blocker, blocked, ready} {
@@ -2498,18 +3027,30 @@ func TestGetStatisticsNoBlocked_LeavesBlockedAndReadyNil(t *testing.T) {
 	defer cancel()
 
 	blocker := &types.Issue{
-		ID:        "stat-nb-blocker",
-		Title:     "Blocker",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "stat-nb-blocker",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocker",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	blocked := &types.Issue{
-		ID:        "stat-nb-blocked",
-		Title:     "Blocked",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "stat-nb-blocked",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocked",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	for _, iss := range []*types.Issue{blocker, blocked} {
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
@@ -2585,11 +3126,17 @@ func TestGetStaleIssues_ReturnsStale(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "stale-old",
-		Title:     "Old Issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "stale-old",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Old Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -2623,11 +3170,17 @@ func TestGetStaleIssues_ExcludesRecent(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "stale-fresh",
-		Title:     "Fresh Issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "stale-fresh",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Fresh Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -2653,11 +3206,17 @@ func TestGetStaleIssues_ExcludesClosed(t *testing.T) {
 	defer cancel()
 
 	issue := &types.Issue{
-		ID:        "stale-closed",
-		Title:     "Closed Stale",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "stale-closed",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Closed Stale",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -2693,18 +3252,30 @@ func TestGetStaleIssues_StatusFilter(t *testing.T) {
 	defer cancel()
 
 	open := &types.Issue{
-		ID:        "stale-sf-open",
-		Title:     "Open Stale",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "stale-sf-open",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Open Stale",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	inProg := &types.Issue{
-		ID:        "stale-sf-inprog",
-		Title:     "In Progress Stale",
-		Status:    types.StatusInProgress,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "stale-sf-inprog",
+		},
+		IssueContent: types.IssueContent{
+			Title: "In Progress Stale",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusInProgress,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, iss := range []*types.Issue{open, inProg} {
@@ -2756,11 +3327,17 @@ func TestGetStaleIssues_LimitFilter(t *testing.T) {
 
 	for i := 0; i < 5; i++ {
 		iss := &types.Issue{
-			ID:        fmt.Sprintf("stale-lim-%d", i),
-			Title:     fmt.Sprintf("Stale Limit %d", i),
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("stale-lim-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Stale Limit %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("failed to create issue: %v", err)
@@ -2794,12 +3371,20 @@ func TestGetStaleIssues_ExcludesEphemeral(t *testing.T) {
 	defer cancel()
 
 	eph := &types.Issue{
-		ID:        "stale-eph",
-		Title:     "Ephemeral Stale",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: "stale-eph",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Ephemeral Stale",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, eph, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -2842,10 +3427,14 @@ func TestCreateIssue_CounterMode(t *testing.T) {
 
 	// Create first issue - should get test-1
 	issue1 := &types.Issue{
-		Title:     "First issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "First issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue1, "tester"); err != nil {
 		t.Fatalf("failed to create issue1: %v", err)
@@ -2856,10 +3445,14 @@ func TestCreateIssue_CounterMode(t *testing.T) {
 
 	// Create second issue - should get test-2
 	issue2 := &types.Issue{
-		Title:     "Second issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Second issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue2, "tester"); err != nil {
 		t.Fatalf("failed to create issue2: %v", err)
@@ -2883,11 +3476,17 @@ func TestCreateIssue_ExplicitIDOverridesCounter(t *testing.T) {
 
 	// Create issue with explicit ID - counter should NOT be used
 	issue := &types.Issue{
-		ID:        "test-explicit",
-		Title:     "Explicit ID issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-explicit",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Explicit ID issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -2906,10 +3505,14 @@ func TestCreateIssue_HashModeDefault(t *testing.T) {
 
 	// No issue_id_mode set (default = hash mode)
 	issue := &types.Issue{
-		Title:     "Hash ID issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Hash ID issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -2943,11 +3546,17 @@ func TestCounterMode_SeedsFromExistingIssues(t *testing.T) {
 	// before counter mode was enabled).
 	for _, id := range []string{"test-5", "test-10", "test-3"} {
 		issue := &types.Issue{
-			ID:        id,
-			Title:     "Pre-existing issue " + id,
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: "Pre-existing issue " + id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 			t.Fatalf("failed to create issue %s: %v", id, err)
@@ -2961,10 +3570,14 @@ func TestCounterMode_SeedsFromExistingIssues(t *testing.T) {
 
 	// The next auto-generated issue should be test-11 (max existing was 10).
 	next := &types.Issue{
-		Title:     "First counter-mode issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "First counter-mode issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, next, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -2986,18 +3599,30 @@ func TestCounterMode_SeedsFromMixed(t *testing.T) {
 
 	// Create a mix: one hash-based ID and one numeric ID.
 	hashIssue := &types.Issue{
-		ID:        "test-a3f2",
-		Title:     "Hash-based issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-a3f2",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Hash-based issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	numericIssue := &types.Issue{
-		ID:        "test-7",
-		Title:     "Numeric issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-7",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Numeric issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	for _, iss := range []*types.Issue{hashIssue, numericIssue} {
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
@@ -3012,10 +3637,14 @@ func TestCounterMode_SeedsFromMixed(t *testing.T) {
 
 	// Only the numeric ID (test-7) should count; next should be test-8.
 	next := &types.Issue{
-		Title:     "First counter-mode issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "First counter-mode issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, next, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -3040,10 +3669,14 @@ func TestCounterMode_NoExistingIssues(t *testing.T) {
 	}
 
 	first := &types.Issue{
-		Title:     "First issue in fresh repo",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "First issue in fresh repo",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, first, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -3072,11 +3705,17 @@ func TestCounterMode_AlreadySeeded(t *testing.T) {
 
 	// Create a manually-specified issue with a higher ID than the counter.
 	highIssue := &types.Issue{
-		ID:        "test-99",
-		Title:     "High manual ID",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-99",
+		},
+		IssueContent: types.IssueContent{
+			Title: "High manual ID",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, highIssue, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -3090,10 +3729,14 @@ func TestCounterMode_AlreadySeeded(t *testing.T) {
 	// Next issue should be test-21 (counter was at 20; seeding must NOT override
 	// the existing counter row even though test-99 exists).
 	next := &types.Issue{
-		Title:     "Next counter issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Next counter issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, next, "tester"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -3115,32 +3758,56 @@ func TestSearchIssues_NoDuplicatesWithMultipleBlockers(t *testing.T) {
 
 	// Create an epic parent and two blocker issues.
 	epic := &types.Issue{
-		ID:        "dup-epic",
-		Title:     "Epic parent",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "dup-epic",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Epic parent",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
 	}
 	blockerA := &types.Issue{
-		ID:        "dup-blocker-a",
-		Title:     "Blocker A",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "dup-blocker-a",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocker A",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	blockerB := &types.Issue{
-		ID:        "dup-blocker-b",
-		Title:     "Blocker B",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "dup-blocker-b",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocker B",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	blocked := &types.Issue{
-		ID:        "dup-blocked",
-		Title:     "Blocked issue with two blockers",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "dup-blocked",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocked issue with two blockers",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, iss := range []*types.Issue{epic, blockerA, blockerB, blocked} {
@@ -3196,12 +3863,20 @@ func TestSearchIssues_StableOrdering(t *testing.T) {
 	// Create issues with identical priority and created_at but different IDs.
 	for _, id := range []string{"stable-c", "stable-a", "stable-b"} {
 		iss := &types.Issue{
-			ID:        id,
-			Title:     "Stable Ordering Test",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			CreatedAt: now,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: "Stable Ordering Test",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: now,
+			},
 		}
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("failed to create issue %s: %v", id, err)

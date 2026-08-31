@@ -7,7 +7,6 @@ import (
 	"sort"
 
 	"github.com/jonbaldie/beads/internal/storage"
-	"github.com/jonbaldie/beads/internal/storage/dberrors"
 	"github.com/jonbaldie/beads/internal/types"
 	"github.com/jonbaldie/beads/issueops"
 )
@@ -251,24 +250,83 @@ type DependencyUseCase interface {
 }
 
 func NewDependencyUseCase(depRepo DependencySQLRepository) DependencyUseCase {
-	return &dependencyUseCaseImpl{depRepo: depRepo}
+	uc := &dependencyUseCaseImpl{
+		dependencyEdgeMutationUseCase:  &dependencyEdgeMutationUseCase{depRepo: depRepo},
+		dependencyBatchMutationUseCase: &dependencyBatchMutationUseCase{depRepo: depRepo},
+		dependencyQueryUseCase:         &dependencyQueryUseCase{depRepo: depRepo},
+		dependencyStatusUseCase:        &dependencyStatusUseCase{depRepo: depRepo},
+		dependencyGraphUseCase:         &dependencyGraphUseCase{depRepo: depRepo},
+		dependencyRecordsUseCase:       &dependencyRecordsUseCase{depRepo: depRepo},
+	}
+	// Keep the composition explicit: the public interface is implemented by
+	// promoted role methods, and these references make that seam visible to
+	// readers and static analyzers.
+	_ = uc.dependencyEdgeMutationUseCase
+	_ = uc.dependencyBatchMutationUseCase
+	_ = uc.dependencyQueryUseCase
+	_ = uc.dependencyStatusUseCase
+	_ = uc.dependencyGraphUseCase
+	_ = uc.dependencyRecordsUseCase
+	return uc
 }
 
 type dependencyUseCaseImpl struct {
+	*dependencyEdgeMutationUseCase
+	*dependencyBatchMutationUseCase
+	*dependencyQueryUseCase
+	*dependencyStatusUseCase
+	*dependencyGraphUseCase
+	*dependencyRecordsUseCase
+}
+
+type dependencyEdgeMutationUseCase struct {
+	depRepo DependencySQLRepository
+}
+
+type dependencyBatchMutationUseCase struct {
+	depRepo DependencySQLRepository
+}
+
+type dependencyQueryUseCase struct {
+	depRepo DependencySQLRepository
+}
+
+type dependencyStatusUseCase struct {
+	depRepo DependencySQLRepository
+}
+
+type dependencyGraphUseCase struct {
+	depRepo DependencySQLRepository
+}
+
+type dependencyRecordsUseCase struct {
 	depRepo DependencySQLRepository
 }
 
 var _ DependencyUseCase = (*dependencyUseCaseImpl)(nil)
 
-func (u *dependencyUseCaseImpl) AddDependency(ctx context.Context, dep *types.Dependency, actor string) error {
-	return u.add(ctx, dep, actor, false)
+func (u *dependencyEdgeMutationUseCase) AddDependency(ctx context.Context, dep *types.Dependency, actor string) error {
+	return addDependency(ctx, u.depRepo, dep, actor, false)
 }
 
-func (u *dependencyUseCaseImpl) AddWispDependency(ctx context.Context, dep *types.Dependency, actor string) error {
-	return u.add(ctx, dep, actor, true)
+func (u *dependencyEdgeMutationUseCase) AddWispDependency(ctx context.Context, dep *types.Dependency, actor string) error {
+	return addDependency(ctx, u.depRepo, dep, actor, true)
 }
 
-func (u *dependencyUseCaseImpl) add(ctx context.Context, dep *types.Dependency, actor string, useWisp bool) error {
+func addDependency(ctx context.Context, depRepo DependencySQLRepository, dep *types.Dependency, actor string, useWisp bool) error {
+	if err := validateUseCaseDependencyInput(dep); err != nil {
+		return err
+	}
+	if err := validateUseCaseDependencyHierarchy(ctx, depRepo, dep); err != nil {
+		return err
+	}
+	if err := checkUseCaseDependencyCycle(ctx, depRepo, dep); err != nil {
+		return err
+	}
+	return insertUseCaseDependency(ctx, depRepo, dep, actor, useWisp)
+}
+
+func validateUseCaseDependencyInput(dep *types.Dependency) error {
 	if dep == nil {
 		return fmt.Errorf("add dep: dep must not be nil")
 	}
@@ -283,7 +341,11 @@ func (u *dependencyUseCaseImpl) add(ctx context.Context, dep *types.Dependency, 
 	if dep.IssueID == dep.DependsOnID {
 		return fmt.Errorf("%w: %s cannot depend on itself", ErrSelfDependency, dep.IssueID)
 	}
-	if err := u.depRepo.ValidateBlockingHierarchy(ctx, dep); err != nil {
+	return nil
+}
+
+func validateUseCaseDependencyHierarchy(ctx context.Context, depRepo DependencySQLRepository, dep *types.Dependency) error {
+	if err := depRepo.ValidateBlockingHierarchy(ctx, dep); err != nil {
 		var hierarchyConflict *DependencyHierarchyConflictError
 		if errors.As(err, &hierarchyConflict) {
 			return err
@@ -291,8 +353,12 @@ func (u *dependencyUseCaseImpl) add(ctx context.Context, dep *types.Dependency, 
 		return fmt.Errorf("add dep: hierarchy check: %w", err)
 	}
 
+	return nil
+}
+
+func checkUseCaseDependencyCycle(ctx context.Context, depRepo DependencySQLRepository, dep *types.Dependency) error {
 	if types.IsSchedulingEdge(dep.Type) {
-		cycle, err := u.depRepo.HasCycle(ctx, dep.IssueID, dep.DependsOnID)
+		cycle, err := depRepo.HasCycle(ctx, dep.IssueID, dep.DependsOnID)
 		if err != nil {
 			return fmt.Errorf("add dep: cycle check: %w", err)
 		}
@@ -303,8 +369,11 @@ func (u *dependencyUseCaseImpl) add(ctx context.Context, dep *types.Dependency, 
 			return ErrDependencyCycle
 		}
 	}
+	return nil
+}
 
-	if err := u.depRepo.Insert(ctx, dep, actor, DepInsertOpts{UseWispsTable: useWisp, HierarchyValidated: true, CycleValidated: true, EmitEvent: true}); err != nil {
+func insertUseCaseDependency(ctx context.Context, depRepo DependencySQLRepository, dep *types.Dependency, actor string, useWisp bool) error {
+	if err := depRepo.Insert(ctx, dep, actor, DepInsertOpts{UseWispsTable: useWisp, HierarchyValidated: true, CycleValidated: true, EmitEvent: true}); err != nil {
 		// The retype conflict is a user-facing error whose message already
 		// matches embedded verbatim; pass it through unwrapped so the CLI does
 		// not prepend "add dep: insert:" (#4547 F-1). The endpoint-existence
@@ -326,12 +395,12 @@ func (u *dependencyUseCaseImpl) add(ctx context.Context, dep *types.Dependency, 
 	return nil
 }
 
-func (u *dependencyUseCaseImpl) RemoveDependency(ctx context.Context, issueID, dependsOnID, actor string) error {
-	return u.removeDep(ctx, issueID, dependsOnID, actor, false)
+func (u *dependencyEdgeMutationUseCase) RemoveDependency(ctx context.Context, issueID, dependsOnID, actor string) error {
+	return removeDependency(ctx, u.depRepo, issueID, dependsOnID, actor, false)
 }
 
-func (u *dependencyUseCaseImpl) RemoveWispDependency(ctx context.Context, wispID, dependsOnID, actor string) error {
-	return u.removeDep(ctx, wispID, dependsOnID, actor, true)
+func (u *dependencyEdgeMutationUseCase) RemoveWispDependency(ctx context.Context, wispID, dependsOnID, actor string) error {
+	return removeDependency(ctx, u.depRepo, wispID, dependsOnID, actor, true)
 }
 
 // RemoveDependencyBySource removes one edge from the plane its SOURCE lives in
@@ -343,41 +412,45 @@ func (u *dependencyUseCaseImpl) RemoveWispDependency(ctx context.Context, wispID
 // a wisp while reporting that it was never there (bd-yby99.17). The delete IS
 // the verdict, the way the store-backed body reads it off RemoveDependencyInTx
 // rather than from a separate lookup.
-func (u *dependencyUseCaseImpl) RemoveDependencyBySource(ctx context.Context, sourceID, dependsOnID, actor string) (bool, error) {
+func (u *dependencyEdgeMutationUseCase) RemoveDependencyBySource(ctx context.Context, sourceID, dependsOnID, actor string) (bool, error) {
+	return removeDependencyBySource(ctx, u.depRepo, sourceID, dependsOnID, actor)
+}
+
+func removeDependencyBySource(ctx context.Context, depRepo DependencySQLRepository, sourceID, dependsOnID, actor string) (bool, error) {
 	if sourceID == "" || dependsOnID == "" {
 		return false, fmt.Errorf("remove dep: sourceID and dependsOnID must not be empty")
 	}
-	wispSources, err := u.depRepo.WispSourceIDs(ctx, []string{sourceID})
+	wispSources, err := depRepo.WispSourceIDs(ctx, []string{sourceID})
 	if err != nil {
 		return false, fmt.Errorf("remove dep: classify source: %w", err)
 	}
 	_, sourceIsWisp := wispSources[sourceID]
-	res, err := u.depRepo.Delete(ctx, sourceID, dependsOnID, actor, DepInsertOpts{UseWispsTable: sourceIsWisp, EmitEvent: true})
+	res, err := depRepo.Delete(ctx, sourceID, dependsOnID, actor, DepInsertOpts{UseWispsTable: sourceIsWisp, EmitEvent: true})
 	if err != nil {
 		return false, fmt.Errorf("remove dep %s -> %s: %w", sourceID, dependsOnID, err)
 	}
 	return res.Found, nil
 }
 
-func (u *dependencyUseCaseImpl) removeDep(ctx context.Context, sourceID, dependsOnID, actor string, useWisp bool) error {
+func removeDependency(ctx context.Context, depRepo DependencySQLRepository, sourceID, dependsOnID, actor string, useWisp bool) error {
 	if sourceID == "" || dependsOnID == "" {
 		return fmt.Errorf("remove dep: sourceID and dependsOnID must not be empty")
 	}
-	if _, err := u.depRepo.Delete(ctx, sourceID, dependsOnID, actor, DepInsertOpts{UseWispsTable: useWisp, EmitEvent: true}); err != nil {
+	if _, err := depRepo.Delete(ctx, sourceID, dependsOnID, actor, DepInsertOpts{UseWispsTable: useWisp, EmitEvent: true}); err != nil {
 		return fmt.Errorf("remove dep %s -> %s: %w", sourceID, dependsOnID, err)
 	}
 	return nil
 }
 
-func (u *dependencyUseCaseImpl) Reparent(ctx context.Context, childID, newParentID, actor string) error {
-	return u.reparent(ctx, childID, newParentID, actor, false)
+func (u *dependencyEdgeMutationUseCase) Reparent(ctx context.Context, childID, newParentID, actor string) error {
+	return reparentDependency(ctx, u.depRepo, childID, newParentID, actor, false)
 }
 
-func (u *dependencyUseCaseImpl) ReparentWisp(ctx context.Context, childWispID, newParentID, actor string) error {
-	return u.reparent(ctx, childWispID, newParentID, actor, true)
+func (u *dependencyEdgeMutationUseCase) ReparentWisp(ctx context.Context, childWispID, newParentID, actor string) error {
+	return reparentDependency(ctx, u.depRepo, childWispID, newParentID, actor, true)
 }
 
-func (u *dependencyUseCaseImpl) reparent(ctx context.Context, childID, newParentID, actor string, useWisp bool) error {
+func reparentDependency(ctx context.Context, depRepo DependencySQLRepository, childID, newParentID, actor string, useWisp bool) error {
 	if childID == "" {
 		return fmt.Errorf("reparent: childID must not be empty")
 	}
@@ -386,13 +459,28 @@ func (u *dependencyUseCaseImpl) reparent(ctx context.Context, childID, newParent
 	}
 
 	opts := DepInsertOpts{UseWispsTable: useWisp}
-	res, err := u.depRepo.ListByIssueIDs(ctx, []string{childID}, DepListOpts{
+	existing, err := currentParentSet(ctx, depRepo, childID, useWisp)
+	if err != nil {
+		return err
+	}
+	target := targetParentSet(newParentID)
+	if sameStringSet(existing, target) {
+		return nil
+	}
+	if err := removeOldParents(ctx, depRepo, childID, actor, opts, existing, target); err != nil {
+		return err
+	}
+	return addNewParents(ctx, depRepo, childID, actor, opts, target, existing)
+}
+
+func currentParentSet(ctx context.Context, depRepo DependencySQLRepository, childID string, useWisp bool) (map[string]struct{}, error) {
+	res, err := depRepo.ListByIssueIDs(ctx, []string{childID}, DepListOpts{
 		Types:         []types.DependencyType{types.DepParentChild},
 		Direction:     DepDirectionOut,
 		UseWispsTable: useWisp,
 	})
 	if err != nil {
-		return fmt.Errorf("reparent: list current parent: %w", err)
+		return nil, fmt.Errorf("reparent: list current parent: %w", err)
 	}
 
 	// A child can carry MORE THAN ONE parent-child edge — Create accepts
@@ -408,27 +496,34 @@ func (u *dependencyUseCaseImpl) reparent(ctx context.Context, childID, newParent
 			existing[dep.DependsOnID] = struct{}{}
 		}
 	}
+	return existing, nil
+}
+
+func targetParentSet(newParentID string) map[string]struct{} {
 	target := map[string]struct{}{}
 	if newParentID != "" {
 		target[newParentID] = struct{}{}
 	}
-	if sameStringSet(existing, target) {
-		return nil
-	}
+	return target
+}
 
+func removeOldParents(ctx context.Context, depRepo DependencySQLRepository, childID, actor string, opts DepInsertOpts, existing, target map[string]struct{}) error {
 	for _, oldParentID := range sortedSetDifference(existing, target) {
-		if _, err := u.depRepo.Delete(ctx, childID, oldParentID, actor, opts); err != nil {
+		if _, err := depRepo.Delete(ctx, childID, oldParentID, actor, opts); err != nil {
 			return fmt.Errorf("reparent: remove old parent %s: %w", oldParentID, err)
 		}
 	}
+	return nil
+}
 
+func addNewParents(ctx context.Context, depRepo DependencySQLRepository, childID, actor string, opts DepInsertOpts, target, existing map[string]struct{}) error {
 	for _, addParentID := range sortedSetDifference(target, existing) {
 		dep := &types.Dependency{
 			IssueID:     childID,
 			DependsOnID: addParentID,
 			Type:        types.DepParentChild,
 		}
-		if err := u.depRepo.Insert(ctx, dep, actor, opts); err != nil {
+		if err := depRepo.Insert(ctx, dep, actor, opts); err != nil {
 			return fmt.Errorf("reparent: add new parent %s: %w", addParentID, err)
 		}
 	}
@@ -458,367 +553,4 @@ func sortedSetDifference(left, right map[string]struct{}) []string {
 	}
 	sort.Strings(values)
 	return values
-}
-
-func (u *dependencyUseCaseImpl) ListByIssueIDs(ctx context.Context, issueIDs []string, filter DepListFilter) (DepBulkResult, error) {
-	return u.list(ctx, issueIDs, filter, false)
-}
-
-func (u *dependencyUseCaseImpl) ListWithIssueMetadata(ctx context.Context, issueID string, filter DepListFilter) ([]*types.IssueWithDependencyMetadata, error) {
-	return u.listWithMetadata(ctx, issueID, filter, false)
-}
-
-func (u *dependencyUseCaseImpl) IterWithIssueMetadata(ctx context.Context, issueID string, filter DepListFilter) (storage.Iter[types.IssueWithDependencyMetadata], error) {
-	return u.iterWithMetadata(ctx, issueID, filter, false)
-}
-
-func (u *dependencyUseCaseImpl) CountByIssueID(ctx context.Context, issueID string, filter DepListFilter) (int64, error) {
-	return u.countByID(ctx, issueID, filter, false)
-}
-
-func (u *dependencyUseCaseImpl) GetForIssueIDs(ctx context.Context, ids []string) (map[string][]*types.Dependency, error) {
-	if len(ids) == 0 {
-		return map[string][]*types.Dependency{}, nil
-	}
-	issueRes, err := u.depRepo.ListByIssueIDs(ctx, ids, DepListOpts{Direction: DepDirectionOut})
-	if err != nil {
-		return nil, fmt.Errorf("GetForIssueIDs: %w", err)
-	}
-	out := issueRes.Outgoing
-	if out == nil {
-		out = make(map[string][]*types.Dependency)
-	}
-	wispRes, err := u.depRepo.ListByIssueIDs(ctx, ids, DepListOpts{Direction: DepDirectionOut, UseWispsTable: true})
-	if err != nil && !dberrors.IsTableNotExist(err) {
-		return nil, fmt.Errorf("GetForIssueIDs (wisps): %w", err)
-	}
-	for id, deps := range wispRes.Outgoing {
-		out[id] = append(out[id], deps...)
-	}
-	return out, nil
-}
-
-func (u *dependencyUseCaseImpl) ListByWispIDs(ctx context.Context, wispIDs []string, filter DepListFilter) (DepBulkResult, error) {
-	return u.list(ctx, wispIDs, filter, true)
-}
-
-func (u *dependencyUseCaseImpl) ListWispWithIssueMetadata(ctx context.Context, wispID string, filter DepListFilter) ([]*types.IssueWithDependencyMetadata, error) {
-	return u.listWithMetadata(ctx, wispID, filter, true)
-}
-
-func (u *dependencyUseCaseImpl) IterWispWithIssueMetadata(ctx context.Context, wispID string, filter DepListFilter) (storage.Iter[types.IssueWithDependencyMetadata], error) {
-	return u.iterWithMetadata(ctx, wispID, filter, true)
-}
-
-func (u *dependencyUseCaseImpl) CountByWispID(ctx context.Context, wispID string, filter DepListFilter) (int64, error) {
-	return u.countByID(ctx, wispID, filter, true)
-}
-
-func (u *dependencyUseCaseImpl) listWithMetadata(ctx context.Context, sourceID string, filter DepListFilter, useWisp bool) ([]*types.IssueWithDependencyMetadata, error) {
-	if sourceID == "" {
-		return nil, fmt.Errorf("list dep metadata: sourceID must not be empty")
-	}
-	out, err := u.depRepo.ListWithIssueMetadata(ctx, sourceID, DepListOpts{
-		Types:         filter.Types,
-		Direction:     filter.Direction,
-		UseWispsTable: useWisp,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("list dep metadata: %w", err)
-	}
-	return out, nil
-}
-
-func (u *dependencyUseCaseImpl) iterWithMetadata(ctx context.Context, sourceID string, filter DepListFilter, useWisp bool) (storage.Iter[types.IssueWithDependencyMetadata], error) {
-	if sourceID == "" {
-		return nil, fmt.Errorf("iter dep metadata: sourceID must not be empty")
-	}
-	it, err := u.depRepo.IterWithIssueMetadata(ctx, sourceID, DepListOpts{
-		Types:         filter.Types,
-		Direction:     filter.Direction,
-		UseWispsTable: useWisp,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("iter dep metadata: %w", err)
-	}
-	return it, nil
-}
-
-func (u *dependencyUseCaseImpl) countByID(ctx context.Context, sourceID string, filter DepListFilter, useWisp bool) (int64, error) {
-	if sourceID == "" {
-		return 0, fmt.Errorf("count by id: sourceID must not be empty")
-	}
-	n, err := u.depRepo.CountByID(ctx, sourceID, DepListOpts{
-		Types:         filter.Types,
-		Direction:     filter.Direction,
-		UseWispsTable: useWisp,
-	})
-	if err != nil {
-		return 0, fmt.Errorf("count by id: %w", err)
-	}
-	return n, nil
-}
-
-func (u *dependencyUseCaseImpl) list(ctx context.Context, ids []string, filter DepListFilter, useWisp bool) (DepBulkResult, error) {
-	if len(ids) == 0 {
-		return DepBulkResult{
-			Outgoing: map[string][]*types.Dependency{},
-			Incoming: map[string][]*types.Dependency{},
-		}, nil
-	}
-	out, err := u.depRepo.ListByIssueIDs(ctx, ids, DepListOpts{
-		Types:         filter.Types,
-		Direction:     filter.Direction,
-		UseWispsTable: useWisp,
-	})
-	if err != nil {
-		return DepBulkResult{}, fmt.Errorf("list deps: %w", err)
-	}
-	return out, nil
-}
-
-func (u *dependencyUseCaseImpl) CountsByIssueIDs(ctx context.Context, issueIDs []string) (map[string]*types.DependencyCounts, error) {
-	return u.counts(ctx, issueIDs, false)
-}
-
-func (u *dependencyUseCaseImpl) CountsByWispIDs(ctx context.Context, wispIDs []string) (map[string]*types.DependencyCounts, error) {
-	return u.counts(ctx, wispIDs, true)
-}
-
-func (u *dependencyUseCaseImpl) counts(ctx context.Context, ids []string, useWisp bool) (map[string]*types.DependencyCounts, error) {
-	if len(ids) == 0 {
-		return map[string]*types.DependencyCounts{}, nil
-	}
-	out, err := u.depRepo.CountsByIssueIDs(ctx, ids, DepCountsOpts{UseWispsTable: useWisp})
-	if err != nil {
-		return nil, fmt.Errorf("dep counts: %w", err)
-	}
-	return out, nil
-}
-
-func (u *dependencyUseCaseImpl) GetBlockingInfo(ctx context.Context, issueIDs []string) (BlockingInfo, error) {
-	if len(issueIDs) == 0 {
-		return BlockingInfo{
-			BlockedBy: map[string][]string{},
-			Blocks:    map[string][]string{},
-			Parent:    map[string]string{},
-		}, nil
-	}
-	out, err := u.depRepo.GetBlockingInfoAcrossIssuesAndWisps(ctx, issueIDs)
-	if err != nil {
-		return BlockingInfo{}, fmt.Errorf("GetBlockingInfo: %w", err)
-	}
-	return out, nil
-}
-
-func (u *dependencyUseCaseImpl) IsBlocked(ctx context.Context, issueID string) (bool, []string, error) {
-	return u.isBlocked(ctx, issueID, false)
-}
-
-func (u *dependencyUseCaseImpl) IsWispBlocked(ctx context.Context, wispID string) (bool, []string, error) {
-	return u.isBlocked(ctx, wispID, true)
-}
-
-func (u *dependencyUseCaseImpl) isBlocked(ctx context.Context, id string, useWisp bool) (bool, []string, error) {
-	if id == "" {
-		return false, nil, fmt.Errorf("IsBlocked: id must not be empty")
-	}
-	blocked, blockers, err := u.depRepo.IsBlocked(ctx, id, DepListOpts{UseWispsTable: useWisp})
-	if err != nil {
-		return false, nil, fmt.Errorf("IsBlocked %s: %w", id, err)
-	}
-	return blocked, blockers, nil
-}
-
-func (u *dependencyUseCaseImpl) DetectCycles(ctx context.Context) ([][]*types.Issue, error) {
-	out, err := u.depRepo.DetectCycles(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("DetectCycles: %w", err)
-	}
-	return out, nil
-}
-
-func (u *dependencyUseCaseImpl) DetectCycleReport(ctx context.Context) (issueops.CycleReport, error) {
-	out, err := u.depRepo.DetectCycleReport(ctx)
-	if err != nil {
-		return issueops.CycleReport{}, fmt.Errorf("DetectCycleReport: %w", err)
-	}
-	return out, nil
-}
-
-// WalkDependencyTree passes the request straight through.
-//
-// No pre-check and no error wrapping, unlike GetDependencyTree below: the
-// request's whole vocabulary is validated inside the shared body, and its
-// refusals are typed sentinels both front doors classify.
-func (u *dependencyUseCaseImpl) WalkDependencyTree(ctx context.Context, req issueops.WalkTreeRequest) (issueops.TreeResult, error) {
-	return u.depRepo.WalkDependencyTree(ctx, req)
-}
-
-// CountEdges passes the request straight through, for WalkDependencyTree's
-// reason: the request's whole vocabulary is validated inside the shared body,
-// and its refusals are typed sentinels both front doors classify.
-func (u *dependencyUseCaseImpl) CountEdges(ctx context.Context, req issueops.EdgeCountRequest) (issueops.EdgeCountResult, error) {
-	return u.depRepo.CountEdges(ctx, req)
-}
-
-func (u *dependencyUseCaseImpl) GetDependencyTree(ctx context.Context, rootID string, opts DepTreeOpts) ([]*types.TreeNode, error) {
-	if rootID == "" {
-		return nil, fmt.Errorf("GetDependencyTree: rootID must not be empty")
-	}
-	out, err := u.depRepo.GetTree(ctx, rootID, opts)
-	if err != nil {
-		return nil, fmt.Errorf("GetDependencyTree: %w", err)
-	}
-	return out, nil
-}
-
-// AddDependencies asserts every edge in one pass, writing each to the plane its
-// own source lives in. The ordering and the final cycle gate deliberately do
-// not partition by plane, because the hierarchy a blocking edge is checked
-// against and the graph the gate walks both span the two tables.
-func (u *dependencyUseCaseImpl) AddDependencies(ctx context.Context, deps []*types.Dependency, actor string, opts BulkAddDepsOpts) (BulkAddDepsResult, error) {
-	if len(deps) == 0 {
-		return BulkAddDepsResult{Added: []*types.Dependency{}}, nil
-	}
-	// Validate the entire input shape before the first write. Multi-edge callers
-	// run in a UOW, but this also avoids an avoidable partial prefix for direct
-	// use-case consumers.
-	for i, dep := range deps {
-		if dep == nil {
-			return BulkAddDepsResult{}, fmt.Errorf("add deps[%d]: dep must not be nil", i)
-		}
-		if dep.IssueID == "" || dep.DependsOnID == "" {
-			return BulkAddDepsResult{}, fmt.Errorf("add deps[%d]: IssueID and DependsOnID must be non-empty", i)
-		}
-		// Self-dependency guard mirrors the single-edge add() path and
-		// issueops.CheckDependencyCycleInTx: reject a self-edge for ALL dep
-		// types before the hierarchy/cycle probe, so a scheduling self-edge is
-		// typed as ErrSelfDependency instead of tripping HasCycle (or the final
-		// CycleThroughEdges gate) and surfacing as a cycle. The message is
-		// byte-identical to every other self-dep site so the proxied bulk CLI
-		// (bd dep add / bd link) shows one consistent self-dependency error.
-		if dep.IssueID == dep.DependsOnID {
-			return BulkAddDepsResult{}, fmt.Errorf("%w: %s cannot depend on itself", ErrSelfDependency, dep.IssueID)
-		}
-	}
-	sources := make([]string, 0, len(deps))
-	for _, dep := range deps {
-		sources = append(sources, dep.IssueID)
-	}
-	// One query for the batch, read before the first write. Nothing an edge
-	// write does moves a source between planes, so the answer stays true for
-	// the rest of the unit of work.
-	wispSources, err := u.depRepo.WispSourceIDs(ctx, sources)
-	if err != nil {
-		return BulkAddDepsResult{}, fmt.Errorf("add deps: classify sources: %w", err)
-	}
-	// Parent-child edges must be visible before blocking edges in the same
-	// request. The shared repository guard can then evaluate existing + planned
-	// ancestry without widening #4034 into #4035's combined-graph cycle check.
-	for phase := 0; phase < 2; phase++ {
-		parentPhase := phase == 0
-		for i, dep := range deps {
-			if (dep.Type == types.DepParentChild) != parentPhase {
-				continue
-			}
-			if err := u.depRepo.ValidateBlockingHierarchy(ctx, dep); err != nil {
-				var hierarchyConflict *DependencyHierarchyConflictError
-				if errors.As(err, &hierarchyConflict) {
-					return BulkAddDepsResult{}, err
-				}
-				return BulkAddDepsResult{}, fmt.Errorf("add deps[%d]: hierarchy check: %w", i, err)
-			}
-			if !opts.SkipPerEdgeCycleCheck && types.IsSchedulingEdge(dep.Type) {
-				cycle, err := u.depRepo.HasCycle(ctx, dep.IssueID, dep.DependsOnID)
-				if err != nil {
-					return BulkAddDepsResult{}, fmt.Errorf("add deps[%d]: cycle check: %w", i, err)
-				}
-				if cycle {
-					return BulkAddDepsResult{}, cycleErrorf("add deps[%d]: adding %s -> %s would create a cycle", i, dep.IssueID, dep.DependsOnID)
-				}
-			}
-			// The explicit `bd dep add` / `bd link` verb on the proxied server
-			// (cmd/bd/dep_proxied_server.go, link_proxied_server.go) records a
-			// dependency_added event for each genuine new edge — unlike
-			// create-with-deps, which calls depRepo.Insert directly without
-			// EmitEvent. UseWispsTable routes both the edge and that event to
-			// the source's own pair of tables.
-			_, sourceIsWisp := wispSources[dep.IssueID]
-			if err := u.depRepo.Insert(ctx, dep, actor, DepInsertOpts{
-				UseWispsTable:      sourceIsWisp,
-				HierarchyValidated: true,
-				CycleValidated:     true,
-				EmitEvent:          true,
-			}); err != nil {
-				var hierarchyConflict *DependencyHierarchyConflictError
-				if errors.As(err, &hierarchyConflict) {
-					return BulkAddDepsResult{}, err
-				}
-				var missingEndpoint *DependencyEndpointNotFoundError
-				if errors.As(err, &missingEndpoint) {
-					return BulkAddDepsResult{}, err
-				}
-				return BulkAddDepsResult{}, fmt.Errorf("add deps[%d]: insert: %w", i, err)
-			}
-		}
-	}
-	var pairs [][2]string
-	for _, dep := range deps {
-		if !types.IsSchedulingEdge(dep.Type) {
-			continue
-		}
-		pairs = append(pairs, [2]string{dep.IssueID, dep.DependsOnID})
-	}
-	if len(pairs) > 0 {
-		cyclePath, err := u.depRepo.CycleThroughEdges(ctx, pairs)
-		if err != nil {
-			return BulkAddDepsResult{}, fmt.Errorf("add deps: final cycle check: %w", err)
-		}
-		if cyclePath != "" {
-			return BulkAddDepsResult{}, cycleErrorf("add deps: dependency cycle would be created: %s", cyclePath)
-		}
-	}
-	return BulkAddDepsResult{Added: deps}, nil
-}
-
-// ValidateBlockingHierarchy passes the edge straight to the repository check
-// AddDependencies runs per edge, so a caller re-running the gate at the end of
-// a mixed request raises the identical *DependencyHierarchyConflictError rather
-// than a second opinion about the same graph.
-func (u *dependencyUseCaseImpl) ValidateBlockingHierarchy(ctx context.Context, dep *types.Dependency) error {
-	return u.depRepo.ValidateBlockingHierarchy(ctx, dep)
-}
-
-// CycleThroughEdges passes the pairs straight to the repository walk
-// AddDependencies runs as its own final gate. The caller composes the refusal,
-// because the two callers word it differently and both spellings are already
-// pinned.
-func (u *dependencyUseCaseImpl) CycleThroughEdges(ctx context.Context, edges [][2]string) (string, error) {
-	if len(edges) == 0 {
-		return "", nil
-	}
-	return u.depRepo.CycleThroughEdges(ctx, edges)
-}
-
-func (u *dependencyUseCaseImpl) GetIssueDependencyRecords(ctx context.Context, issueIDs []string) (map[string][]*types.Dependency, error) {
-	if len(issueIDs) == 0 {
-		return map[string][]*types.Dependency{}, nil
-	}
-	out, err := u.depRepo.GetDependencyRecordsForIssues(ctx, issueIDs)
-	if err != nil {
-		return nil, fmt.Errorf("GetIssueDependencyRecords: %w", err)
-	}
-	return out, nil
-}
-
-func (u *dependencyUseCaseImpl) GetWispDependencyRecords(ctx context.Context, wispIDs []string) (map[string][]*types.Dependency, error) {
-	if len(wispIDs) == 0 {
-		return map[string][]*types.Dependency{}, nil
-	}
-	out, err := u.depRepo.GetWispDependencyRecordsForIDs(ctx, wispIDs)
-	if err != nil {
-		return nil, fmt.Errorf("GetWispDependencyRecords: %w", err)
-	}
-	return out, nil
 }

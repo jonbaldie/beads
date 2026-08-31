@@ -24,15 +24,17 @@ func populatedSnapshot() ContextInfo {
 		IsWorktree:   true,
 		Backend:      "dolt",
 		DoltMode:     "proxied-server",
-		ServerHost:   "10.4.2.9",
-		ServerPort:   3307,
-		ProxiedDir:   "/host/workspace/.beads/dolt",
-		Database:     "beads",
-		DataDir:      "/host/workspace/.beads/embeddeddolt",
-		ProjectID:    "proj-1",
-		SyncRemote:   publishedFakeRemote,
-		Role:         "maintainer",
-		BdVersion:    "9.9.9",
+		ContextServer: ContextServer{
+			ServerHost: "10.4.2.9",
+			ServerPort: 3307,
+			ProxiedDir: "/host/workspace/.beads/dolt",
+		},
+		Database:   "beads",
+		DataDir:    "/host/workspace/.beads/embeddeddolt",
+		ProjectID:  "proj-1",
+		SyncRemote: publishedFakeRemote,
+		Role:       "maintainer",
+		BdVersion:  "9.9.9",
 	}
 }
 

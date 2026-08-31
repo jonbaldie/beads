@@ -17,6 +17,7 @@
 package dolt
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
@@ -170,7 +171,8 @@ func splitCommaList(s string) []string {
 		}
 		cur = cur[:0]
 	}
-	for i := 0; i < len(s); i++ {
+	n := len(s)
+	for i := 0; i < n; i++ {
 		c := s[i]
 		if c == ',' {
 			flush()
@@ -201,24 +203,7 @@ func joinCommaList(items []string) string {
 }
 
 func trimSpaces(b []byte) []byte {
-	start, end := 0, len(b)
-	for start < end {
-		c := b[start]
-		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
-			start++
-			continue
-		}
-		break
-	}
-	for end > start {
-		c := b[end-1]
-		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
-			end--
-			continue
-		}
-		break
-	}
-	return b[start:end]
+	return bytes.Trim(b, " \t\n\r")
 }
 
 // scanIssueWithDepTypeFrom scans a row that contains all IssueSelectColumns

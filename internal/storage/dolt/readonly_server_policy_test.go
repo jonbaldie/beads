@@ -22,14 +22,23 @@ func TestInitializeServerCircuitBreakerHonorsDisableAutoStart(t *testing.T) {
 		return &circuitBreaker{filePath: filepath.Join(t.TempDir(), "circuit.json")}
 	}
 
-	if got := initializeServerCircuitBreaker(&Config{DisableAutoStart: true, ServerPort: 3307}); got != nil {
+	if got := initializeServerCircuitBreaker(&Config{
+		ServerOptions: ServerOptions{
+			DisableAutoStart: true,
+			ServerPort:       3307,
+		},
+	}); got != nil {
 		t.Fatal("strict read-only (DisableAutoStart) server open created a circuit breaker")
 	}
 	if cleanCalls != 0 || newCalls != 0 {
 		t.Fatalf("strict read-only server open mutated circuit state: clean=%d new=%d", cleanCalls, newCalls)
 	}
 
-	if got := initializeServerCircuitBreaker(&Config{ServerPort: 3307}); got == nil {
+	if got := initializeServerCircuitBreaker(&Config{
+		ServerOptions: ServerOptions{
+			ServerPort: 3307,
+		},
+	}); got == nil {
 		t.Fatal("writable server open must retain circuit breaker behavior")
 	}
 	if cleanCalls != 1 || newCalls != 1 {
@@ -40,7 +49,12 @@ func TestInitializeServerCircuitBreakerHonorsDisableAutoStart(t *testing.T) {
 	// DisableAutoStart, and must retain the writable-open circuit breaker
 	// behavior (regression guard for the ReadOnly/DisableAutoStart
 	// conflation fixed in this change).
-	if got := initializeServerCircuitBreaker(&Config{ReadOnly: true, ServerPort: 3307}); got == nil {
+	if got := initializeServerCircuitBreaker(&Config{
+		ReadOnly: true,
+		ServerOptions: ServerOptions{
+			ServerPort: 3307,
+		},
+	}); got == nil {
 		t.Fatal("ordinary classified-read (ReadOnly without DisableAutoStart) must retain circuit breaker behavior")
 	}
 	if cleanCalls != 2 || newCalls != 2 {
@@ -65,7 +79,11 @@ func TestInitializeServerCircuitBreakerSkipsTestMode(t *testing.T) {
 		return &circuitBreaker{}
 	}
 
-	if got := initializeServerCircuitBreaker(&Config{ServerPort: 3307}); got != nil {
+	if got := initializeServerCircuitBreaker(&Config{
+		ServerOptions: ServerOptions{
+			ServerPort: 3307,
+		},
+	}); got != nil {
 		t.Fatal("test-mode server open created a circuit breaker")
 	}
 	if cleanCalls != 0 || newCalls != 0 {
@@ -89,14 +107,25 @@ func TestPersistResolvedPortFileHonorsDisableAutoStart(t *testing.T) {
 	}
 
 	beadsDir := t.TempDir()
-	if err := persistResolvedPortFile(&Config{DisableAutoStart: true, ServerHost: "127.0.0.1", ServerPort: 3307}, beadsDir); err != nil {
+	if err := persistResolvedPortFile(&Config{
+		ServerOptions: ServerOptions{
+			DisableAutoStart: true,
+			ServerHost:       "127.0.0.1",
+			ServerPort:       3307,
+		},
+	}, beadsDir); err != nil {
 		t.Fatalf("strict read-only persist policy: %v", err)
 	}
 	if calls != 0 {
 		t.Fatalf("strict read-only server open repaired port file %d time(s)", calls)
 	}
 
-	if err := persistResolvedPortFile(&Config{ServerHost: "127.0.0.1", ServerPort: 3308}, beadsDir); err != nil {
+	if err := persistResolvedPortFile(&Config{
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: 3308,
+		},
+	}, beadsDir); err != nil {
 		t.Fatalf("writable persist policy: %v", err)
 	}
 	if calls != 1 || gotDir != beadsDir || gotPort != 3308 {
@@ -105,7 +134,13 @@ func TestPersistResolvedPortFileHonorsDisableAutoStart(t *testing.T) {
 
 	// An ordinary classified-read command sets ReadOnly but not
 	// DisableAutoStart, and must retain port-file repair.
-	if err := persistResolvedPortFile(&Config{ReadOnly: true, ServerHost: "127.0.0.1", ServerPort: 3309}, beadsDir); err != nil {
+	if err := persistResolvedPortFile(&Config{
+		ReadOnly: true,
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: 3309,
+		},
+	}, beadsDir); err != nil {
 		t.Fatalf("classified-read persist policy: %v", err)
 	}
 	if calls != 2 || gotDir != beadsDir || gotPort != 3309 {
@@ -114,12 +149,25 @@ func TestPersistResolvedPortFileHonorsDisableAutoStart(t *testing.T) {
 }
 
 func TestServerOpenCanAutoStartHonorsDisableAutoStart(t *testing.T) {
-	strictReadOnly := &Config{DisableAutoStart: true, AutoStart: true, Path: "/unused", ServerHost: "127.0.0.1"}
+	strictReadOnly := &Config{
+		ServerOptions: ServerOptions{
+			DisableAutoStart: true,
+			AutoStart:        true,
+			ServerHost:       "127.0.0.1",
+		},
+		Path: "/unused",
+	}
 	if serverOpenCanAutoStart(strictReadOnly) {
 		t.Fatal("strict read-only (DisableAutoStart) server open must never auto-start a server")
 	}
 
-	writable := &Config{AutoStart: true, Path: "/unused", ServerHost: "127.0.0.1"}
+	writable := &Config{
+		ServerOptions: ServerOptions{
+			AutoStart:  true,
+			ServerHost: "127.0.0.1",
+		},
+		Path: "/unused",
+	}
 	if !serverOpenCanAutoStart(writable) {
 		t.Fatal("writable server open must retain auto-start behavior")
 	}
@@ -129,7 +177,14 @@ func TestServerOpenCanAutoStartHonorsDisableAutoStart(t *testing.T) {
 	// auto-start a stopped managed server (regression guard for the
 	// ReadOnly/DisableAutoStart conflation; see
 	// dolt_autostart_lifecycle_integration_test.go).
-	classifiedRead := &Config{ReadOnly: true, AutoStart: true, Path: "/unused", ServerHost: "127.0.0.1"}
+	classifiedRead := &Config{
+		ReadOnly: true,
+		ServerOptions: ServerOptions{
+			AutoStart:  true,
+			ServerHost: "127.0.0.1",
+		},
+		Path: "/unused",
+	}
 	if !serverOpenCanAutoStart(classifiedRead) {
 		t.Fatal("ordinary classified-read (ReadOnly without DisableAutoStart) must retain auto-start behavior")
 	}

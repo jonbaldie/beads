@@ -103,11 +103,13 @@ func TestNewServerMode_SocketDownTCPUpFallsBack(t *testing.T) {
 		"tcp|" + tcpAddr: true,
 	})
 	cfg := &Config{
-		Database:     "test_socket_fallback_wiring",
-		ServerHost:   host,
-		ServerPort:   port,
-		ServerSocket: socket,
-		AutoStart:    false,
+		Database: "test_socket_fallback_wiring",
+		ServerOptions: ServerOptions{
+			ServerHost:   host,
+			ServerPort:   port,
+			ServerSocket: socket,
+			AutoStart:    false,
+		},
 	}
 
 	_, err := newServerMode(context.Background(), cfg)
@@ -130,10 +132,13 @@ func TestNewServerMode_NoSocketDoesNotProbe(t *testing.T) {
 	t.Setenv("BEADS_TEST_MODE", "1")
 	calls := withStubbedDialProbe(t, map[string]bool{})
 	cfg := &Config{
-		Database:   "test_socket_fallback_no_socket",
-		ServerHost: "127.0.0.1",
-		ServerPort: 1, // expected to be unreachable for the eventual real connection dial
-		AutoStart:  false,
+		Database: "test_socket_fallback_no_socket",
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: 1,
+			// expected to be unreachable for the eventual real connection dial
+			AutoStart: false,
+		},
 	}
 
 	_, err := newServerMode(context.Background(), cfg)

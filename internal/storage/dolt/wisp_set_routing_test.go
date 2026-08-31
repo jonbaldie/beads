@@ -30,11 +30,17 @@ func TestWispIDSetInTx_HardGate(t *testing.T) {
 
 	// Seed: one permanent issue tagged "foo".
 	perm := &types.Issue{
-		ID:        "wispset-perm-1",
-		Title:     "perm issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "wispset-perm-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "perm issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, perm, "tester"); err != nil {
 		t.Fatalf("create perm: %v", err)
@@ -45,11 +51,17 @@ func TestWispIDSetInTx_HardGate(t *testing.T) {
 
 	// Seed: one active wisp tagged "bar".
 	wisp := &types.Issue{
-		Title:     "wisp issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueContent: types.IssueContent{
+			Title: "wisp issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, wisp, "tester"); err != nil {
 		t.Fatalf("create wisp: %v", err)

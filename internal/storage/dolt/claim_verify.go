@@ -87,28 +87,42 @@ func unclaimed() claimPostcondition {
 // coordination-only update, the postcondition checks every field requested by
 // the caller while allowing other coordination fields to change concurrently.
 func guardedUpdatePostcondition(opts storage.UpdateIssueOptions, updates map[string]interface{}) (claimPostcondition, bool) {
-	if opts.ExpectedAssignee == nil && opts.ExpectedStatus == nil {
+	if !hasGuardedCoordinationFields(opts, updates) {
 		return claimPostcondition{}, false
-	}
-	for field := range updates {
-		if field != "assignee" && field != "status" {
-			return claimPostcondition{}, false
-		}
 	}
 	newAssignee, setsAssignee := updates["assignee"].(string)
 	newStatus, setsStatus := updates["status"].(string)
 	if !setsAssignee && !setsStatus {
 		return claimPostcondition{}, false
 	}
-	var desc string
+	desc := guardedUpdateDescription(newAssignee, newStatus, setsAssignee, setsStatus)
+	return newGuardedUpdatePostcondition(newAssignee, newStatus, setsAssignee, setsStatus, desc), true
+}
+
+func hasGuardedCoordinationFields(opts storage.UpdateIssueOptions, updates map[string]interface{}) bool {
+	if opts.ExpectedAssignee == nil && opts.ExpectedStatus == nil {
+		return false
+	}
+	for field := range updates {
+		if field != "assignee" && field != "status" {
+			return false
+		}
+	}
+	return true
+}
+
+func guardedUpdateDescription(assignee, status string, setsAssignee, setsStatus bool) string {
 	switch {
 	case setsAssignee && setsStatus:
-		desc = fmt.Sprintf("assignee=%q status=%q", newAssignee, newStatus)
+		return fmt.Sprintf("assignee=%q status=%q", assignee, status)
 	case setsAssignee:
-		desc = fmt.Sprintf("assignee=%q", newAssignee)
+		return fmt.Sprintf("assignee=%q", assignee)
 	default:
-		desc = fmt.Sprintf("status=%q", newStatus)
+		return fmt.Sprintf("status=%q", status)
 	}
+}
+
+func newGuardedUpdatePostcondition(newAssignee, newStatus string, setsAssignee, setsStatus bool, desc string) claimPostcondition {
 	return claimPostcondition{
 		op: "guarded-update",
 		want: func(assignee string, status types.Status) bool {
@@ -121,7 +135,7 @@ func guardedUpdatePostcondition(opts storage.UpdateIssueOptions, updates map[str
 			return true
 		},
 		desc: desc,
-	}, true
+	}
 }
 
 // readClaimState re-reads an issue's assignee and status on a fresh

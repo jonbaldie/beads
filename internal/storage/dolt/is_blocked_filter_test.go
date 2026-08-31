@@ -20,7 +20,7 @@ func TestIsBlockedFilterPlanIsIndexed(t *testing.T) {
 	defer cancel()
 
 	for i := 0; i < 5; i++ {
-		iss := &types.Issue{ID: "ibp-" + string(rune('a'+i)), Title: "ibp", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+		iss := &types.Issue{IssueID: types.IssueID{ID: "ibp-" + string(rune('a'+i))}, IssueContent: types.IssueContent{Title: "ibp"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("create seed: %v", err)
 		}

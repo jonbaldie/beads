@@ -19,13 +19,19 @@ func TestGetIssue(t *testing.T) {
 		ctx := t.Context()
 
 		issue := &types.Issue{
-			ID:          "gi-test1",
-			Title:       "Round trip test",
-			Description: "A test description",
-			Status:      types.StatusOpen,
-			Priority:    1,
-			IssueType:   types.TypeBug,
-			Assignee:    "alice",
+			IssueID: types.IssueID{
+				ID: "gi-test1",
+			},
+			IssueContent: types.IssueContent{
+				Title:       "Round trip test",
+				Description: "A test description",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeBug,
+				Assignee:  "alice",
+			},
 		}
 		if err := te.store.CreateIssue(ctx, issue, "tester"); err != nil {
 			t.Fatalf("CreateIssue: %v", err)
@@ -73,11 +79,17 @@ func TestGetIssue(t *testing.T) {
 		ctx := t.Context()
 
 		issue := &types.Issue{
-			ID:        "il-labeled",
-			Title:     "Labeled issue",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "il-labeled",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Labeled issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := te.store.CreateIssue(ctx, issue, "tester"); err != nil {
 			t.Fatalf("CreateIssue: %v", err)
@@ -110,12 +122,20 @@ func TestGetIssue(t *testing.T) {
 		ctx := t.Context()
 
 		wisp := &types.Issue{
-			ID:        "wl-wisp",
-			Title:     "Wisp with missing labels table",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Ephemeral: true,
+			IssueID: types.IssueID{
+				ID: "wl-wisp",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Wisp with missing labels table",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		}
 		if err := te.store.CreateIssue(ctx, wisp, "tester"); err != nil {
 			t.Fatalf("CreateIssue: %v", err)
@@ -143,11 +163,17 @@ func TestGetLabels(t *testing.T) {
 		ctx := t.Context()
 
 		issue := &types.Issue{
-			ID:        "gl-nolabels",
-			Title:     "No labels",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "gl-nolabels",
+			},
+			IssueContent: types.IssueContent{
+				Title: "No labels",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := te.store.CreateIssue(ctx, issue, "tester"); err != nil {
 			t.Fatalf("CreateIssue: %v", err)
@@ -167,11 +193,17 @@ func TestGetLabels(t *testing.T) {
 		ctx := t.Context()
 
 		issue := &types.Issue{
-			ID:        "gs-sorted",
-			Title:     "Sorted labels",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "gs-sorted",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Sorted labels",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := te.store.CreateIssue(ctx, issue, "tester"); err != nil {
 			t.Fatalf("CreateIssue: %v", err)
@@ -209,11 +241,17 @@ func TestAddLabel(t *testing.T) {
 		ctx := t.Context()
 
 		issue := &types.Issue{
-			ID:        "al-idem",
-			Title:     "Idempotent label",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "al-idem",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Idempotent label",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := te.store.CreateIssue(ctx, issue, "tester"); err != nil {
 			t.Fatalf("CreateIssue: %v", err)

@@ -90,63 +90,70 @@ func (s *DoltStore) getIssueHistory(ctx context.Context, issueID string) ([]*iss
 
 	var history []*issueHistory
 	for rows.Next() {
-		var h issueHistory
-		var issue types.Issue
-		var createdAtStr, updatedAtStr sql.NullString // TEXT columns - must parse manually
-		var closedAt sql.NullTime
-		var assignee, owner, createdBy, closeReason, molType sql.NullString
-		var estimatedMinutes sql.NullInt64
-		var pinned sql.NullInt64
-
-		if err := rows.Scan(
-			&issue.ID, &issue.Title, &issue.Description, &issue.Design, &issue.AcceptanceCriteria, &issue.Notes,
-			&issue.Status, &issue.Priority, &issue.IssueType, &assignee, &owner, &createdBy,
-			&estimatedMinutes, &createdAtStr, &updatedAtStr, &closedAt, &closeReason,
-			&pinned, &molType,
-			&h.CommitHash, &h.Committer, &h.CommitDate,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan history: %w", err)
+		h, err := scanIssueHistoryRow(rows)
+		if err != nil {
+			return nil, err
 		}
-
-		// Parse timestamp strings (TEXT columns require manual parsing)
-		if createdAtStr.Valid {
-			issue.CreatedAt = parseTimeString(createdAtStr.String)
-		}
-		if updatedAtStr.Valid {
-			issue.UpdatedAt = parseTimeString(updatedAtStr.String)
-		}
-
-		if closedAt.Valid {
-			issue.ClosedAt = &closedAt.Time
-		}
-		if assignee.Valid {
-			issue.Assignee = assignee.String
-		}
-		if owner.Valid {
-			issue.Owner = owner.String
-		}
-		if createdBy.Valid {
-			issue.CreatedBy = createdBy.String
-		}
-		if estimatedMinutes.Valid {
-			mins := int(estimatedMinutes.Int64)
-			issue.EstimatedMinutes = &mins
-		}
-		if closeReason.Valid {
-			issue.CloseReason = closeReason.String
-		}
-		if pinned.Valid && pinned.Int64 != 0 {
-			issue.Pinned = true
-		}
-		if molType.Valid {
-			issue.MolType = types.MolType(molType.String)
-		}
-
-		h.Issue = &issue
-		history = append(history, &h)
+		history = append(history, h)
 	}
 
 	return history, rows.Err()
+}
+
+func scanIssueHistoryRow(rows *sql.Rows) (*issueHistory, error) {
+	var h issueHistory
+	var issue types.Issue
+	var createdAtStr, updatedAtStr sql.NullString // TEXT columns - must parse manually
+	var closedAt sql.NullTime
+	var assignee, owner, createdBy, closeReason, molType sql.NullString
+	var estimatedMinutes sql.NullInt64
+	var pinned sql.NullInt64
+
+	if err := rows.Scan(
+		&issue.ID, &issue.Title, &issue.Description, &issue.Design, &issue.AcceptanceCriteria, &issue.Notes,
+		&issue.Status, &issue.Priority, &issue.IssueType, &assignee, &owner, &createdBy,
+		&estimatedMinutes, &createdAtStr, &updatedAtStr, &closedAt, &closeReason,
+		&pinned, &molType,
+		&h.CommitHash, &h.Committer, &h.CommitDate,
+	); err != nil {
+		return nil, fmt.Errorf("failed to scan history: %w", err)
+	}
+
+	// Parse timestamp strings (TEXT columns require manual parsing).
+	issue.CreatedAt = parseNullableTime(createdAtStr)
+	issue.UpdatedAt = parseNullableTime(updatedAtStr)
+	if closedAt.Valid {
+		issue.ClosedAt = &closedAt.Time
+	}
+	issue.Assignee = nullableString(assignee)
+	issue.Owner = nullableString(owner)
+	issue.CreatedBy = nullableString(createdBy)
+	if estimatedMinutes.Valid {
+		mins := int(estimatedMinutes.Int64)
+		issue.EstimatedMinutes = &mins
+	}
+	issue.CloseReason = nullableString(closeReason)
+	issue.Pinned = pinned.Valid && pinned.Int64 != 0
+	if molType.Valid {
+		issue.MolType = types.MolType(molType.String)
+	}
+
+	h.Issue = &issue
+	return &h, nil
+}
+
+func parseNullableTime(value sql.NullString) time.Time {
+	if !value.Valid {
+		return time.Time{}
+	}
+	return parseTimeString(value.String)
+}
+
+func nullableString(value sql.NullString) string {
+	if !value.Valid {
+		return ""
+	}
+	return value.String
 }
 
 // getIssueAsOf returns an issue as it existed at a specific commit or time

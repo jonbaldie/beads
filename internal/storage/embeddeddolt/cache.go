@@ -9,10 +9,16 @@ import (
 	"sync"
 )
 
-var (
-	cacheMu sync.Mutex
-	cache   = make(map[string]*cacheEntry) // keyed by absolute dataDir
-)
+var cache = newStoreCache()
+
+type storeCache struct {
+	mu      sync.Mutex
+	entries map[string]*cacheEntry
+}
+
+func newStoreCache() *storeCache {
+	return &storeCache{entries: make(map[string]*cacheEntry)}
+}
 
 type cacheEntry struct {
 	store    *EmbeddedDoltStore
@@ -60,25 +66,9 @@ func openCached(ctx context.Context, beadsDir, database, branch string, intent o
 		return nil, err
 	}
 
-	cacheMu.Lock()
-	if entry, ok := cache[key]; ok {
-		// Cache hit: the requested intent is ignored - the store keeps
-		// whatever intent it was opened with on the slow path below. This is
-		// safe today because intent is derived once per process from the
-		// command classification (isReadOnlyCommand / isWorkingSetReconcileCommand
-		// in cmd/bd/main.go), so a single process never opens the same data
-		// directory under two different intents, and autoMigrateOnVersionBump
-		// (cmd/bd/version_tracking.go) always opens its own openStrict store
-		// and closes it before the main command's open runs, so it never
-		// races a cache hit either. A future caller needing a genuinely
-		// different intent on a cache hit would have to plumb intent through
-		// here instead of silently reusing the first store's; it is load-
-		// bearing that no current caller does.
-		entry.refCount++
-		cacheMu.Unlock()
-		return entry.store, nil
+	if store, ok := cache.acquire(key); ok {
+		return store, nil
 	}
-	cacheMu.Unlock()
 
 	// Slow path: create a new store outside the lock.
 	s, err := newStore(ctx, beadsDir, database, branch, intent)
@@ -86,17 +76,11 @@ func openCached(ctx context.Context, beadsDir, database, branch string, intent o
 		return nil, err
 	}
 
-	cacheMu.Lock()
-	// Double-check: another goroutine may have inserted while we created.
-	if entry, ok := cache[key]; ok {
-		cacheMu.Unlock()
+	if store, reused := cache.insertOrAcquire(key, s); reused {
 		// Discard the store we just created; use the cached one.
 		_ = s.Close()
-		entry.refCount++
-		return entry.store, nil
+		return store, nil
 	}
-	cache[key] = &cacheEntry{store: s, refCount: 1}
-	cacheMu.Unlock()
 	return s, nil
 }
 
@@ -105,14 +89,18 @@ func openCached(ctx context.Context, beadsDir, database, branch string, intent o
 // close). Returns false when the caller must run Close — either the
 // entry was evicted (last ref) or the store was never cached.
 func closeCached(s *EmbeddedDoltStore) bool {
-	cacheMu.Lock()
-	defer cacheMu.Unlock()
+	return cache.release(s)
+}
 
-	for key, entry := range cache {
+func (c *storeCache) release(s *EmbeddedDoltStore) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for key, entry := range c.entries {
 		if entry.store == s {
 			entry.refCount--
 			if entry.refCount <= 0 {
-				delete(cache, key)
+				delete(c.entries, key)
 				// Actual close happens after releasing cacheMu (via caller).
 				return false
 			}
@@ -122,6 +110,33 @@ func closeCached(s *EmbeddedDoltStore) bool {
 	}
 	// Not in cache — let the caller close normally.
 	return false
+}
+
+func (c *storeCache) acquire(key string) (*EmbeddedDoltStore, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.entries[key]
+	if !ok {
+		return nil, false
+	}
+	// Cache hit: the requested intent is ignored - the store keeps whatever
+	// intent it was opened with on the slow path below. This is safe today
+	// because intent is derived once per process from command classification,
+	// so a single process never opens the same data directory under two
+	// different intents.
+	entry.refCount++
+	return entry.store, true
+}
+
+func (c *storeCache) insertOrAcquire(key string, store *EmbeddedDoltStore) (*EmbeddedDoltStore, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if entry, ok := c.entries[key]; ok {
+		entry.refCount++
+		return entry.store, true
+	}
+	c.entries[key] = &cacheEntry{store: store, refCount: 1}
+	return store, false
 }
 
 // cacheKey resolves beadsDir to an absolute dataDir path for use as a cache key.

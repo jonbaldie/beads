@@ -37,11 +37,17 @@ func TestDemoteToWisp_InfraDepMirrorUsesSplitColumns(t *testing.T) {
 
 			// Seed a target issue the infra issue will depend on.
 			target := &types.Issue{
-				ID:        fmt.Sprintf("test-target-%s", infraType),
-				Title:     "dep target",
-				Status:    types.StatusOpen,
-				Priority:  2,
-				IssueType: types.TypeTask,
+				IssueID: types.IssueID{
+					ID: fmt.Sprintf("test-target-%s", infraType),
+				},
+				IssueContent: types.IssueContent{
+					Title: "dep target",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  2,
+					IssueType: types.TypeTask,
+				},
 			}
 			if err := store.CreateIssue(ctx, target, "tester"); err != nil {
 				t.Fatalf("create target: %v", err)
@@ -138,11 +144,17 @@ func TestDemoteToWisp_InfraDepToWispUsesWispColumn(t *testing.T) {
 
 			// Create a wisp target.
 			wispTarget := &types.Issue{
-				Title:     "wisp dep target",
-				Status:    types.StatusOpen,
-				Priority:  2,
-				IssueType: types.TypeTask,
-				Ephemeral: true,
+				IssueContent: types.IssueContent{
+					Title: "wisp dep target",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  2,
+					IssueType: types.TypeTask,
+				},
+				IssueWisp: types.IssueWisp{
+					Ephemeral: true,
+				},
 			}
 			if err := store.CreateIssue(ctx, wispTarget, "tester"); err != nil {
 				t.Fatalf("create wisp target: %v", err)
@@ -297,16 +309,24 @@ func TestAddWispDep_InfraWispToInfraWisp(t *testing.T) {
 			// Both source and target are infra-type wisps. CreateIssue routes
 			// infra types to wisps automatically (IsInfraTypeCtx).
 			source := &types.Issue{
-				Title:     fmt.Sprintf("%s source wisp", infraType),
-				Status:    types.StatusOpen,
-				Priority:  2,
-				IssueType: infraType,
+				IssueContent: types.IssueContent{
+					Title: fmt.Sprintf("%s source wisp", infraType),
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  2,
+					IssueType: infraType,
+				},
 			}
 			depTarget := &types.Issue{
-				Title:     fmt.Sprintf("%s target wisp", infraType),
-				Status:    types.StatusOpen,
-				Priority:  2,
-				IssueType: infraType,
+				IssueContent: types.IssueContent{
+					Title: fmt.Sprintf("%s target wisp", infraType),
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  2,
+					IssueType: infraType,
+				},
 			}
 			for _, w := range []*types.Issue{source, depTarget} {
 				if err := store.CreateIssue(ctx, w, "tester"); err != nil {
@@ -381,16 +401,24 @@ func TestAddWispDep_InfraWispToIssue(t *testing.T) {
 			}
 
 			source := &types.Issue{
-				Title:     fmt.Sprintf("%s to-issue wisp", infraType),
-				Status:    types.StatusOpen,
-				Priority:  2,
-				IssueType: infraType,
+				IssueContent: types.IssueContent{
+					Title: fmt.Sprintf("%s to-issue wisp", infraType),
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  2,
+					IssueType: infraType,
+				},
 			}
 			issueTarget := &types.Issue{
-				Title:     "regular issue target",
-				Status:    types.StatusOpen,
-				Priority:  2,
-				IssueType: types.TypeTask,
+				IssueContent: types.IssueContent{
+					Title: "regular issue target",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  2,
+					IssueType: types.TypeTask,
+				},
 			}
 			for _, i := range []*types.Issue{source, issueTarget} {
 				if err := store.CreateIssue(ctx, i, "tester"); err != nil {

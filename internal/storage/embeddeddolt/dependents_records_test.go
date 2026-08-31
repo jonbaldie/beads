@@ -19,10 +19,10 @@ func TestGetDependentRecordsEmbedded(t *testing.T) {
 	ctx := t.Context()
 
 	for _, issue := range []*types.Issue{
-		{ID: "dr-target", Title: "target", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: "dr-s1", Title: "s1", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: "dr-s2", Title: "s2", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: "dr-w", Title: "wisp", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true},
+		{IssueID: types.IssueID{ID: "dr-target"}, IssueContent: types.IssueContent{Title: "target"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "dr-s1"}, IssueContent: types.IssueContent{Title: "s1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "dr-s2"}, IssueContent: types.IssueContent{Title: "s2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "dr-w"}, IssueContent: types.IssueContent{Title: "wisp"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}},
 	} {
 		if err := te.store.CreateIssue(ctx, issue, "tester"); err != nil {
 			t.Fatalf("CreateIssue %s: %v", issue.ID, err)
@@ -104,14 +104,14 @@ func TestGetDependentRecordsForIssuesEmbedded(t *testing.T) {
 	ctx := t.Context()
 
 	for _, issue := range []*types.Issue{
-		{ID: "bt-x", Title: "x", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: "bt-y", Title: "y", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: "bt-blk", Title: "blk", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: "bt-wait", Title: "wait", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: "bt-cond", Title: "cond", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true},
-		{ID: "bt-child", Title: "child", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: "bt-yblk", Title: "yblk", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: "bt-z", Title: "z", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+		{IssueID: types.IssueID{ID: "bt-x"}, IssueContent: types.IssueContent{Title: "x"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "bt-y"}, IssueContent: types.IssueContent{Title: "y"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "bt-blk"}, IssueContent: types.IssueContent{Title: "blk"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "bt-wait"}, IssueContent: types.IssueContent{Title: "wait"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "bt-cond"}, IssueContent: types.IssueContent{Title: "cond"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}},
+		{IssueID: types.IssueID{ID: "bt-child"}, IssueContent: types.IssueContent{Title: "child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "bt-yblk"}, IssueContent: types.IssueContent{Title: "yblk"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "bt-z"}, IssueContent: types.IssueContent{Title: "z"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
 	} {
 		if err := te.store.CreateIssue(ctx, issue, "tester"); err != nil {
 			t.Fatalf("CreateIssue %s: %v", issue.ID, err)

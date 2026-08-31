@@ -282,95 +282,118 @@ func (s *DoltStore) GetMoleculeProgress(ctx context.Context, moleculeID string) 
 	stats := &types.MoleculeProgressStats{
 		MoleculeID: moleculeID,
 	}
-
-	// Route to correct table based on whether molecule is a wisp (bd-w2w)
-	issueTable := "issues"
-	depTable := "dependencies"
-	parentCol := "depends_on_issue_id"
-	if s.isActiveWisp(ctx, moleculeID) {
-		issueTable = "wisps"
-		depTable = "wisp_dependencies"
-		parentCol = "depends_on_wisp_id"
+	tables := moleculeProgressTablesFor(s, ctx, moleculeID)
+	stats.MoleculeTitle = s.moleculeProgressTitle(ctx, tables.issueTable, moleculeID)
+	childIDs, err := s.moleculeProgressChildren(ctx, tables, moleculeID)
+	if err != nil {
+		return nil, err
 	}
+	childStatuses, err := s.moleculeProgressStatuses(ctx, tables.issueTable, childIDs)
+	if err != nil {
+		return nil, err
+	}
+	applyMoleculeProgress(stats, childIDs, childStatuses)
+	return stats, nil
+}
 
-	// Get molecule title
+type moleculeProgressTables struct {
+	issueTable string
+	depTable   string
+	parentCol  string
+}
+
+func moleculeProgressTablesFor(s *DoltStore, ctx context.Context, moleculeID string) moleculeProgressTables {
+	tables := moleculeProgressTables{issueTable: "issues", depTable: "dependencies", parentCol: "depends_on_issue_id"}
+	if s.isActiveWisp(ctx, moleculeID) {
+		tables.issueTable = "wisps"
+		tables.depTable = "wisp_dependencies"
+		tables.parentCol = "depends_on_wisp_id"
+	}
+	return tables
+}
+
+func (s *DoltStore) moleculeProgressTitle(ctx context.Context, issueTable, moleculeID string) string {
 	var title sql.NullString
 	//nolint:gosec // G201: issueTable is hardcoded to "issues" or "wisps"
 	err := s.db.QueryRowContext(ctx, fmt.Sprintf("SELECT title FROM %s WHERE id = ?", issueTable), moleculeID).Scan(&title)
 	if err == nil && title.Valid {
-		stats.MoleculeTitle = title.String
+		return title.String
 	}
+	return ""
+}
 
-	// Step 1: Get child issue IDs from dependencies table (single-table scan)
-	//nolint:gosec // G201: depTable and parentCol are hardcoded
-	depRows, err := s.queryContext(ctx, fmt.Sprintf(`
+func (s *DoltStore) moleculeProgressChildren(ctx context.Context, tables moleculeProgressTables, moleculeID string) ([]string, error) {
+	//nolint:gosec // G201: table and column are selected from hardcoded values
+	rows, err := s.queryContext(ctx, fmt.Sprintf(`
 		SELECT issue_id FROM %s
 		WHERE %s = ? AND type = 'parent-child'
-	`, depTable, parentCol), moleculeID)
+	`, tables.depTable, tables.parentCol), moleculeID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get molecule children: %w", err)
 	}
+	defer rows.Close()
 	var childIDs []string
-	for depRows.Next() {
+	for rows.Next() {
 		var id string
-		if err := depRows.Scan(&id); err != nil {
-			_ = depRows.Close() // Best effort cleanup on error path
+		if err := rows.Scan(&id); err != nil {
 			return nil, wrapScanError("get molecule progress: scan child", err)
 		}
 		childIDs = append(childIDs, id)
 	}
-	_ = depRows.Close() // Redundant close for safety (rows already iterated)
+	return childIDs, nil
+}
 
-	// Step 2: Batch-fetch status for all children (batched IN clauses to avoid full table scans).
-	// Children of a wisp molecule are also wisps, so use the same table.
-	if len(childIDs) > 0 {
-		type childInfo struct {
-			status string
-		}
-		childMap := make(map[string]childInfo)
-		for start := 0; start < len(childIDs); start += queryBatchSize {
-			end := start + queryBatchSize
-			if end > len(childIDs) {
-				end = len(childIDs)
-			}
-			batch := childIDs[start:end]
-			placeholders, args := doltBuildSQLInClause(batch)
-			// nolint:gosec // G201: issueTable is hardcoded, placeholders contains only ? markers
-			query := fmt.Sprintf("SELECT id, status FROM %s WHERE id IN (%s)", issueTable, placeholders)
-			statusRows, err := s.queryContext(ctx, query, args...)
-			if err != nil {
-				return nil, fmt.Errorf("failed to batch-fetch child statuses: %w", err)
-			}
-			for statusRows.Next() {
-				var id, status string
-				if err := statusRows.Scan(&id, &status); err != nil {
-					_ = statusRows.Close()
-					return nil, wrapScanError("get molecule progress: scan status", err)
-				}
-				childMap[id] = childInfo{status: status}
-			}
-			_ = statusRows.Close()
-		}
+type moleculeChildStatus struct{ status string }
 
-		for _, childID := range childIDs {
-			info, ok := childMap[childID]
-			if !ok {
-				continue
-			}
-			stats.Total++
-			switch types.Status(info.status) {
-			case types.StatusClosed:
-				stats.Completed++
-			case types.StatusInProgress:
-				stats.InProgress++
-				if stats.CurrentStepID == "" {
-					stats.CurrentStepID = childID
-				}
+func (s *DoltStore) moleculeProgressStatuses(ctx context.Context, issueTable string, childIDs []string) (map[string]moleculeChildStatus, error) {
+	statuses := make(map[string]moleculeChildStatus)
+	nChildren := len(childIDs)
+	for start := 0; start < nChildren; start += queryBatchSize {
+		end := min(start+queryBatchSize, nChildren)
+		batch := childIDs[start:end]
+		placeholders, args := doltBuildSQLInClause(batch)
+		//nolint:gosec // G201: issueTable is hardcoded, placeholders contains only ? markers
+		query := fmt.Sprintf("SELECT id, status FROM %s WHERE id IN (%s)", issueTable, placeholders)
+		if err := s.readMoleculeStatusBatch(ctx, query, args, statuses); err != nil {
+			return nil, err
+		}
+	}
+	return statuses, nil
+}
+
+func (s *DoltStore) readMoleculeStatusBatch(ctx context.Context, query string, args []interface{}, statuses map[string]moleculeChildStatus) error {
+	rows, err := s.queryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to batch-fetch child statuses: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, status string
+		if err := rows.Scan(&id, &status); err != nil {
+			return wrapScanError("get molecule progress: scan status", err)
+		}
+		statuses[id] = moleculeChildStatus{status: status}
+	}
+	return nil
+}
+
+func applyMoleculeProgress(stats *types.MoleculeProgressStats, childIDs []string, statuses map[string]moleculeChildStatus) {
+	for _, childID := range childIDs {
+		info, ok := statuses[childID]
+		if !ok {
+			continue
+		}
+		stats.Total++
+		switch types.Status(info.status) {
+		case types.StatusClosed:
+			stats.Completed++
+		case types.StatusInProgress:
+			stats.InProgress++
+			if stats.CurrentStepID == "" {
+				stats.CurrentStepID = childID
 			}
 		}
 	}
-
-	return stats, nil
 }
 
 // GetMoleculeLastActivity returns the most recent activity timestamp for a molecule.

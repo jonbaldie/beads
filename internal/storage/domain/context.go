@@ -47,15 +47,23 @@ type ContextInfo struct {
 	IsWorktree   bool
 	Backend      string
 	DoltMode     string
-	ServerHost   string
-	ServerPort   int
-	ProxiedDir   string
-	Database     string
-	DataDir      string
-	ProjectID    string
-	SyncRemote   string
-	Role         string
-	BdVersion    string
+	ContextServer
+	Database   string
+	DataDir    string
+	ProjectID  string
+	SyncRemote string
+	Role       string
+	BdVersion  string
+}
+
+// ContextServer contains the endpoint fields available to local diagnostic
+// callers. It is embedded to keep ContextInfo's aggregate focused while
+// preserving promoted access (info.ServerHost, info.ServerPort, info.ProxiedDir)
+// and the existing JSON shape.
+type ContextServer struct {
+	ServerHost string
+	ServerPort int
+	ProxiedDir string
 }
 
 // PublishedContextFields is the workspace identity every context surface
@@ -189,21 +197,12 @@ func (u *contextUseCaseImpl) GetContextInfo(ctx context.Context) (ContextInfo, e
 		info.Role = role
 	}
 
-	if backend.IsServerMode {
-		info.ServerHost = backend.ServerHost
-		port, err := u.repo.ServerPort(ctx)
-		if err != nil {
-			return ContextInfo{}, err
-		}
-		info.ServerPort = port
+	if err := u.populateServerContext(ctx, &info, backend); err != nil {
+		return ContextInfo{}, err
 	}
 
-	if backend.IsProxiedServerMode {
-		proxiedDir, err := u.repo.ProxiedServerRoot(ctx)
-		if err != nil {
-			return ContextInfo{}, err
-		}
-		info.ProxiedDir = proxiedDir
+	if err := u.populateProxiedContext(ctx, &info, backend); err != nil {
+		return ContextInfo{}, err
 	}
 
 	remote, err := u.repo.SyncRemote(ctx)
@@ -213,4 +212,29 @@ func (u *contextUseCaseImpl) GetContextInfo(ctx context.Context) (ContextInfo, e
 	info.SyncRemote = remote
 
 	return info, nil
+}
+
+func (u *contextUseCaseImpl) populateServerContext(ctx context.Context, info *ContextInfo, backend BackendConfig) error {
+	if !backend.IsServerMode {
+		return nil
+	}
+	info.ServerHost = backend.ServerHost
+	port, err := u.repo.ServerPort(ctx)
+	if err != nil {
+		return err
+	}
+	info.ServerPort = port
+	return nil
+}
+
+func (u *contextUseCaseImpl) populateProxiedContext(ctx context.Context, info *ContextInfo, backend BackendConfig) error {
+	if !backend.IsProxiedServerMode {
+		return nil
+	}
+	proxiedDir, err := u.repo.ProxiedServerRoot(ctx)
+	if err != nil {
+		return err
+	}
+	info.ProxiedDir = proxiedDir
+	return nil
 }

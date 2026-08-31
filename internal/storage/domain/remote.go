@@ -56,28 +56,38 @@ func (u *doltRemoteUseCaseImpl) UpdateRemote(ctx context.Context, name, url stri
 	// Dolt has no atomic remote update, so this is remove-then-add. Capture
 	// the old URL first so a failed add can restore the remote instead of
 	// leaving it deleted (bd-6dnrw.44 P3).
-	var oldURL string
-	if remotes, err := u.remoteRepo.ListRemotes(ctx); err == nil {
-		for _, rem := range remotes {
-			if rem.Name == name {
-				oldURL = rem.URL
-				break
-			}
-		}
-	}
+	oldURL := u.previousURL(ctx, name)
 	if err := u.remoteRepo.RemoveRemote(ctx, name); err != nil {
 		return fmt.Errorf("UpdateRemote %s: remove: %w", name, err)
 	}
 	if err := u.remoteRepo.AddRemote(ctx, name, url); err != nil {
-		if oldURL != "" {
-			if restoreErr := u.remoteRepo.AddRemote(ctx, name, oldURL); restoreErr != nil {
-				return fmt.Errorf("UpdateRemote %s: add: %w (restoring previous URL %s also failed: %v)", name, err, oldURL, restoreErr)
-			}
-			return fmt.Errorf("UpdateRemote %s: add: %w (previous URL %s restored)", name, err, oldURL)
-		}
-		return fmt.Errorf("UpdateRemote %s: add: %w", name, err)
+		return u.restoreAfterUpdateFailure(ctx, name, oldURL, err)
 	}
 	return nil
+}
+
+func (u *doltRemoteUseCaseImpl) previousURL(ctx context.Context, name string) string {
+	remotes, err := u.remoteRepo.ListRemotes(ctx)
+	if err != nil {
+		return ""
+	}
+	for _, rem := range remotes {
+		if rem.Name == name {
+			return rem.URL
+		}
+	}
+	return ""
+}
+
+func (u *doltRemoteUseCaseImpl) restoreAfterUpdateFailure(ctx context.Context, name, oldURL string, updateErr error) error {
+	if oldURL == "" {
+		return fmt.Errorf("UpdateRemote %s: add: %w", name, updateErr)
+	}
+	restoreErr := u.remoteRepo.AddRemote(ctx, name, oldURL)
+	if restoreErr != nil {
+		return fmt.Errorf("UpdateRemote %s: add: %w (restoring previous URL %s also failed: %v)", name, updateErr, oldURL, restoreErr)
+	}
+	return fmt.Errorf("UpdateRemote %s: add: %w (previous URL %s restored)", name, updateErr, oldURL)
 }
 
 func (u *doltRemoteUseCaseImpl) DeleteRemote(ctx context.Context, name string) error {
