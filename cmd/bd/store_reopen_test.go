@@ -79,11 +79,17 @@ func TestIssueIDCompletion_UsesMetadataWhenStoreNil(t *testing.T) {
 	testDBPath := filepath.Join(t.TempDir(), "dolt")
 	testStore := newTestStoreIsolatedDB(t, testDBPath, "cfg")
 	if err := testStore.CreateIssue(ctx, &types.Issue{
-		ID:        "cfg-abc1",
-		Title:     "Completion target",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "cfg-abc1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Completion target",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}, "test"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}

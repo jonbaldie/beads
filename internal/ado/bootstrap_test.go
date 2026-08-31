@@ -20,8 +20,8 @@ func TestFindMatch_ExternalRef(t *testing.T) {
 		URL:   "https://dev.azure.com/org/proj/_workitems/edit/42",
 	}
 	localIssues := []*types.Issue{
-		{ID: "bd-1", Title: "Unrelated", ExternalRef: strPtr("https://other.com/1")},
-		{ID: "bd-2", Title: "Fix login bug", ExternalRef: strPtr("https://dev.azure.com/org/proj/_workitems/edit/42")},
+		{IssueID: types.IssueID{ID: "bd-1"}, IssueContent: types.IssueContent{Title: "Unrelated"}, IssueMeta: types.IssueMeta{ExternalRef: strPtr("https://other.com/1")}},
+		{IssueID: types.IssueID{ID: "bd-2"}, IssueContent: types.IssueContent{Title: "Fix login bug"}, IssueMeta: types.IssueMeta{ExternalRef: strPtr("https://dev.azure.com/org/proj/_workitems/edit/42")}},
 	}
 
 	result := m.FindMatch(adoItem, localIssues)
@@ -46,8 +46,8 @@ func TestFindMatch_SourceSystem(t *testing.T) {
 		URL:   "https://dev.azure.com/org/proj/_workitems/edit/42",
 	}
 	localIssues := []*types.Issue{
-		{ID: "bd-1", Title: "Unrelated", SourceSystem: "github:99"},
-		{ID: "bd-2", Title: "Fix login bug", SourceSystem: "ado:42"},
+		{IssueID: types.IssueID{ID: "bd-1"}, IssueContent: types.IssueContent{Title: "Unrelated"}, IssueMeta: types.IssueMeta{SourceSystem: "github:99"}},
+		{IssueID: types.IssueID{ID: "bd-2"}, IssueContent: types.IssueContent{Title: "Fix login bug"}, IssueMeta: types.IssueMeta{SourceSystem: "ado:42"}},
 	}
 
 	result := m.FindMatch(adoItem, localIssues)
@@ -72,7 +72,7 @@ func TestFindMatch_SourceSystemURL(t *testing.T) {
 		URL:   "https://dev.azure.com/org/proj/_workitems/edit/42",
 	}
 	localIssues := []*types.Issue{
-		{ID: "bd-5", Title: "Fix login bug", SourceSystem: "ado:https://dev.azure.com/org/proj/_workitems/edit/42"},
+		{IssueID: types.IssueID{ID: "bd-5"}, IssueContent: types.IssueContent{Title: "Fix login bug"}, IssueMeta: types.IssueMeta{SourceSystem: "ado:https://dev.azure.com/org/proj/_workitems/edit/42"}},
 	}
 
 	result := m.FindMatch(adoItem, localIssues)
@@ -100,7 +100,7 @@ func TestFindMatch_HeuristicExactMatch(t *testing.T) {
 		CreatedAt: now,
 	}
 	localIssues := []*types.Issue{
-		{ID: "bd-10", Title: "Fix login bug", IssueType: types.TypeBug, CreatedAt: now.Add(2 * time.Hour)},
+		{IssueID: types.IssueID{ID: "bd-10"}, IssueContent: types.IssueContent{Title: "Fix login bug"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeBug}, IssueTimes: types.IssueTimes{CreatedAt: now.Add(2 * time.Hour)}},
 	}
 
 	result := m.FindMatch(adoItem, localIssues)
@@ -130,7 +130,7 @@ func TestFindMatch_HeuristicDisabled(t *testing.T) {
 		CreatedAt: now,
 	}
 	localIssues := []*types.Issue{
-		{ID: "bd-10", Title: "Fix login bug", IssueType: types.TypeBug, CreatedAt: now},
+		{IssueID: types.IssueID{ID: "bd-10"}, IssueContent: types.IssueContent{Title: "Fix login bug"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeBug}, IssueTimes: types.IssueTimes{CreatedAt: now}},
 	}
 
 	result := m.FindMatch(adoItem, localIssues)
@@ -151,7 +151,7 @@ func TestFindMatch_HeuristicTitleMismatch(t *testing.T) {
 		CreatedAt: now,
 	}
 	localIssues := []*types.Issue{
-		{ID: "bd-10", Title: "Fix logout bug", IssueType: types.TypeBug, CreatedAt: now},
+		{IssueID: types.IssueID{ID: "bd-10"}, IssueContent: types.IssueContent{Title: "Fix logout bug"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeBug}, IssueTimes: types.IssueTimes{CreatedAt: now}},
 	}
 
 	result := m.FindMatch(adoItem, localIssues)
@@ -172,7 +172,7 @@ func TestFindMatch_HeuristicTypeMismatch(t *testing.T) {
 		CreatedAt: now,
 	}
 	localIssues := []*types.Issue{
-		{ID: "bd-10", Title: "Fix login bug", IssueType: types.TypeFeature, CreatedAt: now},
+		{IssueID: types.IssueID{ID: "bd-10"}, IssueContent: types.IssueContent{Title: "Fix login bug"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeFeature}, IssueTimes: types.IssueTimes{CreatedAt: now}},
 	}
 
 	result := m.FindMatch(adoItem, localIssues)
@@ -193,7 +193,7 @@ func TestFindMatch_HeuristicTimeOutsideWindow(t *testing.T) {
 		CreatedAt: now,
 	}
 	localIssues := []*types.Issue{
-		{ID: "bd-10", Title: "Fix login bug", IssueType: types.TypeBug, CreatedAt: now.Add(25 * time.Hour)},
+		{IssueID: types.IssueID{ID: "bd-10"}, IssueContent: types.IssueContent{Title: "Fix login bug"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeBug}, IssueTimes: types.IssueTimes{CreatedAt: now.Add(25 * time.Hour)}},
 	}
 
 	result := m.FindMatch(adoItem, localIssues)
@@ -214,8 +214,8 @@ func TestFindMatch_HeuristicMultipleCandidates(t *testing.T) {
 		CreatedAt: now,
 	}
 	localIssues := []*types.Issue{
-		{ID: "bd-10", Title: "Fix login bug", IssueType: types.TypeBug, CreatedAt: now.Add(1 * time.Hour)},
-		{ID: "bd-11", Title: "Fix login bug", IssueType: types.TypeBug, CreatedAt: now.Add(2 * time.Hour)},
+		{IssueID: types.IssueID{ID: "bd-10"}, IssueContent: types.IssueContent{Title: "Fix login bug"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeBug}, IssueTimes: types.IssueTimes{CreatedAt: now.Add(1 * time.Hour)}},
+		{IssueID: types.IssueID{ID: "bd-11"}, IssueContent: types.IssueContent{Title: "Fix login bug"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeBug}, IssueTimes: types.IssueTimes{CreatedAt: now.Add(2 * time.Hour)}},
 	}
 
 	result := m.FindMatch(adoItem, localIssues)
@@ -239,7 +239,7 @@ func TestFindMatch_NoMatch(t *testing.T) {
 		CreatedAt: time.Now(),
 	}
 	localIssues := []*types.Issue{
-		{ID: "bd-1", Title: "Totally different issue", IssueType: types.TypeTask},
+		{IssueID: types.IssueID{ID: "bd-1"}, IssueContent: types.IssueContent{Title: "Totally different issue"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask}},
 	}
 
 	result := m.FindMatch(adoItem, localIssues)
@@ -263,11 +263,21 @@ func TestFindMatch_PriorityOrder(t *testing.T) {
 	// Issue matches both external_ref AND heuristic — external_ref should win.
 	localIssues := []*types.Issue{
 		{
-			ID:          "bd-99",
-			Title:       "Fix login bug",
-			ExternalRef: strPtr("https://dev.azure.com/org/proj/_workitems/edit/42"),
-			IssueType:   types.TypeBug,
-			CreatedAt:   now,
+			IssueID: types.IssueID{
+				ID: "bd-99",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Fix login bug",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				IssueType: types.TypeBug,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: now,
+			},
+			IssueMeta: types.IssueMeta{
+				ExternalRef: strPtr("https://dev.azure.com/org/proj/_workitems/edit/42"),
+			},
 		},
 	}
 

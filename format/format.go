@@ -20,9 +20,9 @@ func PrettyIssue(issue *types.Issue) string {
 	typeBadge := ""
 	switch issue.IssueType {
 	case "epic":
-		typeBadge = ui.TypeEpicStyle.Render("[epic]") + " "
+		typeBadge = ui.TypeEpicStyle().Render("[epic]") + " "
 	case "bug":
-		typeBadge = ui.TypeBugStyle.Render("[bug]") + " "
+		typeBadge = ui.TypeBugStyle().Render("[bug]") + " "
 	}
 
 	if issue.Status == types.StatusClosed {

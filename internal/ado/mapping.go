@@ -21,55 +21,8 @@ func (m *adoFieldMapper) IssueToBeads(ti *tracker.TrackerIssue) *tracker.IssueCo
 		return nil
 	}
 
-	// Convert description from HTML to Markdown.
-	desc, _ := HTMLToMarkdown(wi.GetStringField(FieldDescription))
-
-	// Extract owner from AssignedTo (can be string or identity map).
-	owner := extractAssignedTo(wi.GetField(FieldAssignedTo))
-
-	// Parse tags, filtering out internal beads:* tags.
-	allTags := parseTags(wi.GetStringField(FieldTags))
-	labels := filterBeadsTags(allTags)
-
-	issue := &types.Issue{
-		Title:       wi.GetStringField(FieldTitle),
-		Description: desc,
-		Priority:    m.PriorityToBeads(wi.GetField(FieldPriority)),
-		Status:      m.StatusToBeads(wi.GetField(FieldState)),
-		IssueType:   m.TypeToBeads(wi.GetField(FieldWorkItemType)),
-		Owner:       owner,
-		Labels:      labels,
-	}
-
-	// Restore blocked status from beads:blocked tag (ADO has no blocked state,
-	// so blocked maps to Active + tag on push; reverse it here on pull).
-	if issue.Status == types.StatusInProgress && hasBeadsTag(wi.GetStringField(FieldTags), "beads:blocked") {
-		issue.Status = types.StatusBlocked
-	}
-
-	// Restore original beads priority from tracker metadata when the mapping
-	// is lossy (beads 3 and 4 both map to ADO 4).
-	if ti.Metadata != nil {
-		if bp, ok := ti.Metadata["beads_priority"]; ok {
-			var p int
-			var valid bool
-			switch v := bp.(type) {
-			case string:
-				if n, err := strconv.Atoi(v); err == nil {
-					p, valid = n, true
-				}
-			case float64:
-				p, valid = int(v), true
-			case json.Number:
-				if n, err := v.Int64(); err == nil {
-					p, valid = int(n), true
-				}
-			}
-			if valid && p >= 0 && p <= 4 {
-				issue.Priority = p
-			}
-		}
-	}
+	issue := m.issueFromWorkItem(wi)
+	restoreADOPriority(issue, ti.Metadata)
 
 	// Build external ref URL.
 	ref := buildExternalRef(wi)
@@ -77,23 +30,70 @@ func (m *adoFieldMapper) IssueToBeads(ti *tracker.TrackerIssue) *tracker.IssueCo
 		issue.ExternalRef = &ref
 	}
 
-	// Preserve ADO-specific metadata for round-trip fidelity.
+	applyADOMetadataToIssue(issue, wi, ti.Metadata)
+
+	return &tracker.IssueConversion{Issue: issue, Dependencies: ExtractLinkDeps(wi)}
+}
+
+func (m *adoFieldMapper) issueFromWorkItem(wi *WorkItem) *types.Issue {
+	desc, _ := HTMLToMarkdown(wi.GetStringField(FieldDescription))
+	issue := &types.Issue{
+		IssueContent: types.IssueContent{Title: wi.GetStringField(FieldTitle), Description: desc},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority: m.PriorityToBeads(wi.GetField(FieldPriority)), Status: m.StatusToBeads(wi.GetField(FieldState)),
+			IssueType: m.TypeToBeads(wi.GetField(FieldWorkItemType)), Owner: extractAssignedTo(wi.GetField(FieldAssignedTo)),
+		},
+		IssueGraph: types.IssueGraph{Labels: filterBeadsTags(parseTags(wi.GetStringField(FieldTags)))},
+	}
+	if issue.Status == types.StatusInProgress && hasBeadsTag(wi.GetStringField(FieldTags), "beads:blocked") {
+		issue.Status = types.StatusBlocked
+	}
+	return issue
+}
+
+func restoreADOPriority(issue *types.Issue, metadata map[string]interface{}) {
+	if metadata == nil {
+		return
+	}
+	value, ok := metadata["beads_priority"]
+	if !ok {
+		return
+	}
+	p, ok := adoPriorityValue(value)
+	if ok && p >= 0 && p <= 4 {
+		issue.Priority = p
+	}
+}
+
+func adoPriorityValue(value interface{}) (int, bool) {
+	switch v := value.(type) {
+	case string:
+		n, err := strconv.Atoi(v)
+		return n, err == nil
+	case float64:
+		return int(v), true
+	case json.Number:
+		n, err := v.Int64()
+		return int(n), err == nil
+	default:
+		return 0, false
+	}
+}
+
+func applyADOMetadataToIssue(issue *types.Issue, wi *WorkItem, trackerMetadata map[string]interface{}) {
 	meta := buildMetadata(wi)
-	// Carry forward beads_priority from TrackerIssue metadata so it survives
-	// even when the engine uses conv.Issue.Metadata instead of extIssue.Metadata.
-	if ti.Metadata != nil {
-		if bp, ok := ti.Metadata["beads_priority"]; ok {
+	if trackerMetadata != nil {
+		if bp, ok := trackerMetadata["beads_priority"]; ok {
 			meta["beads_priority"] = bp
 		}
 	}
-	if len(meta) > 0 {
-		raw, err := json.Marshal(meta)
-		if err == nil {
-			issue.Metadata = json.RawMessage(raw)
-		}
+	if len(meta) == 0 {
+		return
 	}
-
-	return &tracker.IssueConversion{Issue: issue, Dependencies: ExtractLinkDeps(wi)}
+	raw, err := json.Marshal(meta)
+	if err == nil {
+		issue.Metadata = json.RawMessage(raw)
+	}
 }
 
 // IssueToTracker converts a beads Issue to a map of ADO work item field values.
@@ -104,15 +104,25 @@ func (m *adoFieldMapper) IssueToTracker(issue *types.Issue) map[string]interface
 		FieldPriority: m.PriorityToTracker(issue.Priority),
 	}
 
-	// Convert description from Markdown to HTML.
-	if issue.Description != "" {
-		htmlDesc, err := MarkdownToHTML(issue.Description)
-		if err == nil && htmlDesc != "" {
-			fields[FieldDescription] = htmlDesc
-		}
-	}
+	addADODescription(fields, issue.Description)
+	addADOTags(fields, issue)
+	storeADOPriority(issue)
+	addADOSeverity(fields, m, issue)
+	restoreMetadata(issue, fields)
+	return fields
+}
 
-	// Build tags: user labels + internal beads tags for round-trip fidelity.
+func addADODescription(fields map[string]interface{}, description string) {
+	if description == "" {
+		return
+	}
+	htmlDesc, err := MarkdownToHTML(description)
+	if err == nil && htmlDesc != "" {
+		fields[FieldDescription] = htmlDesc
+	}
+}
+
+func addADOTags(fields map[string]interface{}, issue *types.Issue) {
 	tags := append([]string{}, issue.Labels...)
 	if issue.Status == types.StatusBlocked {
 		tags = append(tags, "beads:blocked")
@@ -120,35 +130,30 @@ func (m *adoFieldMapper) IssueToTracker(issue *types.Issue) map[string]interface
 	if len(tags) > 0 {
 		fields[FieldTags] = buildTagString(tags)
 	}
+}
 
-	// Store original beads priority in metadata for lossy mappings
-	// (beads 3 and 4 both map to ADO priority 4).
-	if issue.Priority == 3 || issue.Priority == 4 {
-		var meta map[string]interface{}
-		if len(issue.Metadata) > 0 {
-			_ = json.Unmarshal(issue.Metadata, &meta)
-		}
-		if meta == nil {
-			meta = make(map[string]interface{})
-		}
-		meta["beads_priority"] = strconv.Itoa(issue.Priority)
-		if raw, err := json.Marshal(meta); err == nil {
-			issue.Metadata = json.RawMessage(raw)
-		}
+func storeADOPriority(issue *types.Issue) {
+	if issue.Priority != 3 && issue.Priority != 4 {
+		return
 	}
+	var meta map[string]interface{}
+	if len(issue.Metadata) > 0 {
+		_ = json.Unmarshal(issue.Metadata, &meta)
+	}
+	if meta == nil {
+		meta = make(map[string]interface{})
+	}
+	meta["beads_priority"] = strconv.Itoa(issue.Priority)
+	if raw, err := json.Marshal(meta); err == nil {
+		issue.Metadata = json.RawMessage(raw)
+	}
+}
 
-	// Set Severity for Bug-type work items (required by ADO).
-	// This is set before restoreMetadata so that a severity value previously
-	// pulled from ADO (stored in metadata) takes precedence over the computed one.
+func addADOSeverity(fields map[string]interface{}, m *adoFieldMapper, issue *types.Issue) {
 	typeName, _ := m.TypeToTracker(issue.IssueType).(string)
 	if strings.EqualFold(typeName, "Bug") {
 		fields[FieldSeverity] = m.SeverityForBug(issue.Priority)
 	}
-
-	// Restore ADO-specific metadata if present (may override computed severity).
-	restoreMetadata(issue, fields)
-
-	return fields
 }
 
 // extractAssignedTo extracts the display name from an ADO AssignedTo field.

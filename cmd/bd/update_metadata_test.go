@@ -33,10 +33,16 @@ func TestUpdateMetadataInlineJSON(t *testing.T) {
 
 	// Create an issue
 	issue := &types.Issue{
-		ID:        "bd-test1",
-		Title:     "Test Issue",
-		Status:    "open",
-		IssueType: "task",
+		IssueID: types.IssueID{
+			ID: "bd-test1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Test Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    "open",
+			IssueType: "task",
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)

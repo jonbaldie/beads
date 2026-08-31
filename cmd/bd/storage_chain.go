@@ -43,8 +43,8 @@ func wireStorageDecorators(store storage.DoltStorage, hookRunner *hooks.Runner, 
 // after ExecuteC for every path cobra skips PostRunE on — a RunE that returned
 // an error, which is how a partial batch exits with one issue committed.
 func waitForCommandHooks() {
-	if hookRunner == nil {
+	if getHookRunner() == nil {
 		return
 	}
-	hookRunner.Wait(hookRunner.Timeout())
+	getHookRunner().Wait(getHookRunner().Timeout())
 }

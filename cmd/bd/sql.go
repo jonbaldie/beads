@@ -53,14 +53,14 @@ WARNING: Direct database access bypasses the storage layer. Use with caution.`,
 		csvOutput, _ := cmd.Flags().GetBool("csv")
 
 		if usesProxiedServer() {
-			return runSQLProxiedServer(rootCtx, query, csvOutput)
+			return runSQLProxiedServer(getRootContext(), query, csvOutput)
 		}
 
-		if store == nil {
+		if getStore() == nil {
 			return HandleErrorRespectJSON("no database connection available (%s)", diagHint())
 		}
 
-		accessor, ok := storage.UnwrapStore(store).(storage.RawDBAccessor)
+		accessor, ok := storage.UnwrapStore(getStore()).(storage.RawDBAccessor)
 		if !ok {
 			return HandleErrorRespectJSON("storage backend does not support raw DB access")
 		}
@@ -69,7 +69,7 @@ WARNING: Direct database access bypasses the storage layer. Use with caution.`,
 			return HandleErrorRespectJSON("underlying database not available")
 		}
 
-		ctx := rootCtx
+		ctx := getRootContext()
 
 		trimmed := strings.TrimSpace(strings.ToUpper(query))
 		isRead := strings.HasPrefix(trimmed, "SELECT") ||
@@ -118,7 +118,7 @@ WARNING: Direct database access bypasses the storage layer. Use with caution.`,
 				return HandleErrorRespectJSON("reading rows: %v", err)
 			}
 
-			if jsonOutput {
+			if isJSONOutput() {
 				return outputJSON(allRows)
 			}
 
@@ -206,7 +206,9 @@ WARNING: Direct database access bypasses the storage layer. Use with caution.`,
 			return nil
 		}
 
-		CheckReadonly("sql")
+		if err := CheckReadonly("sql"); err != nil {
+			return err
+		}
 
 		result, err := db.ExecContext(ctx, query)
 		if err != nil {
@@ -215,7 +217,7 @@ WARNING: Direct database access bypasses the storage layer. Use with caution.`,
 
 		affected, _ := result.RowsAffected()
 
-		if jsonOutput {
+		if isJSONOutput() {
 			return outputJSON(map[string]interface{}{
 				"rows_affected": affected,
 			})

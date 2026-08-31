@@ -33,7 +33,9 @@ Examples:
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE: func(_ *cobra.Command, _ []string) error {
-		CheckReadonly("recompute-blocked")
+		if err := CheckReadonly("recompute-blocked"); err != nil {
+			return err
+		}
 
 		evt := metrics.NewCommandEvent("recompute-blocked")
 		defer func() {
@@ -42,13 +44,13 @@ Examples:
 			}
 		}()
 
-		ctx := rootCtx
+		ctx := getRootContext()
 
 		if usesProxiedServer() {
 			return runRecomputeBlockedProxiedServer(ctx)
 		}
 
-		recomputer, ok := storage.UnwrapStore(store).(storage.BlockedRecomputer)
+		recomputer, ok := storage.UnwrapStore(getStore()).(storage.BlockedRecomputer)
 		if !ok {
 			return HandleError("storage backend does not support is_blocked recompute")
 		}
@@ -65,7 +67,7 @@ Examples:
 // drift between them. wh-bridge-sync only reads the exit code, but a human
 // repairing a stale graph reads these two lines.
 func renderRecomputeBlocked(changed int) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(map[string]interface{}{"rows_corrected": changed})
 	}
 	if changed == 0 {

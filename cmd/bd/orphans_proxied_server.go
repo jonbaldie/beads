@@ -34,18 +34,22 @@ type uowIssueProvider struct {
 func (p *uowIssueProvider) GetOpenIssues(ctx context.Context) ([]*types.Issue, error) {
 	openStatus := types.StatusOpen
 	openPage, err := p.uw.IssueUseCase().SearchIssues(ctx, "", types.IssueFilter{
-		Status:    &openStatus,
-		Labels:    p.labels,
-		LabelsAny: p.labelsAny,
+		IssueFilterCore: types.IssueFilterCore{
+			Status:    &openStatus,
+			Labels:    p.labels,
+			LabelsAny: p.labelsAny,
+		},
 	})
 	if err != nil {
 		return nil, err
 	}
 	inProgressStatus := types.StatusInProgress
 	inProgressPage, err := p.uw.IssueUseCase().SearchIssues(ctx, "", types.IssueFilter{
-		Status:    &inProgressStatus,
-		Labels:    p.labels,
-		LabelsAny: p.labelsAny,
+		IssueFilterCore: types.IssueFilterCore{
+			Status:    &inProgressStatus,
+			Labels:    p.labels,
+			LabelsAny: p.labelsAny,
+		},
 	})
 	if err != nil {
 		return nil, err

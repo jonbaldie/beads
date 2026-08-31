@@ -50,7 +50,7 @@ func stubGeminiEnvProvider(t *testing.T, env geminiEnv, err error) {
 	t.Cleanup(func() { geminiEnvProvider = orig })
 }
 
-func writeGeminiSettings(t *testing.T, path string, settings map[string]interface{}) {
+func writeGeminiSettingsFixture(t *testing.T, path string, settings map[string]interface{}) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("mkdir settings dir: %v", err)
@@ -232,7 +232,7 @@ func TestInstallGemini_MigratesLegacyHooks(t *testing.T) {
 			},
 		},
 	}
-	writeGeminiSettings(t, settingsPath, legacy)
+	writeGeminiSettingsFixture(t, settingsPath, legacy)
 
 	// Re-run setup — must behave as a clean upgrade, not an accumulation.
 	if err := installGemini(env, false, false); err != nil {
@@ -273,7 +273,7 @@ func TestInstallGemini_PreservesExistingSettings(t *testing.T) {
 			},
 		},
 	}
-	writeGeminiSettings(t, settingsPath, existingSettings)
+	writeGeminiSettingsFixture(t, settingsPath, existingSettings)
 
 	// Install Gemini hooks
 	if err := installGemini(env, false, false); err != nil {
@@ -314,7 +314,7 @@ func TestCheckGemini_LegacyInstall(t *testing.T) {
 			},
 		},
 	}
-	writeGeminiSettings(t, settingsPath, legacy)
+	writeGeminiSettingsFixture(t, settingsPath, legacy)
 
 	err := checkGemini(env)
 	if err != errGeminiHooksLegacy {
@@ -491,7 +491,7 @@ func TestRemoveGemini_PreservesOtherHooks(t *testing.T) {
 			},
 		},
 	}
-	writeGeminiSettings(t, settingsPath, existingSettings)
+	writeGeminiSettingsFixture(t, settingsPath, existingSettings)
 
 	// Remove bd prime hooks
 	if err := removeGemini(env, false); err != nil {
@@ -641,7 +641,7 @@ func TestRemoveGemini_CleansAllVariants(t *testing.T) {
 			},
 		},
 	}
-	writeGeminiSettings(t, settingsPath, existing)
+	writeGeminiSettingsFixture(t, settingsPath, existing)
 
 	if err := removeGemini(env, false); err != nil {
 		t.Fatalf("removeGemini: %v", err)

@@ -39,6 +39,10 @@ var primeProxiedProviderOpen = func(ctx context.Context, beadsDir string) (uow.U
 // workspace, provider open failure, read failure): prime must degrade
 // silently, never fail the session-start hook.
 func formatMemoriesForPrimeProxied(compact bool) string {
+	return formatMemoriesForPrimeProxiedWithOptions(compact, primeOptions{})
+}
+
+func formatMemoriesForPrimeProxiedWithOptions(compact bool, opts primeOptions) string {
 	timeout := primeStoreTimeout()
 	ctx := context.Background()
 	var cancel context.CancelFunc
@@ -53,7 +57,7 @@ func formatMemoriesForPrimeProxied(compact bool) string {
 		}
 		return "" // Silently skip — proxied plane unavailable
 	}
-	return renderPrimeMemoryPlane(plane, compact)
+	return renderPrimeMemoryPlaneWithOptions(plane, compact, opts)
 }
 
 // primeProxiedMemoryPlane reads the memory plane through the proxied plane's
@@ -63,7 +67,7 @@ func formatMemoriesForPrimeProxied(compact bool) string {
 // otherwise a provider is opened scoped to this one read and closed before
 // returning.
 func primeProxiedMemoryPlane(ctx context.Context) (map[string]string, error) {
-	provider := uowProvider
+	provider := getUOWProvider()
 	if provider == nil {
 		beadsDir := beads.FindBeadsDir()
 		if beadsDir == "" {

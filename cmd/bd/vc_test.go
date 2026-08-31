@@ -7,14 +7,6 @@ import (
 
 func TestVcCommitStdinFlag(t *testing.T) {
 	t.Run("StdinReadsMessage", func(t *testing.T) {
-		// Save and restore globals
-		origMessage := vcCommitMessage
-		origStdin := vcCommitStdin
-		t.Cleanup(func() {
-			vcCommitMessage = origMessage
-			vcCommitStdin = origStdin
-		})
-
 		// Create a pipe to simulate stdin
 		r, w, err := os.Pipe()
 		if err != nil {
@@ -30,10 +22,6 @@ func TestVcCommitStdinFlag(t *testing.T) {
 			w.WriteString(content)
 			w.Close()
 		}()
-
-		// Simulate what the Run function does when --stdin is set
-		vcCommitStdin = true
-		vcCommitMessage = ""
 
 		cmd := vcCommitCmd
 		cmd.SetArgs([]string{"--stdin"})

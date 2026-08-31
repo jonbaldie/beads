@@ -33,7 +33,7 @@ func (r *currentIssueSearchRecorder) SearchIssues(_ context.Context, query strin
 func TestResolveCurrentIssueIDFromInProgressShortCircuits(t *testing.T) {
 	searcher := &currentIssueSearchRecorder{
 		responses: []currentIssueSearchResponse{{
-			issues: []*types.Issue{{ID: "in-progress-first"}, {ID: "in-progress-second"}},
+			issues: []*types.Issue{{IssueID: types.IssueID{ID: "in-progress-first"}}, {IssueID: types.IssueID{ID: "in-progress-second"}}},
 		}},
 	}
 	actorCalls := 0
@@ -59,7 +59,7 @@ func TestResolveCurrentIssueIDFromFindsHookedAfterInProgressMiss(t *testing.T) {
 	searcher := &currentIssueSearchRecorder{
 		responses: []currentIssueSearchResponse{
 			{err: errors.New("in-progress search failed")},
-			{issues: []*types.Issue{{ID: "hooked"}}},
+			{issues: []*types.Issue{{IssueID: types.IssueID{ID: "hooked"}}}},
 		},
 	}
 
@@ -130,8 +130,10 @@ func assertCurrentIssueSearchCalls(t *testing.T, got []currentIssueSearchCall, a
 		want = append(want, currentIssueSearchCall{
 			query: "",
 			filter: types.IssueFilter{
-				Status:   &status,
-				Assignee: &actor,
+				IssueFilterCore: types.IssueFilterCore{
+					Status:   &status,
+					Assignee: &actor,
+				},
 			},
 		})
 	}

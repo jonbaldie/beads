@@ -49,8 +49,8 @@ func serializationFailure() error {
 }
 
 func TestProxiedUpdateRunsOnTheLifecycleContract(t *testing.T) {
-	before := &types.Issue{ID: "bd-1", Status: types.StatusOpen, Title: "Original"}
-	after := &types.Issue{ID: "bd-1", Status: types.StatusOpen, Title: "Renamed", Labels: []string{"keep"}}
+	before := &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueContent: types.IssueContent{Title: "Original"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}
+	after := &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueContent: types.IssueContent{Title: "Renamed"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueGraph: types.IssueGraph{Labels: []string{"keep"}}}
 	p := claimRoleFixture(t, before, issueops.UpdateResult{Issue: after, Changed: true}, nil)
 
 	oldActor := actor
@@ -99,10 +99,18 @@ func TestProxiedUpdateRunsOnTheLifecycleContract(t *testing.T) {
 // concurrent writer committed after it).
 func TestProxiedUpdatePatchRoutesMergeOpsAsOperations(t *testing.T) {
 	current := &types.Issue{
-		ID:       "bd-spec-1",
-		Status:   types.StatusOpen,
-		Notes:    "existing notes",
-		Metadata: json.RawMessage(`{"existing":"yes"}`),
+		IssueID: types.IssueID{
+			ID: "bd-spec-1",
+		},
+		IssueContent: types.IssueContent{
+			Notes: "existing notes",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status: types.StatusOpen,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"existing":"yes"}`),
+		},
 	}
 
 	t.Run("append_notes", func(t *testing.T) {
@@ -150,12 +158,12 @@ func TestProxiedUpdatePatchRoutesMergeOpsAsOperations(t *testing.T) {
 	})
 
 	t.Run("clear_defer_status_resolved_from_the_pre_read_row", func(t *testing.T) {
-		deferred := &types.Issue{ID: "bd-spec-2", Status: types.StatusDeferred}
+		deferred := &types.Issue{IssueID: types.IssueID{ID: "bd-spec-2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusDeferred}}
 		patch := mustProxiedUpdatePatch(t, &updateInput{fields: map[string]any{}, clearDeferStatus: true}, deferred)
 		if !patch.Status.Set || patch.Status.Value != types.StatusOpen {
 			t.Errorf("Status = %+v, want open (clearDeferStatus on a deferred issue)", patch.Status)
 		}
-		open := &types.Issue{ID: "bd-spec-3", Status: types.StatusBlocked}
+		open := &types.Issue{IssueID: types.IssueID{ID: "bd-spec-3"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusBlocked}}
 		if patch := mustProxiedUpdatePatch(t, &updateInput{fields: map[string]any{}, clearDeferStatus: true}, open); patch.Status.Set {
 			t.Errorf("Status = %+v, want unset: --defer=\"\" must not clobber a non-deferred status", patch.Status)
 		}
@@ -221,7 +229,7 @@ func TestProxiedUpdateCarriesConditionalGuards(t *testing.T) {
 
 func recordProxiedUpdateRequest(t *testing.T, in *updateInput) issueops.UpdateRequest {
 	t.Helper()
-	before := &types.Issue{ID: "bd-1", Status: types.StatusOpen}
+	before := &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}
 	p := claimRoleFixture(t, before, issueops.UpdateResult{Issue: before, Changed: true}, nil)
 	if _, fail, err := applyUpdateProxiedOne(context.Background(), "bd-1", in); err != nil || fail != nil {
 		t.Fatalf("applyUpdateProxiedOne: err = %v, fail = %+v", err, fail)
@@ -235,7 +243,7 @@ func recordProxiedUpdateRequest(t *testing.T, in *updateInput) issueops.UpdateRe
 // "✓ Updated" (a recorded failure suppresses the success line and drives the
 // non-zero exit via reportUpdateFailures in runUpdateProxiedServer).
 func TestProxiedUpdateExhaustedConflictsFailLoudly(t *testing.T) {
-	before := &types.Issue{ID: "bd-retry-2", Status: types.StatusOpen}
+	before := &types.Issue{IssueID: types.IssueID{ID: "bd-retry-2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}
 	claimRoleFixture(t, before, issueops.UpdateResult{}, serializationFailure())
 
 	var (
@@ -265,7 +273,7 @@ func TestProxiedUpdateExhaustedConflictsFailLoudly(t *testing.T) {
 // gets its own exit code: a stale --if-assignee/--if-status wrote nothing and
 // retrying is pointless, so the batch must exit 13 rather than 1.
 func TestProxiedUpdateGuardMismatchExitsThirteen(t *testing.T) {
-	before := &types.Issue{ID: "bd-guard-1", Status: types.StatusOpen}
+	before := &types.Issue{IssueID: types.IssueID{ID: "bd-guard-1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}
 	claimRoleFixture(t, before, issueops.UpdateResult{},
 		fmt.Errorf("%w: bd-guard-1 has status %q, expected %q", storage.ErrStatusMismatch, "open", "in_progress"))
 
@@ -294,7 +302,7 @@ func TestProxiedUpdateGuardMismatchExitsThirteen(t *testing.T) {
 func TestProxiedUpdateAbortsTheBatchOnCancellation(t *testing.T) {
 	for _, cancellation := range []error{context.Canceled, context.DeadlineExceeded} {
 		t.Run(cancellation.Error(), func(t *testing.T) {
-			before := &types.Issue{ID: "bd-1", Status: types.StatusOpen}
+			before := &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}
 			claimRoleFixture(t, before, issueops.UpdateResult{}, fmt.Errorf("update bd-1: %w", cancellation))
 
 			got, fail, err := applyUpdateProxiedOne(context.Background(), "bd-1",

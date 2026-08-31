@@ -230,13 +230,11 @@ func TestRunNotionInitPersistsTargetConfig(t *testing.T) {
 			}
 
 			oldFactory := newNotionSetupClient
-			oldParent, oldTitle, oldJSON := notionInitParent, notionInitTitle, jsonOutput
+			oldJSON := jsonOutput
 			t.Cleanup(func() {
 				newNotionSetupClient = oldFactory
-				notionInitParent, notionInitTitle, jsonOutput = oldParent, oldTitle, oldJSON
+				jsonOutput = oldJSON
 			})
-			notionInitParent = "329e5bf9-7fae-8080-bb4a-d94e1387655d"
-			notionInitTitle = "Beads Issues"
 			jsonOutput = false
 			t.Setenv("NOTION_TOKEN", "env-token")
 
@@ -263,6 +261,8 @@ func TestRunNotionInitPersistsTargetConfig(t *testing.T) {
 			}
 
 			cmd := &cobra.Command{}
+			cmd.Flags().String("parent", "329e5bf9-7fae-8080-bb4a-d94e1387655d", "")
+			cmd.Flags().String("title", "Beads Issues", "")
 			var stdout bytes.Buffer
 			cmd.SetOut(&stdout)
 			cmd.SetContext(context.Background())
@@ -292,12 +292,11 @@ func TestRunNotionConnectResolvesDataSourceURL(t *testing.T) {
 	}
 	installNotionRecorderStore(t, recorder, false)
 	oldFactory := newNotionSetupClient
-	oldURL, oldJSON := notionConnectURL, jsonOutput
+	oldJSON := jsonOutput
 	t.Cleanup(func() {
 		newNotionSetupClient = oldFactory
-		notionConnectURL, jsonOutput = oldURL, oldJSON
+		jsonOutput = oldJSON
 	})
-	notionConnectURL = url
 	jsonOutput = false
 	t.Setenv("NOTION_TOKEN", "env-token")
 
@@ -314,6 +313,7 @@ func TestRunNotionConnectResolvesDataSourceURL(t *testing.T) {
 		return notion.NewClient(token).WithBaseURL(server.URL)
 	}
 	cmd := &cobra.Command{}
+	cmd.Flags().String("url", url, "")
 	var stdout bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetContext(context.Background())
@@ -434,8 +434,6 @@ func TestResolveNotionAuthPrefersConfigTokenOverEnv(t *testing.T) {
 
 func TestRenderNotionSyncResultUsesPhaseStats(t *testing.T) {
 	saveAndRestoreGlobals(t)
-	notionSyncDryRun = true
-	t.Cleanup(func() { notionSyncDryRun = false })
 
 	cmd := &cobra.Command{}
 	var stdout bytes.Buffer
@@ -458,7 +456,7 @@ func TestRenderNotionSyncResultUsesPhaseStats(t *testing.T) {
 			Created: 2,
 			Updated: 1,
 		},
-	})
+	}, notionSyncOptions{dryRun: true})
 	out := stdout.String()
 	for _, want := range []string{
 		"Dry run mode",
@@ -485,8 +483,6 @@ func TestRenderNotionSyncResultUsesPhaseStats(t *testing.T) {
 
 func TestRenderNotionSyncResultOmitsMutationSummaryForSameMinuteNoopDryRun(t *testing.T) {
 	saveAndRestoreGlobals(t)
-	notionSyncDryRun = true
-	t.Cleanup(func() { notionSyncDryRun = false })
 
 	cmd := &cobra.Command{}
 	var stdout bytes.Buffer
@@ -497,7 +493,7 @@ func TestRenderNotionSyncResultOmitsMutationSummaryForSameMinuteNoopDryRun(t *te
 			Queried:    49,
 			Candidates: 3,
 		},
-	})
+	}, notionSyncOptions{dryRun: true})
 	out := stdout.String()
 	for _, want := range []string{
 		"Dry run mode",
@@ -595,7 +591,7 @@ func TestShouldPushNotionIssue(t *testing.T) {
 			name: "existing notion ref is allowed",
 			issue: func() *types.Issue {
 				extRef := "https://www.notion.so/Test-0123456789abcdef0123456789abcdef"
-				return &types.Issue{ID: "beads-1", ExternalRef: &extRef}
+				return &types.Issue{IssueID: types.IssueID{ID: "beads-1"}, IssueMeta: types.IssueMeta{ExternalRef: &extRef}}
 			}(),
 			want: true,
 		},
@@ -603,62 +599,62 @@ func TestShouldPushNotionIssue(t *testing.T) {
 			name: "other tracker ref is rejected",
 			issue: func() *types.Issue {
 				extRef := "https://github.com/example/repo/issues/1"
-				return &types.Issue{ID: "beads-1", ExternalRef: &extRef}
+				return &types.Issue{IssueID: types.IssueID{ID: "beads-1"}, IssueMeta: types.IssueMeta{ExternalRef: &extRef}}
 			}(),
 			want: false,
 		},
 		{
 			name:  "unlinked issue is allowed when no gate is configured",
-			issue: &types.Issue{ID: "beads-1"},
+			issue: &types.Issue{IssueID: types.IssueID{ID: "beads-1"}},
 			want:  true,
 		},
 		{
 			name:       "prefix alone narrows issue set when no label gate is configured",
-			issue:      &types.Issue{ID: "beads-1"},
+			issue:      &types.Issue{IssueID: types.IssueID{ID: "beads-1"}},
 			pushPrefix: "beads",
 			want:       true,
 		},
 		{
 			name:       "prefix mismatch still rejects issue without label gate",
-			issue:      &types.Issue{ID: "beads-1"},
+			issue:      &types.Issue{IssueID: types.IssueID{ID: "beads-1"}},
 			pushPrefix: "proj",
 			want:       false,
 		},
 		{
 			name:      "configured label opts issue in",
-			issue:     &types.Issue{ID: "beads-1", Labels: []string{"notion-sync"}},
+			issue:     &types.Issue{IssueID: types.IssueID{ID: "beads-1"}, IssueGraph: types.IssueGraph{Labels: []string{"notion-sync"}}},
 			pushLabel: "notion-sync",
 			want:      true,
 		},
 		{
 			name:      "configured label still gates unlinked issue",
-			issue:     &types.Issue{ID: "beads-1"},
+			issue:     &types.Issue{IssueID: types.IssueID{ID: "beads-1"}},
 			pushLabel: "notion-sync",
 			want:      false,
 		},
 		{
 			name:      "configured label is case insensitive",
-			issue:     &types.Issue{ID: "beads-1", Labels: []string{"Notion-Sync"}},
+			issue:     &types.Issue{IssueID: types.IssueID{ID: "beads-1"}, IssueGraph: types.IssueGraph{Labels: []string{"Notion-Sync"}}},
 			pushLabel: "notion-sync",
 			want:      true,
 		},
 		{
 			name:       "label plus matching prefix allows issue",
-			issue:      &types.Issue{ID: "beads-1", Labels: []string{"notion-sync"}},
+			issue:      &types.Issue{IssueID: types.IssueID{ID: "beads-1"}, IssueGraph: types.IssueGraph{Labels: []string{"notion-sync"}}},
 			pushPrefix: "beads",
 			pushLabel:  "notion-sync",
 			want:       true,
 		},
 		{
 			name:       "label plus wrong prefix rejects issue",
-			issue:      &types.Issue{ID: "beads-1", Labels: []string{"notion-sync"}},
+			issue:      &types.Issue{IssueID: types.IssueID{ID: "beads-1"}, IssueGraph: types.IssueGraph{Labels: []string{"notion-sync"}}},
 			pushPrefix: "proj",
 			pushLabel:  "notion-sync",
 			want:       false,
 		},
 	}
 
-	tr := &notion.Tracker{}
+	tr := notion.NewTracker()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := shouldPushNotionIssue(tt.issue, tr, tt.pushPrefix, tt.pushLabel); got != tt.want {

@@ -53,7 +53,7 @@ Examples:
 
 		beadsDir := resolveWhereBeadsDir(cmd)
 		if beadsDir == "" {
-			if jsonOutput {
+			if isJSONOutput() {
 				if jerr := outputJSON(map[string]string{
 					"error":   "no_beads_directory",
 					"message": activeWorkspaceNotFoundMessage(),
@@ -98,7 +98,7 @@ Examples:
 			})
 		}
 
-		if jsonOutput {
+		if isJSONOutput() {
 			return outputJSON(result)
 		}
 		fmt.Println(result.Path)
@@ -150,27 +150,28 @@ func findOriginalBeadsDir() string {
 	if err != nil {
 		return ""
 	}
-
-	// Canonicalize cwd to handle symlinks
 	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
 		cwd = resolved
 	}
-
-	// Check BEADS_DIR first: if the env points at a .beads directory with a
-	// redirect file, that's the original. Fall through to the fs walk if
-	// BEADS_DIR is set but does not contain a redirect — bd's startup now
-	// rebinds BEADS_DIR to the resolved target (#3230) after following
-	// redirects, so an unconditional early-return here would hide every
-	// redirect from `bd where` output.
-	if envDir := os.Getenv("BEADS_DIR"); envDir != "" {
-		envDir = utils.CanonicalizePath(envDir)
-		redirectFile := filepath.Join(envDir, beads.RedirectFileName)
-		if _, err := os.Stat(redirectFile); err == nil {
-			return envDir
-		}
+	if envDir := originalBeadsDirFromEnv(); envDir != "" {
+		return envDir
 	}
+	return findOriginalBeadsDirFrom(cwd)
+}
 
-	// Walk up directory tree looking for .beads with redirect
+func originalBeadsDirFromEnv() string {
+	envDir := os.Getenv("BEADS_DIR")
+	if envDir == "" {
+		return ""
+	}
+	envDir = utils.CanonicalizePath(envDir)
+	if _, err := os.Stat(filepath.Join(envDir, beads.RedirectFileName)); err == nil {
+		return envDir
+	}
+	return ""
+}
+
+func findOriginalBeadsDirFrom(cwd string) string {
 	for dir := cwd; dir != "/" && dir != "."; {
 		beadsDir := filepath.Join(dir, ".beads")
 		if info, err := os.Stat(beadsDir); err == nil && info.IsDir() {

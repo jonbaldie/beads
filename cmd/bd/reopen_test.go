@@ -20,10 +20,14 @@ type reopenTestHelper struct {
 
 func (h *reopenTestHelper) createIssue(title string, issueType types.IssueType, priority int) *types.Issue {
 	issue := &types.Issue{
-		Title:     title,
-		Priority:  priority,
-		IssueType: issueType,
-		Status:    types.StatusOpen,
+		IssueContent: types.IssueContent{
+			Title: title,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  priority,
+			IssueType: issueType,
+			Status:    types.StatusOpen,
+		},
 	}
 	if err := h.s.CreateIssue(h.ctx, issue, "test-user"); err != nil {
 		h.t.Fatalf("Failed to create issue: %v", err)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -11,10 +12,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var undeferCmd = &cobra.Command{
-	Use:   "undefer [id...]",
-	Short: "Undefer one or more issues (restore to open)",
-	Long: `Undefer issues to restore them to open status.
+func newUndeferCmd() *cobra.Command {
+	undeferCmd := &cobra.Command{
+		Use:   "undefer [id...]",
+		Short: "Undefer one or more issues (restore to open)",
+		Long: `Undefer issues to restore them to open status.
 
 This brings issues back from the icebox so they can be worked on again.
 Issues will appear in 'bd ready' if they have no blockers.
@@ -22,86 +24,90 @@ Issues will appear in 'bd ready' if they have no blockers.
 Examples:
   bd undefer bd-abc        # Undefer a single issue
   bd undefer bd-abc bd-def # Undefer multiple issues`,
-	Args:          cobra.MinimumNArgs(1),
-	SilenceUsage:  true,
-	SilenceErrors: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		evt := metrics.NewCommandEvent("undefer")
-		defer func() {
-			if c := metrics.Global(); c != nil {
-				c.CloseEventAndAdd(evt)
-			}
-		}()
+		Args:          cobra.MinimumNArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE:          runUndefer,
+	}
+	undeferCmd.ValidArgsFunction = issueIDCompletion
+	return undeferCmd
+}
 
-		CheckReadonly("undefer")
-
-		if usesProxiedServer() {
-			return runUndeferProxiedServer(rootCtx, args)
+func runUndefer(_ *cobra.Command, args []string) error {
+	evt := metrics.NewCommandEvent("undefer")
+	defer func() {
+		if c := metrics.Global(); c != nil {
+			c.CloseEventAndAdd(evt)
 		}
+	}()
 
-		ctx := rootCtx
+	if err := CheckReadonly("undefer"); err != nil {
+		return err
+	}
+	if usesProxiedServer() {
+		return runUndeferProxiedServer(getRootContext(), args)
+	}
+	return runDirectUndefer(getRootContext(), args)
+}
 
-		_, err := utils.ResolvePartialIDs(ctx, store, args)
-		if err != nil {
-			return HandleError("%v", err)
+func runDirectUndefer(ctx context.Context, args []string) error {
+	if _, err := utils.ResolvePartialIDs(ctx, getStore(), args); err != nil {
+		return HandleError("%v", err)
+	}
+	if getStore() == nil {
+		return HandleErrorWithHint("database not initialized", diagHint())
+	}
+
+	undeferredIssues := make([]*types.Issue, 0, len(args))
+	for _, id := range args {
+		issue, ok := applyUndefer(ctx, id)
+		if ok && issue != nil {
+			undeferredIssues = append(undeferredIssues, issue)
 		}
+	}
+	if len(args) > 0 {
+		commandDidWrite.Store(true)
+	}
+	if isJSONOutput() && len(undeferredIssues) > 0 {
+		return outputJSON(undeferredIssues)
+	}
+	return nil
+}
 
-		undeferredIssues := []*types.Issue{}
-
-		if store == nil {
-			return HandleErrorWithHint("database not initialized", diagHint())
+func applyUndefer(ctx context.Context, id string) (*types.Issue, bool) {
+	fullID, err := utils.ResolvePartialID(ctx, getStore(), id)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error resolving %s: %v\n", id, err)
+		return nil, false
+	}
+	issue, err := getStore().GetIssue(ctx, fullID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting %s: %v\n", fullID, err)
+		return nil, false
+	}
+	if issue == nil || issue.Status != types.StatusDeferred {
+		if issue == nil {
+			fmt.Fprintf(os.Stderr, "Issue %s not found\n", fullID)
+		} else {
+			fmt.Fprintf(os.Stderr, "%s is not deferred (status: %s)\n", fullID, string(issue.Status))
 		}
-
-		for _, id := range args {
-			fullID, err := utils.ResolvePartialID(ctx, store, id)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error resolving %s: %v\n", id, err)
-				continue
-			}
-
-			issue, err := store.GetIssue(ctx, fullID)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error getting %s: %v\n", fullID, err)
-				continue
-			}
-			if issue.Status != types.StatusDeferred {
-				fmt.Fprintf(os.Stderr, "%s is not deferred (status: %s)\n", fullID, string(issue.Status))
-				continue
-			}
-
-			updates := map[string]interface{}{
-				"status":      string(types.StatusOpen),
-				"defer_until": nil,
-			}
-
-			if err := store.UpdateIssue(ctx, fullID, updates, actor); err != nil {
-				fmt.Fprintf(os.Stderr, "Error undeferring %s: %v\n", fullID, err)
-				continue
-			}
-
-			if jsonOutput {
-				issue, _ := store.GetIssue(ctx, fullID)
-				if issue != nil {
-					undeferredIssues = append(undeferredIssues, issue)
-				}
-			} else {
-				fmt.Printf("%s Undeferred %s (now open)\n", ui.RenderPass("*"), fullID)
-			}
-		}
-
-		if len(args) > 0 {
-			commandDidWrite.Store(true)
-		}
-
-		if jsonOutput && len(undeferredIssues) > 0 {
-			return outputJSON(undeferredIssues)
-		}
-
-		return nil
-	},
+		return nil, false
+	}
+	if err := getStore().UpdateIssue(ctx, fullID, map[string]interface{}{
+		"status":      string(types.StatusOpen),
+		"defer_until": nil,
+	}, getActor()); err != nil {
+		fmt.Fprintf(os.Stderr, "Error undeferring %s: %v\n", fullID, err)
+		return nil, false
+	}
+	if isJSONOutput() {
+		updated, _ := getStore().GetIssue(ctx, fullID)
+		return updated, true
+	}
+	fmt.Printf("%s Undeferred %s (now open)\n", ui.RenderPass("*"), fullID)
+	return nil, true
 }
 
 func init() {
-	undeferCmd.ValidArgsFunction = issueIDCompletion
-	rootCmd.AddCommand(undeferCmd)
+	rootCmd.AddCommand(newUndeferCmd())
 }

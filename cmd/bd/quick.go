@@ -38,10 +38,12 @@ Example:
 			}
 		}()
 
-		CheckReadonly("q")
+		if err := CheckReadonly("q"); err != nil {
+			return err
+		}
 
 		if usesProxiedServer() {
-			return runQuickProxiedServer(cmd, rootCtx, args)
+			return runQuickProxiedServer(cmd, getRootContext(), args)
 		}
 
 		title := strings.Join(args, " ")
@@ -56,31 +58,37 @@ Example:
 			return HandleError("%v", err)
 		}
 
-		ctx := rootCtx
+		ctx := getRootContext()
 
 		// Mirrors bd create's parent handling: validate the parent exists,
 		// inherit its labels, and reserve a hierarchical child ID.
 		var inheritedLabels []string
 		if parentID != "" {
-			if _, err := store.GetIssue(ctx, parentID); err != nil {
+			if _, err := getStore().GetIssue(ctx, parentID); err != nil {
 				if errors.Is(err, storage.ErrNotFound) {
 					return HandleError("parent issue %s not found", parentID)
 				}
 				return HandleError("failed to check parent issue: %v", err)
 			}
-			inheritedLabels, _ = store.GetLabels(ctx, parentID)
+			inheritedLabels, _ = getStore().GetLabels(ctx, parentID)
 		}
 
 		issue := &types.Issue{
-			Title:     title,
-			Status:    types.StatusOpen,
-			Priority:  priority,
-			IssueType: types.IssueType(issueType).Normalize(),
-			Labels:    mergeCreateLabels(labels, inheritedLabels),
+			IssueContent: types.IssueContent{
+				Title: title,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  priority,
+				IssueType: types.IssueType(issueType).Normalize(),
+			},
+			IssueGraph: types.IssueGraph{
+				Labels: mergeCreateLabels(labels, inheritedLabels),
+			},
 		}
 
 		if parentID != "" {
-			childID, err := store.GetNextChildID(ctx, parentID)
+			childID, err := getStore().GetNextChildID(ctx, parentID)
 			if err != nil {
 				return HandleError("%v", err)
 			}
@@ -91,7 +99,7 @@ Example:
 		// The issue and its parent-child edge commit in one transaction; a
 		// failed edge rolls back the create instead of leaving a dep-less
 		// child behind (same contract as bd create).
-		if err := createIssueWithDeps(ctx, store, issue, actor, createDepEdges{parentID: parentID}); err != nil {
+		if err := createIssueWithDeps(ctx, getStore(), issue, getActor(), createDepEdges{parentID: parentID}); err != nil {
 			return HandleError("%v", err)
 		}
 

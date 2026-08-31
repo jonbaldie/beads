@@ -127,13 +127,19 @@ func TestRenderTier1Prompt(t *testing.T) {
 	}
 
 	issue := &types.Issue{
-		ID:                 "bd-1",
-		Title:              "Fix authentication bug",
-		Description:        "Users can't log in with OAuth",
-		Design:             "Add error handling to OAuth flow",
-		AcceptanceCriteria: "Users can log in successfully",
-		Notes:              "Related to issue bd-2",
-		Status:             types.StatusClosed,
+		IssueID: types.IssueID{
+			ID: "bd-1",
+		},
+		IssueContent: types.IssueContent{
+			Title:              "Fix authentication bug",
+			Description:        "Users can't log in with OAuth",
+			Design:             "Add error handling to OAuth flow",
+			AcceptanceCriteria: "Users can log in successfully",
+			Notes:              "Related to issue bd-2",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status: types.StatusClosed,
+		},
 	}
 
 	prompt, err := client.renderTier1Prompt(issue)
@@ -168,10 +174,16 @@ func TestRenderTier1Prompt_HandlesEmptyFields(t *testing.T) {
 	}
 
 	issue := &types.Issue{
-		ID:          "bd-1",
-		Title:       "Simple task",
-		Description: "Just a simple task",
-		Status:      types.StatusClosed,
+		IssueID: types.IssueID{
+			ID: "bd-1",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Simple task",
+			Description: "Just a simple task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status: types.StatusClosed,
+		},
 	}
 
 	prompt, err := client.renderTier1Prompt(issue)
@@ -194,10 +206,16 @@ func TestRenderTier1Prompt_UTF8(t *testing.T) {
 	}
 
 	issue := &types.Issue{
-		ID:          "bd-1",
-		Title:       "Fix bug with émojis 🎉",
-		Description: "Handle UTF-8: café, 日本語, emoji 🚀",
-		Status:      types.StatusClosed,
+		IssueID: types.IssueID{
+			ID: "bd-1",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Fix bug with émojis 🎉",
+			Description: "Handle UTF-8: café, 日本語, emoji 🚀",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status: types.StatusClosed,
+		},
 	}
 
 	prompt, err := client.renderTier1Prompt(issue)
@@ -278,9 +296,13 @@ func TestSummarizeTier1_CancelledContext(t *testing.T) {
 	cancel()
 
 	issue := &types.Issue{
-		ID:          "bd-1",
-		Title:       "Test",
-		Description: "Test desc",
+		IssueID: types.IssueID{
+			ID: "bd-1",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Test",
+			Description: "Test desc",
+		},
 	}
 
 	_, err = client.SummarizeTier1(ctx, issue)
@@ -303,9 +325,13 @@ func TestSummarizeTier1_WithAuditEnabled(t *testing.T) {
 	cancel()
 
 	issue := &types.Issue{
-		ID:          "bd-audit",
-		Title:       "Audit Test",
-		Description: "Test audit logging",
+		IssueID: types.IssueID{
+			ID: "bd-audit",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Audit Test",
+			Description: "Test audit logging",
+		},
 	}
 
 	_, err = client.SummarizeTier1(ctx, issue)

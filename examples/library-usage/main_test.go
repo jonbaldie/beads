@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jonbaldie/beads"
+	"github.com/jonbaldie/beads/internal/types"
 )
 
 // TestExampleCompiles ensures the example code compiles and basic API works
@@ -41,13 +42,10 @@ func TestExampleCompiles(t *testing.T) {
 	}
 
 	// Create an issue (from example code)
-	newIssue := &beads.Issue{
-		ID:          "",
-		Title:       "Test library-created issue",
-		Description: "This verifies the library example works",
-		Status:      beads.StatusOpen,
-		Priority:    2,
-		IssueType:   beads.TypeTask,
+	newIssue := &beads.Issue{IssueID: types.IssueID{ID: ""}, IssueContent: types.IssueContent{Title: "Test library-created issue",
+		Description: "This verifies the library example works"}, IssueWorkflow: types.IssueWorkflow{Status: beads.StatusOpen,
+		Priority:  2,
+		IssueType: beads.TypeTask},
 	}
 
 	if err := store.CreateIssue(ctx, newIssue, "test"); err != nil {

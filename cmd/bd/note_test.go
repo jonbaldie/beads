@@ -10,6 +10,7 @@ import "testing"
 // pins down which shapes are accepted vs rejected. Mirrors
 // TestValidateCommentArgs (#5369) for GH#5370.
 func TestValidateNoteArgs(t *testing.T) {
+	noteCmd := newNoteCmd()
 	origJSONOutput := jsonOutput
 	jsonOutput = false
 	t.Cleanup(func() { jsonOutput = origJSONOutput })

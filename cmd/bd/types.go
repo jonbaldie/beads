@@ -52,11 +52,11 @@ Examples:
 
 		showSections, _ := cmd.Flags().GetBool("sections")
 		if showSections {
-			return printSections(jsonOutput)
+			return printSections(isJSONOutput())
 		}
 
 		if usesProxiedServer() {
-			return runTypesProxiedServer(rootCtx)
+			return runTypesProxiedServer(getRootContext())
 		}
 
 		if err := ensureDirectMode("types command requires direct database access"); err != nil {
@@ -65,8 +65,8 @@ Examples:
 
 		var customTypes []string
 		ctx := context.Background()
-		if store != nil {
-			if ct, err := store.GetCustomTypes(ctx); err == nil {
+		if getStore() != nil {
+			if ct, err := getStore().GetCustomTypes(ctx); err == nil {
 				customTypes = ct
 			}
 		}
@@ -76,7 +76,7 @@ Examples:
 }
 
 func renderTypes(customTypes []string) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		result := struct {
 			CoreTypes   []typeInfo `json:"core_types"`
 			CustomTypes []string   `json:"custom_types,omitempty"`

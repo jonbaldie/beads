@@ -90,54 +90,67 @@ func (c *Compactor) CompactTier1(ctx context.Context, issueID string) error {
 		return ctx.Err()
 	}
 
-	// Check eligibility before fetching issue (fail fast)
-	eligible, reason, err := c.store.CheckEligibility(ctx, issueID, 1)
+	issue, err := c.loadTier1Issue(ctx, issueID)
 	if err != nil {
-		return fmt.Errorf("failed to verify eligibility: %w", err)
+		return err
 	}
-	if !eligible {
-		if reason != "" {
-			return fmt.Errorf("issue %s is not eligible for Tier 1 compaction: %s", issueID, reason)
-		}
-		return fmt.Errorf("issue %s is not eligible for Tier 1 compaction", issueID)
-	}
-
-	issue, err := c.store.GetIssue(ctx, issueID)
-	if err != nil {
-		return fmt.Errorf("failed to fetch issue: %w", err)
-	}
-
-	// Calculate original size
-	originalSize := len(issue.Description) + len(issue.Design) + len(issue.Notes) + len(issue.AcceptanceCriteria)
+	originalSize := issueContentSize(issue)
 
 	if c.config.DryRun {
 		return fmt.Errorf("dry-run: would compact %s (original size: %d bytes)", issueID, originalSize)
 	}
 
-	// Get summary from AI
 	summary, err := c.summarizer.SummarizeTier1(ctx, issue)
 	if err != nil {
 		return fmt.Errorf("failed to summarize: %w", err)
 	}
-
-	// Check if compaction would actually reduce size
 	compactedSize := len(summary)
-	if compactedSize >= originalSize {
-		warningMsg := fmt.Sprintf("Tier 1 compaction skipped: summary (%d bytes) not shorter than original (%d bytes)", compactedSize, originalSize)
-		if err := c.store.AddComment(ctx, issueID, "compactor", warningMsg); err != nil {
-			return fmt.Errorf("failed to record warning: %w", err)
-		}
-		return fmt.Errorf("compaction would increase size (%d → %d bytes), keeping original", originalSize, compactedSize)
+	if err := c.ensureSummarySmaller(ctx, issueID, originalSize, compactedSize); err != nil {
+		return err
 	}
+	return c.applyTier1(ctx, issueID, summary, originalSize, compactedSize)
+}
 
+func (c *Compactor) loadTier1Issue(ctx context.Context, issueID string) (*types.Issue, error) {
+	// Check eligibility before fetching issue (fail fast).
+	eligible, reason, err := c.store.CheckEligibility(ctx, issueID, 1)
+	if err != nil {
+		return nil, fmt.Errorf("failed to verify eligibility: %w", err)
+	}
+	if !eligible {
+		if reason != "" {
+			return nil, fmt.Errorf("issue %s is not eligible for Tier 1 compaction: %s", issueID, reason)
+		}
+		return nil, fmt.Errorf("issue %s is not eligible for Tier 1 compaction", issueID)
+	}
+	issue, err := c.store.GetIssue(ctx, issueID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch issue: %w", err)
+	}
+	return issue, nil
+}
+
+func issueContentSize(issue *types.Issue) int {
+	return len(issue.Description) + len(issue.Design) + len(issue.Notes) + len(issue.AcceptanceCriteria)
+}
+
+func (c *Compactor) ensureSummarySmaller(ctx context.Context, issueID string, originalSize, compactedSize int) error {
+	if compactedSize < originalSize {
+		return nil
+	}
+	warningMsg := fmt.Sprintf("Tier 1 compaction skipped: summary (%d bytes) not shorter than original (%d bytes)", compactedSize, originalSize)
+	if err := c.store.AddComment(ctx, issueID, "compactor", warningMsg); err != nil {
+		return fmt.Errorf("failed to record warning: %w", err)
+	}
+	return fmt.Errorf("compaction would increase size (%d → %d bytes), keeping original", originalSize, compactedSize)
+}
+
+func (c *Compactor) applyTier1(ctx context.Context, issueID, summary string, originalSize, compactedSize int) error {
 	// Archive the original content BEFORE the destructive overwrite, so the
-	// compaction is reversible (bd restore reads this snapshot). If archiving
-	// fails we abort with the original content intact rather than lose it.
+	// compaction is reversible (bd restore reads this snapshot).
 	if err := c.store.SnapshotIssue(ctx, issueID, 1); err != nil {
 		return fmt.Errorf("failed to archive pre-compaction snapshot: %w", err)
 	}
-
-	// Update issue with summarized content
 	updates := map[string]interface{}{
 		"description":         summary,
 		"design":              "",
@@ -147,20 +160,13 @@ func (c *Compactor) CompactTier1(ctx context.Context, issueID string) error {
 	if err := c.store.UpdateIssue(ctx, issueID, updates, "compactor"); err != nil {
 		return fmt.Errorf("failed to update issue: %w", err)
 	}
-
-	// Record compaction metadata with git commit hash
-	commitHash := GetCurrentCommitHash()
-	if err := c.store.ApplyCompaction(ctx, issueID, 1, originalSize, compactedSize, commitHash); err != nil {
+	if err := c.store.ApplyCompaction(ctx, issueID, 1, originalSize, compactedSize, GetCurrentCommitHash()); err != nil {
 		return fmt.Errorf("failed to apply compaction metadata: %w", err)
 	}
-
-	// Add comment about compaction
-	savingBytes := originalSize - compactedSize
-	comment := fmt.Sprintf("Tier 1 compaction: %d → %d bytes (saved %d)", originalSize, compactedSize, savingBytes)
+	comment := fmt.Sprintf("Tier 1 compaction: %d → %d bytes (saved %d)", originalSize, compactedSize, originalSize-compactedSize)
 	if err := c.store.AddComment(ctx, issueID, "compactor", comment); err != nil {
 		return fmt.Errorf("failed to add compaction comment: %w", err)
 	}
-
 	return nil
 }
 

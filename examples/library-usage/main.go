@@ -30,7 +30,22 @@ func main() {
 		log.Fatalf("Failed to open storage: %v", err)
 	}
 	defer store.Close()
+	runDemo(ctx, store)
+}
 
+func runDemo(ctx context.Context, store beads.Storage) {
+	printReadyWork(ctx, store)
+	newIssue := createDemoIssue(ctx, store)
+	addDemoDependency(ctx, store, newIssue)
+	addDemoLabel(ctx, store, newIssue)
+	addDemoComment(ctx, store, newIssue)
+	updateDemoStatus(ctx, store, newIssue)
+	printDemoStatistics(ctx, store)
+	closeDemoIssue(ctx, store, newIssue)
+	fmt.Println("\n✅ Library usage demo complete!")
+}
+
+func printReadyWork(ctx context.Context, store beads.Storage) {
 	// Example 1: Get ready work
 	fmt.Println("=== Ready Work ===")
 	ready, err := store.GetReadyWork(ctx, beads.WorkFilter{
@@ -40,11 +55,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to get ready work: %v", err)
 	}
-
 	for _, issue := range ready {
 		fmt.Printf("- %s: %s (priority %d)\n", issue.ID, issue.Title, issue.Priority)
 	}
+}
 
+func createDemoIssue(ctx context.Context, store beads.Storage) *beads.Issue {
 	// Example 2: Create an issue
 	fmt.Println("\n=== Creating Issue ===")
 	newIssue := &beads.Issue{
@@ -57,13 +73,14 @@ func main() {
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
-
 	if err := store.CreateIssue(ctx, newIssue, "library-example"); err != nil {
 		log.Fatalf("Failed to create issue: %v", err)
 	}
-
 	fmt.Printf("Created issue: %s\n", newIssue.ID)
+	return newIssue
+}
 
+func addDemoDependency(ctx context.Context, store beads.Storage, newIssue *beads.Issue) {
 	// Example 3: Add a dependency
 	fmt.Println("\n=== Adding Dependency ===")
 	dep := &beads.Dependency{
@@ -73,21 +90,24 @@ func main() {
 		CreatedAt:   time.Now(),
 		CreatedBy:   "library-example",
 	}
-
 	if err := store.AddDependency(ctx, dep, "library-example"); err != nil {
 		// Don't fail if bd-1 doesn't exist
 		fmt.Printf("Note: Could not add dependency (bd-1 may not exist): %v\n", err)
-	} else {
-		fmt.Printf("Added dependency: %s discovered-from bd-1\n", newIssue.ID)
+		return
 	}
+	fmt.Printf("Added dependency: %s discovered-from bd-1\n", newIssue.ID)
+}
 
+func addDemoLabel(ctx context.Context, store beads.Storage, newIssue *beads.Issue) {
 	// Example 4: Add a label
 	fmt.Println("\n=== Adding Label ===")
 	if err := store.AddLabel(ctx, newIssue.ID, "library-usage", "library-example"); err != nil {
 		log.Fatalf("Failed to add label: %v", err)
 	}
 	fmt.Printf("Added label 'library-usage' to %s\n", newIssue.ID)
+}
 
+func addDemoComment(ctx context.Context, store beads.Storage, newIssue *beads.Issue) {
 	// Example 5: Add a comment
 	fmt.Println("\n=== Adding Comment ===")
 	comment, err := store.AddIssueComment(ctx, newIssue.ID, "library-example", "This is a programmatic comment")
@@ -95,43 +115,45 @@ func main() {
 		log.Fatalf("Failed to add comment: %v", err)
 	}
 	fmt.Printf("Added comment #%s\n", comment.ID)
+}
 
+func updateDemoStatus(ctx context.Context, store beads.Storage, newIssue *beads.Issue) {
 	// Example 6: Update issue status
 	fmt.Println("\n=== Updating Status ===")
-	updates := map[string]interface{}{
-		"status": beads.StatusInProgress,
-	}
+	updates := map[string]interface{}{"status": beads.StatusInProgress}
 	if err := store.UpdateIssue(ctx, newIssue.ID, updates, "library-example"); err != nil {
 		log.Fatalf("Failed to update issue: %v", err)
 	}
 	fmt.Printf("Updated %s status to in_progress\n", newIssue.ID)
+}
 
+func printDemoStatistics(ctx context.Context, store beads.Storage) {
 	// Example 7: Get statistics
 	fmt.Println("\n=== Statistics ===")
 	stats, err := store.GetStatistics(ctx)
 	if err != nil {
 		log.Fatalf("Failed to get statistics: %v", err)
 	}
-
-	blockedCount := 0
-	if stats.BlockedIssues != nil {
-		blockedCount = *stats.BlockedIssues
-	}
-	readyCount := 0
-	if stats.ReadyIssues != nil {
-		readyCount = *stats.ReadyIssues
-	}
+	blockedCount := optionalCount(stats.BlockedIssues)
+	readyCount := optionalCount(stats.ReadyIssues)
 	fmt.Printf("Total issues: %d\n", stats.TotalIssues)
 	fmt.Printf("Open: %d | In Progress: %d | Closed: %d | Blocked: %d | Ready: %d\n",
 		stats.OpenIssues, stats.InProgressIssues, stats.ClosedIssues,
 		blockedCount, readyCount)
+}
 
+func optionalCount(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func closeDemoIssue(ctx context.Context, store beads.Storage, newIssue *beads.Issue) {
 	// Example 8: Close the issue
 	fmt.Println("\n=== Closing Issue ===")
 	if err := store.CloseIssue(ctx, newIssue.ID, "Completed demo", "library-example", ""); err != nil {
 		log.Fatalf("Failed to close issue: %v", err)
 	}
 	fmt.Printf("Closed issue %s\n", newIssue.ID)
-
-	fmt.Println("\n✅ Library usage demo complete!")
 }

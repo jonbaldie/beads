@@ -23,42 +23,6 @@ func resetSetupResolutionCaches(t *testing.T) {
 	})
 }
 
-func resetSetupGlobals(t *testing.T) {
-	t.Helper()
-
-	originalProject := setupProject
-	originalGlobal := setupGlobal
-	originalCheck := setupCheck
-	originalRemove := setupRemove
-	originalStealth := setupStealth
-	originalPrint := setupPrint
-	originalOutput := setupOutput
-	originalList := setupList
-	originalAdd := setupAdd
-
-	setupProject = false
-	setupGlobal = false
-	setupCheck = false
-	setupRemove = false
-	setupStealth = false
-	setupPrint = false
-	setupOutput = ""
-	setupList = false
-	setupAdd = ""
-
-	t.Cleanup(func() {
-		setupProject = originalProject
-		setupGlobal = originalGlobal
-		setupCheck = originalCheck
-		setupRemove = originalRemove
-		setupStealth = originalStealth
-		setupPrint = originalPrint
-		setupOutput = originalOutput
-		setupList = originalList
-		setupAdd = originalAdd
-	})
-}
-
 func TestLoadSetupRecipes_NoWorkspaceUsesBuiltinsOnly(t *testing.T) {
 	tmpDir := t.TempDir()
 	orphanBeadsDir := filepath.Join(tmpDir, ".beads")
@@ -165,10 +129,9 @@ func TestRunRecipe_BuiltinFileRecipeWorksWithoutWorkspace(t *testing.T) {
 	t.Chdir(tmpDir)
 	t.Setenv("BEADS_DIR", "")
 	resetSetupResolutionCaches(t)
-	resetSetupGlobals(t)
 
 	out := captureStdout(t, func() error {
-		runRecipe("windsurf")
+		runRecipe("windsurf", setupOptions{})
 		return nil
 	})
 
@@ -194,10 +157,9 @@ func TestRunRecipe_KiroWorksWithoutWorkspace(t *testing.T) {
 	t.Chdir(tmpDir)
 	t.Setenv("BEADS_DIR", "")
 	resetSetupResolutionCaches(t)
-	resetSetupGlobals(t)
 
 	out := captureStdout(t, func() error {
-		runRecipe("kiro")
+		runRecipe("kiro", setupOptions{})
 		return nil
 	})
 
@@ -224,10 +186,9 @@ func TestRunRecipe_CopilotWorksWithoutWorkspace(t *testing.T) {
 	t.Chdir(tmpDir)
 	t.Setenv("BEADS_DIR", "")
 	resetSetupResolutionCaches(t)
-	resetSetupGlobals(t)
 
 	out := captureStdout(t, func() error {
-		runRecipe("copilot")
+		runRecipe("copilot", setupOptions{})
 		return nil
 	})
 
@@ -249,15 +210,11 @@ func TestRunRecipe_CopilotCheckWorksWithoutWorkspace(t *testing.T) {
 	t.Chdir(tmpDir)
 	t.Setenv("BEADS_DIR", "")
 	resetSetupResolutionCaches(t)
-	resetSetupGlobals(t)
 
-	runRecipe("copilot")
-
-	resetSetupGlobals(t)
-	setupCheck = true
+	runRecipe("copilot", setupOptions{})
 
 	out := captureStdout(t, func() error {
-		runRecipe("copilot")
+		runRecipe("copilot", setupOptions{check: true})
 		return nil
 	})
 
@@ -275,13 +232,9 @@ func TestRunRecipe_CopilotRemoveWorksWithoutWorkspace(t *testing.T) {
 	t.Chdir(tmpDir)
 	t.Setenv("BEADS_DIR", "")
 	resetSetupResolutionCaches(t)
-	resetSetupGlobals(t)
 
-	runRecipe("copilot")
-
-	resetSetupGlobals(t)
-	setupRemove = true
-	runRecipe("copilot")
+	runRecipe("copilot", setupOptions{})
+	runRecipe("copilot", setupOptions{remove: true})
 
 	if _, err := os.Stat(filepath.Join(tmpDir, ".copilot-plugin", "plugin.json")); !os.IsNotExist(err) {
 		t.Fatalf("expected plugin manifest to be removed, got err=%v", err)

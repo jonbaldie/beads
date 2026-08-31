@@ -14,6 +14,12 @@ import (
 	"time"
 )
 
+// buildPullWIQL is the single-project compatibility view exercised by the
+// focused query tests. Production callers use the multi-project builder.
+func (c *Client) buildPullWIQL(since *time.Time, filters *PullFilters) string {
+	return c.buildPullWIQLMulti([]string{c.Project}, since, filters)
+}
+
 // setupTestServer creates an httptest server and a Client pointed at it.
 func setupTestServer(t *testing.T, handler http.HandlerFunc) (*Client, *httptest.Server) {
 	t.Helper()

@@ -249,12 +249,20 @@ func TestCloneSubgraph_SubstitutesGateRepoMetadata(t *testing.T) {
 	h.addLabel(epic.ID, BeadsTemplateLabel)
 
 	gate := &types.Issue{
-		Title:     "Gate: gh:run",
-		IssueType: "gate",
-		Status:    types.StatusOpen,
-		AwaitType: "gh:run",
-		AwaitID:   "release.yml",
-		Metadata:  json.RawMessage(`{"repo":"{{gate_repo}}"}`),
+		IssueContent: types.IssueContent{
+			Title: "Gate: gh:run",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: "gate",
+			Status:    types.StatusOpen,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"repo":"{{gate_repo}}"}`),
+		},
+		IssueCoord: types.IssueCoord{
+			AwaitType: "gh:run",
+			AwaitID:   "release.yml",
+		},
 	}
 	if err := s.CreateIssue(ctx, gate, "test-user"); err != nil {
 		t.Fatalf("Failed to create gate issue: %v", err)
@@ -302,11 +310,15 @@ type templateTestHelper struct {
 
 func (h *templateTestHelper) createIssue(title, description string, issueType types.IssueType, priority int) *types.Issue {
 	issue := &types.Issue{
-		Title:       title,
-		Description: description,
-		Priority:    priority,
-		IssueType:   issueType,
-		Status:      types.StatusOpen,
+		IssueContent: types.IssueContent{
+			Title:       title,
+			Description: description,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  priority,
+			IssueType: issueType,
+			Status:    types.StatusOpen,
+		},
 	}
 	if err := h.s.CreateIssue(h.ctx, issue, "test-user"); err != nil {
 		h.t.Fatalf("Failed to create issue: %v", err)
@@ -334,12 +346,18 @@ func (h *templateTestHelper) addLabel(issueID, label string) {
 // createIssueWithID creates an issue with a specific ID (for testing hierarchical IDs)
 func (h *templateTestHelper) createIssueWithID(id, title, description string, issueType types.IssueType, priority int) *types.Issue {
 	issue := &types.Issue{
-		ID:          id,
-		Title:       title,
-		Description: description,
-		Priority:    priority,
-		IssueType:   issueType,
-		Status:      types.StatusOpen,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title:       title,
+			Description: description,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  priority,
+			IssueType: issueType,
+			Status:    types.StatusOpen,
+		},
 	}
 	if err := h.s.CreateIssue(h.ctx, issue, "test-user"); err != nil {
 		h.t.Fatalf("Failed to create issue with ID %s: %v", id, err)
@@ -390,11 +408,15 @@ func newTemplateBenchmarkStore(b *testing.B) (*dolt.DoltStore, context.Context) 
 	database := fmt.Sprintf("benchdb_%d", time.Now().UnixNano())
 
 	s, err := dolt.New(ctx, &dolt.Config{
-		Path:            testDB,
-		ServerHost:      "127.0.0.1",
-		ServerPort:      testDoltServerPort,
-		Database:        database,
-		CreateIfMissing: true,
+		Path: testDB,
+		ServerOptions: dolt.ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: testDoltServerPort,
+		},
+		Database: database,
+		RemoteOptions: dolt.RemoteOptions{
+			CreateIfMissing: true,
+		},
 	})
 	if err != nil {
 		b.Fatalf("Failed to create benchmark dolt store: %v", err)
@@ -419,11 +441,17 @@ func createBenchmarkIssue(b *testing.B, ctx context.Context, s *dolt.DoltStore, 
 	b.Helper()
 
 	issue := &types.Issue{
-		ID:        id,
-		Title:     id,
-		Priority:  priority,
-		IssueType: issueType,
-		Status:    types.StatusOpen,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  priority,
+			IssueType: issueType,
+			Status:    types.StatusOpen,
+		},
 	}
 	if err := s.CreateIssue(ctx, issue, "benchmark"); err != nil {
 		b.Fatalf("CreateIssue(%s): %v", id, err)
@@ -1061,21 +1089,23 @@ func TestExtractRequiredVariables_IgnoresUndeclaredVars(t *testing.T) {
 	}{
 		{
 			name:         "declared var without default is required",
-			issues:       []*types.Issue{{Title: "Deploy {{component}}", Description: "Deploy the component"}},
+			issues:       []*types.Issue{{IssueContent: types.IssueContent{Title: "Deploy {{component}}", Description: "Deploy the component"}}},
 			varDefs:      map[string]formula.VarDef{"component": {Required: true}},
 			wantRequired: []string{"component"},
 		},
 		{
 			name:         "declared var with default is not required",
-			issues:       []*types.Issue{{Title: "Deploy {{component}}", Description: "Deploy the component"}},
+			issues:       []*types.Issue{{IssueContent: types.IssueContent{Title: "Deploy {{component}}", Description: "Deploy the component"}}},
 			varDefs:      map[string]formula.VarDef{"component": {Default: formula.StringPtr("api")}},
 			wantRequired: []string{},
 		},
 		{
 			name: "undeclared var in description is ignored when VarDefs exists",
 			issues: []*types.Issue{{
-				Title:       "Generate report",
-				Description: "Output format:\n**Ready**: {{ready_count}}\n**Done**: {{done_count}}",
+				IssueContent: types.IssueContent{
+					Title:       "Generate report",
+					Description: "Output format:\n**Ready**: {{ready_count}}\n**Done**: {{done_count}}",
+				},
 			}},
 			varDefs:      map[string]formula.VarDef{},
 			wantRequired: []string{},
@@ -1083,8 +1113,10 @@ func TestExtractRequiredVariables_IgnoresUndeclaredVars(t *testing.T) {
 		{
 			name: "mix of declared and undeclared vars",
 			issues: []*types.Issue{{
-				Title:       "Deploy {{component}} to {{env}}",
-				Description: "Shows: {{status_count}} items processed",
+				IssueContent: types.IssueContent{
+					Title:       "Deploy {{component}} to {{env}}",
+					Description: "Shows: {{status_count}} items processed",
+				},
 			}},
 			varDefs: map[string]formula.VarDef{
 				"component": {Required: true},
@@ -1141,12 +1173,12 @@ func (s stubConfigReader) GetConfig(_ context.Context, key string) (string, erro
 func TestFlattenUnregisteredIssueTypes(t *testing.T) {
 	cfg := stubConfigReader{"types.custom": `["duty"]`}
 	issues := []*types.Issue{
-		{ID: "f.a", IssueType: types.TypeBug},
-		{ID: "f.b", IssueType: types.IssueType("gate")}, // built-in orchestrator type
-		{ID: "f.c", IssueType: types.IssueType("duty")}, // registered custom type
-		{ID: "f.d", IssueType: types.IssueType("typo")}, // unregistered leaf — flattens to task
-		{ID: "f.e", IssueType: ""},
-		{ID: "f.p", IssueType: types.IssueType("typo")}, // unregistered parent — flattens to epic
+		{IssueID: types.IssueID{ID: "f.a"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeBug}},
+		{IssueID: types.IssueID{ID: "f.b"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.IssueType("gate")}}, // built-in orchestrator type
+		{IssueID: types.IssueID{ID: "f.c"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.IssueType("duty")}}, // registered custom type
+		{IssueID: types.IssueID{ID: "f.d"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.IssueType("typo")}}, // unregistered leaf — flattens to task
+		{IssueID: types.IssueID{ID: "f.e"}, IssueWorkflow: types.IssueWorkflow{IssueType: ""}},
+		{IssueID: types.IssueID{ID: "f.p"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.IssueType("typo")}}, // unregistered parent — flattens to epic
 	}
 	deps := []*types.Dependency{
 		{IssueID: "f.d", DependsOnID: "f.p", Type: types.DepParentChild},

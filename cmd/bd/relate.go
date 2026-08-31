@@ -13,10 +13,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var relateCmd = &cobra.Command{
-	Use:   "relate <id1> <id2>",
-	Short: "Create a bidirectional relates_to link between issues",
-	Long: `Create a loose 'see also' relationship between two issues.
+func newRelateCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "relate <id1> <id2>",
+		Short: "Create a bidirectional relates_to link between issues",
+		Long: `Create a loose 'see also' relationship between two issues.
 
 The relates_to link is bidirectional - both issues will reference each other.
 This enables knowledge graph connections without blocking or hierarchy.
@@ -24,35 +25,39 @@ This enables knowledge graph connections without blocking or hierarchy.
 Examples:
   bd relate bd-abc bd-xyz    # Link two related issues
   bd relate bd-123 bd-456    # Create see-also connection`,
-	Args: cobra.ExactArgs(2),
-	RunE: runRelate,
+		Args: cobra.ExactArgs(2),
+		RunE: runRelate,
+	}
+	cmd.ValidArgsFunction = issueIDCompletion
+	return cmd
 }
 
-var unrelateCmd = &cobra.Command{
-	Use:   "unrelate <id1> <id2>",
-	Short: "Remove a relates_to link between issues",
-	Long: `Remove a relates_to relationship between two issues.
+func newUnrelateCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "unrelate <id1> <id2>",
+		Short: "Remove a relates_to link between issues",
+		Long: `Remove a relates_to relationship between two issues.
 
 Removes the link in both directions.
 
 Example:
   bd unrelate bd-abc bd-xyz`,
-	Args: cobra.ExactArgs(2),
-	RunE: runUnrelate,
+		Args: cobra.ExactArgs(2),
+		RunE: runUnrelate,
+	}
+	cmd.ValidArgsFunction = issueIDCompletion
+	return cmd
 }
 
 func init() {
-	// Issue ID completions
-	relateCmd.ValidArgsFunction = issueIDCompletion
-	unrelateCmd.ValidArgsFunction = issueIDCompletion
-
-	// Add as subcommands of dep
-	depCmd.AddCommand(relateCmd)
-	depCmd.AddCommand(unrelateCmd)
+	depCmd.AddCommand(newRelateCmd())
+	depCmd.AddCommand(newUnrelateCmd())
 }
 
-func runRelate(cmd *cobra.Command, args []string) error {
-	CheckReadonly("relate")
+func runRelate(_ *cobra.Command, args []string) error {
+	if err := CheckReadonly("relate"); err != nil {
+		return err
+	}
 
 	evt := metrics.NewCommandEvent("relate")
 	defer func() {
@@ -61,86 +66,29 @@ func runRelate(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	ctx := rootCtx
-
 	if usesProxiedServer() {
-		return runRelateProxiedServer(ctx, args)
+		return runRelateProxiedServer(getRootContext(), args)
 	}
-
-	// Resolve partial IDs
-	var id1, id2 string
-	var err error
-	id1, err = utils.ResolvePartialID(ctx, store, args[0])
+	id1, id2, err := resolveRelatedIssuePair(args)
 	if err != nil {
-		return fmt.Errorf("failed to resolve %s: %w", args[0], err)
+		return err
 	}
-	id2, err = utils.ResolvePartialID(ctx, store, args[1])
-	if err != nil {
-		return fmt.Errorf("failed to resolve %s: %w", args[1], err)
-	}
-
 	if id1 == id2 {
 		return fmt.Errorf("cannot relate an issue to itself")
 	}
-
-	// Get both issues
-	var issue1, issue2 *types.Issue
-	issue1, err = store.GetIssue(ctx, id1)
-	if err != nil {
-		return fmt.Errorf("failed to get issue %s: %w", id1, err)
+	if err := requireIssues(id1, id2); err != nil {
+		return err
 	}
-	issue2, err = store.GetIssue(ctx, id2)
-	if err != nil {
-		return fmt.Errorf("failed to get issue %s: %w", id2, err)
+	if err := addRelatedPair(id1, id2); err != nil {
+		return err
 	}
-
-	if issue1 == nil {
-		return fmt.Errorf("issue not found: %s", id1)
-	}
-	if issue2 == nil {
-		return fmt.Errorf("issue not found: %s", id2)
-	}
-
-	// Add relates-to dependency: id1 -> id2 (bidirectional, so also id2 -> id1)
-	// Per Decision 004, relates-to links are now stored in dependencies table
-	// Add id1 -> id2
-	dep1 := &types.Dependency{
-		IssueID:     id1,
-		DependsOnID: id2,
-		Type:        types.DepRelatesTo,
-	}
-	// bd relate is an explicit dependency verb, so it records history like
-	// bd link / bd dep add (EmitEvent); only structural edge wiring stays silent.
-	if err := store.AddDependencyWithOptions(ctx, dep1, actor, storage.DependencyAddOptions{EmitEvent: true}); err != nil {
-		return fmt.Errorf("failed to add relates-to %s -> %s: %w", id1, id2, err)
-	}
-	// Add id2 -> id1 (bidirectional)
-	dep2 := &types.Dependency{
-		IssueID:     id2,
-		DependsOnID: id1,
-		Type:        types.DepRelatesTo,
-	}
-	if err := store.AddDependencyWithOptions(ctx, dep2, actor, storage.DependencyAddOptions{EmitEvent: true}); err != nil {
-		return fmt.Errorf("failed to add relates-to %s -> %s: %w", id2, id1, err)
-	}
-
-	if jsonOutput {
-		result := map[string]interface{}{
-			"id1":     id1,
-			"id2":     id2,
-			"related": true,
-		}
-		encoder := json.NewEncoder(os.Stdout)
-		encoder.SetIndent("", "  ")
-		return encoder.Encode(result)
-	}
-
-	fmt.Printf("%s Linked %s ↔ %s\n", ui.RenderPass("✓"), id1, id2)
-	return nil
+	return reportRelatedPair(id1, id2, true)
 }
 
-func runUnrelate(cmd *cobra.Command, args []string) error {
-	CheckReadonly("unrelate")
+func runUnrelate(_ *cobra.Command, args []string) error {
+	if err := CheckReadonly("unrelate"); err != nil {
+		return err
+	}
 
 	evt := metrics.NewCommandEvent("unrelate")
 	defer func() {
@@ -149,67 +97,83 @@ func runUnrelate(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	ctx := rootCtx
-
 	if usesProxiedServer() {
-		return runUnrelateProxiedServer(ctx, args)
+		return runUnrelateProxiedServer(getRootContext(), args)
 	}
-
-	// Resolve partial IDs
-	var id1, id2 string
-	var err error
-	id1, err = utils.ResolvePartialID(ctx, store, args[0])
+	id1, id2, err := resolveRelatedIssuePair(args)
 	if err != nil {
-		return fmt.Errorf("failed to resolve %s: %w", args[0], err)
+		return err
 	}
-	id2, err = utils.ResolvePartialID(ctx, store, args[1])
+	if err := requireIssues(id1, id2); err != nil {
+		return err
+	}
+	if err := removeRelatedPair(id1, id2); err != nil {
+		return err
+	}
+	return reportRelatedPair(id1, id2, false)
+}
+
+func resolveRelatedIssuePair(args []string) (string, string, error) {
+	id1, err := utils.ResolvePartialID(getRootContext(), getStore(), args[0])
 	if err != nil {
-		return fmt.Errorf("failed to resolve %s: %w", args[1], err)
+		return "", "", fmt.Errorf("failed to resolve %s: %w", args[0], err)
 	}
-
-	// Get both issues
-	var issue1, issue2 *types.Issue
-	issue1, err = store.GetIssue(ctx, id1)
+	id2, err := utils.ResolvePartialID(getRootContext(), getStore(), args[1])
 	if err != nil {
-		return fmt.Errorf("failed to get issue %s: %w", id1, err)
+		return "", "", fmt.Errorf("failed to resolve %s: %w", args[1], err)
 	}
-	issue2, err = store.GetIssue(ctx, id2)
-	if err != nil {
-		return fmt.Errorf("failed to get issue %s: %w", id2, err)
-	}
+	return id1, id2, nil
+}
 
-	if issue1 == nil {
-		return fmt.Errorf("issue not found: %s", id1)
+func requireIssues(ids ...string) error {
+	for _, id := range ids {
+		issue, err := getStore().GetIssue(getRootContext(), id)
+		if err != nil {
+			return fmt.Errorf("failed to get issue %s: %w", id, err)
+		}
+		if issue == nil {
+			return fmt.Errorf("issue not found: %s", id)
+		}
 	}
-	if issue2 == nil {
-		return fmt.Errorf("issue not found: %s", id2)
-	}
+	return nil
+}
 
-	// Remove relates-to dependency in both directions
-	// Per Decision 004, relates-to links are now stored in dependencies table.
-	// bd unrelate is an explicit dependency verb, so it records history
-	// (EmitEvent) like bd dep remove; only structural teardown stays silent.
-	// Remove id1 -> id2
-	if err := store.RemoveDependencyWithOptions(ctx, id1, id2, actor, storage.DependencyRemoveOptions{EmitEvent: true}); err != nil {
-		return fmt.Errorf("failed to remove relates-to %s -> %s: %w", id1, id2, err)
+func addRelatedPair(id1, id2 string) error {
+	for _, pair := range [][2]string{{id1, id2}, {id2, id1}} {
+		dep := &types.Dependency{IssueID: pair[0], DependsOnID: pair[1], Type: types.DepRelatesTo}
+		if err := getStore().AddDependencyWithOptions(getRootContext(), dep, getActor(), storage.DependencyAddOptions{EmitEvent: true}); err != nil {
+			return fmt.Errorf("failed to add relates-to %s -> %s: %w", pair[0], pair[1], err)
+		}
 	}
-	// Remove id2 -> id1 (bidirectional)
-	if err := store.RemoveDependencyWithOptions(ctx, id2, id1, actor, storage.DependencyRemoveOptions{EmitEvent: true}); err != nil {
-		return fmt.Errorf("failed to remove relates-to %s -> %s: %w", id2, id1, err)
-	}
+	return nil
+}
 
-	if jsonOutput {
-		result := map[string]interface{}{
-			"id1":       id1,
-			"id2":       id2,
-			"unrelated": true,
+func removeRelatedPair(id1, id2 string) error {
+	for _, pair := range [][2]string{{id1, id2}, {id2, id1}} {
+		if err := getStore().RemoveDependencyWithOptions(getRootContext(), pair[0], pair[1], getActor(), storage.DependencyRemoveOptions{EmitEvent: true}); err != nil {
+			return fmt.Errorf("failed to remove relates-to %s -> %s: %w", pair[0], pair[1], err)
+		}
+	}
+	return nil
+}
+
+func reportRelatedPair(id1, id2 string, related bool) error {
+	if isJSONOutput() {
+		result := map[string]interface{}{"id1": id1, "id2": id2}
+		if related {
+			result["related"] = true
+		} else {
+			result["unrelated"] = true
 		}
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetIndent("", "  ")
 		return encoder.Encode(result)
 	}
-
-	fmt.Printf("%s Unlinked %s ↔ %s\n", ui.RenderPass("✓"), id1, id2)
+	verb := "Unlinked"
+	if related {
+		verb = "Linked"
+	}
+	fmt.Printf("%s %s %s ↔ %s\n", ui.RenderPass("✓"), verb, id1, id2)
 	return nil
 }
 

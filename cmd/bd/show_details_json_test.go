@@ -18,8 +18,12 @@ func TestIssueDetailsCountOnlyJSON(t *testing.T) {
 	cmtCount := int64(7)
 	details := &types.IssueDetails{
 		Issue: types.Issue{
-			ID:    "be-abc",
-			Title: "Test issue",
+			IssueID: types.IssueID{
+				ID: "be-abc",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Test issue",
+			},
 		},
 		DependentCount:  &depCount,
 		DependencyCount: &depnCount,
@@ -75,9 +79,15 @@ func TestShowJSONDetailsCarryTheRevisionToken(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			details := types.NewIssueDetails(types.Issue{
-				ID:         "be-revision",
-				Title:      "Versioned issue",
-				RowVersion: tc.token,
+				IssueID: types.IssueID{
+					ID: "be-revision",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Versioned issue",
+				},
+				IssueLease: types.IssueLease{
+					RowVersion: tc.token,
+				},
 			})
 
 			data, err := json.Marshal(details)

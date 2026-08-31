@@ -250,61 +250,60 @@ func CanonicalizeJSON(raw []byte) ([]byte, error) {
 func canonValue(v any) any {
 	switch t := v.(type) {
 	case map[string]any:
-		for k, child := range t {
-			// NOTE ON SCOPE: the provenance transforms below match by bare key
-			// name at every nesting depth of every blob, not just the version
-			// capture. That is safe only because these keys (commit/version/
-			// branch/build) currently appear solely in the version blob
-			// (`grep -rl '"version"' testdata/corpus` lists version blobs only).
-			// If a future command ever emits a field named commit/version/branch/
-			// build, this would silently drop or placeholder it and the corpus
-			// would stop guarding that command's wire shape. Before adding such a
-			// field, scope these transforms to the version capture (thread the
-			// Capture.Name through generation) — note it cannot be done by "top
-			// level only" because envelope mode nests these under "data".
-			//
-			// Drop build-provenance keys entirely so the canonical corpus does
-			// not depend on how (or where) bd was built.
-			if provenanceDropKeys[k] {
-				delete(t, k)
-				continue
-			}
-			// Replace release/build-specific values (version, branch, build) with
-			// a placeholder: pin the version command's shape, not its identity.
-			if ph, ok := provenanceValueKeys[k]; ok {
-				if _, isStr := child.(string); isStr {
-					t[k] = ph
-					continue
-				}
-			}
-			// Replace per-write-random token values (the guarded-write revision /
-			// row_lock) with a placeholder: pin that bd show exposes a revision
-			// field, not its nondeterministic value. Unlike the provenance keys
-			// above this is unconditional — the value is a JSON number, not a
-			// string — but it stays a bare-key match, so keep the scope caveat in
-			// mind (see volatileValueKeys).
-			if ph, ok := volatileValueKeys[k]; ok {
-				t[k] = ph
-				continue
-			}
-			t[k] = canonValue(child)
-		}
+		canonObject(t)
 		return t
 	case []any:
-		for i, child := range t {
-			t[i] = canonValue(child)
-		}
-		sortObjectArray(t)
+		canonArray(t)
 		return t
 	case string:
-		if timestampRE.MatchString(t) {
-			return tsPlaceholder
-		}
-		return t
+		return canonicalString(t)
 	default:
 		// json.Number, bool, nil — already deterministic.
 		return v
 	}
+}
+
+func canonObject(object map[string]any) {
+	for key, child := range object {
+		value, keep := canonObjectEntry(key, child)
+		if !keep {
+			delete(object, key)
+			continue
+		}
+		object[key] = value
+	}
+}
+
+func canonObjectEntry(key string, child any) (any, bool) {
+	// NOTE ON SCOPE: these transforms match bare keys at every nesting depth,
+	// including envelope data. Keep this scope caveat with the transform logic
+	// so a future field named commit/version/branch/build can be reviewed here.
+	if provenanceDropKeys[key] {
+		return nil, false
+	}
+	if placeholder, ok := provenanceValueKeys[key]; ok {
+		if _, isString := child.(string); isString {
+			return placeholder, true
+		}
+	}
+	if placeholder, ok := volatileValueKeys[key]; ok {
+		return placeholder, true
+	}
+	return canonValue(child), true
+}
+
+func canonArray(array []any) {
+	for index, child := range array {
+		array[index] = canonValue(child)
+	}
+	sortObjectArray(array)
+}
+
+func canonicalString(value string) string {
+	if timestampRE.MatchString(value) {
+		return tsPlaceholder
+	}
+	return value
 }
 
 // sortObjectArray stably sorts arr in place iff every element is an object.

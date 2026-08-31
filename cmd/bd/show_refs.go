@@ -5,29 +5,24 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/jonbaldie/beads/internal/storage"
 	"github.com/jonbaldie/beads/internal/types"
 	"github.com/jonbaldie/beads/internal/ui"
 )
 
 // showIssueRefs displays issues that reference the given issue(s), grouped by relationship type
 func showIssueRefs(ctx context.Context, args []string, jsonOut bool) error {
-	// Collect all refs for all issues
-	allRefs := make(map[string][]*types.IssueWithDependencyMetadata)
-
-	// Process each issue
-	processIssue := func(issueID string, issueStore storage.DoltStorage) error {
-		refs, err := issueStore.GetDependentsWithMetadata(ctx, issueID)
-		if err != nil {
-			return err
-		}
-		allRefs[issueID] = refs
-		return nil
+	allRefs := collectIssueRefs(ctx, args)
+	if jsonOut {
+		return outputJSON(allRefs)
 	}
+	renderIssueRefs(allRefs)
+	return nil
+}
 
-	// Process each arg via routing-aware resolution
+func collectIssueRefs(ctx context.Context, args []string) map[string][]*types.IssueWithDependencyMetadata {
+	allRefs := make(map[string][]*types.IssueWithDependencyMetadata)
 	for _, id := range args {
-		result, err := resolveAndGetIssueWithRouting(ctx, store, id)
+		result, err := resolveAndGetIssueWithRouting(ctx, getStore(), id)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error resolving %s: %v\n", id, err)
 			continue
@@ -39,36 +34,37 @@ func showIssueRefs(ctx context.Context, args []string, jsonOut bool) error {
 			fmt.Fprintf(os.Stderr, "Issue %s not found\n", id)
 			continue
 		}
-		if err := processIssue(result.ResolvedID, result.Store); err != nil {
+		refs, err := result.Store.GetDependentsWithMetadata(ctx, result.ResolvedID)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error getting refs for %s: %v\n", id, err)
+		} else {
+			allRefs[result.ResolvedID] = refs
 		}
 		result.Close()
 	}
+	return allRefs
+}
 
-	// Output results
-	if jsonOut {
-		return outputJSON(allRefs)
-	}
-
-	// Display refs grouped by issue and relationship type
+func renderIssueRefs(allRefs map[string][]*types.IssueWithDependencyMetadata) {
 	for issueID, refs := range allRefs {
-		if len(refs) == 0 {
-			fmt.Printf("\n%s: No references found\n", ui.RenderAccent(issueID))
-			continue
-		}
-
-		fmt.Printf("\n%s References to %s:\n", ui.RenderAccent("📎"), issueID)
-
-		// Every ref is an edge pointing AT this issue, so each group is named
-		// from this issue's end. The bare type name would read from the other
-		// end for the types whose name runs source-first: a (dup, canonical)
-		// edge under a "duplicates" heading says the canonical is the copy.
-		for _, sec := range groupDepSections(refs, false, nil) {
-			displayRefGroup(sec)
-		}
-		fmt.Println()
+		renderIssueRefGroup(issueID, refs)
 	}
-	return nil
+}
+
+func renderIssueRefGroup(issueID string, refs []*types.IssueWithDependencyMetadata) {
+	if len(refs) == 0 {
+		fmt.Printf("\n%s: No references found\n", ui.RenderAccent(issueID))
+		return
+	}
+	fmt.Printf("\n%s References to %s:\n", ui.RenderAccent("📎"), issueID)
+	// Every ref is an edge pointing AT this issue, so each group is named
+	// from this issue's end. The bare type name would read from the other
+	// end for the types whose name runs source-first: a (dup, canonical)
+	// edge under a "duplicates" heading says the canonical is the copy.
+	for _, sec := range groupDepSections(refs, false, nil) {
+		displayRefGroup(sec)
+	}
+	fmt.Println()
 }
 
 // displayRefGroup displays one group of references under its relationship name
@@ -91,11 +87,11 @@ func displayRefGroup(sec depSection) {
 		var idStr string
 		switch ref.Status {
 		case types.StatusOpen:
-			idStr = ui.StatusOpenStyle.Render(ref.ID)
+			idStr = ui.StatusOpenStyle().Render(ref.ID)
 		case types.StatusInProgress:
-			idStr = ui.StatusInProgressStyle.Render(ref.ID)
+			idStr = ui.StatusInProgressStyle().Render(ref.ID)
 		case types.StatusBlocked:
-			idStr = ui.StatusBlockedStyle.Render(ref.ID)
+			idStr = ui.StatusBlockedStyle().Render(ref.ID)
 		default:
 			idStr = ref.ID
 		}
@@ -103,38 +99,28 @@ func displayRefGroup(sec depSection) {
 	}
 }
 
-// getRefTypeEmoji returns an emoji for a dependency/reference type
+// getRefTypeEmoji returns a symbol for a dependency/reference type.
 func getRefTypeEmoji(depType types.DependencyType) string {
-	switch depType {
-	case types.DepUntil:
-		return "⏳" // Hourglass - waiting until
-	case types.DepCausedBy:
-		return "⚡" // Lightning - triggered by
-	case types.DepValidates:
-		return "✅" // Checkmark - validates
-	case types.DepBlocks:
-		return "🚫" // Blocked
-	case types.DepParentChild:
-		return "↳" // Child arrow
-	case types.DepRelatesTo, types.DepRelated:
-		return "↔" // Bidirectional
-	case types.DepTracks:
-		return "👁" // Watching
-	case types.DepDiscoveredFrom:
-		return "◊" // Diamond - discovered
-	case types.DepSupersedes:
-		return "⬆" // Upgrade
-	case types.DepDuplicates:
-		return "🔄" // Duplicate
-	case types.DepRepliesTo:
-		return "💬" // Chat
-	case types.DepApprovedBy:
-		return "👍" // Approved
-	case types.DepAuthoredBy:
-		return "✏" // Authored
-	case types.DepAssignedTo:
-		return "👤" // Assigned
-	default:
-		return "→" // Default arrow
+	if symbol, ok := refTypeSymbols[depType]; ok {
+		return symbol
 	}
+	return "→"
+}
+
+var refTypeSymbols = map[types.DependencyType]string{
+	types.DepUntil:          "⏳",
+	types.DepCausedBy:       "⚡",
+	types.DepValidates:      "✅",
+	types.DepBlocks:         "🚫",
+	types.DepParentChild:    "↳",
+	types.DepRelatesTo:      "↔",
+	types.DepRelated:        "↔",
+	types.DepTracks:         "👁",
+	types.DepDiscoveredFrom: "◊",
+	types.DepSupersedes:     "⬆",
+	types.DepDuplicates:     "🔄",
+	types.DepRepliesTo:      "💬",
+	types.DepApprovedBy:     "👍",
+	types.DepAuthoredBy:     "✏",
+	types.DepAssignedTo:     "👤",
 }

@@ -8,10 +8,10 @@ import (
 )
 
 func runProxiedNonTx(ctx context.Context, fn func(ctx context.Context, conn *sql.Conn) error) error {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return HandleErrorRespectJSON("proxied-server UOW provider not initialized")
 	}
-	mp, ok := uowProvider.(uow.MaintenanceProvider)
+	mp, ok := getUOWProvider().(uow.MaintenanceProvider)
 	if !ok {
 		return HandleErrorRespectJSON("proxied-server provider does not support maintenance operations")
 	}

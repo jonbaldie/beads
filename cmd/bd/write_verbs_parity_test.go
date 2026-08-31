@@ -63,6 +63,8 @@ import (
 	"github.com/spf13/pflag"
 )
 
+var reopenCmd = newReopenCmd()
+
 // ===== counting store decorator =====
 
 // parityStore counts the mutating store calls a command makes. It mirrors
@@ -440,12 +442,20 @@ func resetCommandFlagsToDefaults(cmd *cobra.Command) {
 func (e *parityEnv) seed(id, title string, mutate func(*types.Issue)) *types.Issue {
 	e.t.Helper()
 	issue := &types.Issue{
-		ID:        id,
-		Title:     title,
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		CreatedBy: "parity-seed",
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: title,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedBy: "parity-seed",
+		},
 	}
 	if mutate != nil {
 		mutate(issue)

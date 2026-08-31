@@ -64,29 +64,47 @@ func TestRenamePrefixCommand(t *testing.T) {
 	}
 
 	issue1 := &types.Issue{
-		ID:          "old-1",
-		Title:       "Fix bug in old-2",
-		Description: "See old-3 for details",
-		Status:      types.StatusOpen,
-		Priority:    1,
-		IssueType:   types.TypeBug,
+		IssueID: types.IssueID{
+			ID: "old-1",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Fix bug in old-2",
+			Description: "See old-3 for details",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeBug,
+		},
 	}
 	issue2 := &types.Issue{
-		ID:          "old-2",
-		Title:       "Related to old-1",
-		Description: "This depends on old-1",
-		Status:      types.StatusOpen,
-		Priority:    1,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "old-2",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Related to old-1",
+			Description: "This depends on old-1",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	issue3 := &types.Issue{
-		ID:          "old-3",
-		Title:       "Another issue",
-		Description: "Referenced by old-1",
-		Design:      "Mentions old-2 in design",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeFeature,
+		IssueID: types.IssueID{
+			ID: "old-3",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Another issue",
+			Description: "Referenced by old-1",
+			Design:      "Mentions old-2 in design",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeFeature,
+		},
 	}
 
 	if err := testStore.CreateIssue(ctx, issue1, "test"); err != nil {
@@ -190,12 +208,18 @@ func TestRenamePrefixInDB(t *testing.T) {
 	}
 
 	issue1 := &types.Issue{
-		ID:          "old-1",
-		Title:       "Test issue",
-		Description: "Description",
-		Status:      types.StatusOpen,
-		Priority:    1,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "old-1",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Test issue",
+			Description: "Description",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	if err := testStore.CreateIssue(ctx, issue1, "test"); err != nil {
@@ -249,12 +273,18 @@ func TestRenamePrefixInDB_HalfMigratedConfigNotDoubled(t *testing.T) {
 	}
 
 	issue1 := &types.Issue{
-		ID:          "atlas-1",
-		Title:       "Already migrated",
-		Description: "Row is on the target prefix; config cell is stale",
-		Status:      types.StatusOpen,
-		Priority:    1,
-		IssueType:   types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "atlas-1",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Already migrated",
+			Description: "Row is on the target prefix; config cell is stale",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := testStore.CreateIssue(ctx, issue1, "test"); err != nil {
 		t.Fatalf("Failed to create issue: %v", err)

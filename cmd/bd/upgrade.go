@@ -45,21 +45,21 @@ Examples:
 			}
 		}()
 
-		if jsonOutput {
+		if isJSONOutput() {
 			result := map[string]interface{}{
-				"upgraded":        versionUpgradeDetected,
+				"upgraded":        isVersionUpgradeDetected(),
 				"current_version": Version,
 			}
-			if versionUpgradeDetected {
-				result["previous_version"] = previousVersion
-				result["changes_available"] = len(getVersionsSince(previousVersion)) > 0
+			if isVersionUpgradeDetected() {
+				result["previous_version"] = getPreviousVersion()
+				result["changes_available"] = len(getVersionsSince(getPreviousVersion())) > 0
 			}
 			return outputJSON(result)
 		}
 
-		if versionUpgradeDetected {
-			fmt.Printf("✨ bd upgraded from v%s to v%s\n", previousVersion, Version)
-			newVersions := getVersionsSince(previousVersion)
+		if isVersionUpgradeDetected() {
+			fmt.Printf("✨ bd upgraded from v%s to v%s\n", getPreviousVersion(), Version)
+			newVersions := getVersionsSince(getPreviousVersion())
 			if len(newVersions) > 0 {
 				fmt.Printf("   %d version%s with changes available\n",
 					len(newVersions),
@@ -67,7 +67,7 @@ Examples:
 				fmt.Println()
 				fmt.Println("Run 'bd upgrade review' to see what changed")
 			}
-		} else if previousVersion == "" {
+		} else if getPreviousVersion() == "" {
 			fmt.Printf("bd version: v%s (first run or version tracking just enabled)\n", Version)
 		} else {
 			fmt.Printf("bd version: v%s (no upgrade detected)\n", Version)
@@ -100,7 +100,7 @@ Examples:
 			}
 		}()
 
-		lastVersion := previousVersion
+		lastVersion := getPreviousVersion()
 
 		if lastVersion == "" {
 			fmt.Println("No previous version recorded")
@@ -108,7 +108,7 @@ Examples:
 			return nil
 		}
 
-		if !versionUpgradeDetected {
+		if !isVersionUpgradeDetected() {
 			fmt.Printf("You're already on v%s (no upgrade detected)\n", Version)
 			fmt.Println("Run 'bd info --whats-new' to see recent changes")
 			return nil
@@ -116,7 +116,7 @@ Examples:
 
 		newVersions := getVersionsSince(lastVersion)
 
-		if jsonOutput {
+		if isJSONOutput() {
 			return outputJSON(map[string]interface{}{
 				"current_version":  Version,
 				"previous_version": lastVersion,
@@ -199,10 +199,10 @@ Examples:
 			return HandleError("saving metadata.json: %v", err)
 		}
 
-		upgradeAcknowledged = true
-		versionUpgradeDetected = false
+		setUpgradeAcknowledged(true)
+		setVersionUpgradeDetected(false)
 
-		if jsonOutput {
+		if isJSONOutput() {
 			return outputJSON(map[string]interface{}{
 				"acknowledged":     true,
 				"current_version":  Version,

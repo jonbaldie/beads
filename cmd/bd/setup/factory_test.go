@@ -372,12 +372,8 @@ func TestWrapperReturnsErrorOnFailure(t *testing.T) {
 
 	t.Run("RemoveFactory", func(t *testing.T) {
 		env := factoryEnv{agentsPath: filepath.Join(t.TempDir(), "AGENTS.md"), stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}}
-		beadsSection := agents.EmbeddedBeadsSection()
-		if err := os.WriteFile(env.agentsPath, []byte(beadsSection), 0644); err != nil {
-			t.Fatalf("failed to seed file: %v", err)
-		}
-		if err := os.Chmod(env.agentsPath, 0o000); err != nil {
-			t.Fatalf("failed to chmod file: %v", err)
+		if err := os.Mkdir(env.agentsPath, 0o755); err != nil {
+			t.Fatalf("failed to create directory at file path: %v", err)
 		}
 		stubFactoryEnvProvider(t, env)
 		if err := RemoveFactory(); err == nil {

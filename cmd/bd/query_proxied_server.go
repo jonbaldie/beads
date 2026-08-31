@@ -21,12 +21,12 @@ import (
 // and for every caller, because paging under a sort would sort each page for
 // itself.
 func proxiedQuerier() (issueops.Querier, error) {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return nil, errors.New("proxied-server UOW provider not initialized")
 	}
-	src, ok := uowProvider.(uow.QuerierSource)
+	src, ok := getUOWProvider().(uow.QuerierSource)
 	if !ok {
-		return nil, fmt.Errorf("proxied-server provider %T does not offer the boolean-query surface", uowProvider)
+		return nil, fmt.Errorf("proxied-server provider %T does not offer the boolean-query surface", getUOWProvider())
 	}
 	return src.Querier()
 }

@@ -42,6 +42,13 @@ type purgeScope struct {
 	reportsReferences bool
 }
 
+type sweepCommandOptions struct {
+	force     bool
+	dryRun    bool
+	olderThan string
+	pattern   string
+}
+
 var purgeCmd = &cobra.Command{
 	Use:     "purge",
 	GroupID: "maint",
@@ -93,83 +100,111 @@ func openSweeper() (issueops.Sweeper, error) {
 	if usesProxiedServer() {
 		return proxiedSweeper()
 	}
-	if store == nil {
+	if getStore() == nil {
 		if err := ensureStoreActive(); err != nil {
 			return nil, err
 		}
 	}
-	return store.Sweeper()
+	return getStore().Sweeper()
 }
 
 // runPurgeOrPrune implements the shared delete-closed-beads flow used by both
 // `bd purge` (ephemeral tier) and `bd prune` (durable tier), on both routes.
 func runPurgeOrPrune(cmd *cobra.Command, scope purgeScope) error {
-	CheckReadonly(scope.cmdName)
+	if err := CheckReadonly(scope.cmdName); err != nil {
+		return err
+	}
+	opts := readSweepCommandOptions(cmd)
+	if err := validateSweepScope(scope, opts); err != nil {
+		return err
+	}
+	request, err := buildSweepRequest(scope, opts)
+	if err != nil {
+		return err
+	}
+	result, err := executeSweepRequest(scope, request)
+	if err != nil {
+		return err
+	}
+	warnSweepDefenseSkips(result.Skipped)
+	return emitSweepOutcome(scope, opts, result)
+}
 
+func readSweepCommandOptions(cmd *cobra.Command) sweepCommandOptions {
 	force, _ := cmd.Flags().GetBool("force")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	olderThan, _ := cmd.Flags().GetString("older-than")
 	pattern, _ := cmd.Flags().GetString("pattern")
+	return sweepCommandOptions{force: force, dryRun: dryRun, olderThan: olderThan, pattern: pattern}
+}
 
+func validateSweepScope(scope purgeScope, opts sweepCommandOptions) error {
 	// The ROLE refuses an unfiltered durable sweep — that guard is
 	// workapi.ValidateSweepRequest, below every front door. This branch is here
 	// for the MESSAGE: the role's refusal names request fields, not the two
 	// flags a person who typed `bd prune --force` has to reach for. The contract
 	// case RunSweeperRefusesAnUnfilteredDurableSweep proves the guard survives
 	// this branch being deleted.
-	if scope.tier == issueops.SweepDurable && olderThan == "" && pattern == "" {
+	if scope.tier == issueops.SweepDurable && opts.olderThan == "" && opts.pattern == "" {
 		return HandleErrorWithHint(
 			fmt.Sprintf("bd %s requires --older-than or --pattern", scope.cmdName),
 			"Protects against accidental bulk deletion. Use `--pattern '*'` to\n"+
 				"  include all closed beads in this scope, or `--older-than 1d`\n"+
 				"  / `--pattern '<glob>'` to narrow the deletion.")
 	}
+	return nil
+}
 
+func buildSweepRequest(scope purgeScope, opts sweepCommandOptions) (issueops.SweepRequest, error) {
 	request := issueops.SweepRequest{
-		Actor:             actor,
+		Actor:             getActor(),
 		Tier:              scope.tier,
-		IDPattern:         pattern,
+		IDPattern:         opts.pattern,
 		ProtectReferenced: scope.protectReferenced,
 		// A --dry-run and an UNCONFIRMED run ask the role the same question —
 		// "what would this do" — so both send DryRun. --force is this
 		// command's confirmation, not a request field.
-		DryRun: dryRun || !force,
+		DryRun: opts.dryRun || !opts.force,
 	}
-	if olderThan != "" {
-		days, err := parseHumanDuration(olderThan)
+	if opts.olderThan != "" {
+		days, err := parseHumanDuration(opts.olderThan)
 		if err != nil {
-			return HandleErrorRespectJSON("invalid --older-than value %q: %v", olderThan, err)
+			return issueops.SweepRequest{}, HandleErrorRespectJSON("invalid --older-than value %q: %v", opts.olderThan, err)
 		}
 		cutoff := time.Now().UTC().AddDate(0, 0, -days)
 		request.ClosedBefore = &cutoff
 	}
+	return request, nil
+}
 
+func executeSweepRequest(scope purgeScope, request issueops.SweepRequest) (issueops.SweepResult, error) {
 	sweeper, err := openSweeper()
 	if err != nil {
-		return HandleErrorRespectJSON("%v", err)
+		return issueops.SweepResult{}, HandleErrorRespectJSON("%v", err)
 	}
 	// The role mints the sweep's version commit itself, so batch and off modes
 	// have to be said on the CONTEXT — the same way `bd delete` says them. Left
 	// off, an embedded `bd prune --dolt-auto-commit batch` advances HEAD, which
 	// is the one thing batch mode promises it will not do.
-	opsCtx, err := issueOpsContext(rootCtx)
+	opsCtx, err := issueOpsContext(getRootContext())
 	if err != nil {
-		return HandleErrorRespectJSON("%v", err)
+		return issueops.SweepResult{}, HandleErrorRespectJSON("%v", err)
 	}
 	result, err := sweeper.Sweep(opsCtx, request)
 	if err != nil {
-		return HandleErrorRespectJSON("%s failed: %v", scope.cmdName, err)
+		return issueops.SweepResult{}, HandleErrorRespectJSON("%s failed: %v", scope.cmdName, err)
 	}
+	return result, nil
+}
 
-	warnSweepDefenseSkips(result.Skipped)
-
+func emitSweepOutcome(scope purgeScope, opts sweepCommandOptions, result issueops.SweepResult) error {
 	switch {
 	case result.Swept == 0:
-		return emitSweepEmpty(scope, olderThan, pattern, result)
-	case dryRun:
+		return emitSweepEmpty(scope, opts.olderThan, opts.pattern, result)
+	case opts.dryRun:
 		return emitSweepDryRun(scope, result)
-	case !force:
-		return emitSweepConfirm(scope, olderThan, pattern, result)
+	case !opts.force:
+		return emitSweepConfirm(scope, opts.olderThan, opts.pattern, result)
 	}
 
 	commandDidWrite.Store(true)
@@ -209,7 +244,7 @@ func addReferenceStats(scope purgeScope, stats map[string]interface{}, result is
 }
 
 func emitSweepEmpty(scope purgeScope, olderThan, pattern string, result issueops.SweepResult) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		stats := map[string]interface{}{
 			scope.countKey: 0,
 			"message":      fmt.Sprintf("No %ss to %s", scope.subjectNoun, scope.cmdName),
@@ -226,7 +261,7 @@ func emitSweepEmpty(scope purgeScope, olderThan, pattern string, result issueops
 	}
 	fmt.Println(msg)
 	if result.Skipped.Referenced > 0 {
-		fmt.Println(ui.MutedStyle.Render(fmt.Sprintf(
+		fmt.Println(ui.MutedStyle().Render(fmt.Sprintf(
 			"  (%d closed bead(s) protected by open-bead references — use --ignore-references to override)",
 			result.Skipped.Referenced)))
 	}
@@ -234,7 +269,7 @@ func emitSweepEmpty(scope purgeScope, olderThan, pattern string, result issueops
 }
 
 func emitSweepDryRun(scope purgeScope, result issueops.SweepResult) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		stats := map[string]interface{}{
 			"dry_run":            true,
 			scope.dryRunCountKey: result.Swept,
@@ -256,20 +291,20 @@ func emitSweepDryRun(scope purgeScope, result issueops.SweepResult) error {
 		fmt.Printf("  Pinned (skipped): %d\n", result.Skipped.Pinned)
 	}
 	if result.Skipped.Referenced > 0 {
-		fmt.Printf("  %s   %d\n", ui.MutedStyle.Render("Referenced (skipped):"), result.Skipped.Referenced)
+		fmt.Printf("  %s   %d\n", ui.MutedStyle().Render("Referenced (skipped):"), result.Skipped.Referenced)
 		sample := result.ReferencedIDs
 		if len(sample) > 5 {
 			sample = sample[:5]
 		}
 		idStrs := make([]string, len(sample))
 		for i, id := range sample {
-			idStrs[i] = ui.IDStyle.Render(id)
+			idStrs[i] = ui.IDStyle().Render(id)
 		}
 		suffix := ""
 		if result.Skipped.Referenced > 5 {
-			suffix = ui.MutedStyle.Render(", ...")
+			suffix = ui.MutedStyle().Render(", ...")
 		}
-		fmt.Printf("  %s %s%s\n", ui.MutedStyle.Render("Referenced IDs (sample):"), strings.Join(idStrs, ", "), suffix)
+		fmt.Printf("  %s %s%s\n", ui.MutedStyle().Render("Referenced IDs (sample):"), strings.Join(idStrs, ", "), suffix)
 	}
 	fmt.Printf("\n(Dry-run mode — no changes made)\n")
 	return nil
@@ -281,7 +316,7 @@ func emitSweepConfirm(scope purgeScope, olderThan, pattern string, result issueo
 		fmt.Printf("Skipping %d pinned bead(s)\n", result.Skipped.Pinned)
 	}
 	if result.Skipped.Referenced > 0 {
-		fmt.Println(ui.MutedStyle.Render(fmt.Sprintf("Skipping %d referenced bead(s)", result.Skipped.Referenced)))
+		fmt.Println(ui.MutedStyle().Render(fmt.Sprintf("Skipping %d referenced bead(s)", result.Skipped.Referenced)))
 	}
 	hint := fmt.Sprintf("bd %s --force", scope.cmdName)
 	if olderThan != "" {
@@ -296,7 +331,7 @@ func emitSweepConfirm(scope purgeScope, olderThan, pattern string, result issueo
 }
 
 func emitSweepResult(scope purgeScope, result issueops.SweepResult) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		stats := map[string]interface{}{
 			scope.countKey: result.Swept,
 			"dependencies": result.Dependencies,
@@ -317,7 +352,7 @@ func emitSweepResult(scope purgeScope, result issueops.SweepResult) error {
 		fmt.Printf("  Pinned (skipped):     %d\n", result.Skipped.Pinned)
 	}
 	if result.Skipped.Referenced > 0 {
-		fmt.Printf("  %s %d\n", ui.MutedStyle.Render("Referenced (skipped):"), result.Skipped.Referenced)
+		fmt.Printf("  %s %d\n", ui.MutedStyle().Render("Referenced (skipped):"), result.Skipped.Referenced)
 	}
 	return nil
 }
@@ -336,16 +371,24 @@ func parseHumanDuration(s string) (int, error) {
 	if s == "" {
 		return 0, fmt.Errorf("empty duration")
 	}
-
-	// Plain number = days
-	if days, err := strconv.Atoi(s); err == nil {
-		if days <= 0 {
-			return 0, fmt.Errorf("duration must be positive")
-		}
-		return days, nil
+	if days, ok, err := parsePlainDuration(s); ok {
+		return days, err
 	}
+	return parseSuffixedDuration(s)
+}
 
-	// Parse suffix
+func parsePlainDuration(s string) (days int, ok bool, err error) {
+	days, err = strconv.Atoi(s)
+	if err != nil {
+		return 0, false, nil
+	}
+	if days <= 0 {
+		return 0, true, fmt.Errorf("duration must be positive")
+	}
+	return days, true, nil
+}
+
+func parseSuffixedDuration(s string) (int, error) {
 	unit := s[len(s)-1]
 	numStr := s[:len(s)-1]
 	num, err := strconv.Atoi(numStr)

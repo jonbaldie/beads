@@ -84,13 +84,104 @@ func (s *stubSummarizer) getCalls() int {
 
 func stubIssue() *types.Issue {
 	return &types.Issue{
-		ID:                 "bd-123",
-		Title:              "Fix login",
-		Description:        strings.Repeat("A", 20),
-		Design:             strings.Repeat("B", 10),
-		Notes:              strings.Repeat("C", 5),
-		AcceptanceCriteria: "done",
-		Status:             types.StatusClosed,
+		IssueID: types.IssueID{
+			ID: "bd-123",
+		},
+		IssueContent: types.IssueContent{
+			Title:              "Fix login",
+			Description:        strings.Repeat("A", 20),
+			Design:             strings.Repeat("B", 10),
+			Notes:              strings.Repeat("C", 5),
+			AcceptanceCriteria: "done",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status: types.StatusClosed,
+		},
+	}
+}
+
+func TestIssueContentSizeSumsEveryCompactedField(t *testing.T) {
+	issue := &types.Issue{IssueContent: types.IssueContent{
+		Description:        "aa",
+		Design:             "bbb",
+		Notes:              "ccccc",
+		AcceptanceCriteria: "ddddddd",
+	}}
+	if got := issueContentSize(issue); got != 17 {
+		t.Fatalf("issueContentSize() = %d, want 17", got)
+	}
+}
+
+func TestCompactTier1PropagatesContextAndExactSizes(t *testing.T) {
+	type contextKey struct{}
+	ctx := context.WithValue(context.Background(), contextKey{}, "sentinel")
+	assertContext := func(got context.Context) {
+		t.Helper()
+		if got == nil || got.Value(contextKey{}) != "sentinel" {
+			t.Fatalf("context = %v, want caller context", got)
+		}
+	}
+	issue := stubIssue()
+	originalSize := issueContentSize(issue)
+	const summary = "short"
+	store := &stubStore{
+		checkEligibilityFn: func(got context.Context, id string, tier int) (bool, string, error) {
+			assertContext(got)
+			return true, "", nil
+		},
+		getIssueFn: func(got context.Context, id string) (*types.Issue, error) {
+			assertContext(got)
+			return issue, nil
+		},
+		snapshotIssueFn: func(got context.Context, id string, tier int) error {
+			assertContext(got)
+			return nil
+		},
+		updateIssueFn: func(got context.Context, id string, updates map[string]interface{}, actor string) error {
+			assertContext(got)
+			return nil
+		},
+		applyCompactionFn: func(got context.Context, id string, tier, original, compacted int, hash string) error {
+			assertContext(got)
+			if original != originalSize || compacted != len(summary) {
+				t.Fatalf("sizes = %d -> %d, want %d -> %d", original, compacted, originalSize, len(summary))
+			}
+			return nil
+		},
+		addCommentFn: func(got context.Context, id, actor, comment string) error {
+			assertContext(got)
+			want := fmt.Sprintf("saved %d", originalSize-len(summary))
+			if !strings.Contains(comment, want) {
+				t.Fatalf("comment = %q, want %q", comment, want)
+			}
+			return nil
+		},
+	}
+	c := &Compactor{store: store, summarizer: &stubSummarizer{summary: summary}, config: &Config{}}
+	if err := c.CompactTier1(ctx, issue.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEnsureSummarySmallerBoundary(t *testing.T) {
+	type contextKey struct{}
+	ctx := context.WithValue(context.Background(), contextKey{}, "sentinel")
+	comments := 0
+	c := &Compactor{store: &stubStore{addCommentFn: func(got context.Context, _ string, _ string, _ string) error {
+		if got == nil || got.Value(contextKey{}) != "sentinel" {
+			t.Fatalf("context = %v, want caller context", got)
+		}
+		comments++
+		return nil
+	}}}
+	if err := c.ensureSummarySmaller(ctx, "bd-1", 10, 9); err != nil {
+		t.Fatalf("shorter summary: %v", err)
+	}
+	if err := c.ensureSummarySmaller(ctx, "bd-1", 10, 10); err == nil {
+		t.Fatal("equal-size summary returned nil error")
+	}
+	if comments != 1 {
+		t.Fatalf("warning comments = %d, want 1", comments)
 	}
 }
 
@@ -375,9 +466,10 @@ func TestCompactTier1_CancelledContext(t *testing.T) {
 }
 
 func TestCompactTier1_EligibilityCheckError(t *testing.T) {
+	cause := errors.New("db error")
 	store := &stubStore{
 		checkEligibilityFn: func(context.Context, string, int) (bool, string, error) {
-			return false, "", errors.New("db error")
+			return false, "", cause
 		},
 	}
 	c := &Compactor{store: store, config: &Config{}}
@@ -388,6 +480,9 @@ func TestCompactTier1_EligibilityCheckError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "failed to verify eligibility") {
 		t.Errorf("unexpected error: %v", err)
+	}
+	if !errors.Is(err, cause) {
+		t.Errorf("error does not wrap cause: %v", err)
 	}
 }
 
@@ -408,10 +503,11 @@ func TestCompactTier1_IneligibleNoReason(t *testing.T) {
 }
 
 func TestCompactTier1_GetIssueFetchError(t *testing.T) {
+	cause := errors.New("fetch error")
 	store := &stubStore{
 		checkEligibilityFn: func(context.Context, string, int) (bool, string, error) { return true, "", nil },
 		getIssueFn: func(context.Context, string) (*types.Issue, error) {
-			return nil, errors.New("fetch error")
+			return nil, cause
 		},
 	}
 	c := &Compactor{store: store, config: &Config{}}
@@ -422,6 +518,9 @@ func TestCompactTier1_GetIssueFetchError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "failed to fetch issue") {
 		t.Errorf("unexpected error: %v", err)
+	}
+	if !errors.Is(err, cause) {
+		t.Errorf("error does not wrap cause: %v", err)
 	}
 }
 
@@ -488,10 +587,11 @@ func TestCompactTier1_AddCommentError(t *testing.T) {
 }
 
 func TestCompactTier1_SummaryNotSmaller_CommentError(t *testing.T) {
+	cause := errors.New("comment failed")
 	store := &stubStore{
 		checkEligibilityFn: func(context.Context, string, int) (bool, string, error) { return true, "", nil },
 		getIssueFn:         func(context.Context, string) (*types.Issue, error) { return stubIssue(), nil },
-		addCommentFn:       func(context.Context, string, string, string) error { return errors.New("comment failed") },
+		addCommentFn:       func(context.Context, string, string, string) error { return cause },
 	}
 	summary := &stubSummarizer{summary: strings.Repeat("X", 40)}
 	c := &Compactor{store: store, summarizer: summary, config: &Config{}}
@@ -502,6 +602,9 @@ func TestCompactTier1_SummaryNotSmaller_CommentError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "failed to record warning") {
 		t.Errorf("unexpected error: %v", err)
+	}
+	if !errors.Is(err, cause) {
+		t.Errorf("error does not wrap cause: %v", err)
 	}
 }
 

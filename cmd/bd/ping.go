@@ -34,7 +34,7 @@ Examples:
 	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if usesProxiedServer() {
-			return runPingProxiedServer(rootCtx)
+			return runPingProxiedServer(getRootContext())
 		}
 		evt := metrics.NewCommandEvent("ping")
 		defer func() {
@@ -60,15 +60,15 @@ Examples:
 		}
 		storeMs := time.Since(start).Milliseconds()
 
-		filter := types.IssueFilter{Limit: 1}
-		_, err := st.SearchIssues(rootCtx, "", filter)
+		filter := types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 1}}
+		_, err := st.SearchIssues(getRootContext(), "", filter)
 		if err != nil {
 			return pingFail(start, fmt.Sprintf("query failed: %v", err))
 		}
 		totalMs := time.Since(start).Milliseconds()
 		queryMs := totalMs - storeMs
 
-		if jsonOutput {
+		if isJSONOutput() {
 			return outputJSON(map[string]interface{}{
 				"status":     "ok",
 				"resolve_ms": resolveMs,
@@ -85,7 +85,7 @@ Examples:
 
 func pingFail(start time.Time, reason string) error {
 	totalMs := time.Since(start).Milliseconds()
-	if jsonOutput {
+	if isJSONOutput() {
 		if jerr := outputJSON(map[string]interface{}{
 			"status":   "error",
 			"error":    reason,

@@ -59,7 +59,7 @@ Examples:
 		}()
 
 		if usesProxiedServer() {
-			return runStatusesProxiedServer(rootCtx)
+			return runStatusesProxiedServer(getRootContext())
 		}
 
 		if err := ensureDirectMode("statuses command requires direct database access"); err != nil {
@@ -68,8 +68,8 @@ Examples:
 
 		var customStatuses []types.CustomStatus
 		ctx := context.Background()
-		if store != nil {
-			if cs, err := store.GetCustomStatusesDetailed(ctx); err == nil {
+		if getStore() != nil {
+			if cs, err := getStore().GetCustomStatusesDetailed(ctx); err == nil {
 				customStatuses = cs
 			}
 		}
@@ -79,7 +79,7 @@ Examples:
 }
 
 func renderStatuses(customStatuses []types.CustomStatus) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		result := struct {
 			BuiltInStatuses []statusInfo         `json:"built_in_statuses"`
 			CustomStatuses  []types.CustomStatus `json:"custom_statuses,omitempty"`

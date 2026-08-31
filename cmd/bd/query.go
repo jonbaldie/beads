@@ -88,7 +88,7 @@ Examples:
 		}()
 
 		if usesProxiedServer() {
-			return runQueryProxiedServer(cmd, rootCtx, args)
+			return runQueryProxiedServer(cmd, getRootContext(), args)
 		}
 
 		in, err := gatherQueryInput(cmd, args)
@@ -106,7 +106,7 @@ Examples:
 		if err != nil {
 			return HandleErrorRespectJSON("%v", err)
 		}
-		return runQuery(rootCtx, querier, in)
+		return runQuery(getRootContext(), querier, in)
 	},
 }
 
@@ -117,10 +117,10 @@ func openQuerier() (issueops.Querier, error) {
 	if usesProxiedServer() {
 		return proxiedQuerier()
 	}
-	if store == nil {
+	if getStore() == nil {
 		return nil, errors.New("no storage available")
 	}
-	return store.Querier()
+	return getStore().Querier()
 }
 
 // queryInput is the flag set both routes read, gathered once.
@@ -194,7 +194,7 @@ func runQuery(ctx context.Context, querier issueops.Querier, in queryInput) erro
 	if err != nil {
 		return HandleErrorRespectJSON("%v", err)
 	}
-	if jsonOutput {
+	if isJSONOutput() {
 		if err := outputJSON(page.Items); err != nil {
 			return err
 		}

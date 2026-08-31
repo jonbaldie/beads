@@ -108,11 +108,14 @@ func EnsureFile() (string, error) {
 // Append appends an event to .beads/interactions.jsonl as a single JSON line.
 // This is intentionally append-only: callers must not mutate existing lines.
 func Append(e *Entry) (string, error) {
-	if e == nil {
-		return "", fmt.Errorf("nil entry")
-	}
-	if e.Kind == "" {
-		return "", fmt.Errorf("kind is required")
+	return appendEntry(e, prepareEntry, func(f *os.File, data []byte) (int, error) {
+		return f.Write(data)
+	})
+}
+
+func appendEntry(e *Entry, prepare func(*Entry) error, write func(*os.File, []byte) (int, error)) (string, error) {
+	if err := validateEntry(e); err != nil {
+		return "", err
 	}
 
 	p, err := EnsureFile()
@@ -120,16 +123,8 @@ func Append(e *Entry) (string, error) {
 		return "", err
 	}
 
-	if e.ID == "" {
-		e.ID, err = newID()
-		if err != nil {
-			return "", err
-		}
-	}
-	if e.CreatedAt.IsZero() {
-		e.CreatedAt = time.Now().UTC()
-	} else {
-		e.CreatedAt = e.CreatedAt.UTC()
+	if err := prepare(e); err != nil {
+		return "", err
 	}
 
 	f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644) // nolint:gosec // intended permissions
@@ -138,20 +133,58 @@ func Append(e *Entry) (string, error) {
 	}
 	defer func() { _ = f.Close() }() // Best effort: file close in defer after flush
 
+	buf, err := marshalEntry(e)
+	if err != nil {
+		return "", err
+	}
+	if _, err := write(f, buf.Bytes()); err != nil {
+		return "", fmt.Errorf("failed to write interactions log entry: %w", err)
+	}
+
+	return e.ID, nil
+}
+
+func validateEntry(e *Entry) error {
+	if e == nil {
+		return fmt.Errorf("nil entry")
+	}
+	if e.Kind == "" {
+		return fmt.Errorf("kind is required")
+	}
+	return nil
+}
+
+func prepareEntry(e *Entry) error {
+	return prepareEntryWithID(e, newID)
+}
+
+func prepareEntryWithID(e *Entry, generateID func() (string, error)) error {
+	if e.ID == "" {
+		id, err := generateID()
+		if err != nil {
+			return err
+		}
+		e.ID = id
+	}
+	if e.CreatedAt.IsZero() {
+		e.CreatedAt = time.Now().UTC()
+		return nil
+	}
+	e.CreatedAt = e.CreatedAt.UTC()
+	return nil
+}
+
+func marshalEntry(e *Entry) (*bytes.Buffer, error) {
 	// Marshal to a single byte slice and write atomically.
-	// Using bufio.NewWriter could split into multiple write() syscalls,
+	// Using bufio.NewWriter could split multiple write() syscalls,
 	// which interleave under concurrent O_APPEND and corrupt lines.
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(e); err != nil {
-		return "", fmt.Errorf("failed to marshal interactions log entry: %w", err)
+		return nil, fmt.Errorf("failed to marshal interactions log entry: %w", err)
 	}
-	if _, err := f.Write(buf.Bytes()); err != nil {
-		return "", fmt.Errorf("failed to write interactions log entry: %w", err)
-	}
-
-	return e.ID, nil
+	return &buf, nil
 }
 
 // AppendIfEnabled appends only when the optional JSONL sidecar is enabled.

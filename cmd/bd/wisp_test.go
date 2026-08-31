@@ -21,21 +21,31 @@ import (
 func wispTestProto(t *testing.T, ctx context.Context, s *dolt.DoltStore, numChildren int) string {
 	t.Helper()
 	root := &types.Issue{
-		Title:     "Proto Root",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
-		Labels:    []string{MoleculeLabel},
+		IssueContent: types.IssueContent{
+			Title: "Proto Root",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{MoleculeLabel},
+		},
 	}
 	if err := s.CreateIssue(ctx, root, "test"); err != nil {
 		t.Fatalf("Failed to create proto root: %v", err)
 	}
 	for i := 1; i <= numChildren; i++ {
 		child := &types.Issue{
-			Title:     fmt.Sprintf("Step %d", i),
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Step %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := s.CreateIssue(ctx, child, "test"); err != nil {
 			t.Fatalf("Failed to create step %d: %v", i, err)
@@ -66,7 +76,7 @@ func makeWispTestCmd(rootOnly, dryRun bool) *cobra.Command {
 func countEphemeral(t *testing.T, ctx context.Context, s *dolt.DoltStore) int {
 	t.Helper()
 	tru := true
-	results, err := s.SearchIssues(ctx, "", types.IssueFilter{Ephemeral: &tru})
+	results, err := s.SearchIssues(ctx, "", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{Ephemeral: &tru}})
 	if err != nil {
 		t.Fatalf("SearchIssues: %v", err)
 	}

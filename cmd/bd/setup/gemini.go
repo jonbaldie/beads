@@ -82,88 +82,81 @@ func InstallGemini(project bool, stealth bool) error {
 }
 
 func installGemini(env geminiEnv, project bool, stealth bool) error {
-	var settingsPath string
-	if project {
-		settingsPath = geminiProjectSettingsPath(env.projectDir)
-		_, _ = fmt.Fprintln(env.stdout, "Installing Gemini CLI hooks for this project...")
-	} else {
-		settingsPath = geminiGlobalSettingsPath(env.homeDir)
-		_, _ = fmt.Fprintln(env.stdout, "Installing Gemini CLI hooks globally...")
-	}
-
+	settingsPath := announceGeminiInstall(env, project)
 	if err := env.ensureDir(filepath.Dir(settingsPath), 0o755); err != nil {
 		_, _ = fmt.Fprintf(env.stderr, "Error: %v\n", err)
 		return err
 	}
+	settings, hooks, err := loadGeminiSettings(env, settingsPath)
+	if err != nil {
+		return err
+	}
+	command := "bd prime --hook-json"
+	if stealth {
+		command = "bd prime --stealth --hook-json"
+	}
+	migrateGeminiHooks(hooks, command)
+	if addHookCommand(hooks, "SessionStart", command) {
+		_, _ = fmt.Fprintln(env.stdout, "✓ Registered SessionStart hook")
+	}
+	if err := writeGeminiSettings(env, settingsPath, settings); err != nil {
+		return err
+	}
+	if err := installAgents(geminiAgentsEnv(env), geminiAgentsIntegration); err != nil {
+		_, _ = fmt.Fprintf(env.stderr, "Warning: failed to update %s: %v\n", geminiInstructionsFile, err)
+	}
+	_, _ = fmt.Fprintln(env.stdout, "\n✓ Gemini CLI integration installed")
+	_, _ = fmt.Fprintf(env.stdout, "  Settings: %s\n", settingsPath)
+	_, _ = fmt.Fprintln(env.stdout, "\nRestart Gemini CLI for changes to take effect.")
+	return nil
+}
 
+func announceGeminiInstall(env geminiEnv, project bool) string {
+	if project {
+		_, _ = fmt.Fprintln(env.stdout, "Installing Gemini CLI hooks for this project...")
+		return geminiProjectSettingsPath(env.projectDir)
+	}
+	_, _ = fmt.Fprintln(env.stdout, "Installing Gemini CLI hooks globally...")
+	return geminiGlobalSettingsPath(env.homeDir)
+}
+
+func loadGeminiSettings(env geminiEnv, path string) (map[string]interface{}, map[string]interface{}, error) {
 	settings := make(map[string]interface{})
-	if data, err := env.readFile(settingsPath); err == nil {
+	if data, err := env.readFile(path); err == nil {
 		if err := json.Unmarshal(data, &settings); err != nil {
 			_, _ = fmt.Fprintf(env.stderr, "Error: failed to parse settings.json: %v\n", err)
-			return err
+			return nil, nil, err
 		}
 	}
-
 	hooks, ok := settings["hooks"].(map[string]interface{})
 	if !ok {
 		hooks = make(map[string]interface{})
 		settings["hooks"] = hooks
 	}
+	return settings, hooks, nil
+}
 
-	// Gemini CLI (and Claude Code, Codex) require hook stdout to be valid JSON;
-	// --hook-json wraps bd prime's markdown in the shared SessionStart envelope.
-	// PreCompress is intentionally NOT registered: Gemini's PreCompress event is
-	// advisory-only and does not support additionalContext injection — context
-	// re-injection after compression is architecturally impossible there.
-	command := "bd prime --hook-json"
-	if stealth {
-		command = "bd prime --stealth --hook-json"
-	}
-
-	// Migration sweep: remove all known legacy command variants before registering
-	// the canonical command. Re-running setup must be a clean upgrade path —
-	// stale entries alongside the new one cause Gemini to invoke both, and any
-	// pre-JSON variant emits raw markdown that violates the strict hook contract.
-	legacyVariants := []string{"bd prime", "bd prime --stealth"}
-	for _, legacy := range legacyVariants {
-		if legacy == command {
-			continue // never remove the variant we're about to add
+func migrateGeminiHooks(hooks map[string]interface{}, command string) {
+	for _, legacy := range []string{"bd prime", "bd prime --stealth"} {
+		if legacy != command {
+			removeHookCommand(hooks, "SessionStart", legacy)
+			removeHookCommand(hooks, "PreCompress", legacy)
 		}
-		removeHookCommand(hooks, "SessionStart", legacy)
-		removeHookCommand(hooks, "PreCompress", legacy)
 	}
-	// Also clear any --hook-json registration from PreCompress. Beads previously
-	// registered bd prime on PreCompress before we discovered that Gemini's
-	// PreCompress event is advisory-only and cannot inject additionalContext
-	// into the model regardless of output format. Re-running setup migrates cleanly.
 	removeHookCommand(hooks, "PreCompress", "bd prime --hook-json")
 	removeHookCommand(hooks, "PreCompress", "bd prime --stealth --hook-json")
+}
 
-	if addHookCommand(hooks, "SessionStart", command) {
-		_, _ = fmt.Fprintln(env.stdout, "✓ Registered SessionStart hook")
-	}
-
+func writeGeminiSettings(env geminiEnv, path string, settings map[string]interface{}) error {
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		_, _ = fmt.Fprintf(env.stderr, "Error: marshal settings: %v\n", err)
 		return err
 	}
-
-	if err := env.writeFile(settingsPath, data); err != nil {
+	if err := env.writeFile(path, data); err != nil {
 		_, _ = fmt.Fprintf(env.stderr, "Error: write settings: %v\n", err)
 		return err
 	}
-
-	// Install minimal beads section in GEMINI.md.
-	// Hooks handle the heavy lifting via bd prime; GEMINI.md just needs a pointer.
-	if err := installAgents(geminiAgentsEnv(env), geminiAgentsIntegration); err != nil {
-		// Non-fatal: hooks are already installed
-		_, _ = fmt.Fprintf(env.stderr, "Warning: failed to update %s: %v\n", geminiInstructionsFile, err)
-	}
-
-	_, _ = fmt.Fprintln(env.stdout, "\n✓ Gemini CLI integration installed")
-	_, _ = fmt.Fprintf(env.stdout, "  Settings: %s\n", settingsPath)
-	_, _ = fmt.Fprintln(env.stdout, "\nRestart Gemini CLI for changes to take effect.")
 	return nil
 }
 
@@ -285,35 +278,30 @@ func geminiSessionStartCommands(settingsPath string) []string {
 	if err := json.Unmarshal(data, &settings); err != nil {
 		return nil
 	}
-	hooks, ok := settings["hooks"].(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	eventHooks, ok := hooks["SessionStart"].([]interface{})
-	if !ok {
-		return nil
-	}
+	return geminiCommandsFromSettings(settings)
+}
+
+func geminiCommandsFromSettings(settings map[string]interface{}) []string {
+	hooks, _ := settings["hooks"].(map[string]interface{})
+	eventHooks, _ := hooks["SessionStart"].([]interface{})
 	var cmds []string
 	for _, hook := range eventHooks {
-		hookMap, ok := hook.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		hookCmds, ok := hookMap["hooks"].([]interface{})
-		if !ok {
-			continue
-		}
-		for _, cmd := range hookCmds {
-			cmdMap, ok := cmd.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			if s, ok := cmdMap["command"].(string); ok {
-				cmds = append(cmds, s)
-			}
-		}
+		cmds = append(cmds, geminiCommandsFromHook(hook)...)
 	}
 	return cmds
+}
+
+func geminiCommandsFromHook(hook interface{}) []string {
+	hookMap, _ := hook.(map[string]interface{})
+	hookCommands, _ := hookMap["hooks"].([]interface{})
+	var commands []string
+	for _, command := range hookCommands {
+		commandMap, _ := command.(map[string]interface{})
+		if value, ok := commandMap["command"].(string); ok {
+			commands = append(commands, value)
+		}
+	}
+	return commands
 }
 
 // hasCurrentGeminiHooks reports whether a settings file has a current-format

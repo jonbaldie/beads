@@ -222,7 +222,11 @@ func worktreeRemovalFacts(ignore worktreeremove.IgnoreKind) worktreeremove.Prepa
 }
 
 func worktreeRemovalRevalidationFacts(mode worktreeremove.Mode) worktreeremove.RevalidationFacts {
-	facts := worktreeremove.RevalidationFacts{Registration: worktreeremove.InvariantStable, LockPrune: worktreeremove.InvariantStable, TargetPath: worktreeremove.InvariantStable, TargetDirectory: worktreeremove.InvariantStable, GitAdminDirectory: worktreeremove.InvariantStable, GitAdminDirectoryBytes: worktreeremove.InvariantStable, GitMarker: worktreeremove.InvariantStable, GitMarkerBytes: worktreeremove.InvariantStable, CommonDirectory: worktreeremove.InvariantStable, Head: worktreeremove.InvariantStable, Cleanliness: worktreeremove.InvariantStable, StatusBytes: worktreeremove.InvariantStable, DirtyFileFingerprint: worktreeremove.InvariantStable, Comparator: worktreeremove.InvariantStable, Containment: worktreeremove.InvariantStable, ManagedIgnore: worktreeremove.InvariantStable}
+	facts := worktreeremove.RevalidationFacts{
+		RevalidationIdentityFacts: worktreeremove.RevalidationIdentityFacts{Registration: worktreeremove.InvariantStable, LockPrune: worktreeremove.InvariantStable, TargetPath: worktreeremove.InvariantStable, TargetDirectory: worktreeremove.InvariantStable, CommonDirectory: worktreeremove.InvariantStable, Head: worktreeremove.InvariantStable},
+		RevalidationGitFacts:      worktreeremove.RevalidationGitFacts{GitAdminDirectory: worktreeremove.InvariantStable, GitAdminDirectoryBytes: worktreeremove.InvariantStable, GitMarker: worktreeremove.InvariantStable, GitMarkerBytes: worktreeremove.InvariantStable, Cleanliness: worktreeremove.InvariantStable, StatusBytes: worktreeremove.InvariantStable, DirtyFileFingerprint: worktreeremove.InvariantStable},
+		RevalidationOutcomeFacts:  worktreeremove.RevalidationOutcomeFacts{Comparator: worktreeremove.InvariantStable, Containment: worktreeremove.InvariantStable, ManagedIgnore: worktreeremove.InvariantStable},
+	}
 	if mode == worktreeremove.Force {
 		facts.Comparator, facts.Containment = worktreeremove.InvariantNotRequired, worktreeremove.InvariantNotRequired
 	}

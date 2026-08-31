@@ -100,6 +100,14 @@ func requireDoltStore(t *testing.T, what string) {
 func buildBD(t *testing.T) string {
 	t.Helper()
 	bdOnce.Do(func() {
+		if prebuilt := os.Getenv("BEADS_TEST_BD_BINARY"); prebuilt != "" {
+			if _, err := os.Stat(prebuilt); err != nil {
+				bdErr = fmt.Errorf("BEADS_TEST_BD_BINARY=%q: %w", prebuilt, err)
+				return
+			}
+			bdPath = prebuilt
+			return
+		}
 		bin := "bd-protocol"
 		if runtime.GOOS == "windows" {
 			bin += ".exe"

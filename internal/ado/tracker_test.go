@@ -1010,12 +1010,18 @@ func TestTracker_CreateIssue(t *testing.T) {
 
 	tr, _ := newTestTracker(t, mux)
 	issue := &types.Issue{
-		Title:       "New Bug",
-		Description: "A bug description",
-		Priority:    0,
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeBug,
-		Labels:      []string{"urgent", "frontend"},
+		IssueContent: types.IssueContent{
+			Title:       "New Bug",
+			Description: "A bug description",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  0,
+			Status:    types.StatusOpen,
+			IssueType: types.TypeBug,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"urgent", "frontend"},
+		},
 	}
 
 	result, err := tr.CreateIssue(context.Background(), issue)
@@ -1064,9 +1070,13 @@ func TestTracker_CreateIssue_DefaultType(t *testing.T) {
 
 	tr, _ := newTestTracker(t, mux)
 	issue := &types.Issue{
-		Title:    "No Type",
-		Priority: 2,
-		Status:   types.StatusOpen,
+		IssueContent: types.IssueContent{
+			Title: "No Type",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority: 2,
+			Status:   types.StatusOpen,
+		},
 	}
 
 	_, err := tr.CreateIssue(context.Background(), issue)
@@ -1086,8 +1096,12 @@ func TestTracker_CreateIssue_APIError(t *testing.T) {
 
 	tr, _ := newTestTracker(t, mux)
 	_, err := tr.CreateIssue(context.Background(), &types.Issue{
-		Title:     "Will Fail",
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Will Fail",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+		},
 	})
 	if err == nil {
 		t.Fatal("CreateIssue() expected error on API failure")
@@ -1126,11 +1140,15 @@ func TestTracker_UpdateIssue(t *testing.T) {
 
 	tr, _ := newTestTracker(t, mux)
 	issue := &types.Issue{
-		Title:       "Updated Title",
-		Description: "Updated description",
-		Priority:    1,
-		Status:      types.StatusInProgress,
-		IssueType:   types.TypeBug,
+		IssueContent: types.IssueContent{
+			Title:       "Updated Title",
+			Description: "Updated description",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  1,
+			Status:    types.StatusInProgress,
+			IssueType: types.TypeBug,
+		},
 	}
 
 	result, err := tr.UpdateIssue(context.Background(), "55", issue)
@@ -1162,7 +1180,7 @@ func TestTracker_UpdateIssue_InvalidID(t *testing.T) {
 		client: NewClient(NewSecretString("pat"), "org", "proj"),
 		mapper: NewFieldMapper(nil, nil),
 	}
-	_, err := tr.UpdateIssue(context.Background(), "abc", &types.Issue{Title: "x"})
+	_, err := tr.UpdateIssue(context.Background(), "abc", &types.Issue{IssueContent: types.IssueContent{Title: "x"}})
 	if err == nil {
 		t.Fatal("UpdateIssue() expected error for non-numeric ID")
 	}
@@ -1178,7 +1196,7 @@ func TestTracker_UpdateIssue_APIError(t *testing.T) {
 	})
 
 	tr, _ := newTestTracker(t, mux)
-	_, err := tr.UpdateIssue(context.Background(), "999", &types.Issue{Title: "x"})
+	_, err := tr.UpdateIssue(context.Background(), "999", &types.Issue{IssueContent: types.IssueContent{Title: "x"}})
 	if err == nil {
 		t.Fatal("UpdateIssue() expected error on API failure")
 	}
@@ -1270,7 +1288,7 @@ func TestTracker_UpdateIssue_ZeroID(t *testing.T) {
 		client: NewClient(NewSecretString("pat"), "org", "proj"),
 		mapper: NewFieldMapper(nil, nil),
 	}
-	_, err := tr.UpdateIssue(context.Background(), "0", &types.Issue{Title: "x"})
+	_, err := tr.UpdateIssue(context.Background(), "0", &types.Issue{IssueContent: types.IssueContent{Title: "x"}})
 	if err == nil {
 		t.Fatal("UpdateIssue(0) should return error")
 	}
@@ -1284,7 +1302,7 @@ func TestTracker_UpdateIssue_NegativeID(t *testing.T) {
 		client: NewClient(NewSecretString("pat"), "org", "proj"),
 		mapper: NewFieldMapper(nil, nil),
 	}
-	_, err := tr.UpdateIssue(context.Background(), "-1", &types.Issue{Title: "x"})
+	_, err := tr.UpdateIssue(context.Background(), "-1", &types.Issue{IssueContent: types.IssueContent{Title: "x"}})
 	if err == nil {
 		t.Fatal("UpdateIssue(-1) should return error")
 	}

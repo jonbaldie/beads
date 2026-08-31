@@ -26,25 +26,29 @@ func runQuickProxiedServer(cmd *cobra.Command, ctx context.Context, args []strin
 		return HandleError("%v", err)
 	}
 
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return HandleError("proxied-server UOW provider not initialized")
 	}
 
 	issue := &types.Issue{
-		Title:     title,
-		Status:    types.StatusOpen,
-		Priority:  priority,
-		IssueType: types.IssueType(issueType).Normalize(),
+		IssueContent: types.IssueContent{
+			Title: title,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  priority,
+			IssueType: types.IssueType(issueType).Normalize(),
+		},
 	}
 
-	res, err := uow.RunTxResult(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (*types.Issue, string, error) {
+	res, err := uow.RunTxResult(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (*types.Issue, string, error) {
 		params := domain.CreateIssueParams{
 			Issue:                   issue,
 			ParentID:                parentID,
 			Labels:                  labels,
 			InheritLabelsFromParent: parentID != "",
 		}
-		result, err := uw.IssueUseCase().CreateIssue(ctx, params, actor)
+		result, err := uw.IssueUseCase().CreateIssue(ctx, params, getActor())
 		if err != nil {
 			return nil, "", err
 		}

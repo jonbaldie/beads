@@ -34,80 +34,96 @@ func openReadOnlyStoreForDBPath(ctx context.Context, dbPath string) (storage.Dol
 // non-default dolt_database names or custom dolt_data_dir locations.
 func resolveBeadsDirForDBPath(dbPath string) string {
 	actualDBPath := utils.CanonicalizePath(dbPath)
-	if parent := filepath.Dir(dbPath); filepath.Base(parent) == ".beads" {
-		if _, err := os.Stat(filepath.Join(parent, "metadata.json")); err == nil {
-			return parent
-		}
+	if beadsDir := beadsDirWithMetadata(filepath.Dir(dbPath)); beadsDir != "" {
+		return beadsDir
 	}
-	if parent := filepath.Dir(actualDBPath); filepath.Base(parent) == ".beads" {
-		if _, err := os.Stat(filepath.Join(parent, "metadata.json")); err == nil {
-			return parent
-		}
+	if beadsDir := beadsDirWithMetadata(filepath.Dir(actualDBPath)); beadsDir != "" {
+		return beadsDir
 	}
-	seen := map[string]struct{}{}
-	candidates := make([]string, 0, 16)
-
-	addCandidate := func(path string) {
-		if path == "" {
-			return
-		}
-		key := utils.NormalizePathForComparison(path)
-		if key == "" {
-			return
-		}
-		if _, ok := seen[key]; ok {
-			return
-		}
-		seen[key] = struct{}{}
-		candidates = append(candidates, path)
-	}
-
-	addAncestorCandidates := func(path string) {
-		for dir := path; dir != "" && dir != filepath.Dir(dir); dir = filepath.Dir(dir) {
-			addCandidate(filepath.Join(dir, ".beads"))
-			if filepath.Base(dir) == ".beads" {
-				addCandidate(dir)
-			}
-		}
-	}
-
-	if info, err := os.Stat(dbPath); err == nil && info.IsDir() {
-		addCandidate(dbPath)
-	}
-	if info, err := os.Stat(actualDBPath); err == nil && info.IsDir() {
-		addCandidate(actualDBPath)
-	}
-
-	addCandidate(filepath.Dir(dbPath))
-	addCandidate(filepath.Dir(actualDBPath))
-	addAncestorCandidates(filepath.Dir(dbPath))
-	addAncestorCandidates(filepath.Dir(actualDBPath))
-
-	if found := beads.FindBeadsDir(); found != "" {
-		addCandidate(found)
-		addCandidate(utils.CanonicalizePath(found))
-	}
-
-	for _, beadsDir := range candidates {
-		cfg, err := configfile.Load(beadsDir)
-		if err != nil || cfg == nil {
-			continue
-		}
-		if utils.PathsEqual(beadsDir, dbPath) || utils.PathsEqual(beadsDir, actualDBPath) {
-			return beadsDir
-		}
-		// dbPath is the data directory living directly inside beadsDir
-		// (<beadsDir>/embeddeddolt for embedded, <beadsDir>/dolt for server).
-		// Match on that parent relationship so resolution works for embedded
-		// stores regardless of the beads dir name; Config.DatabasePath alone
-		// returns the "dolt" name and misses embeddeddolt/ (GH#4574).
-		if utils.PathsEqual(filepath.Dir(dbPath), beadsDir) || utils.PathsEqual(filepath.Dir(actualDBPath), beadsDir) {
-			return beadsDir
-		}
-		if utils.PathsEqual(cfg.DatabasePath(beadsDir), dbPath) || utils.PathsEqual(cfg.DatabasePath(beadsDir), actualDBPath) {
+	for _, beadsDir := range beadsDirCandidates(dbPath, actualDBPath) {
+		if matchBeadsDirForDBPath(beadsDir, dbPath, actualDBPath) {
 			return beadsDir
 		}
 	}
-
 	return ""
+}
+
+func beadsDirWithMetadata(parent string) string {
+	if filepath.Base(parent) != ".beads" {
+		return ""
+	}
+	if _, err := os.Stat(filepath.Join(parent, "metadata.json")); err != nil {
+		return ""
+	}
+	return parent
+}
+
+type beadsDirCandidateSet struct {
+	seen       map[string]struct{}
+	candidates []string
+}
+
+func (s *beadsDirCandidateSet) add(path string) {
+	if path == "" {
+		return
+	}
+	key := utils.NormalizePathForComparison(path)
+	if key == "" {
+		return
+	}
+	if _, ok := s.seen[key]; ok {
+		return
+	}
+	s.seen[key] = struct{}{}
+	s.candidates = append(s.candidates, path)
+}
+
+func (s *beadsDirCandidateSet) addAncestors(path string) {
+	for dir := path; dir != "" && dir != filepath.Dir(dir); dir = filepath.Dir(dir) {
+		s.add(filepath.Join(dir, ".beads"))
+		if filepath.Base(dir) == ".beads" {
+			s.add(dir)
+		}
+	}
+}
+
+func (s *beadsDirCandidateSet) addIfDir(path string) {
+	info, err := os.Stat(path)
+	if err == nil && info.IsDir() {
+		s.add(path)
+	}
+}
+
+func beadsDirCandidates(dbPath, actualDBPath string) []string {
+	s := beadsDirCandidateSet{seen: map[string]struct{}{}, candidates: make([]string, 0, 16)}
+	s.addIfDir(dbPath)
+	s.addIfDir(actualDBPath)
+	s.add(filepath.Dir(dbPath))
+	s.add(filepath.Dir(actualDBPath))
+	s.addAncestors(filepath.Dir(dbPath))
+	s.addAncestors(filepath.Dir(actualDBPath))
+	if found := beads.FindBeadsDir(); found != "" {
+		s.add(found)
+		s.add(utils.CanonicalizePath(found))
+	}
+	return s.candidates
+}
+
+func matchBeadsDirForDBPath(beadsDir, dbPath, actualDBPath string) bool {
+	cfg, err := configfile.Load(beadsDir)
+	if err != nil || cfg == nil {
+		return false
+	}
+	if utils.PathsEqual(beadsDir, dbPath) || utils.PathsEqual(beadsDir, actualDBPath) {
+		return true
+	}
+	// dbPath is the data directory living directly inside beadsDir
+	// (<beadsDir>/embeddeddolt for embedded, <beadsDir>/dolt for server).
+	// Match on that parent relationship so resolution works for embedded
+	// stores regardless of the beads dir name; Config.DatabasePath alone
+	// returns the "dolt" name and misses embeddeddolt/ (GH#4574).
+	if utils.PathsEqual(filepath.Dir(dbPath), beadsDir) || utils.PathsEqual(filepath.Dir(actualDBPath), beadsDir) {
+		return true
+	}
+	return utils.PathsEqual(cfg.DatabasePath(beadsDir), dbPath) || utils.PathsEqual(cfg.DatabasePath(beadsDir), actualDBPath)
 }

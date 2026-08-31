@@ -29,12 +29,12 @@ func runPingProxiedServer(ctx context.Context) error {
 	}
 	resolveMs := time.Since(start).Milliseconds()
 
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return pingFail(start, "proxied-server UOW provider not initialized")
 	}
 	storeMs := time.Since(start).Milliseconds()
 
-	_, err := uow.RunTxRead(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (*domain.RawSQLResult, error) {
+	_, err := uow.RunTxRead(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (*domain.RawSQLResult, error) {
 		return uw.RawSQLUseCase().Query(ctx, "SELECT 1")
 	})
 	if err != nil {
@@ -43,7 +43,7 @@ func runPingProxiedServer(ctx context.Context) error {
 	totalMs := time.Since(start).Milliseconds()
 	queryMs := totalMs - storeMs
 
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(map[string]interface{}{
 			"status":     "ok",
 			"resolve_ms": resolveMs,

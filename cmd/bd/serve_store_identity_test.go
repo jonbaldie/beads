@@ -84,7 +84,8 @@ func TestServeAnswersFromTheStoreTheRootCommandOpened(t *testing.T) {
 	}
 	store = opened
 
-	serveAddr, serveAllowNonLoopback = "127.0.0.1:0", false
+	setServeFlag(t, "addr", "127.0.0.1:0")
+	setServeFlag(t, "allow-non-loopback", "false")
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	setRootContext(ctx, cancel)
@@ -312,9 +313,15 @@ type serveIdentityReader struct{ id string }
 func (r serveIdentityReader) Ready(context.Context, issueops.ReadyRequest) (issueops.IssuePage, error) {
 	return issueops.IssuePage{
 		Items: []*issueops.IssueWithCounts{{Issue: &types.Issue{
-			ID:     r.id,
-			Title:  "answered by " + r.id,
-			Status: types.StatusOpen,
+			IssueID: types.IssueID{
+				ID: r.id,
+			},
+			IssueContent: types.IssueContent{
+				Title: "answered by " + r.id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status: types.StatusOpen,
+			},
 		}}},
 	}, nil
 }

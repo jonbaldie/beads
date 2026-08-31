@@ -328,10 +328,14 @@ func TestCreateIssue_ClosedState_TransitionsAfterCreate(t *testing.T) {
 
 	tr, _ := newTestTracker(t, mux)
 	issue := &types.Issue{
-		Title:     "Closed Bug",
-		Priority:  1,
-		Status:    types.StatusClosed,
-		IssueType: types.TypeBug,
+		IssueContent: types.IssueContent{
+			Title: "Closed Bug",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  1,
+			Status:    types.StatusClosed,
+			IssueType: types.TypeBug,
+		},
 	}
 
 	result, err := tr.CreateIssue(context.Background(), issue)
@@ -413,10 +417,14 @@ func TestCreateIssue_ClosedState_WalksPathOnReject(t *testing.T) {
 
 	tr, _ := newTestTracker(t, mux)
 	issue := &types.Issue{
-		Title:     "Walk Path Bug",
-		Priority:  1,
-		Status:    types.StatusClosed,
-		IssueType: types.TypeBug,
+		IssueContent: types.IssueContent{
+			Title: "Walk Path Bug",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  1,
+			Status:    types.StatusClosed,
+			IssueType: types.TypeBug,
+		},
 	}
 
 	result, err := tr.CreateIssue(context.Background(), issue)
@@ -464,10 +472,14 @@ func TestCreateIssue_OpenState_NoTransition(t *testing.T) {
 
 	tr, _ := newTestTracker(t, mux)
 	issue := &types.Issue{
-		Title:     "Open Task",
-		Priority:  2,
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Open Task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	result, err := tr.CreateIssue(context.Background(), issue)
@@ -520,10 +532,14 @@ func TestCreateIssue_ActiveState_TransitionsAfterCreate(t *testing.T) {
 
 	tr, _ := newTestTracker(t, mux)
 	issue := &types.Issue{
-		Title:     "Active Task",
-		Priority:  2,
-		Status:    types.StatusInProgress,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Active Task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			Status:    types.StatusInProgress,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	result, err := tr.CreateIssue(context.Background(), issue)
@@ -581,10 +597,14 @@ func TestCreateIssue_DeferredState_Removed(t *testing.T) {
 
 	tr, _ := newTestTracker(t, mux)
 	issue := &types.Issue{
-		Title:     "Deferred Task",
-		Priority:  3,
-		Status:    types.StatusDeferred,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Deferred Task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  3,
+			Status:    types.StatusDeferred,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	result, err := tr.CreateIssue(context.Background(), issue)

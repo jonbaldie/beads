@@ -90,11 +90,6 @@ func TestResetHooksPathIfBeadsManagedReportsFailureLoudly(t *testing.T) {
 	tmpDir := newGitRepo(t)
 	runInDir(t, tmpDir, func() {
 		gitDir := filepath.Join(tmpDir, ".git")
-		info, err := os.Stat(gitDir)
-		if err != nil {
-			t.Fatalf("failed to stat .git: %v", err)
-		}
-		orig := info.Mode()
 
 		// There has to be something to unset, or there is no git invocation to
 		// fail: the reset reads beads.role first and only unsets it when it is
@@ -105,18 +100,14 @@ func TestResetHooksPathIfBeadsManagedReportsFailureLoudly(t *testing.T) {
 			t.Fatalf("failed to set beads.role: %v", err)
 		}
 
-		// Make .git/ read+execute only (no write), so `git rev-parse` (used to
-		// resolve repoRoot) and `git config --get` still succeed but
-		// `git config --unset` cannot create its lockfile — a genuine failure,
-		// which resetHooksPathIfBeadsManaged must not swallow.
-		if err := os.Chmod(gitDir, 0555); err != nil {
-			t.Fatalf("failed to chmod .git: %v", err)
+		// Occupy the lockfile path with a directory. Unlike directory modes this
+		// remains a genuine git-config write failure when the test runs as root,
+		// while reads and repository discovery continue to work normally.
+		if err := os.Mkdir(filepath.Join(gitDir, "config.lock"), 0755); err != nil {
+			t.Fatalf("failed to occupy config lock path: %v", err)
 		}
-		t.Cleanup(func() {
-			_ = os.Chmod(gitDir, orig)
-		})
 
-		err = resetHooksPathIfBeadsManaged()
+		err := resetHooksPathIfBeadsManaged()
 		if err == nil {
 			t.Fatal("expected resetHooksPathIfBeadsManaged to return an error when the config lockfile cannot be created")
 		}

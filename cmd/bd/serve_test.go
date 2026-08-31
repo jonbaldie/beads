@@ -301,7 +301,7 @@ func TestServeNamesOneDatabaseSourcePerServerItBuilds(t *testing.T) {
 				attributed++
 				keys := configLiteralKeys(lit)
 				provider := keys["Provider"]
-				reader, claimer := keys["Reader"], keys["Claimer"]
+				reader, claimer := configLiteralMentions(lit, "Reader"), configLiteralMentions(lit, "Claimer")
 
 				switch {
 				case provider && (reader || claimer):
@@ -315,7 +315,7 @@ func TestServeNamesOneDatabaseSourcePerServerItBuilds(t *testing.T) {
 					providerBacked++
 				case reader && claimer:
 					rolesBacked++
-					if !functionMentions(fn, "serveDatabaseSource") || !functionMentions(fn, "serveSourceStore") {
+					if fn.Name.Name != "runServeStore" || !serveDispatcherUsesStoreGate(file) {
 						t.Errorf("%s: %s builds a roles-backed httpapi.Config without consulting serveDatabaseSource. "+
 							"That gate is where the permanent embedded-Dolt refusal lives, and internal/httpapi "+
 							"cannot tell an embedded-backed role from any other — read it before changing this",
@@ -340,6 +340,42 @@ func TestServeNamesOneDatabaseSourcePerServerItBuilds(t *testing.T) {
 	if rolesBacked == 0 {
 		t.Error("no roles-backed httpapi.Config in cmd/bd: a registered backend is no longer served from its store")
 	}
+}
+
+// configLiteralMentions reports whether a keyed field occurs anywhere inside
+// lit. Config embeds SourceRoles, whose own role groups are deliberately nested;
+// flattening those fields merely to make this source invariant easy to scan
+// would undo that API deepening.
+func configLiteralMentions(lit *ast.CompositeLit, field string) bool {
+	found := false
+	ast.Inspect(lit, func(n ast.Node) bool {
+		kv, ok := n.(*ast.KeyValueExpr)
+		if !ok {
+			return true
+		}
+		if ident, ok := kv.Key.(*ast.Ident); ok && ident.Name == field {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+// serveDispatcherUsesStoreGate keeps the roles-backed constructor tied to the
+// permanent embedded-Dolt refusal even though classification now belongs to
+// runServeWithFlags and construction belongs to runServeStore.
+func serveDispatcherUsesStoreGate(file *ast.File) bool {
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "runServeWithFlags" {
+			continue
+		}
+		return functionMentions(fn, "serveDatabaseSource") &&
+			functionMentions(fn, "serveSourceStore") &&
+			functionMentions(fn, "runServeStore")
+	}
+	return false
 }
 
 // httpapiConfigLiterals returns every `httpapi.Config{...}` composite literal
@@ -474,7 +510,8 @@ func runServeUnderReadonly(t *testing.T, dir string) (string, error) {
 	t.Cleanup(func() { readonlyMode = origReadonly })
 
 	store = nil
-	serveAddr, serveAllowNonLoopback = "127.0.0.1:0", false
+	setServeFlag(t, "addr", "127.0.0.1:0")
+	setServeFlag(t, "allow-non-loopback", "false")
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	setRootContext(ctx, cancel)
@@ -505,21 +542,25 @@ func clearServeEnv(t *testing.T) {
 	}
 }
 
-// withServeFlags sets the serve globals for one test and restores them, so a
-// table row cannot leak its posture into the next one.
+// setServeFlag changes one command-local serve flag and fails the test if the
+// command's declared flag surface has drifted.
+func setServeFlag(t *testing.T, name, value string) {
+	t.Helper()
+	if err := serveCmd.Flags().Set(name, value); err != nil {
+		t.Fatalf("set --%s=%q: %v", name, value, err)
+	}
+}
+
+// withServeFlags resets the command-local serve flags for one test, so a table
+// row cannot leak its posture into the next one.
 func withServeFlags(t *testing.T) {
 	t.Helper()
-	addr, nonLoopback := serveAddr, serveAllowNonLoopback
-	token, insecure := serveAuthTokenFile, serveInsecureNoAuth
-	hosts := serveAllowedHosts
+	serveCmd.ResetFlags()
+	registerServeFlags(serveCmd)
 	t.Cleanup(func() {
-		serveAddr, serveAllowNonLoopback = addr, nonLoopback
-		serveAuthTokenFile, serveInsecureNoAuth = token, insecure
-		serveAllowedHosts = hosts
+		serveCmd.ResetFlags()
+		registerServeFlags(serveCmd)
 	})
-	serveAddr, serveAllowNonLoopback = "127.0.0.1:0", false
-	serveAuthTokenFile, serveInsecureNoAuth = "", false
-	serveAllowedHosts = nil
 }
 
 func serveTokenFile(t *testing.T) string {
@@ -550,39 +591,42 @@ func TestServeConfigRefusesAnUnservablePosture(t *testing.T) {
 		},
 		{
 			name:  "loopback with a token",
-			apply: func(*testing.T) { serveAuthTokenFile = token },
+			apply: func(t *testing.T) { setServeFlag(t, "auth-token-file", token) },
 		},
 		{
 			name: "non-loopback with a token",
-			apply: func(*testing.T) {
-				serveAddr, serveAllowNonLoopback = "0.0.0.0:0", true
-				serveAuthTokenFile = token
+			apply: func(t *testing.T) {
+				setServeFlag(t, "addr", "0.0.0.0:0")
+				setServeFlag(t, "allow-non-loopback", "true")
+				setServeFlag(t, "auth-token-file", token)
 			},
 		},
 		{
 			name: "non-loopback with no credential",
-			apply: func(*testing.T) {
-				serveAddr, serveAllowNonLoopback = "0.0.0.0:0", true
+			apply: func(t *testing.T) {
+				setServeFlag(t, "addr", "0.0.0.0:0")
+				setServeFlag(t, "allow-non-loopback", "true")
 			},
 			wantErr: "--auth-token-file",
 		},
 		{
 			name: "non-loopback waived explicitly",
-			apply: func(*testing.T) {
-				serveAddr, serveAllowNonLoopback = "0.0.0.0:0", true
-				serveInsecureNoAuth = true
+			apply: func(t *testing.T) {
+				setServeFlag(t, "addr", "0.0.0.0:0")
+				setServeFlag(t, "allow-non-loopback", "true")
+				setServeFlag(t, "insecure-no-auth", "true")
 			},
 		},
 		{
 			name: "a token file that does not exist",
-			apply: func(*testing.T) {
-				serveAuthTokenFile = filepath.Join(t.TempDir(), "absent")
+			apply: func(t *testing.T) {
+				setServeFlag(t, "auth-token-file", filepath.Join(t.TempDir(), "absent"))
 			},
 			wantErr: "no such file",
 		},
 		{
 			name:    "an allowed host with a port",
-			apply:   func(*testing.T) { serveAllowedHosts = []string{"bd.beads.svc:8080"} },
+			apply:   func(t *testing.T) { setServeFlag(t, "allowed-host", "bd.beads.svc:8080") },
 			wantErr: "--allowed-host",
 		},
 	} {
@@ -632,7 +676,7 @@ func TestServeEnvFallbackAppliesOnlyWhenTheFlagIsUnset(t *testing.T) {
 		clearServeEnv(t)
 		withServeFlags(t)
 		t.Setenv(serveTokenFileEnv, filepath.Join(t.TempDir(), "absent"))
-		serveAuthTokenFile = serveTokenFile(t)
+		setServeFlag(t, "auth-token-file", serveTokenFile(t))
 
 		if _, err := resolveServeConfig(); err != nil {
 			t.Fatalf("the flag lost to an unreadable environment fallback: %v", err)
@@ -646,8 +690,9 @@ func TestServeEnvFallbackAppliesOnlyWhenTheFlagIsUnset(t *testing.T) {
 func TestServeConfigCarriesTheOperatorsChoicesThrough(t *testing.T) {
 	clearServeEnv(t)
 	withServeFlags(t)
-	serveAuthTokenFile = serveTokenFile(t)
-	serveAllowedHosts = []string{"bd-proj.beads.svc.cluster.local", "bd-proj.beads.svc"}
+	setServeFlag(t, "auth-token-file", serveTokenFile(t))
+	setServeFlag(t, "allowed-host", "bd-proj.beads.svc.cluster.local")
+	setServeFlag(t, "allowed-host", "bd-proj.beads.svc")
 
 	cfg, err := resolveServeConfig()
 	if err != nil {
@@ -656,8 +701,9 @@ func TestServeConfigCarriesTheOperatorsChoicesThrough(t *testing.T) {
 	if cfg.Auth == nil {
 		t.Error("--auth-token-file did not reach the server config")
 	}
-	if strings.Join(cfg.AllowedHosts, ",") != strings.Join(serveAllowedHosts, ",") {
-		t.Errorf("AllowedHosts = %v, want %v", cfg.AllowedHosts, serveAllowedHosts)
+	wantHosts := []string{"bd-proj.beads.svc.cluster.local", "bd-proj.beads.svc"}
+	if strings.Join(cfg.AllowedHosts, ",") != strings.Join(wantHosts, ",") {
+		t.Errorf("AllowedHosts = %v, want %v", cfg.AllowedHosts, wantHosts)
 	}
 	if cfg.InsecureNoAuth {
 		t.Error("InsecureNoAuth is set without the flag")

@@ -78,10 +78,12 @@ func startTestDoltServer() func() {
 func initCmdBDSharedSchema(port int) error {
 	ctx := context.Background()
 	cfg := &dolt.Config{
-		Path:       "/tmp/cmdbd-shared-init",
-		ServerHost: "127.0.0.1",
-		ServerPort: port,
-		Database:   testSharedDB,
+		Path: "/tmp/cmdbd-shared-init",
+		ServerOptions: dolt.ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: port,
+		},
+		Database: testSharedDB,
 	}
 	store, err := dolt.New(ctx, cfg)
 	if err != nil {

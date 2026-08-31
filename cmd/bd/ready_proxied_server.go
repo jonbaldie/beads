@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -37,7 +36,7 @@ func runReadyProxiedServer(cmd *cobra.Command, ctx context.Context) error {
 		return err
 	}
 
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return HandleError("proxied-server UOW provider not initialized")
 	}
 
@@ -49,9 +48,9 @@ func runReadyProxiedServer(cmd *cobra.Command, ctx context.Context) error {
 	// route opens is read-only-by-ending (Close rolls back), so the sweep runs
 	// in a committing UOW of its own first; the claim route above gets the
 	// same sweep from its role (uow.readyClaimer.ClaimNext).
-	uow.WakeExpiredDefersAdvisory(ctx, uowProvider)
+	uow.WakeExpiredDefersAdvisory(ctx, getUOWProvider())
 
-	uw, err := uowProvider.NewUOW(ctx)
+	uw, err := getUOWProvider().NewUOW(ctx)
 	if err != nil {
 		return HandleErrorRespectJSON("open unit of work: %v", err)
 	}
@@ -70,10 +69,10 @@ func runReadyProxiedServer(cmd *cobra.Command, ctx context.Context) error {
 }
 
 func runBlockedProxiedServer(cmd *cobra.Command, ctx context.Context) error {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return HandleError("proxied-server UOW provider not initialized")
 	}
-	uw, err := uowProvider.NewUOW(ctx)
+	uw, err := getUOWProvider().NewUOW(ctx)
 	if err != nil {
 		return HandleErrorRespectJSON("open unit of work: %v", err)
 	}
@@ -89,7 +88,7 @@ func runBlockedProxiedServer(cmd *cobra.Command, ctx context.Context) error {
 		return HandleErrorRespectJSON("%v", err)
 	}
 
-	if jsonOutput {
+	if isJSONOutput() {
 		if blocked == nil {
 			blocked = []*types.BlockedIssue{}
 		}
@@ -102,43 +101,52 @@ func runBlockedProxiedServer(cmd *cobra.Command, ctx context.Context) error {
 
 func runReadyProxiedList(ctx context.Context, uw uow.UnitOfWork, in readyInput) error {
 	if in.jsonOut {
-		page, err := uw.IssueUseCase().GetReadyWorkWithCounts(ctx, in.filter)
-		if err != nil {
-			return HandleError("%v", err)
-		}
-		// The same epilogue issueops.Reader.Ready runs, through the same
-		// function: this seam reports a has-more natively and ready has no
-		// display order, so the trim is a no-op and the verdict is the seam's
-		// — but it is reached the one way, not restated here.
-		results, truncated := workapi.FinishPage(page.Items, "", false, in.filter.Limit, page.HasMore)
-		truncated = truncated && in.filter.Limit > 0
-		// Parity with the direct route: the pagination key is emitted only
-		// when truncated, and it now carries the same Total, from the same
-		// role. This route published no total at all until ReadyCounter
-		// existed, so a script that read `pagination.total` got one number
-		// under a direct-mode workspace and no key at all under a proxied one.
-		//
-		// The guard is the direct route's guard: the two queries are not one
-		// snapshot (issueops.ReadyCounter.CountReady), so a close landing
-		// between them must not publish a total smaller than the page beside
-		// it.
-		var pag *PaginationMeta
-		if truncated {
-			pag = &PaginationMeta{
-				Returned:  len(results),
-				Truncated: true,
-			}
-			if n, countErr := proxiedReadyTotal(ctx, in); countErr == nil && n > len(results) {
-				pag.Total = n
-			}
-		}
-		_ = outputJSONWithPagination(results, pag)
-		if truncated {
-			fmt.Fprintf(os.Stderr, "Showing %d ready issues; more matched but were hidden by --limit. Use --limit 0 for all, or --limit N to raise the cap.\n", len(results))
-		}
+		return runReadyProxiedListJSON(ctx, uw, in)
+	}
+	return runReadyProxiedListHuman(ctx, uw, in)
+}
+
+func runReadyProxiedListJSON(ctx context.Context, uw uow.UnitOfWork, in readyInput) error {
+	page, err := uw.IssueUseCase().GetReadyWorkWithCounts(ctx, in.filter)
+	if err != nil {
+		return HandleError("%v", err)
+	}
+	// The same epilogue issueops.Reader.Ready runs, through the same
+	// function: this seam reports a has-more natively and ready has no
+	// display order, so the trim is a no-op and the verdict is the seam's
+	// — but it is reached the one way, not restated here.
+	results, truncated := workapi.FinishPage(page.Items, "", false, in.filter.Limit, page.HasMore)
+	truncated = truncated && in.filter.Limit > 0
+	_ = outputJSONWithPagination(results, proxiedReadyPagination(ctx, in, results, truncated))
+	if truncated {
+		fmt.Fprintf(os.Stderr, "Showing %d ready issues; more matched but were hidden by --limit. Use --limit 0 for all, or --limit N to raise the cap.\n", len(results))
+	}
+	return nil
+}
+
+func proxiedReadyPagination(ctx context.Context, in readyInput, results []*types.IssueWithCounts, truncated bool) *PaginationMeta {
+	if !truncated {
 		return nil
 	}
 
+	// Parity with the direct route: the pagination key is emitted only
+	// when truncated, and it now carries the same Total, from the same
+	// role. This route published no total at all until ReadyCounter
+	// existed, so a script that read `pagination.total` got one number
+	// under a direct-mode workspace and no key at all under a proxied one.
+	//
+	// The guard is the direct route's guard: the two queries are not one
+	// snapshot (issueops.ReadyCounter.CountReady), so a close landing
+	// between them must not publish a total smaller than the page beside
+	// it.
+	pag := &PaginationMeta{Returned: len(results), Truncated: true}
+	if n, countErr := proxiedReadyTotal(ctx, in); countErr == nil && n > len(results) {
+		pag.Total = n
+	}
+	return pag
+}
+
+func runReadyProxiedListHuman(ctx context.Context, uw uow.UnitOfWork, in readyInput) error {
 	page, err := uw.IssueUseCase().GetReadyWork(ctx, in.filter)
 	if err != nil {
 		return HandleError("%v", err)
@@ -149,44 +157,56 @@ func runReadyProxiedList(ctx context.Context, uw uow.UnitOfWork, in readyInput) 
 	maybeShowUpgradeNotification()
 
 	if len(issues) == 0 {
-		hasOpenIssues := false
-		if stats, statsErr := uw.IssueUseCase().GetStatistics(ctx); statsErr == nil {
-			hasOpenIssues = stats.OpenIssues > 0 || stats.InProgressIssues > 0
-		}
-		hasStoredBlocked := false
-		st := types.StatusBlocked
-		if page, err := uw.IssueUseCase().SearchIssues(ctx, "", types.IssueFilter{Status: &st, Limit: 1}); err == nil && len(page.Items) > 0 {
-			hasStoredBlocked = true
-		}
-		printReadyEmptyHuman(hasOpenIssues, hasStoredBlocked)
+		showReadyProxiedEmpty(ctx, uw)
 		return nil
 	}
 
 	parentEpicMap := buildParentEpicMapProxied(ctx, uw, issues)
-	usePlain := in.plainFormat || !in.prettyFormat
-	if usePlain {
-		fmt.Printf("\n%s Ready work (%d issues with no active blockers):\n\n", ui.RenderAccent("▸"), len(issues))
-		for i, issue := range issues {
-			fmt.Printf("%d. [%s] [%s] %s: %s\n", i+1,
-				ui.RenderPriority(issue.Priority),
-				ui.RenderType(string(issue.IssueType)),
-				ui.RenderID(issue.ID), issue.Title)
-			if issue.EstimatedMinutes != nil {
-				fmt.Printf("   Estimate: %d min\n", *issue.EstimatedMinutes)
-			}
-			if issue.Assignee != "" {
-				fmt.Printf("   Assignee: %s\n", issue.Assignee)
-			}
-		}
-		fmt.Println()
-	} else {
-		displayReadyList(issues, parentEpicMap)
-	}
+	printReadyProxiedIssues(issues, parentEpicMap, in.plainFormat || !in.prettyFormat)
 
 	if truncated {
-		fmt.Printf("%s\n\n", ui.RenderMuted(fmt.Sprintf("Showing %d ready issues; more matched but were hidden by --limit. Use --limit 0 for all, or --limit N to raise the cap.", len(issues))))
+		printReadyProxiedTruncation(len(issues))
 	}
 	return nil
+}
+
+func showReadyProxiedEmpty(ctx context.Context, uw uow.UnitOfWork) {
+	hasOpenIssues := false
+	if stats, err := uw.IssueUseCase().GetStatistics(ctx); err == nil {
+		hasOpenIssues = stats.OpenIssues > 0 || stats.InProgressIssues > 0
+	}
+	hasStoredBlocked := false
+	st := types.StatusBlocked
+	if page, err := uw.IssueUseCase().SearchIssues(ctx, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Status: &st, Limit: 1}}); err == nil && len(page.Items) > 0 {
+		hasStoredBlocked = true
+	}
+	printReadyEmptyHuman(hasOpenIssues, hasStoredBlocked)
+}
+
+func printReadyProxiedIssues(issues []*types.Issue, parentEpicMap map[string]string, plain bool) {
+	if !plain {
+		displayReadyList(issues, parentEpicMap)
+		return
+	}
+
+	fmt.Printf("\n%s Ready work (%d issues with no active blockers):\n\n", ui.RenderAccent("▸"), len(issues))
+	for i, issue := range issues {
+		fmt.Printf("%d. [%s] [%s] %s: %s\n", i+1,
+			ui.RenderPriority(issue.Priority),
+			ui.RenderType(string(issue.IssueType)),
+			ui.RenderID(issue.ID), issue.Title)
+		if issue.EstimatedMinutes != nil {
+			fmt.Printf("   Estimate: %d min\n", *issue.EstimatedMinutes)
+		}
+		if issue.Assignee != "" {
+			fmt.Printf("   Assignee: %s\n", issue.Assignee)
+		}
+	}
+	fmt.Println()
+}
+
+func printReadyProxiedTruncation(issueCount int) {
+	fmt.Printf("%s\n\n", ui.RenderMuted(fmt.Sprintf("Showing %d ready issues; more matched but were hidden by --limit. Use --limit 0 for all, or --limit N to raise the cap.", issueCount)))
 }
 
 // runReadyProxiedClaim is the proxied route of `bd ready --claim`, on the same
@@ -196,7 +216,9 @@ func runReadyProxiedList(ctx context.Context, uw uow.UnitOfWork, in readyInput) 
 // IS the transaction, which is what lets the selection, the compare-and-set
 // and the hydration this route prints share it.
 func runReadyProxiedClaim(ctx context.Context, in readyInput) error {
-	CheckReadonly("ready --claim")
+	if err := CheckReadonly("ready --claim"); err != nil {
+		return err
+	}
 
 	claimer, err := proxiedReadyClaimer()
 	if err != nil {
@@ -234,12 +256,12 @@ func runReadyProxiedClaim(ctx context.Context, in readyInput) error {
 // so the count runs in its own read-only unit of work rather than the one the
 // page came from, which is why the two are not one snapshot.
 func proxiedReadyTotal(ctx context.Context, in readyInput) (int, error) {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return 0, errors.New("proxied-server UOW provider not initialized")
 	}
-	src, ok := uowProvider.(uow.ReadyCounterSource)
+	src, ok := getUOWProvider().(uow.ReadyCounterSource)
 	if !ok {
-		return 0, fmt.Errorf("proxied-server provider %T does not offer the ready-count surface", uowProvider)
+		return 0, fmt.Errorf("proxied-server provider %T does not offer the ready-count surface", getUOWProvider())
 	}
 	counter, err := src.ReadyCounter()
 	if err != nil {
@@ -257,43 +279,71 @@ func proxiedReadyTotal(ctx context.Context, in readyInput) (int, error) {
 // the same two-step proxiedIssueReader performs, and for the same reason: the
 // accessor is where a decorator adds its layer.
 func proxiedReadyClaimer() (issueops.ReadyClaimer, error) {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return nil, errors.New("proxied-server UOW provider not initialized")
 	}
-	src, ok := uowProvider.(uow.ReadyClaimerSource)
+	src, ok := getUOWProvider().(uow.ReadyClaimerSource)
 	if !ok {
-		return nil, fmt.Errorf("proxied-server provider %T does not offer the ready-claim surface", uowProvider)
+		return nil, fmt.Errorf("proxied-server provider %T does not offer the ready-claim surface", getUOWProvider())
 	}
 	return src.ReadyClaimer()
 }
 
 func runReadyProxiedExplain(ctx context.Context, uw uow.UnitOfWork, _ readyInput) error {
-	filter, err := readyExplainFilter()
+	data, err := loadReadyExplanationDataProxied(ctx, uw)
 	if err != nil {
 		return HandleErrorRespectJSON("%v", err)
 	}
+	explanation := types.BuildReadyExplanation(
+		data.readyIssues,
+		data.blockedIssues,
+		data.depCounts,
+		data.allDeps,
+		data.blockerMap,
+		data.cycles,
+	)
+
+	if isJSONOutput() {
+		_ = outputJSON(explanation)
+		return nil
+	}
+	renderReadyExplanation(explanation)
+	return nil
+}
+
+func loadReadyExplanationDataProxied(ctx context.Context, uw uow.UnitOfWork) (readyExplanationData, error) {
+	filter, err := readyExplainFilter()
+	if err != nil {
+		return readyExplanationData{}, err
+	}
 	readyPage, err := uw.IssueUseCase().GetReadyWork(ctx, filter)
 	if err != nil {
-		return HandleErrorRespectJSON("%v", err)
+		return readyExplanationData{}, err
 	}
 	readyIssues := readyPage.Items
 
 	blockedIssues, err := uw.IssueUseCase().GetBlockedIssues(ctx, types.WorkFilter{})
 	if err != nil {
-		return HandleErrorRespectJSON("%v", err)
+		return readyExplanationData{}, err
 	}
 
-	readyIDs := make([]string, len(readyIssues))
-	for i, issue := range readyIssues {
-		readyIDs[i] = issue.ID
-	}
-	depCountsMap, err := uw.DependencyUseCase().CountsByIssueIDs(ctx, readyIDs)
+	readyIDs := readyExplanationIssueIDs(readyIssues)
+	depCounts, allDeps, cycles := loadReadyExplanationDependenciesProxied(ctx, uw, readyIDs)
+	blockerMap := loadReadyExplanationBlockersProxied(ctx, uw, blockedIssues)
+	return readyExplanationData{
+		readyIssues:   readyIssues,
+		blockedIssues: blockedIssues,
+		depCounts:     depCounts,
+		allDeps:       allDeps,
+		blockerMap:    blockerMap,
+		cycles:        cycles,
+	}, nil
+}
+
+func loadReadyExplanationDependenciesProxied(ctx context.Context, uw uow.UnitOfWork, readyIDs []string) (map[string]*types.DependencyCounts, map[string][]*types.Dependency, [][]*types.Issue) {
+	depCounts, err := uw.DependencyUseCase().CountsByIssueIDs(ctx, readyIDs)
 	if err != nil {
 		debug.Logf("warning: failed to get dependency counts: %v", err)
-	}
-	depCounts := make(map[string]*types.DependencyCounts, len(depCountsMap))
-	for k, v := range depCountsMap {
-		depCounts[k] = v
 	}
 	allDeps, err := uw.DependencyUseCase().GetForIssueIDs(ctx, readyIDs)
 	if err != nil {
@@ -304,22 +354,16 @@ func runReadyProxiedExplain(ctx context.Context, uw uow.UnitOfWork, _ readyInput
 	if err != nil {
 		debug.Logf("warning: failed to detect cycles: %v", err)
 	}
+	return depCounts, allDeps, cycles
+}
 
-	allBlockerIDs := make(map[string]bool)
-	for _, bi := range blockedIssues {
-		for _, blockerID := range bi.BlockedBy {
-			allBlockerIDs[blockerID] = true
-		}
-	}
-	blockerIDList := make([]string, 0, len(allBlockerIDs))
-	for id := range allBlockerIDs {
-		blockerIDList = append(blockerIDList, id)
-	}
-	blockerIssues, err := uw.IssueUseCase().GetIssuesByIDs(ctx, blockerIDList)
+func loadReadyExplanationBlockersProxied(ctx context.Context, uw uow.UnitOfWork, blockedIssues []*types.BlockedIssue) map[string]*types.Issue {
+	blockerIDs := readyExplanationBlockerIDs(blockedIssues)
+	blockerIssues, err := uw.IssueUseCase().GetIssuesByIDs(ctx, blockerIDs)
 	if err != nil {
 		debug.Logf("warning: failed to get blocker issues: %v", err)
 	}
-	blockerWisps, err := uw.IssueUseCase().GetWispsByIDs(ctx, blockerIDList)
+	blockerWisps, err := uw.IssueUseCase().GetWispsByIDs(ctx, blockerIDs)
 	if err != nil {
 		debug.Logf("warning: failed to get blocker wisps: %v", err)
 	}
@@ -330,64 +374,7 @@ func runReadyProxiedExplain(ctx context.Context, uw uow.UnitOfWork, _ readyInput
 	for _, wisp := range blockerWisps {
 		blockerMap[wisp.ID] = wisp
 	}
-
-	explanation := types.BuildReadyExplanation(readyIssues, blockedIssues, depCounts, allDeps, blockerMap, cycles)
-
-	if jsonOutput {
-		_ = outputJSON(explanation)
-		return nil
-	}
-
-	fmt.Printf("\n%s Ready Work Explanation\n\n", ui.RenderAccent("▸"))
-	if len(explanation.Ready) > 0 {
-		fmt.Printf("%s Ready (%d issues):\n\n", ui.RenderPass("●"), len(explanation.Ready))
-		for _, item := range explanation.Ready {
-			fmt.Printf("  %s [%s] %s\n",
-				ui.RenderID(item.ID),
-				ui.RenderPriority(item.Priority),
-				item.Title)
-			fmt.Printf("    Reason: %s\n", item.Reason)
-			if len(item.ResolvedBlockers) > 0 {
-				fmt.Printf("    Resolved blockers: %s\n", strings.Join(item.ResolvedBlockers, ", "))
-			}
-			if item.DependentCount > 0 {
-				fmt.Printf("    Unblocks: %d issue(s)\n", item.DependentCount)
-			}
-			fmt.Println()
-		}
-	} else {
-		fmt.Printf("%s No ready work\n\n", ui.RenderWarn("○"))
-	}
-	if len(explanation.Blocked) > 0 {
-		fmt.Printf("%s Blocked (%d issues):\n\n", ui.RenderFail("●"), len(explanation.Blocked))
-		for _, item := range explanation.Blocked {
-			fmt.Printf("  %s [%s] %s\n",
-				ui.RenderID(item.ID),
-				ui.RenderPriority(item.Priority),
-				item.Title)
-			for _, blocker := range item.BlockedBy {
-				fmt.Printf("    ← blocked by %s: %s [%s]\n",
-					ui.RenderID(blocker.ID), blocker.Title, blocker.Status)
-			}
-			fmt.Println()
-		}
-	}
-	if len(explanation.Cycles) > 0 {
-		fmt.Printf("%s Cycles detected (%d):\n\n", ui.RenderFail("⚠"), len(explanation.Cycles))
-		for _, cycle := range explanation.Cycles {
-			fmt.Printf("  %s → %s\n", strings.Join(cycle, " → "), cycle[0])
-		}
-		fmt.Println()
-	}
-	fmt.Printf("%s Summary: %d ready, %d blocked",
-		ui.RenderMuted("─"),
-		explanation.Summary.TotalReady,
-		explanation.Summary.TotalBlocked)
-	if explanation.Summary.CycleCount > 0 {
-		fmt.Printf(", %d cycle(s)", explanation.Summary.CycleCount)
-	}
-	fmt.Printf("\n\n")
-	return nil
+	return blockerMap
 }
 
 func runReadyProxiedMolecule(ctx context.Context, uw uow.UnitOfWork, in readyInput) error {
@@ -398,78 +385,20 @@ func runReadyProxiedMolecule(ctx context.Context, uw uow.UnitOfWork, in readyInp
 	}
 
 	analysis := analyzeMoleculeParallel(subgraph)
-
-	var readySteps []*MoleculeReadyStep
-	for _, issue := range subgraph.Issues {
-		info := analysis.Steps[issue.ID]
-		if info != nil && info.IsReady {
-			readySteps = append(readySteps, &MoleculeReadyStep{
-				Issue:         issue,
-				ParallelInfo:  info,
-				ParallelGroup: info.ParallelGroup,
-			})
-		}
-	}
+	readySteps := collectReadyMoleculeSteps(subgraph, analysis)
 
 	if in.jsonOut {
-		output := MoleculeReadyOutput{
+		_ = outputJSON(MoleculeReadyOutput{
 			MoleculeID:     moleculeID,
 			MoleculeTitle:  subgraph.Root.Title,
 			TotalSteps:     analysis.TotalSteps,
 			ReadySteps:     len(readySteps),
 			Steps:          readySteps,
 			ParallelGroups: analysis.ParallelGroups,
-		}
-		_ = outputJSON(output)
+		})
 		return nil
 	}
-
-	fmt.Printf("\n%s Ready steps in molecule: %s\n", ui.RenderAccent("🧪"), subgraph.Root.Title)
-	fmt.Printf("   ID: %s\n", moleculeID)
-	fmt.Printf("   Total: %d steps, %d ready\n", analysis.TotalSteps, len(readySteps))
-	if len(readySteps) == 0 {
-		fmt.Printf("\n%s No ready steps (all blocked or completed)\n\n", ui.RenderWarn("○"))
-		return nil
-	}
-	if len(analysis.ParallelGroups) > 0 {
-		fmt.Printf("\n%s Parallel Groups:\n", ui.RenderPass("⚡"))
-		for groupName, members := range analysis.ParallelGroups {
-			readyInGroup := 0
-			for _, id := range members {
-				if info := analysis.Steps[id]; info != nil && info.IsReady {
-					readyInGroup++
-				}
-			}
-			if readyInGroup > 0 {
-				fmt.Printf("   %s: %d ready\n", groupName, readyInGroup)
-			}
-		}
-	}
-	fmt.Printf("\n%s Ready steps:\n\n", ui.RenderPass("▸"))
-	for i, step := range readySteps {
-		groupAnnotation := ""
-		if step.ParallelGroup != "" {
-			groupAnnotation = fmt.Sprintf(" [%s]", ui.RenderAccent(step.ParallelGroup))
-		}
-		fmt.Printf("%d. [%s] [%s] %s: %s%s\n", i+1,
-			ui.RenderPriority(step.Issue.Priority),
-			ui.RenderType(string(step.Issue.IssueType)),
-			ui.RenderID(step.Issue.ID),
-			step.Issue.Title,
-			groupAnnotation)
-		if len(step.ParallelInfo.CanParallel) > 0 {
-			readyParallel := []string{}
-			for _, pID := range step.ParallelInfo.CanParallel {
-				if pInfo := analysis.Steps[pID]; pInfo != nil && pInfo.IsReady {
-					readyParallel = append(readyParallel, pID)
-				}
-			}
-			if len(readyParallel) > 0 {
-				fmt.Printf("   Can run with: %v\n", readyParallel)
-			}
-		}
-	}
-	fmt.Println()
+	renderMoleculeReadyHuman(moleculeID, subgraph, analysis, readySteps)
 	return nil
 }
 
@@ -493,19 +422,30 @@ func buildParentEpicMapProxied(ctx context.Context, uw uow.UnitOfWork, issues []
 	if err != nil {
 		return nil
 	}
+	parentIDs, childToParent := proxiedParentEpicRelationships(allDeps)
+	if len(parentIDs) == 0 {
+		return nil
+	}
+	epicTitles := loadProxiedEpicTitles(ctx, uw, parentIDs)
+	return mapChildrenToEpicTitles(childToParent, epicTitles)
+}
+
+func proxiedParentEpicRelationships(allDeps map[string][]*types.Dependency) (map[string]bool, map[string]string) {
 	parentIDs := make(map[string]bool)
 	childToParent := make(map[string]string)
 	for issueID, deps := range allDeps {
 		for _, dep := range deps {
-			if dep.Type == types.DepParentChild {
-				parentIDs[dep.DependsOnID] = true
-				childToParent[issueID] = dep.DependsOnID
+			if dep.Type != types.DepParentChild {
+				continue
 			}
+			parentIDs[dep.DependsOnID] = true
+			childToParent[issueID] = dep.DependsOnID
 		}
 	}
-	if len(parentIDs) == 0 {
-		return nil
-	}
+	return parentIDs, childToParent
+}
+
+func loadProxiedEpicTitles(ctx context.Context, uw uow.UnitOfWork, parentIDs map[string]bool) map[string]string {
 	epicTitles := make(map[string]string)
 	for parentID := range parentIDs {
 		parent, err := uw.IssueUseCase().GetIssue(ctx, parentID)
@@ -516,11 +456,5 @@ func buildParentEpicMapProxied(ctx context.Context, uw uow.UnitOfWork, issues []
 			epicTitles[parentID] = parent.Title
 		}
 	}
-	result := make(map[string]string)
-	for childID, parentID := range childToParent {
-		if title, ok := epicTitles[parentID]; ok {
-			result[childID] = title
-		}
-	}
-	return result
+	return epicTitles
 }

@@ -59,7 +59,7 @@ Examples:
 		details, _ := cmd.Flags().GetBool("details")
 
 		if usesProxiedServer() {
-			return runOrphansProxiedServer(rootCtx, labels, labelsAny, fix, details)
+			return runOrphansProxiedServer(getRootContext(), labels, labelsAny, fix, details)
 		}
 
 		orphans, err := findOrphanedIssues(".", labels, labelsAny)
@@ -72,53 +72,71 @@ Examples:
 }
 
 func reportOrphans(orphans []orphanIssueOutput, fix, details bool) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(orphans)
 	}
 
 	if len(orphans) == 0 {
-		fmt.Printf("%s No orphaned issues found\n", ui.RenderPass("✓"))
+		renderNoOrphans()
 		return nil
 	}
-
-	fmt.Printf("\n%s Found %d orphaned issue(s):\n\n", ui.RenderWarn("⚠"), len(orphans))
 
 	sort.Slice(orphans, func(i, j int) bool {
 		return orphans[i].IssueID < orphans[j].IssueID
 	})
-
-	for i, orphan := range orphans {
-		fmt.Printf("%d. %s: %s\n", i+1, ui.RenderID(orphan.IssueID), orphan.Title)
-		fmt.Printf("   Status: %s\n", orphan.Status)
-		if details && orphan.LatestCommit != "" {
-			fmt.Printf("   Latest commit: %s - %s\n", orphan.LatestCommit, orphan.LatestCommitMessage)
-		}
-	}
+	renderOrphanList(orphans, details)
 
 	if fix {
-		fmt.Println()
-		fmt.Printf("This will close %d orphaned issue(s). Continue? (Y/n): ", len(orphans))
-		var response string
-		_, _ = fmt.Scanln(&response)
-		response = strings.ToLower(strings.TrimSpace(response))
-		if response != "" && response != "y" && response != "yes" {
-			fmt.Println("Canceled.")
-			return nil
-		}
-
-		closedCount := 0
-		for _, orphan := range orphans {
-			err := closeIssue(orphan.IssueID)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error closing %s: %v\n", orphan.IssueID, err)
-			} else {
-				fmt.Printf("✓ Closed %s\n", orphan.IssueID)
-				closedCount++
-			}
-		}
-		fmt.Printf("\nClosed %d issue(s)\n", closedCount)
+		return fixOrphans(orphans)
 	}
 	return nil
+}
+
+func renderNoOrphans() {
+	fmt.Printf("%s No orphaned issues found\n", ui.RenderPass("✓"))
+}
+
+func renderOrphanList(orphans []orphanIssueOutput, details bool) {
+	fmt.Printf("\n%s Found %d orphaned issue(s):\n\n", ui.RenderWarn("⚠"), len(orphans))
+	for i, orphan := range orphans {
+		renderOrphan(i+1, orphan, details)
+	}
+}
+
+func renderOrphan(number int, orphan orphanIssueOutput, details bool) {
+	fmt.Printf("%d. %s: %s\n", number, ui.RenderID(orphan.IssueID), orphan.Title)
+	fmt.Printf("   Status: %s\n", orphan.Status)
+	if details && orphan.LatestCommit != "" {
+		fmt.Printf("   Latest commit: %s - %s\n", orphan.LatestCommit, orphan.LatestCommitMessage)
+	}
+}
+
+func fixOrphans(orphans []orphanIssueOutput) error {
+	fmt.Println()
+	fmt.Printf("This will close %d orphaned issue(s). Continue? (Y/n): ", len(orphans))
+	var response string
+	_, _ = fmt.Scanln(&response)
+	response = strings.ToLower(strings.TrimSpace(response))
+	if response != "" && response != "y" && response != "yes" {
+		fmt.Println("Canceled.")
+		return nil
+	}
+
+	closedCount := 0
+	for _, orphan := range orphans {
+		if err := closeOrphan(orphan); err != nil {
+			fmt.Fprintf(os.Stderr, "Error closing %s: %v\n", orphan.IssueID, err)
+			continue
+		}
+		fmt.Printf("✓ Closed %s\n", orphan.IssueID)
+		closedCount++
+	}
+	fmt.Printf("\nClosed %d issue(s)\n", closedCount)
+	return nil
+}
+
+func closeOrphan(orphan orphanIssueOutput) error {
+	return closeIssue(orphan.IssueID)
 }
 
 // orphanIssueOutput is the JSON output format for orphaned issues
@@ -138,19 +156,23 @@ type doltStoreProvider struct {
 
 func (p *doltStoreProvider) GetOpenIssues(ctx context.Context) ([]*types.Issue, error) {
 	openStatus := types.StatusOpen
-	openIssues, err := store.SearchIssues(ctx, "", types.IssueFilter{
-		Status:    &openStatus,
-		Labels:    p.labels,
-		LabelsAny: p.labelsAny,
+	openIssues, err := getStore().SearchIssues(ctx, "", types.IssueFilter{
+		IssueFilterCore: types.IssueFilterCore{
+			Status:    &openStatus,
+			Labels:    p.labels,
+			LabelsAny: p.labelsAny,
+		},
 	})
 	if err != nil {
 		return nil, err
 	}
 	inProgressStatus := types.StatusInProgress
-	inProgressIssues, err := store.SearchIssues(ctx, "", types.IssueFilter{
-		Status:    &inProgressStatus,
-		Labels:    p.labels,
-		LabelsAny: p.labelsAny,
+	inProgressIssues, err := getStore().SearchIssues(ctx, "", types.IssueFilter{
+		IssueFilterCore: types.IssueFilterCore{
+			Status:    &inProgressStatus,
+			Labels:    p.labels,
+			LabelsAny: p.labelsAny,
+		},
 	})
 	if err != nil {
 		return nil, err
@@ -165,7 +187,7 @@ func (p *doltStoreProvider) GetIssuePrefix() string {
 		return yamlPrefix
 	}
 	ctx := context.Background()
-	prefix, err := store.GetConfig(ctx, "issue_prefix")
+	prefix, err := getStore().GetConfig(ctx, "issue_prefix")
 	if err != nil || prefix == "" {
 		return "bd"
 	}
@@ -175,7 +197,7 @@ func (p *doltStoreProvider) GetIssuePrefix() string {
 // getIssueProviderFn is the function used to create an IssueProvider.
 // It is a variable so tests can substitute a mock without needing a real store.
 var getIssueProviderFn = func(labels, labelsAny []string) (types.IssueProvider, func(), error) {
-	if store != nil {
+	if getStore() != nil {
 		return &doltStoreProvider{labels: labels, labelsAny: labelsAny}, func() {}, nil
 	}
 	return nil, nil, fmt.Errorf("no database available")

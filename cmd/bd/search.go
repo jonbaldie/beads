@@ -51,7 +51,7 @@ Examples:
 		}()
 
 		if usesProxiedServer() {
-			return runSearchProxiedServer(cmd, rootCtx, args)
+			return runSearchProxiedServer(cmd, getRootContext(), args)
 		}
 
 		queryFlag, _ := cmd.Flags().GetString("query")
@@ -108,11 +108,13 @@ Examples:
 
 		// Build filter
 		filter := types.IssueFilter{
-			Limit: limit,
+			IssueFilterCore: types.IssueFilterCore{
+				Limit: limit,
+			},
 		}
 
 		if status != "" && status != "all" {
-			cfg, err := workapi.LoadStoreListConfig(rootCtx, store)
+			cfg, err := workapi.LoadStoreListConfig(getRootContext(), getStore())
 			if err != nil {
 				return HandleError("loading status configuration: %v", err)
 			}
@@ -247,9 +249,9 @@ Examples:
 			filter.HasMetadataKey = hasMetadataKey
 		}
 
-		ctx := rootCtx
+		ctx := getRootContext()
 
-		issues, err := store.SearchIssues(ctx, query, filter)
+		issues, err := getStore().SearchIssues(ctx, query, filter)
 		if err != nil {
 			return HandleError("%v", err)
 		}
@@ -257,23 +259,23 @@ Examples:
 		// Apply sorting
 		workapi.SortIssues(issues, sortBy, reverse)
 
-		if jsonOutput {
+		if isJSONOutput() {
 			// Get labels and dependency counts
 			issueIDs := make([]string, len(issues))
 			for i, issue := range issues {
 				issueIDs[i] = issue.ID
 			}
-			labelsMap, err := store.GetLabelsForIssues(ctx, issueIDs)
+			labelsMap, err := getStore().GetLabelsForIssues(ctx, issueIDs)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: failed to get labels: %v\n", err)
 				labelsMap = make(map[string][]string)
 			}
-			depCounts, err := store.GetDependencyCounts(ctx, issueIDs)
+			depCounts, err := getStore().GetDependencyCounts(ctx, issueIDs)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: failed to get dependency counts: %v\n", err)
 				depCounts = make(map[string]*types.DependencyCounts)
 			}
-			commentCounts, err := store.GetCommentCounts(ctx, issueIDs)
+			commentCounts, err := getStore().GetCommentCounts(ctx, issueIDs)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: failed to get comment counts: %v\n", err)
 				commentCounts = make(map[string]int)
@@ -306,7 +308,7 @@ Examples:
 		for i, issue := range issues {
 			issueIDs[i] = issue.ID
 		}
-		labelsMap, _ := store.GetLabelsForIssues(ctx, issueIDs)
+		labelsMap, _ := getStore().GetLabelsForIssues(ctx, issueIDs)
 		for _, issue := range issues {
 			issue.Labels = labelsMap[issue.ID]
 		}

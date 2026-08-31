@@ -74,7 +74,7 @@ Examples:
 		jsonFormat, _ := cmd.Flags().GetBool("json")
 
 		if jsonFormat {
-			jsonOutput = true
+			setJSONOutput(true)
 		}
 
 		reporter, err := openStatsReporter()
@@ -87,9 +87,9 @@ Examples:
 			// --no-blocked is not consulted here, and never was: an
 			// assignee-scoped summary computes both numbers by a route that has
 			// no fast path (issueops.StatsReporter.AssigneeStats).
-			result, err = reporter.AssigneeStats(rootCtx, issueops.AssigneeStatsRequest{Assignee: actor})
+			result, err = reporter.AssigneeStats(getRootContext(), issueops.AssigneeStatsRequest{Assignee: getActor()})
 		} else {
-			result, err = reporter.Stats(rootCtx, issueops.StatsRequest{SkipBlocked: noBlocked})
+			result, err = reporter.Stats(getRootContext(), issueops.StatsRequest{SkipBlocked: noBlocked})
 			if err == nil && noBlocked && result.Summary.BlockedIssues != nil {
 				// Derived from the ANSWER rather than from the route: the two
 				// routes differ on it today (the unit-of-work seam publishes no
@@ -117,7 +117,7 @@ func openStatsReporter() (issueops.StatsReporter, error) {
 	if usesProxiedServer() {
 		return proxiedStatsReporter()
 	}
-	return store.StatsReporter()
+	return getStore().StatsReporter()
 }
 
 func renderStatus(stats *types.Statistics, recentActivity *RecentActivitySummary) error {
@@ -127,10 +127,20 @@ func renderStatus(stats *types.Statistics, recentActivity *RecentActivitySummary
 		RecentActivity:      recentActivity,
 	}
 
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(output)
 	}
 
+	renderStatusSummary(stats)
+	renderStatusExtended(stats)
+	renderStatusActivity(recentActivity)
+	fmt.Printf("\nFor more details, use 'bd list' to see individual issues.\n")
+	fmt.Println()
+
+	return nil
+}
+
+func renderStatusSummary(stats *types.Statistics) {
 	// Human-readable colorized output using semantic ui package
 	fmt.Printf("\n%s Issue Database Status\n\n", ui.RenderAccent("▸"))
 	fmt.Printf("Summary:\n")
@@ -142,7 +152,7 @@ func renderStatus(stats *types.Statistics, recentActivity *RecentActivitySummary
 	// when --no-blocked was also passed, so the flag alone would misrender those
 	// as skipped.
 	if stats.BlockedIssues == nil {
-		fmt.Printf("  Blocked:                %s\n", ui.MutedStyle.Render("(skipped)"))
+		fmt.Printf("  Blocked:                %s\n", ui.MutedStyle().Render("(skipped)"))
 	} else if *stats.BlockedIssues > 0 {
 		fmt.Printf("  Blocked:                %s\n", ui.RenderFail(fmt.Sprintf("%d", *stats.BlockedIssues)))
 	} else {
@@ -150,11 +160,13 @@ func renderStatus(stats *types.Statistics, recentActivity *RecentActivitySummary
 	}
 	fmt.Printf("  Closed:                 %d\n", stats.ClosedIssues)
 	if stats.ReadyIssues == nil {
-		fmt.Printf("  Ready to Work:          %s\n", ui.MutedStyle.Render("(skipped)"))
+		fmt.Printf("  Ready to Work:          %s\n", ui.MutedStyle().Render("(skipped)"))
 	} else {
 		fmt.Printf("  Ready to Work:          %s\n", ui.RenderPass(fmt.Sprintf("%d", *stats.ReadyIssues)))
 	}
+}
 
+func renderStatusExtended(stats *types.Statistics) {
 	// Extended statistics (only show if non-zero)
 	hasExtended := stats.PinnedIssues > 0 ||
 		stats.EpicsEligibleForClosure > 0 || stats.AverageLeadTime > 0
@@ -170,7 +182,9 @@ func renderStatus(stats *types.Statistics, recentActivity *RecentActivitySummary
 			fmt.Printf("  Avg Lead Time:          %.1f hours\n", stats.AverageLeadTime)
 		}
 	}
+}
 
+func renderStatusActivity(recentActivity *RecentActivitySummary) {
 	if recentActivity != nil {
 		fmt.Printf("\nRecent Activity (last %d hours):\n", recentActivity.HoursTracked)
 		fmt.Printf("  Commits:                %d\n", recentActivity.CommitCount)
@@ -180,11 +194,6 @@ func renderStatus(stats *types.Statistics, recentActivity *RecentActivitySummary
 		fmt.Printf("  Issues Reopened:        %d\n", recentActivity.IssuesReopened)
 		fmt.Printf("  Issues Updated:         %d\n", recentActivity.IssuesUpdated)
 	}
-
-	fmt.Printf("\nFor more details, use 'bd list' to see individual issues.\n")
-	fmt.Println()
-
-	return nil
 }
 
 // getGitActivity returns recent activity statistics.

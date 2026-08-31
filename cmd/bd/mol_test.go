@@ -135,13 +135,17 @@ func TestCollectSubgraphText(t *testing.T) {
 	subgraph := &MoleculeSubgraph{
 		Issues: []*types.Issue{
 			{
-				Title:       "Epic: Feature Auth",
-				Description: "Implement authentication",
-				Design:      "Use OAuth2",
+				IssueContent: types.IssueContent{
+					Title:       "Epic: Feature Auth",
+					Description: "Implement authentication",
+					Design:      "Use OAuth2",
+				},
 			},
 			{
-				Title: "Add login endpoint",
-				Notes: "See RFC 6749",
+				IssueContent: types.IssueContent{
+					Title: "Add login endpoint",
+					Notes: "See RFC 6749",
+				},
 			},
 		},
 	}
@@ -179,7 +183,7 @@ func TestIsProto(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			issue := &types.Issue{Labels: tt.labels}
+			issue := &types.Issue{IssueGraph: types.IssueGraph{Labels: tt.labels}}
 			got := isProto(issue)
 			if got != tt.want {
 				t.Errorf("isProto() = %v, want %v", got, tt.want)
@@ -228,18 +232,30 @@ func TestBondProtoProto(t *testing.T) {
 
 	// Create two protos
 	protoA := &types.Issue{
-		Title:     "Proto A",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
-		Labels:    []string{MoleculeLabel},
+		IssueContent: types.IssueContent{
+			Title: "Proto A",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{MoleculeLabel},
+		},
 	}
 	protoB := &types.Issue{
-		Title:     "Proto B",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeEpic,
-		Labels:    []string{MoleculeLabel},
+		IssueContent: types.IssueContent{
+			Title: "Proto B",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeEpic,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{MoleculeLabel},
+		},
 	}
 
 	if err := store.CreateIssue(ctx, protoA, "test"); err != nil {
@@ -304,22 +320,34 @@ func TestBondProtoMol(t *testing.T) {
 
 	// Create a proto with a child issue
 	proto := &types.Issue{
-		Title:     "Proto: {{name}}",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
-		Labels:    []string{MoleculeLabel},
+		IssueContent: types.IssueContent{
+			Title: "Proto: {{name}}",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{MoleculeLabel},
+		},
 	}
 	if err := store.CreateIssue(ctx, proto, "test"); err != nil {
 		t.Fatalf("Failed to create proto: %v", err)
 	}
 
 	protoChild := &types.Issue{
-		Title:     "Step 1 for {{name}}",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Labels:    []string{MoleculeLabel},
+		IssueContent: types.IssueContent{
+			Title: "Step 1 for {{name}}",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{MoleculeLabel},
+		},
 	}
 	if err := store.CreateIssue(ctx, protoChild, "test"); err != nil {
 		t.Fatalf("Failed to create proto child: %v", err)
@@ -336,10 +364,14 @@ func TestBondProtoMol(t *testing.T) {
 
 	// Create a molecule (existing epic)
 	mol := &types.Issue{
-		Title:     "Existing Work",
-		Status:    types.StatusInProgress,
-		Priority:  1,
-		IssueType: types.TypeEpic,
+		IssueContent: types.IssueContent{
+			Title: "Existing Work",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusInProgress,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
 	}
 	if err := store.CreateIssue(ctx, mol, "test"); err != nil {
 		t.Fatalf("Failed to create molecule: %v", err)
@@ -347,7 +379,7 @@ func TestBondProtoMol(t *testing.T) {
 
 	// Bond proto to molecule
 	vars := map[string]string{"name": "auth-feature"}
-	result, err := bondProtoMol(ctx, store, proto, mol, types.BondTypeSequential, vars, "", "test", false, false)
+	result, err := bondProtoMol(ctx, store, proto, mol, newBondAttachmentOptions(types.BondTypeSequential, vars, "", "test", false, false))
 	if err != nil {
 		t.Fatalf("bondProtoMol failed: %v", err)
 	}
@@ -377,16 +409,24 @@ func TestBondMolMol(t *testing.T) {
 
 	// Create two molecules
 	molA := &types.Issue{
-		Title:     "Molecule A",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
+		IssueContent: types.IssueContent{
+			Title: "Molecule A",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
 	}
 	molB := &types.Issue{
-		Title:     "Molecule B",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeEpic,
+		IssueContent: types.IssueContent{
+			Title: "Molecule B",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeEpic,
+		},
 	}
 
 	if err := store.CreateIssue(ctx, molA, "test"); err != nil {
@@ -426,14 +466,22 @@ func TestBondMolMol(t *testing.T) {
 
 	// Test parallel bond (create new molecules)
 	molC := &types.Issue{
-		Title:     "Molecule C",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeEpic,
+		IssueContent: types.IssueContent{
+			Title: "Molecule C",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeEpic,
+		},
 	}
 	molD := &types.Issue{
-		Title:     "Molecule D",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeEpic,
+		IssueContent: types.IssueContent{
+			Title: "Molecule D",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeEpic,
+		},
 	}
 	if err := store.CreateIssue(ctx, molC, "test"); err != nil {
 		t.Fatalf("Failed to create molC: %v", err)
@@ -477,10 +525,14 @@ func TestSquashMolecule(t *testing.T) {
 
 	// Create a molecule (root issue)
 	root := &types.Issue{
-		Title:     "Test Molecule",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
+		IssueContent: types.IssueContent{
+			Title: "Test Molecule",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
 	}
 	if err := s.CreateIssue(ctx, root, "test"); err != nil {
 		t.Fatalf("Failed to create root: %v", err)
@@ -488,22 +540,38 @@ func TestSquashMolecule(t *testing.T) {
 
 	// Create ephemeral children
 	child1 := &types.Issue{
-		Title:       "Step 1: Design",
-		Description: "Design the architecture",
-		Status:      types.StatusClosed,
-		Priority:    2,
-		IssueType:   types.TypeTask,
-		Ephemeral:   true,
-		CloseReason: "Completed design",
+		IssueContent: types.IssueContent{
+			Title:       "Step 1: Design",
+			Description: "Design the architecture",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CloseReason: "Completed design",
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	child2 := &types.Issue{
-		Title:       "Step 2: Implement",
-		Description: "Build the feature",
-		Status:      types.StatusClosed,
-		Priority:    2,
-		IssueType:   types.TypeTask,
-		Ephemeral:   true,
-		CloseReason: "Code merged",
+		IssueContent: types.IssueContent{
+			Title:       "Step 2: Implement",
+			Description: "Build the feature",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CloseReason: "Code merged",
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 
 	if err := s.CreateIssue(ctx, child1, "test"); err != nil {
@@ -585,21 +653,31 @@ func TestSquashMoleculeWithDelete(t *testing.T) {
 
 	// Create a molecule with ephemeral children
 	root := &types.Issue{
-		Title:     "Delete Test Molecule",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
+		IssueContent: types.IssueContent{
+			Title: "Delete Test Molecule",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
 	}
 	if err := s.CreateIssue(ctx, root, "test"); err != nil {
 		t.Fatalf("Failed to create root: %v", err)
 	}
 
 	child := &types.Issue{
-		Title:     "Wisp Step",
-		Status:    types.StatusClosed,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueContent: types.IssueContent{
+			Title: "Wisp Step",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := s.CreateIssue(ctx, child, "test"); err != nil {
 		t.Fatalf("Failed to create child: %v", err)
@@ -637,19 +715,31 @@ func TestSquashMoleculeWithDelete(t *testing.T) {
 
 func TestGenerateDigest(t *testing.T) {
 	root := &types.Issue{
-		Title: "Test Molecule",
+		IssueContent: types.IssueContent{
+			Title: "Test Molecule",
+		},
 	}
 	children := []*types.Issue{
 		{
-			Title:       "Step 1",
-			Description: "First step description",
-			Status:      types.StatusClosed,
-			CloseReason: "Done",
+			IssueContent: types.IssueContent{
+				Title:       "Step 1",
+				Description: "First step description",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status: types.StatusClosed,
+			},
+			IssueTimes: types.IssueTimes{
+				CloseReason: "Done",
+			},
 		},
 		{
-			Title:       "Step 2",
-			Description: "Second step description that is longer",
-			Status:      types.StatusInProgress,
+			IssueContent: types.IssueContent{
+				Title:       "Step 2",
+				Description: "Second step description that is longer",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status: types.StatusInProgress,
+			},
 		},
 	}
 
@@ -694,23 +784,35 @@ func TestSquashMoleculeWithAgentSummary(t *testing.T) {
 
 	// Create a molecule with ephemeral child
 	root := &types.Issue{
-		Title:     "Agent Summary Test",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
+		IssueContent: types.IssueContent{
+			Title: "Agent Summary Test",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
 	}
 	if err := s.CreateIssue(ctx, root, "test"); err != nil {
 		t.Fatalf("Failed to create root: %v", err)
 	}
 
 	child := &types.Issue{
-		Title:       "Wisp Step",
-		Description: "This should NOT appear in digest",
-		Status:      types.StatusClosed,
-		Priority:    2,
-		IssueType:   types.TypeTask,
-		Ephemeral:   true,
-		CloseReason: "Done",
+		IssueContent: types.IssueContent{
+			Title:       "Wisp Step",
+			Description: "This should NOT appear in digest",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CloseReason: "Done",
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := s.CreateIssue(ctx, child, "test"); err != nil {
 		t.Fatalf("Failed to create child: %v", err)
@@ -765,22 +867,34 @@ func TestSquashWispMoleculeClearsRootEphemeral(t *testing.T) {
 
 	// Wisp molecule: root is ephemeral too (created via `bd mol wisp`).
 	root := &types.Issue{
-		Title:     "Wisp Molecule Root",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
-		Ephemeral: true,
+		IssueContent: types.IssueContent{
+			Title: "Wisp Molecule Root",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := s.CreateIssue(ctx, root, "test"); err != nil {
 		t.Fatalf("Failed to create ephemeral root: %v", err)
 	}
 
 	child := &types.Issue{
-		Title:     "Wisp Step",
-		Status:    types.StatusClosed,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueContent: types.IssueContent{
+			Title: "Wisp Step",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := s.CreateIssue(ctx, child, "test"); err != nil {
 		t.Fatalf("Failed to create child: %v", err)
@@ -832,21 +946,31 @@ func TestSpawnWithBasicAttach(t *testing.T) {
 
 	// Create primary proto with a child
 	primaryProto := &types.Issue{
-		Title:     "Primary: {{feature}}",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
-		Labels:    []string{MoleculeLabel},
+		IssueContent: types.IssueContent{
+			Title: "Primary: {{feature}}",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{MoleculeLabel},
+		},
 	}
 	if err := s.CreateIssue(ctx, primaryProto, "test"); err != nil {
 		t.Fatalf("Failed to create primary proto: %v", err)
 	}
 
 	primaryChild := &types.Issue{
-		Title:     "Step 1 for {{feature}}",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Step 1 for {{feature}}",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := s.CreateIssue(ctx, primaryChild, "test"); err != nil {
 		t.Fatalf("Failed to create primary child: %v", err)
@@ -861,21 +985,31 @@ func TestSpawnWithBasicAttach(t *testing.T) {
 
 	// Create attachment proto with a child
 	attachProto := &types.Issue{
-		Title:     "Attachment: {{feature}} docs",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeEpic,
-		Labels:    []string{MoleculeLabel},
+		IssueContent: types.IssueContent{
+			Title: "Attachment: {{feature}} docs",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeEpic,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{MoleculeLabel},
+		},
 	}
 	if err := s.CreateIssue(ctx, attachProto, "test"); err != nil {
 		t.Fatalf("Failed to create attach proto: %v", err)
 	}
 
 	attachChild := &types.Issue{
-		Title:     "Write docs for {{feature}}",
-		Status:    types.StatusOpen,
-		Priority:  3,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Write docs for {{feature}}",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  3,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := s.CreateIssue(ctx, attachChild, "test"); err != nil {
 		t.Fatalf("Failed to create attach child: %v", err)
@@ -911,7 +1045,7 @@ func TestSpawnWithBasicAttach(t *testing.T) {
 	}
 
 	// Attach the second proto (simulating --attach flag behavior)
-	bondResult, err := bondProtoMol(ctx, s, attachProto, spawnedMol, types.BondTypeSequential, vars, "", "test", false, false)
+	bondResult, err := bondProtoMol(ctx, s, attachProto, spawnedMol, newBondAttachmentOptions(types.BondTypeSequential, vars, "", "test", false, false))
 	if err != nil {
 		t.Fatalf("Failed to bond attachment: %v", err)
 	}
@@ -965,11 +1099,17 @@ func TestSpawnWithMultipleAttachments(t *testing.T) {
 
 	// Create primary proto
 	primaryProto := &types.Issue{
-		Title:     "Primary Feature",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
-		Labels:    []string{MoleculeLabel},
+		IssueContent: types.IssueContent{
+			Title: "Primary Feature",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{MoleculeLabel},
+		},
 	}
 	if err := s.CreateIssue(ctx, primaryProto, "test"); err != nil {
 		t.Fatalf("Failed to create primary proto: %v", err)
@@ -977,11 +1117,17 @@ func TestSpawnWithMultipleAttachments(t *testing.T) {
 
 	// Create first attachment proto
 	attachA := &types.Issue{
-		Title:     "Attachment A: Testing",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeEpic,
-		Labels:    []string{MoleculeLabel},
+		IssueContent: types.IssueContent{
+			Title: "Attachment A: Testing",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeEpic,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{MoleculeLabel},
+		},
 	}
 	if err := s.CreateIssue(ctx, attachA, "test"); err != nil {
 		t.Fatalf("Failed to create attachA: %v", err)
@@ -989,11 +1135,17 @@ func TestSpawnWithMultipleAttachments(t *testing.T) {
 
 	// Create second attachment proto
 	attachB := &types.Issue{
-		Title:     "Attachment B: Documentation",
-		Status:    types.StatusOpen,
-		Priority:  3,
-		IssueType: types.TypeEpic,
-		Labels:    []string{MoleculeLabel},
+		IssueContent: types.IssueContent{
+			Title: "Attachment B: Documentation",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  3,
+			IssueType: types.TypeEpic,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{MoleculeLabel},
+		},
 	}
 	if err := s.CreateIssue(ctx, attachB, "test"); err != nil {
 		t.Fatalf("Failed to create attachB: %v", err)
@@ -1016,12 +1168,12 @@ func TestSpawnWithMultipleAttachments(t *testing.T) {
 	}
 
 	// Attach both protos (simulating --attach A --attach B)
-	bondResultA, err := bondProtoMol(ctx, s, attachA, spawnedMol, types.BondTypeSequential, nil, "", "test", false, false)
+	bondResultA, err := bondProtoMol(ctx, s, attachA, spawnedMol, newBondAttachmentOptions(types.BondTypeSequential, nil, "", "test", false, false))
 	if err != nil {
 		t.Fatalf("Failed to bond attachA: %v", err)
 	}
 
-	bondResultB, err := bondProtoMol(ctx, s, attachB, spawnedMol, types.BondTypeSequential, nil, "", "test", false, false)
+	bondResultB, err := bondProtoMol(ctx, s, attachB, spawnedMol, newBondAttachmentOptions(types.BondTypeSequential, nil, "", "test", false, false))
 	if err != nil {
 		t.Fatalf("Failed to bond attachB: %v", err)
 	}
@@ -1083,11 +1235,17 @@ func TestSpawnAttachTypes(t *testing.T) {
 
 	// Create primary proto
 	primaryProto := &types.Issue{
-		Title:     "Primary",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
-		Labels:    []string{MoleculeLabel},
+		IssueContent: types.IssueContent{
+			Title: "Primary",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{MoleculeLabel},
+		},
 	}
 	if err := s.CreateIssue(ctx, primaryProto, "test"); err != nil {
 		t.Fatalf("Failed to create primary: %v", err)
@@ -1095,11 +1253,17 @@ func TestSpawnAttachTypes(t *testing.T) {
 
 	// Create attachment proto
 	attachProto := &types.Issue{
-		Title:     "Attachment",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeEpic,
-		Labels:    []string{MoleculeLabel},
+		IssueContent: types.IssueContent{
+			Title: "Attachment",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeEpic,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{MoleculeLabel},
+		},
 	}
 	if err := s.CreateIssue(ctx, attachProto, "test"); err != nil {
 		t.Fatalf("Failed to create attachment: %v", err)
@@ -1134,7 +1298,7 @@ func TestSpawnAttachTypes(t *testing.T) {
 			}
 
 			// Bond with specified type
-			bondResult, err := bondProtoMol(ctx, s, attachProto, spawnedMol, tt.bondType, nil, "", "test", false, false)
+			bondResult, err := bondProtoMol(ctx, s, attachProto, spawnedMol, newBondAttachmentOptions(tt.bondType, nil, "", "test", false, false))
 			if err != nil {
 				t.Fatalf("Failed to bond: %v", err)
 			}
@@ -1167,9 +1331,16 @@ func TestSpawnAttachNonProtoError(t *testing.T) {
 
 	// Create a non-proto issue (no template label)
 	issue := &types.Issue{
-		Title:  "Not a proto",
-		Status: types.StatusOpen,
-		Labels: []string{"bug"}, // Not MoleculeLabel
+		IssueContent: types.IssueContent{
+			Title: "Not a proto",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status: types.StatusOpen,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"bug"},
+		},
+		// Not MoleculeLabel,
 	}
 
 	if isProto(issue) {
@@ -1178,9 +1349,15 @@ func TestSpawnAttachNonProtoError(t *testing.T) {
 
 	// Issue with template label should pass
 	protoIssue := &types.Issue{
-		Title:  "A proto",
-		Status: types.StatusOpen,
-		Labels: []string{MoleculeLabel},
+		IssueContent: types.IssueContent{
+			Title: "A proto",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status: types.StatusOpen,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{MoleculeLabel},
+		},
 	}
 
 	if !isProto(protoIssue) {
@@ -1203,12 +1380,18 @@ func TestSpawnVariableAggregation(t *testing.T) {
 
 	// Create primary proto with one variable
 	primaryProto := &types.Issue{
-		Title:       "Feature: {{feature_name}}",
-		Description: "Implement the {{feature_name}} feature",
-		Status:      types.StatusOpen,
-		Priority:    1,
-		IssueType:   types.TypeEpic,
-		Labels:      []string{MoleculeLabel},
+		IssueContent: types.IssueContent{
+			Title:       "Feature: {{feature_name}}",
+			Description: "Implement the {{feature_name}} feature",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{MoleculeLabel},
+		},
 	}
 	if err := s.CreateIssue(ctx, primaryProto, "test"); err != nil {
 		t.Fatalf("Failed to create primary: %v", err)
@@ -1216,12 +1399,18 @@ func TestSpawnVariableAggregation(t *testing.T) {
 
 	// Create attachment proto with a different variable
 	attachProto := &types.Issue{
-		Title:       "Docs for {{doc_version}}",
-		Description: "Document version {{doc_version}}",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeEpic,
-		Labels:      []string{MoleculeLabel},
+		IssueContent: types.IssueContent{
+			Title:       "Docs for {{doc_version}}",
+			Description: "Document version {{doc_version}}",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeEpic,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{MoleculeLabel},
+		},
 	}
 	if err := s.CreateIssue(ctx, attachProto, "test"); err != nil {
 		t.Fatalf("Failed to create attachment: %v", err)
@@ -1299,7 +1488,7 @@ func TestSpawnVariableAggregation(t *testing.T) {
 
 	// Bond attachment with same variables
 	spawnedMol, _ := s.GetIssue(ctx, spawnResult.NewEpicID)
-	bondResult, err := bondProtoMol(ctx, s, attachProto, spawnedMol, types.BondTypeSequential, vars, "", "test", false, false)
+	bondResult, err := bondProtoMol(ctx, s, attachProto, spawnedMol, newBondAttachmentOptions(types.BondTypeSequential, vars, "", "test", false, false))
 	if err != nil {
 		t.Fatalf("Failed to bond: %v", err)
 	}
@@ -1330,10 +1519,10 @@ func TestSpawnAttachDryRunOutput(t *testing.T) {
 	// Simulate the attachment info collection
 	attachments := []attachmentInfo{
 		{id: "test-1", title: "Attachment 1", subgraph: &MoleculeSubgraph{
-			Issues: []*types.Issue{{Title: "Issue A"}, {Title: "Issue B"}},
+			Issues: []*types.Issue{{IssueContent: types.IssueContent{Title: "Issue A"}}, {IssueContent: types.IssueContent{Title: "Issue B"}}},
 		}},
 		{id: "test-2", title: "Attachment 2", subgraph: &MoleculeSubgraph{
-			Issues: []*types.Issue{{Title: "Issue C"}},
+			Issues: []*types.Issue{{IssueContent: types.IssueContent{Title: "Issue C"}}},
 		}},
 	}
 
@@ -1371,18 +1560,30 @@ func TestWispFilteringFromExport(t *testing.T) {
 
 	// Create a mix of wisp and non-wisp issues
 	normalIssue := &types.Issue{
-		Title:     "Normal Issue",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
-		Ephemeral: false,
+		IssueContent: types.IssueContent{
+			Title: "Normal Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: false,
+		},
 	}
 	wispIssue := &types.Issue{
-		Title:     "Wisp Issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueContent: types.IssueContent{
+			Title: "Wisp Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 
 	if err := s.CreateIssue(ctx, normalIssue, "test"); err != nil {
@@ -1437,12 +1638,18 @@ func TestGetMoleculeProgress(t *testing.T) {
 
 	// Create a molecule (epic with template label)
 	root := &types.Issue{
-		Title:     "Test Molecule",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
-		Labels:    []string{BeadsTemplateLabel},
-		Assignee:  "test-agent",
+		IssueContent: types.IssueContent{
+			Title: "Test Molecule",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+			Assignee:  "test-agent",
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{BeadsTemplateLabel},
+		},
 	}
 	if err := s.CreateIssue(ctx, root, "test"); err != nil {
 		t.Fatalf("Failed to create root: %v", err)
@@ -1450,22 +1657,34 @@ func TestGetMoleculeProgress(t *testing.T) {
 
 	// Create steps with different statuses
 	step1 := &types.Issue{
-		Title:     "Step 1: Done",
-		Status:    types.StatusClosed,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Step 1: Done",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	step2 := &types.Issue{
-		Title:     "Step 2: Current",
-		Status:    types.StatusInProgress,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Step 2: Current",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusInProgress,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	step3 := &types.Issue{
-		Title:     "Step 3: Pending",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Step 3: Pending",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, step := range []*types.Issue{step1, step2, step3} {
@@ -1538,11 +1757,17 @@ func TestFindParentMolecule(t *testing.T) {
 
 	// Create molecule root (epic with template label)
 	root := &types.Issue{
-		Title:     "Molecule Root",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
-		Labels:    []string{BeadsTemplateLabel},
+		IssueContent: types.IssueContent{
+			Title: "Molecule Root",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{BeadsTemplateLabel},
+		},
 	}
 	if err := s.CreateIssue(ctx, root, "test"); err != nil {
 		t.Fatalf("Failed to create root: %v", err)
@@ -1550,10 +1775,14 @@ func TestFindParentMolecule(t *testing.T) {
 
 	// Create child step
 	child := &types.Issue{
-		Title:     "Child Step",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Child Step",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := s.CreateIssue(ctx, child, "test"); err != nil {
 		t.Fatalf("Failed to create child: %v", err)
@@ -1568,10 +1797,14 @@ func TestFindParentMolecule(t *testing.T) {
 
 	// Create grandchild
 	grandchild := &types.Issue{
-		Title:     "Grandchild Step",
-		Status:    types.StatusOpen,
-		Priority:  3,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Grandchild Step",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  3,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := s.CreateIssue(ctx, grandchild, "test"); err != nil {
 		t.Fatalf("Failed to create grandchild: %v", err)
@@ -1604,10 +1837,14 @@ func TestFindParentMolecule(t *testing.T) {
 
 	// Create orphan issue (not part of any molecule)
 	orphan := &types.Issue{
-		Title:     "Orphan Issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Orphan Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := s.CreateIssue(ctx, orphan, "test"); err != nil {
 		t.Fatalf("Failed to create orphan: %v", err)
@@ -1635,11 +1872,17 @@ func TestFindParentMoleculesBatch(t *testing.T) {
 
 	// Create molecule root (epic with template label)
 	root := &types.Issue{
-		Title:     "Molecule Root",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
-		Labels:    []string{BeadsTemplateLabel},
+		IssueContent: types.IssueContent{
+			Title: "Molecule Root",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{BeadsTemplateLabel},
+		},
 	}
 	if err := s.CreateIssue(ctx, root, "test"); err != nil {
 		t.Fatalf("Failed to create root: %v", err)
@@ -1647,10 +1890,14 @@ func TestFindParentMoleculesBatch(t *testing.T) {
 
 	// Create child step
 	child := &types.Issue{
-		Title:     "Child Step",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Child Step",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := s.CreateIssue(ctx, child, "test"); err != nil {
 		t.Fatalf("Failed to create child: %v", err)
@@ -1665,10 +1912,14 @@ func TestFindParentMoleculesBatch(t *testing.T) {
 
 	// Create grandchild
 	grandchild := &types.Issue{
-		Title:     "Grandchild Step",
-		Status:    types.StatusOpen,
-		Priority:  3,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Grandchild Step",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  3,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := s.CreateIssue(ctx, grandchild, "test"); err != nil {
 		t.Fatalf("Failed to create grandchild: %v", err)
@@ -1683,10 +1934,14 @@ func TestFindParentMoleculesBatch(t *testing.T) {
 
 	// Create orphan issue (not part of any molecule)
 	orphan := &types.Issue{
-		Title:     "Orphan Issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Orphan Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := s.CreateIssue(ctx, orphan, "test"); err != nil {
 		t.Fatalf("Failed to create orphan: %v", err)
@@ -1750,21 +2005,31 @@ func TestFindParentMolecule_RootShapes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			root := &types.Issue{
-				Title:     tt.name + " root",
-				Status:    types.StatusOpen,
-				Priority:  1,
-				IssueType: tt.rootType,
-				Labels:    tt.rootLabels,
+				IssueContent: types.IssueContent{
+					Title: tt.name + " root",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  1,
+					IssueType: tt.rootType,
+				},
+				IssueGraph: types.IssueGraph{
+					Labels: tt.rootLabels,
+				},
 			}
 			if err := s.CreateIssue(ctx, root, "test"); err != nil {
 				t.Fatalf("Failed to create root: %v", err)
 			}
 
 			child := &types.Issue{
-				Title:     tt.name + " child",
-				Status:    types.StatusOpen,
-				Priority:  2,
-				IssueType: types.TypeTask,
+				IssueContent: types.IssueContent{
+					Title: tt.name + " child",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  2,
+					IssueType: types.TypeTask,
+				},
 			}
 			if err := s.CreateIssue(ctx, child, "test"); err != nil {
 				t.Fatalf("Failed to create child: %v", err)
@@ -1812,26 +2077,38 @@ func TestAdvanceToNextStep_PouredMolecule(t *testing.T) {
 
 	// Root shaped like `bd mol pour` output: TypeMolecule, no template label.
 	root := &types.Issue{
-		Title:     "Poured Molecule",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeMolecule,
+		IssueContent: types.IssueContent{
+			Title: "Poured Molecule",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeMolecule,
+		},
 	}
 	if err := s.CreateIssue(ctx, root, "test"); err != nil {
 		t.Fatalf("Failed to create root: %v", err)
 	}
 
 	step1 := &types.Issue{
-		Title:     "Step 1",
-		Status:    types.StatusClosed,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Step 1",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	step2 := &types.Issue{
-		Title:     "Step 2",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Step 2",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	for _, step := range []*types.Issue{step1, step2} {
 		if err := s.CreateIssue(ctx, step, "test"); err != nil {
@@ -1895,10 +2172,14 @@ func TestFindHookedMolecules(t *testing.T) {
 
 	// Create molecule root (epic)
 	molecule := &types.Issue{
-		Title:     "Test Molecule",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
+		IssueContent: types.IssueContent{
+			Title: "Test Molecule",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
 	}
 	if err := s.CreateIssue(ctx, molecule, "test"); err != nil {
 		t.Fatalf("Failed to create molecule: %v", err)
@@ -1906,10 +2187,14 @@ func TestFindHookedMolecules(t *testing.T) {
 
 	// Create step as child of molecule
 	step := &types.Issue{
-		Title:     "Step 1",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Step 1",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := s.CreateIssue(ctx, step, "test"); err != nil {
 		t.Fatalf("Failed to create step: %v", err)
@@ -1924,11 +2209,15 @@ func TestFindHookedMolecules(t *testing.T) {
 
 	// Create hooked issue with blocks dependency on molecule
 	hookedIssue := &types.Issue{
-		Title:     "Hooked Work",
-		Status:    types.StatusHooked,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Assignee:  "test-agent",
+		IssueContent: types.IssueContent{
+			Title: "Hooked Work",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusHooked,
+			Priority:  2,
+			IssueType: types.TypeTask,
+			Assignee:  "test-agent",
+		},
 	}
 	if err := s.CreateIssue(ctx, hookedIssue, "test"); err != nil {
 		t.Fatalf("Failed to create hooked issue: %v", err)
@@ -1978,27 +2267,41 @@ func TestAdvanceToNextStep(t *testing.T) {
 
 	// Create molecule with sequential steps
 	root := &types.Issue{
-		Title:     "Advance Test Molecule",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
-		Labels:    []string{BeadsTemplateLabel},
+		IssueContent: types.IssueContent{
+			Title: "Advance Test Molecule",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{BeadsTemplateLabel},
+		},
 	}
 	if err := s.CreateIssue(ctx, root, "test"); err != nil {
 		t.Fatalf("Failed to create root: %v", err)
 	}
 
 	step1 := &types.Issue{
-		Title:     "Step 1",
-		Status:    types.StatusClosed,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Step 1",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	step2 := &types.Issue{
-		Title:     "Step 2",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Step 2",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, step := range []*types.Issue{step1, step2} {
@@ -2080,21 +2383,31 @@ func TestAdvanceToNextStepMoleculeComplete(t *testing.T) {
 
 	// Create molecule with single step
 	root := &types.Issue{
-		Title:     "Complete Test Molecule",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
-		Labels:    []string{BeadsTemplateLabel},
+		IssueContent: types.IssueContent{
+			Title: "Complete Test Molecule",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{BeadsTemplateLabel},
+		},
 	}
 	if err := s.CreateIssue(ctx, root, "test"); err != nil {
 		t.Fatalf("Failed to create root: %v", err)
 	}
 
 	step1 := &types.Issue{
-		Title:     "Only Step",
-		Status:    types.StatusClosed,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Only Step",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := s.CreateIssue(ctx, step1, "test"); err != nil {
 		t.Fatalf("Failed to create step: %v", err)
@@ -2138,10 +2451,14 @@ func TestAdvanceToNextStepOrphanIssue(t *testing.T) {
 
 	// Create standalone issue (not part of molecule)
 	orphan := &types.Issue{
-		Title:     "Standalone Issue",
-		Status:    types.StatusClosed,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Standalone Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := s.CreateIssue(ctx, orphan, "test"); err != nil {
 		t.Fatalf("Failed to create orphan: %v", err)
@@ -2175,33 +2492,51 @@ func TestAdvanceToNextStepConcurrentClaim(t *testing.T) {
 	// Create molecule: root -> step1 (closed), step2 (open), step3 (open)
 	// step2 and step3 both depend on step1, so both become ready when step1 closes.
 	root := &types.Issue{
-		Title:     "Concurrent Claim Test Molecule",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
-		Labels:    []string{BeadsTemplateLabel},
+		IssueContent: types.IssueContent{
+			Title: "Concurrent Claim Test Molecule",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{BeadsTemplateLabel},
+		},
 	}
 	if err := s.CreateIssue(ctx, root, "test"); err != nil {
 		t.Fatalf("Failed to create root: %v", err)
 	}
 
 	step1 := &types.Issue{
-		Title:     "Step 1 (closed)",
-		Status:    types.StatusClosed,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Step 1 (closed)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	step2 := &types.Issue{
-		Title:     "Step 2 (will be pre-claimed)",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Step 2 (will be pre-claimed)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	step3 := &types.Issue{
-		Title:     "Step 3 (fallback target)",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Step 3 (fallback target)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, step := range []*types.Issue{step1, step2, step3} {
@@ -2278,27 +2613,41 @@ func TestAdvanceToNextStepAllClaimed(t *testing.T) {
 
 	// Create molecule: root -> step1 (closed), step2 (open, will be pre-claimed)
 	root := &types.Issue{
-		Title:     "All Claimed Test Molecule",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
-		Labels:    []string{BeadsTemplateLabel},
+		IssueContent: types.IssueContent{
+			Title: "All Claimed Test Molecule",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{BeadsTemplateLabel},
+		},
 	}
 	if err := s.CreateIssue(ctx, root, "test"); err != nil {
 		t.Fatalf("Failed to create root: %v", err)
 	}
 
 	step1 := &types.Issue{
-		Title:     "Step 1 (closed)",
-		Status:    types.StatusClosed,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Step 1 (closed)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	step2 := &types.Issue{
-		Title:     "Step 2 (only ready, will be pre-claimed)",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Step 2 (only ready, will be pre-claimed)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	for _, step := range []*types.Issue{step1, step2} {
@@ -2514,11 +2863,17 @@ func TestBondProtoMolWithRef(t *testing.T) {
 
 	// Create a proto with child steps (mol-polecat-arm template)
 	protoRoot := &types.Issue{
-		Title:     "Polecat Arm: {{polecat_name}}",
-		IssueType: types.TypeEpic,
-		Status:    types.StatusOpen,
-		Priority:  2,
-		Labels:    []string{MoleculeLabel},
+		IssueContent: types.IssueContent{
+			Title: "Polecat Arm: {{polecat_name}}",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeEpic,
+			Status:    types.StatusOpen,
+			Priority:  2,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{MoleculeLabel},
+		},
 	}
 	if err := s.CreateIssue(ctx, protoRoot, "test"); err != nil {
 		t.Fatalf("Failed to create proto root: %v", err)
@@ -2526,10 +2881,14 @@ func TestBondProtoMolWithRef(t *testing.T) {
 
 	// Add proto steps
 	protoCapture := &types.Issue{
-		Title:     "Capture {{polecat_name}}",
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		Priority:  2,
+		IssueContent: types.IssueContent{
+			Title: "Capture {{polecat_name}}",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+			Priority:  2,
+		},
 	}
 	if err := s.CreateIssue(ctx, protoCapture, "test"); err != nil {
 		t.Fatalf("Failed to create proto capture: %v", err)
@@ -2544,10 +2903,14 @@ func TestBondProtoMolWithRef(t *testing.T) {
 
 	// Create target molecule (patrol-xxx)
 	patrol := &types.Issue{
-		Title:     "Witness Patrol",
-		IssueType: types.TypeEpic,
-		Status:    types.StatusInProgress,
-		Priority:  1,
+		IssueContent: types.IssueContent{
+			Title: "Witness Patrol",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeEpic,
+			Status:    types.StatusInProgress,
+			Priority:  1,
+		},
 	}
 	if err := s.CreateIssue(ctx, patrol, "test"); err != nil {
 		t.Fatalf("Failed to create patrol: %v", err)
@@ -2556,7 +2919,7 @@ func TestBondProtoMolWithRef(t *testing.T) {
 	// Bond proto to patrol with custom child ref
 	vars := map[string]string{"polecat_name": "ace"}
 	childRef := "arm-{{polecat_name}}"
-	result, err := bondProtoMol(ctx, s, protoRoot, patrol, types.BondTypeSequential, vars, childRef, "test", false, false)
+	result, err := bondProtoMol(ctx, s, protoRoot, patrol, newBondAttachmentOptions(types.BondTypeSequential, vars, childRef, "test", false, false))
 	if err != nil {
 		t.Fatalf("bondProtoMol failed: %v", err)
 	}
@@ -2604,11 +2967,17 @@ func TestBondProtoMolMultipleArms(t *testing.T) {
 
 	// Create simple proto
 	proto := &types.Issue{
-		Title:     "Arm: {{name}}",
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		Priority:  2,
-		Labels:    []string{MoleculeLabel},
+		IssueContent: types.IssueContent{
+			Title: "Arm: {{name}}",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+			Priority:  2,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{MoleculeLabel},
+		},
 	}
 	if err := s.CreateIssue(ctx, proto, "test"); err != nil {
 		t.Fatalf("Failed to create proto: %v", err)
@@ -2616,10 +2985,14 @@ func TestBondProtoMolMultipleArms(t *testing.T) {
 
 	// Create parent patrol
 	patrol := &types.Issue{
-		Title:     "Patrol",
-		IssueType: types.TypeEpic,
-		Status:    types.StatusOpen,
-		Priority:  1,
+		IssueContent: types.IssueContent{
+			Title: "Patrol",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeEpic,
+			Status:    types.StatusOpen,
+			Priority:  1,
+		},
 	}
 	if err := s.CreateIssue(ctx, patrol, "test"); err != nil {
 		t.Fatalf("Failed to create patrol: %v", err)
@@ -2627,14 +3000,14 @@ func TestBondProtoMolMultipleArms(t *testing.T) {
 
 	// Bond arm-ace
 	varsAce := map[string]string{"name": "ace"}
-	resultAce, err := bondProtoMol(ctx, s, proto, patrol, types.BondTypeParallel, varsAce, "arm-{{name}}", "test", false, false)
+	resultAce, err := bondProtoMol(ctx, s, proto, patrol, newBondAttachmentOptions(types.BondTypeParallel, varsAce, "arm-{{name}}", "test", false, false))
 	if err != nil {
 		t.Fatalf("bondProtoMol (ace) failed: %v", err)
 	}
 
 	// Bond arm-nux
 	varsNux := map[string]string{"name": "nux"}
-	resultNux, err := bondProtoMol(ctx, s, proto, patrol, types.BondTypeParallel, varsNux, "arm-{{name}}", "test", false, false)
+	resultNux, err := bondProtoMol(ctx, s, proto, patrol, newBondAttachmentOptions(types.BondTypeParallel, varsNux, "arm-{{name}}", "test", false, false))
 	if err != nil {
 		t.Fatalf("bondProtoMol (nux) failed: %v", err)
 	}
@@ -2672,22 +3045,40 @@ func TestBondProtoMolMultipleArms(t *testing.T) {
 func TestAnalyzeMoleculeParallelNoBlocking(t *testing.T) {
 	// Create a simple molecule with parallel children (no blocking deps between them)
 	root := &types.Issue{
-		ID:        "mol-test",
-		Title:     "Test Molecule",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "mol-test",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Test Molecule",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeEpic,
+		},
 	}
 	child1 := &types.Issue{
-		ID:        "mol-test.step1",
-		Title:     "Step 1",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "mol-test.step1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Step 1",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+		},
 	}
 	child2 := &types.Issue{
-		ID:        "mol-test.step2",
-		Title:     "Step 2",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "mol-test.step2",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Step 2",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	subgraph := &MoleculeSubgraph{
@@ -2740,22 +3131,40 @@ func TestAnalyzeMoleculeParallelNoBlocking(t *testing.T) {
 func TestAnalyzeMoleculeParallelWithBlocking(t *testing.T) {
 	// Create a sequential molecule: step1 blocks step2
 	root := &types.Issue{
-		ID:        "mol-seq",
-		Title:     "Sequential Molecule",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "mol-seq",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Sequential Molecule",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeEpic,
+		},
 	}
 	step1 := &types.Issue{
-		ID:        "mol-seq.step1",
-		Title:     "Step 1",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "mol-seq.step1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Step 1",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+		},
 	}
 	step2 := &types.Issue{
-		ID:        "mol-seq.step2",
-		Title:     "Step 2 (blocked by Step 1)",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "mol-seq.step2",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Step 2 (blocked by Step 1)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	subgraph := &MoleculeSubgraph{
@@ -2803,22 +3212,41 @@ func TestAnalyzeMoleculeParallelWithBlocking(t *testing.T) {
 func TestAnalyzeMoleculeParallelCompletedBlockers(t *testing.T) {
 	// Create molecule where step1 is completed, so step2 should be ready
 	root := &types.Issue{
-		ID:        "mol-done",
-		Title:     "Molecule with completed step",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "mol-done",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Molecule with completed step",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeEpic,
+		},
 	}
 	step1 := &types.Issue{
-		ID:        "mol-done.step1",
-		Title:     "Step 1 (completed)",
-		Status:    types.StatusClosed, // Completed!
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "mol-done.step1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Step 1 (completed)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status: types.StatusClosed,
+			// Completed!
+			IssueType: types.TypeTask,
+		},
 	}
 	step2 := &types.Issue{
-		ID:        "mol-done.step2",
-		Title:     "Step 2 (depends on step1)",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "mol-done.step2",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Step 2 (depends on step1)",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	subgraph := &MoleculeSubgraph{
@@ -2851,40 +3279,76 @@ func TestAnalyzeMoleculeParallelCompletedBlockers(t *testing.T) {
 
 func TestAnalyzeMoleculeParallelWaitsForChildrenOfSpawner(t *testing.T) {
 	root := &types.Issue{
-		ID:        "mol-fanout",
-		Title:     "Fanout Molecule",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "mol-fanout",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Fanout Molecule",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeEpic,
+		},
 	}
 	implement := &types.Issue{
-		ID:        "mol-fanout.implement",
-		Title:     "Implement",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "mol-fanout.implement",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Implement",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+		},
 	}
 	otherSpawner := &types.Issue{
-		ID:        "mol-fanout.other",
-		Title:     "Other spawner",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "mol-fanout.other",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Other spawner",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+		},
 	}
 	review := &types.Issue{
-		ID:        "mol-fanout.review",
-		Title:     "Review",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "mol-fanout.review",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Review",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+		},
 	}
 	implChild := &types.Issue{
-		ID:        "mol-fanout.implement.arm-1",
-		Title:     "Implement child",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "mol-fanout.implement.arm-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Implement child",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+		},
 	}
 	otherChild := &types.Issue{
-		ID:        "mol-fanout.other.arm-1",
-		Title:     "Other child",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "mol-fanout.other.arm-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Other child",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	subgraph := &MoleculeSubgraph{
@@ -2947,22 +3411,40 @@ func TestAnalyzeMoleculeParallelWaitsForChildrenOfSpawner(t *testing.T) {
 func TestAnalyzeMoleculeParallelMultipleArms(t *testing.T) {
 	// Create molecule with two arms that can run in parallel
 	root := &types.Issue{
-		ID:        "patrol",
-		Title:     "Patrol",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "patrol",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Patrol",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeEpic,
+		},
 	}
 	armAce := &types.Issue{
-		ID:        "patrol.arm-ace",
-		Title:     "Arm: ace",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "patrol.arm-ace",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Arm: ace",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+		},
 	}
 	armNux := &types.Issue{
-		ID:        "patrol.arm-nux",
-		Title:     "Arm: nux",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "patrol.arm-nux",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Arm: nux",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	subgraph := &MoleculeSubgraph{
@@ -3025,10 +3507,10 @@ func TestAnalyzeMoleculeParallelMultipleArms(t *testing.T) {
 // TestCalculateBlockingDepths tests the depth calculation
 func TestCalculateBlockingDepths(t *testing.T) {
 	// Create chain: root -> step1 -> step2 -> step3
-	root := &types.Issue{ID: "root", Status: types.StatusOpen}
-	step1 := &types.Issue{ID: "step1", Status: types.StatusOpen}
-	step2 := &types.Issue{ID: "step2", Status: types.StatusOpen}
-	step3 := &types.Issue{ID: "step3", Status: types.StatusOpen}
+	root := &types.Issue{IssueID: types.IssueID{ID: "root"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}
+	step1 := &types.Issue{IssueID: types.IssueID{ID: "step1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}
+	step2 := &types.Issue{IssueID: types.IssueID{ID: "step2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}
+	step3 := &types.Issue{IssueID: types.IssueID{ID: "step3"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}
 
 	subgraph := &MoleculeSubgraph{
 		Root:     root,
@@ -3075,17 +3557,28 @@ func TestSpawnMoleculeEphemeralFlag(t *testing.T) {
 
 	// Create a template with a child (IDs will be auto-generated)
 	root := &types.Issue{
-		Title:     "Template Epic",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeEpic,
-		Labels:    []string{MoleculeLabel}, // Required for loadTemplateSubgraph
+		IssueContent: types.IssueContent{
+			Title: "Template Epic",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeEpic,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{MoleculeLabel},
+		},
+		// Required for loadTemplateSubgraph,
 	}
 	child := &types.Issue{
-		Title:     "Template Task",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Template Task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	if err := s.CreateIssue(ctx, root, "test"); err != nil {
@@ -3151,20 +3644,36 @@ func TestSpawnMoleculeFromFormulaEphemeral(t *testing.T) {
 
 	// Create a minimal in-memory subgraph (simulating cookFormulaToSubgraph output)
 	root := &types.Issue{
-		ID:         "test-formula",
-		Title:      "Test Formula",
-		Status:     types.StatusOpen,
-		Priority:   2,
-		IssueType:  types.TypeEpic,
-		IsTemplate: true,
+		IssueID: types.IssueID{
+			ID: "test-formula",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Test Formula",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeEpic,
+		},
+		IssueWisp: types.IssueWisp{
+			IsTemplate: true,
+		},
 	}
 	step := &types.Issue{
-		ID:         "test-formula.step1",
-		Title:      "Step 1",
-		Status:     types.StatusOpen,
-		Priority:   2,
-		IssueType:  types.TypeTask,
-		IsTemplate: true,
+		IssueID: types.IssueID{
+			ID: "test-formula.step1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Step 1",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			IsTemplate: true,
+		},
 	}
 
 	subgraph := &TemplateSubgraph{
@@ -3346,9 +3855,15 @@ func TestCompoundMoleculeVisualization(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			issue := &types.Issue{
-				ID:         "test-compound",
-				Title:      "Test Compound Molecule",
-				BondedFrom: tt.bondedFrom,
+				IssueID: types.IssueID{
+					ID: "test-compound",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Test Compound Molecule",
+				},
+				IssueCoord: types.IssueCoord{
+					BondedFrom: tt.bondedFrom,
+				},
 			}
 
 			if got := issue.IsCompound(); got != tt.isCompound {

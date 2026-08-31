@@ -78,7 +78,7 @@ Examples:
 			}
 		}()
 
-		return runState(rootCtx, args[0], args[1])
+		return runState(getRootContext(), args[0], args[1])
 	},
 }
 
@@ -90,7 +90,7 @@ func runState(ctx context.Context, issueID, dimension string) error {
 
 	value, _ := findStateLabel(details.Labels, dimension)
 
-	if jsonOutput {
+	if isJSONOutput() {
 		result := map[string]interface{}{
 			"issue_id":  details.ID,
 			"dimension": dimension,
@@ -155,9 +155,11 @@ The --reason flag provides context for the event bead (recommended).`,
 
 		reason, _ := cmd.Flags().GetString("reason")
 
-		CheckReadonly("set-state")
+		if err := CheckReadonly("set-state"); err != nil {
+			return err
+		}
 
-		return runSetState(rootCtx, issueID, dimension, newValue, reason)
+		return runSetState(getRootContext(), issueID, dimension, newValue, reason)
 	},
 }
 
@@ -177,28 +179,10 @@ func runSetState(ctx context.Context, issueID, dimension, newValue, reason strin
 	newLabel := dimension + ":" + newValue
 
 	if oldLabel == newLabel {
-		if jsonOutput {
-			return outputJSON(map[string]interface{}{
-				"issue_id":  fullID,
-				"dimension": dimension,
-				"value":     newValue,
-				"changed":   false,
-			})
-		}
-		fmt.Printf("(no change: %s already set to %s)\n", dimension, newValue)
-		return nil
+		return reportUnchangedState(fullID, dimension, newValue)
 	}
 
-	eventTitle := fmt.Sprintf("State change: %s → %s", dimension, newValue)
-	eventDesc := ""
-	if oldValue != "" {
-		eventDesc = fmt.Sprintf("Changed %s from %s to %s", dimension, oldValue, newValue)
-	} else {
-		eventDesc = fmt.Sprintf("Set %s to %s", dimension, newValue)
-	}
-	if reason != "" {
-		eventDesc += "\n\nReason: " + reason
-	}
+	eventTitle, eventDesc := stateChangeEventText(dimension, oldValue, newValue, reason)
 
 	lifecycle, err := openIssueLifecycle()
 	if err != nil {
@@ -223,16 +207,24 @@ func runSetState(ctx context.Context, issueID, dimension, newValue, reason strin
 	// could not write, so an event that disagreed with its subject's plane
 	// fails the command instead of silently landing in the wrong table.
 	created, err := lifecycle.Create(ctx, issueops.CreateRequest{
-		Actor: actor,
+		Actor: getActor(),
 		Issue: &types.Issue{
-			Title:       eventTitle,
-			Description: eventDesc,
-			Status:      types.StatusClosed,
-			Priority:    4,
-			IssueType:   types.TypeEvent,
-			CreatedBy:   getActorWithGit(),
-			Ephemeral:   details.Ephemeral,
-			NoHistory:   details.NoHistory,
+			IssueContent: types.IssueContent{
+				Title:       eventTitle,
+				Description: eventDesc,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusClosed,
+				Priority:  4,
+				IssueType: types.TypeEvent,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedBy: getActorWithGit(),
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: details.Ephemeral,
+				NoHistory: details.NoHistory,
+			},
 		},
 		ParentID: fullID,
 	})
@@ -251,7 +243,7 @@ func runSetState(ctx context.Context, issueID, dimension, newValue, reason strin
 	// failed. The plane needs no branch: IssuePlaneOnly stays false and the
 	// role resolves it inside its own transaction.
 	if _, err := lifecycle.Update(ctx, issueops.UpdateRequest{
-		Actor:   actor,
+		Actor:   getActor(),
 		IssueID: fullID,
 		Patch: issueops.IssuePatch{Labels: issueops.LabelPatch{
 			Add:    []string{newLabel},
@@ -261,7 +253,36 @@ func runSetState(ctx context.Context, issueID, dimension, newValue, reason strin
 		return HandleErrorRespectJSON("setting %s: %v", dimension, err)
 	}
 
-	if jsonOutput {
+	return reportSetStateResult(fullID, dimension, oldValue, newValue, eventID)
+}
+
+func reportUnchangedState(fullID, dimension, newValue string) error {
+	if isJSONOutput() {
+		return outputJSON(map[string]interface{}{
+			"issue_id":  fullID,
+			"dimension": dimension,
+			"value":     newValue,
+			"changed":   false,
+		})
+	}
+	fmt.Printf("(no change: %s already set to %s)\n", dimension, newValue)
+	return nil
+}
+
+func stateChangeEventText(dimension, oldValue, newValue, reason string) (string, string) {
+	eventTitle := fmt.Sprintf("State change: %s → %s", dimension, newValue)
+	eventDesc := fmt.Sprintf("Set %s to %s", dimension, newValue)
+	if oldValue != "" {
+		eventDesc = fmt.Sprintf("Changed %s from %s to %s", dimension, oldValue, newValue)
+	}
+	if reason != "" {
+		eventDesc += "\n\nReason: " + reason
+	}
+	return eventTitle, eventDesc
+}
+
+func reportSetStateResult(fullID, dimension, oldValue, newValue, eventID string) error {
+	if isJSONOutput() {
 		result := map[string]interface{}{
 			"issue_id":  fullID,
 			"dimension": dimension,
@@ -309,7 +330,7 @@ Example:
 			}
 		}()
 
-		return runStateList(rootCtx, args[0])
+		return runStateList(getRootContext(), args[0])
 	},
 }
 
@@ -322,7 +343,7 @@ func runStateList(ctx context.Context, issueID string) error {
 
 	states := collectStateLabels(details.Labels)
 
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(map[string]interface{}{
 			"issue_id": fullID,
 			"states":   states,
@@ -354,7 +375,7 @@ func init() {
 }
 
 // Ensure ctx is available
-var _ context.Context = rootCtx
+var _ context.Context = getRootContext()
 
 func findStateLabel(labels []string, dimension string) (string, bool) {
 	prefix := dimension + ":"

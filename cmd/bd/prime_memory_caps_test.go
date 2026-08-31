@@ -120,47 +120,42 @@ func TestRenderPrimeMemoriesBannerNamesOnlyBindingCap(t *testing.T) {
 }
 
 func TestPrimeMemoryCapsResolution(t *testing.T) {
-	oldMax, oldChars := primeMaxMemories, primeMaxMemoryChars
-	oldMaxSet, oldCharsSet := primeMaxMemoriesSet, primeMaxMemoryCharsSet
 	oldConfigInt := primeConfigInt
 	t.Cleanup(func() {
-		primeMaxMemories, primeMaxMemoryChars = oldMax, oldChars
-		primeMaxMemoriesSet, primeMaxMemoryCharsSet = oldMaxSet, oldCharsSet
 		primeConfigInt = oldConfigInt
 	})
 	configValues := map[string]int{}
 	primeConfigInt = func(key string) int { return configValues[key] }
+	opts := primeOptions{}
 
 	// No flags, no config: uncapped.
-	primeMaxMemories, primeMaxMemoryChars = 0, 0
-	primeMaxMemoriesSet, primeMaxMemoryCharsSet = false, false
-	if c, ch := primeMemoryCaps(); c != 0 || ch != 0 {
+	if c, ch := primeMemoryCapsForOptions(opts); c != 0 || ch != 0 {
 		t.Fatalf("expected uncapped defaults, got %d/%d", c, ch)
 	}
 
 	// Config keys apply when flags are absent.
 	configValues["prime.max-memories"] = 20
 	configValues["prime.max-memory-chars"] = 25000
-	if c, ch := primeMemoryCaps(); c != 20 || ch != 25000 {
+	if c, ch := primeMemoryCapsForOptions(opts); c != 20 || ch != 25000 {
 		t.Fatalf("expected config caps 20/25000, got %d/%d", c, ch)
 	}
 
 	// An explicit flag wins over config.
-	primeMaxMemories, primeMaxMemoriesSet = 5, true
-	if c, _ := primeMemoryCaps(); c != 5 {
+	opts.maxMemories, opts.maxMemoriesSet = 5, true
+	if c, _ := primeMemoryCapsForOptions(opts); c != 5 {
 		t.Fatalf("flag must beat config, got %d", c)
 	}
 
 	// An explicit 0 flag forces unlimited despite config.
-	primeMaxMemories = 0
-	if c, _ := primeMemoryCaps(); c != 0 {
+	opts.maxMemories = 0
+	if c, _ := primeMemoryCapsForOptions(opts); c != 0 {
 		t.Fatalf("explicit --max-memories 0 must force unlimited, got %d", c)
 	}
 
 	// Negative values clamp to uncapped.
-	primeMaxMemories, primeMaxMemoriesSet = -3, true
-	primeMaxMemoryChars, primeMaxMemoryCharsSet = -1, true
-	if c, ch := primeMemoryCaps(); c != 0 || ch != 0 {
+	opts.maxMemories, opts.maxMemoriesSet = -3, true
+	opts.maxMemoryChars, opts.maxMemoryCharsSet = -1, true
+	if c, ch := primeMemoryCapsForOptions(opts); c != 0 || ch != 0 {
 		t.Fatalf("negative caps must clamp to 0, got %d/%d", c, ch)
 	}
 }

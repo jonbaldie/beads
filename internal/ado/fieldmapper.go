@@ -9,8 +9,16 @@ import (
 
 // adoFieldMapper implements tracker.FieldMapper for Azure DevOps.
 type adoFieldMapper struct {
+	adoStatusMapper
+	adoTypeMapper
+}
+
+type adoStatusMapper struct {
 	stateMap map[string]string // beads status → ADO state (from ado.state_map.* config)
-	typeMap  map[string]string // beads type → ADO type (from ado.type_map.* config)
+}
+
+type adoTypeMapper struct {
+	typeMap map[string]string // beads type → ADO type (from ado.type_map.* config)
 }
 
 // Compile-time interface check.
@@ -29,12 +37,15 @@ func NewFieldMapper(stateMap, typeMap map[string]string) tracker.FieldMapper {
 	for k, v := range typeMap {
 		tm[k] = v
 	}
-	return &adoFieldMapper{stateMap: sm, typeMap: tm}
+	return &adoFieldMapper{
+		adoStatusMapper: adoStatusMapper{stateMap: sm},
+		adoTypeMapper:   adoTypeMapper{typeMap: tm},
+	}
 }
 
 // PriorityToBeads converts an ADO priority (float64 from JSON: 1-4) to beads (0-4).
 // ADO 1→0, 2→1, 3→2, 4→3. Unknown values default to 2 (medium).
-func (m *adoFieldMapper) PriorityToBeads(trackerPriority interface{}) int {
+func (m *adoStatusMapper) PriorityToBeads(trackerPriority interface{}) int {
 	p, ok := trackerPriority.(float64)
 	if !ok {
 		return 2
@@ -55,7 +66,7 @@ func (m *adoFieldMapper) PriorityToBeads(trackerPriority interface{}) int {
 
 // PriorityToTracker converts a beads priority (0-4) to ADO priority (1-4).
 // Beads 0→1, 1→2, 2→3, 3→4, 4→4 (lossy: backlog collapses to low).
-func (m *adoFieldMapper) PriorityToTracker(beadsPriority int) interface{} {
+func (m *adoTypeMapper) PriorityToTracker(beadsPriority int) interface{} {
 	switch beadsPriority {
 	case 0:
 		return 1
@@ -74,7 +85,7 @@ func (m *adoFieldMapper) PriorityToTracker(beadsPriority int) interface{} {
 
 // StatusToBeads converts an ADO state string to a beads Status.
 // Checks custom stateMap first (inverted lookup), then falls back to Agile defaults.
-func (m *adoFieldMapper) StatusToBeads(trackerState interface{}) types.Status {
+func (m *adoStatusMapper) StatusToBeads(trackerState interface{}) types.Status {
 	state, ok := trackerState.(string)
 	if !ok {
 		return types.StatusOpen
@@ -106,7 +117,7 @@ func (m *adoFieldMapper) StatusToBeads(trackerState interface{}) types.Status {
 
 // StatusToTracker converts a beads Status to an ADO state string.
 // Checks custom stateMap first, then falls back to Agile defaults.
-func (m *adoFieldMapper) StatusToTracker(beadsStatus types.Status) interface{} {
+func (m *adoStatusMapper) StatusToTracker(beadsStatus types.Status) interface{} {
 	if name, ok := m.stateMap[string(beadsStatus)]; ok {
 		return name
 	}
@@ -128,7 +139,7 @@ func (m *adoFieldMapper) StatusToTracker(beadsStatus types.Status) interface{} {
 
 // TypeToBeads converts an ADO work item type string to a beads IssueType.
 // Uses case-insensitive matching. Checks custom typeMap first (inverted), then defaults.
-func (m *adoFieldMapper) TypeToBeads(trackerType interface{}) types.IssueType {
+func (m *adoTypeMapper) TypeToBeads(trackerType interface{}) types.IssueType {
 	t, ok := trackerType.(string)
 	if !ok {
 		return types.TypeTask
@@ -163,7 +174,7 @@ func (m *adoFieldMapper) TypeToBeads(trackerType interface{}) types.IssueType {
 // ADO Bug work items require a Severity field with values like "1 - Critical".
 // Beads 0→"1 - Critical", 1→"2 - High", 2→"3 - Medium", 3/4→"4 - Low".
 // Returns "3 - Medium" for unknown values.
-func (m *adoFieldMapper) SeverityForBug(beadsPriority int) string {
+func (m *adoStatusMapper) SeverityForBug(beadsPriority int) string {
 	switch beadsPriority {
 	case 0:
 		return "1 - Critical"
@@ -182,7 +193,7 @@ func (m *adoFieldMapper) SeverityForBug(beadsPriority int) string {
 
 // TypeToTracker converts a beads IssueType to an ADO work item type string.
 // Checks custom typeMap first, then falls back to Agile defaults.
-func (m *adoFieldMapper) TypeToTracker(beadsType types.IssueType) interface{} {
+func (m *adoTypeMapper) TypeToTracker(beadsType types.IssueType) interface{} {
 	if name, ok := m.typeMap[string(beadsType)]; ok {
 		return name
 	}

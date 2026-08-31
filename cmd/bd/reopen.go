@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -12,136 +13,144 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var reopenCmd = &cobra.Command{
-	Use:     "reopen [id...]",
-	GroupID: "issues",
-	Short:   "Reopen one or more closed issues",
-	Long: `Reopen closed issues by setting status to 'open' and clearing the closed_at timestamp.
+func newReopenCmd() *cobra.Command {
+	reopenCmd := &cobra.Command{
+		Use:     "reopen [id...]",
+		GroupID: "issues",
+		Short:   "Reopen one or more closed issues",
+		Long: `Reopen closed issues by setting status to 'open' and clearing the closed_at timestamp.
 This is more explicit than 'bd update --status open' and emits a Reopened event.`,
-	Args:          cobra.MinimumNArgs(1),
-	SilenceUsage:  true,
-	SilenceErrors: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		CheckReadonly("reopen")
+		Args:          cobra.MinimumNArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE:          runReopen,
+	}
+	reopenCmd.Flags().StringP("reason", "r", "", "Reason for reopening")
+	reopenCmd.ValidArgsFunction = issueIDCompletion
+	return reopenCmd
+}
 
-		evt := metrics.NewCommandEvent("reopen")
-		defer func() {
-			if c := metrics.Global(); c != nil {
-				c.CloseEventAndAdd(evt)
-			}
-		}()
+type reopenState struct {
+	reason       string
+	reopened     []*types.Issue
+	mutated      map[storage.DoltStorage][]string
+	pendingClose []*RoutedResult
+	hasError     bool
+}
 
-		if usesProxiedServer() {
-			return runReopenProxiedServer(cmd, rootCtx, args)
+func runReopen(cmd *cobra.Command, args []string) error {
+	if err := CheckReadonly("reopen"); err != nil {
+		return err
+	}
+	evt := metrics.NewCommandEvent("reopen")
+	defer func() {
+		if c := metrics.Global(); c != nil {
+			c.CloseEventAndAdd(evt)
 		}
+	}()
+	if usesProxiedServer() {
+		return runReopenProxiedServer(cmd, getRootContext(), args)
+	}
+	reason, _ := cmd.Flags().GetString("reason")
+	return runReopenDirect(args, reason)
+}
 
-		reason, _ := cmd.Flags().GetString("reason")
-		ctx := rootCtx
-		opsCtx, err := issueOpsContext(ctx)
-		if err != nil {
-			return HandleErrorRespectJSON("%v", err)
+func runReopenDirect(ids []string, reason string) error {
+	if getStore() == nil {
+		return HandleErrorWithHint("database not initialized", diagHint())
+	}
+	opsCtx, err := issueOpsContext(getRootContext())
+	if err != nil {
+		return HandleErrorRespectJSON("%v", err)
+	}
+	state := reopenState{reason: reason, mutated: map[storage.DoltStorage][]string{}}
+	for _, id := range ids {
+		if err := reopenOne(opsCtx, id, &state); err != nil {
+			fmt.Fprintf(os.Stderr, "Error %v\n", err)
+			state.hasError = true
 		}
+	}
+	if err := commitReopenedIssues(&state); err != nil {
+		return err
+	}
+	return reportReopenedIssues(&state)
+}
 
-		reopenedIssues := []*types.Issue{}
-		hasError := false
-		mutatedStores := map[storage.DoltStorage][]string{}
-		pendingCloseResults := []*RoutedResult{}
-		if store == nil {
-			return HandleErrorWithHint("database not initialized", diagHint())
+func reportReopenedIssues(state *reopenState) error {
+	if isJSONOutput() && len(state.reopened) > 0 {
+		if err := outputJSON(state.reopened); err != nil {
+			return err
 		}
-		for _, id := range args {
-			// Resolve with prefix routing (supports cross-rig reopens like `bd reopen xe-5ls`)
-			result, err := resolveAndGetIssueForMutation(ctx, store, id)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error resolving %s: %v\n", id, err)
-				hasError = true
-				continue
-			}
-			fullID := result.ResolvedID
-			issueStore := result.Store
-			issue := result.Issue
+	}
+	if state.hasError {
+		return SilentExit()
+	}
+	return nil
+}
 
-			if issue.Status == types.StatusOpen {
-				fmt.Fprintln(os.Stderr, reopenNoOpMessage(fullID, types.StatusOpen))
-				result.Close()
-				continue
-			}
-			ops, err := writeOps(issueStore)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error reopening %s: %v\n", fullID, err)
-				hasError = true
-				result.Close()
-				continue
-			}
-			reopened, err := ops.Reopen(opsCtx, issueops.ReopenRequest{
-				Actor:   actor,
-				IssueID: fullID,
-				Reason:  reason,
-				// Names the issue for the reason `bd close`'s does, and keeps
-				// the entry identical across backends: the proxied route
-				// already writes "bd: reopen <ids>".
-				Provenance: "bd: reopen " + fullID,
-			})
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error reopening %s: %v\n", fullID, err)
-				hasError = true
-				result.Close()
-				continue
-			}
-			if !reopened.Changed {
-				// RULING R4: only literal closed and configured done statuses
-				// reopen. Anything else was never closed, so there is nothing to
-				// report as reopened, nothing to commit, and no hook to fire —
-				// the same "nothing to do" shape as the already-open skip above.
-				fmt.Fprintln(os.Stderr, reopenNoOpMessage(fullID, reopenStatusOf(reopened.Issue, issue)))
-				result.Close()
-				continue
-			}
-			mutatedStores[issueStore] = append(mutatedStores[issueStore], fullID)
-			pendingCloseResults = append(pendingCloseResults, result)
-			if jsonOutput {
-				// The operation's own post-state snapshot replaces the re-read.
-				// Dependency records are dropped because `bd reopen` has never
-				// printed them.
-				if updated := reopened.Issue; updated != nil {
-					updated.Dependencies = nil
-					reopenedIssues = append(reopenedIssues, updated)
-				}
-			} else {
-				reasonMsg := ""
-				if reason != "" {
-					reasonMsg = ": " + reason
-				}
-				fmt.Printf("%s Reopened %s%s\n", ui.RenderAccent("↻"), fullID, reasonMsg)
-			}
-		}
+func reopenOne(opsCtx context.Context, id string, state *reopenState) error {
+	result, err := resolveAndGetIssueForMutation(getRootContext(), getStore(), id)
+	if err != nil {
+		return fmt.Errorf("resolving %s: %w", id, err)
+	}
+	if result.Issue.Status == types.StatusOpen {
+		fmt.Fprintln(os.Stderr, reopenNoOpMessage(result.ResolvedID, types.StatusOpen))
+		result.Close()
+		return nil
+	}
+	ops, err := writeOps(result.Store)
+	if err != nil {
+		result.Close()
+		return fmt.Errorf("reopening %s: %w", result.ResolvedID, err)
+	}
+	reopened, err := ops.Reopen(opsCtx, issueops.ReopenRequest{
+		Actor: getActor(), IssueID: result.ResolvedID, Reason: state.reason,
+		Provenance: "bd: reopen " + result.ResolvedID,
+	})
+	if err != nil {
+		result.Close()
+		return fmt.Errorf("reopening %s: %w", result.ResolvedID, err)
+	}
+	if !reopened.Changed {
+		fmt.Fprintln(os.Stderr, reopenNoOpMessage(result.ResolvedID, reopenStatusOf(reopened.Issue, result.Issue)))
+		result.Close()
+		return nil
+	}
+	recordReopenedIssue(result, reopened.Issue, state)
+	return nil
+}
 
-		for s, ids := range mutatedStores {
-			if err := commitPendingIfEmbedded(ctx, s, actor, doltAutoCommitParams{
-				Command:  "reopen",
-				IssueIDs: ids,
-			}); err != nil {
-				for _, result := range pendingCloseResults {
-					result.Close()
-				}
-				return HandleErrorRespectJSON("failed to commit: %v", err)
-			}
+func recordReopenedIssue(result *RoutedResult, issue *types.Issue, state *reopenState) {
+	state.mutated[result.Store] = append(state.mutated[result.Store], result.ResolvedID)
+	state.pendingClose = append(state.pendingClose, result)
+	if isJSONOutput() {
+		if issue != nil {
+			issue.Dependencies = nil
+			state.reopened = append(state.reopened, issue)
 		}
-		for _, result := range pendingCloseResults {
+		return
+	}
+	reasonMessage := ""
+	if state.reason != "" {
+		reasonMessage = ": " + state.reason
+	}
+	fmt.Printf("%s Reopened %s%s\n", ui.RenderAccent("↻"), result.ResolvedID, reasonMessage)
+}
+
+func commitReopenedIssues(state *reopenState) error {
+	defer func() {
+		for _, result := range state.pendingClose {
 			result.Close()
 		}
-
-		if jsonOutput && len(reopenedIssues) > 0 {
-			if jerr := outputJSON(reopenedIssues); jerr != nil {
-				return jerr
-			}
+	}()
+	for issueStore, ids := range state.mutated {
+		if err := commitPendingIfEmbedded(getRootContext(), issueStore, getActor(), doltAutoCommitParams{
+			Command: "reopen", IssueIDs: ids,
+		}); err != nil {
+			return HandleErrorRespectJSON("failed to commit: %v", err)
 		}
-
-		if hasError {
-			return SilentExit()
-		}
-		return nil
-	},
+	}
+	return nil
 }
 
 // reopenNoOpMessage is what either route says when the role reported no change.
@@ -169,7 +178,5 @@ func reopenStatusOf(post, pre *types.Issue) types.Status {
 }
 
 func init() {
-	reopenCmd.Flags().StringP("reason", "r", "", "Reason for reopening")
-	reopenCmd.ValidArgsFunction = issueIDCompletion
-	rootCmd.AddCommand(reopenCmd)
+	rootCmd.AddCommand(newReopenCmd())
 }

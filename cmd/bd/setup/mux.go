@@ -222,27 +222,36 @@ func installMux(env agentsEnv, project bool, global bool) error {
 	}
 
 	if project {
-		projectPath := muxProjectAgentsPath(env.agentsPath)
-		if err := EnsureDir(filepath.Dir(projectPath), 0o755); err != nil {
+		if err := installMuxProject(env); err != nil {
 			return err
-		}
-
-		projectEnv := env
-		projectEnv.agentsPath = projectPath
-		projectSkipped := false
-		projectEnv.skipped = &projectSkipped
-		if err := installAgents(projectEnv, muxProjectIntegration); err != nil {
-			return err
-		}
-		if projectSkipped {
-			_, _ = fmt.Fprintf(env.stdout, "✓ Mux project hooks installed; managed section skipped for symlinked %s\n", projectPath)
 		}
 	}
 
 	if !global {
 		return nil
 	}
+	return installMuxGlobal(env)
+}
 
+func installMuxProject(env agentsEnv) error {
+	projectPath := muxProjectAgentsPath(env.agentsPath)
+	if err := EnsureDir(filepath.Dir(projectPath), 0o755); err != nil {
+		return err
+	}
+	projectEnv := env
+	projectEnv.agentsPath = projectPath
+	projectSkipped := false
+	projectEnv.skipped = &projectSkipped
+	if err := installAgents(projectEnv, muxProjectIntegration); err != nil {
+		return err
+	}
+	if projectSkipped {
+		_, _ = fmt.Fprintf(env.stdout, "✓ Mux project hooks installed; managed section skipped for symlinked %s\n", projectPath)
+	}
+	return nil
+}
+
+func installMuxGlobal(env agentsEnv) error {
 	globalPath, err := muxGlobalAgentsPath()
 	if err != nil {
 		return err

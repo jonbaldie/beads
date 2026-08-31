@@ -37,16 +37,24 @@ func TestSqlCommand(t *testing.T) {
 	// Create test data
 	testIssues := []*types.Issue{
 		{
-			Title:     "Test issue one",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
+			IssueContent: types.IssueContent{
+				Title: "Test issue one",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
 		},
 		{
-			Title:     "Test issue two",
-			Status:    types.StatusClosed,
-			Priority:  2,
-			IssueType: types.TypeBug,
+			IssueContent: types.IssueContent{
+				Title: "Test issue two",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusClosed,
+				Priority:  2,
+				IssueType: types.TypeBug,
+			},
 		},
 	}
 

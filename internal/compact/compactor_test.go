@@ -54,9 +54,12 @@ func createClosedIssue(t *testing.T, store *dolt.DoltStore, id string) *types.Is
 	// Issue closed 8 days ago (beyond 7-day threshold for Tier 1)
 	closedAt := now.Add(-8 * 24 * time.Hour)
 	issue := &types.Issue{
-		ID:    id,
-		Title: "Test Issue",
-		Description: `Implemented a comprehensive authentication system for the application.
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: "Test Issue",
+			Description: `Implemented a comprehensive authentication system for the application.
 		
 The system includes JWT token generation, refresh token handling, password hashing with bcrypt,
 rate limiting on login attempts, and session management. We chose JWT for stateless authentication
@@ -64,7 +67,7 @@ to enable horizontal scaling across multiple server instances.
 
 The implementation follows OWASP security guidelines and includes protection against common attacks
 like brute force, timing attacks, and token theft. All sensitive operations are logged for audit purposes.`,
-		Design: `Authentication Flow:
+			Design: `Authentication Flow:
 1. User submits credentials
 2. Server validates against database
 3. On success, generate JWT with user claims
@@ -79,7 +82,7 @@ Security Measures:
 - JWT expires after 1 hour
 - Refresh tokens expire after 30 days
 - All tokens stored in httpOnly cookies`,
-		Notes: `Performance considerations:
+			Notes: `Performance considerations:
 - JWT validation adds ~2ms latency per request
 - Consider caching user data in Redis for frequently accessed profiles
 - Monitor token refresh patterns for anomalies
@@ -89,19 +92,24 @@ Testing strategy:
 - Integration tests for full auth flow
 - Security tests for attack scenarios
 - Load tests for rate limiting behavior`,
-		AcceptanceCriteria: `- Users can register with email/password
+			AcceptanceCriteria: `- Users can register with email/password
 - Users can login and receive valid JWT
 - Protected endpoints reject invalid/expired tokens
 - Rate limiting blocks brute force attempts
 - Tokens can be refreshed before expiry
 - Logout invalidates current session
 - All security requirements met per OWASP guidelines`,
-		Status:    types.StatusClosed,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		CreatedAt: now.Add(-48 * time.Hour),
-		UpdatedAt: now.Add(-24 * time.Hour),
-		ClosedAt:  &closedAt,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now.Add(-48 * time.Hour),
+			UpdatedAt: now.Add(-24 * time.Hour),
+			ClosedAt:  &closedAt,
+		},
 	}
 
 	if err := store.CreateIssue(ctx, issue, prefix); err != nil {
@@ -184,14 +192,22 @@ func TestCompactTier1_IneligibleIssue(t *testing.T) {
 
 	now := time.Now()
 	issue := &types.Issue{
-		ID:          "bd-open",
-		Title:       "Open Issue",
-		Description: "Should not be compacted",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		IssueID: types.IssueID{
+			ID: "bd-open",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Open Issue",
+			Description: "Should not be compacted",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, prefix); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -300,14 +316,22 @@ func TestCompactTier1Batch_WithIneligible(t *testing.T) {
 
 	now := time.Now()
 	openIssue := &types.Issue{
-		ID:          "bd-open",
-		Title:       "Open Issue",
-		Description: "Should not be compacted",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		IssueID: types.IssueID{
+			ID: "bd-open",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Open Issue",
+			Description: "Should not be compacted",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
 	}
 	if err := store.CreateIssue(ctx, openIssue, prefix); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -424,14 +448,22 @@ func TestBatchOperations_ErrorHandling(t *testing.T) {
 
 	closedIssue := createClosedIssue(t, store, "bd-closed")
 	openIssue := &types.Issue{
-		ID:          "bd-open",
-		Title:       "Open",
-		Description: "Open issue",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeTask,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		IssueID: types.IssueID{
+			ID: "bd-open",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Open",
+			Description: "Open issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
 	}
 	if err := store.CreateIssue(ctx, openIssue, prefix); err != nil {
 		t.Fatalf("failed to create open issue: %v", err)

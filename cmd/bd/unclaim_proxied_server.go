@@ -42,66 +42,73 @@ type unclaimProxiedResult struct {
 // one for the same refusal is exactly the divergence this lane exists to
 // prevent.
 func runUnclaimProxiedServer(ctx context.Context, args []string, reason string, force bool, expectedAssignee string) error {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return HandleError("proxied-server UOW provider not initialized")
 	}
-
-	res, err := uow.RunTxResult(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (unclaimProxiedResult, string, error) {
-		var r unclaimProxiedResult
-		for _, id := range args {
-			issue, _, rerr := workapi.GetIssueOrWisp(ctx, workapi.NewUOWDetailSource(uw), id)
-			if errors.Is(rerr, storage.ErrNotFound) {
-				r.errs = append(r.errs, fmt.Sprintf("Error resolving %s: not found", id))
-				continue
-			}
-			if rerr != nil {
-				r.errs = append(r.errs, fmt.Sprintf("Error resolving %s: %v", id, rerr))
-				continue
-			}
-			fullID := issue.ID
-
-			var uerr error
-			if expectedAssignee != "" {
-				uerr = uw.IssueUseCase().UnclaimIfAssignee(ctx, fullID, actor, expectedAssignee)
-			} else {
-				uerr = uw.IssueUseCase().Unclaim(ctx, fullID, actor, force)
-			}
-			if uerr != nil {
-				r.errs = append(r.errs, fmt.Sprintf("Error unclaiming %s: %v", fullID, uerr))
-				continue
-			}
-
-			if reason != "" {
-				if _, cerr := uw.CommentUseCase().AddCommentToIssue(ctx, fullID, actor, reason); cerr != nil {
-					r.errs = append(r.errs, fmt.Sprintf("Warning: failed to add reason comment on %s: %v", fullID, cerr))
-				}
-			}
-
-			if jsonOutput {
-				if updated, _ := uw.IssueUseCase().GetIssue(ctx, fullID); updated != nil {
-					r.unclaimed = append(r.unclaimed, updated)
-				}
-			}
-			r.ids = append(r.ids, fullID)
-		}
-		if len(r.ids) == 0 {
-			return r, "", nil
-		}
-		return r, "bd: unclaim " + strings.Join(r.ids, ", "), nil
+	res, err := uow.RunTxResult(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (unclaimProxiedResult, string, error) {
+		return unclaimProxiedTx(ctx, uw, args, reason, force, expectedAssignee)
 	})
 	if err != nil {
 		return HandleErrorRespectJSON("%v", err)
 	}
+	return printUnclaimProxiedResult(res, reason)
+}
 
+func unclaimProxiedTx(ctx context.Context, uw uow.UnitOfWork, args []string, reason string, force bool, expectedAssignee string) (unclaimProxiedResult, string, error) {
+	var r unclaimProxiedResult
+	for _, id := range args {
+		unclaimOneProxiedIssue(ctx, uw, id, reason, force, expectedAssignee, &r)
+	}
+	if len(r.ids) == 0 {
+		return r, "", nil
+	}
+	return r, "bd: unclaim " + strings.Join(r.ids, ", "), nil
+}
+
+func unclaimOneProxiedIssue(ctx context.Context, uw uow.UnitOfWork, id, reason string, force bool, expectedAssignee string, r *unclaimProxiedResult) {
+	issue, _, rerr := workapi.GetIssueOrWisp(ctx, workapi.NewUOWDetailSource(uw), id)
+	if errors.Is(rerr, storage.ErrNotFound) {
+		r.errs = append(r.errs, fmt.Sprintf("Error resolving %s: not found", id))
+		return
+	}
+	if rerr != nil {
+		r.errs = append(r.errs, fmt.Sprintf("Error resolving %s: %v", id, rerr))
+		return
+	}
+	fullID := issue.ID
+	uerr := unclaimProxiedIssue(ctx, uw, fullID, force, expectedAssignee)
+	if uerr != nil {
+		r.errs = append(r.errs, fmt.Sprintf("Error unclaiming %s: %v", fullID, uerr))
+		return
+	}
+	if reason != "" {
+		if _, cerr := uw.CommentUseCase().AddCommentToIssue(ctx, fullID, getActor(), reason); cerr != nil {
+			r.errs = append(r.errs, fmt.Sprintf("Warning: failed to add reason comment on %s: %v", fullID, cerr))
+		}
+	}
+	if isJSONOutput() {
+		if updated, _ := uw.IssueUseCase().GetIssue(ctx, fullID); updated != nil {
+			r.unclaimed = append(r.unclaimed, updated)
+		}
+	}
+	r.ids = append(r.ids, fullID)
+}
+
+func unclaimProxiedIssue(ctx context.Context, uw uow.UnitOfWork, fullID string, force bool, expectedAssignee string) error {
+	if expectedAssignee != "" {
+		return uw.IssueUseCase().UnclaimIfAssignee(ctx, fullID, getActor(), expectedAssignee)
+	}
+	return uw.IssueUseCase().Unclaim(ctx, fullID, getActor(), force)
+}
+
+func printUnclaimProxiedResult(res unclaimProxiedResult, reason string) error {
 	for _, e := range res.errs {
 		fmt.Fprintln(os.Stderr, e)
 	}
-
 	if len(res.ids) > 0 {
 		commandDidWrite.Store(true)
 	}
-
-	if jsonOutput {
+	if isJSONOutput() {
 		if len(res.unclaimed) > 0 {
 			if e := outputJSON(res.unclaimed); e != nil {
 				return HandleError("%v", e)
@@ -116,7 +123,6 @@ func runUnclaimProxiedServer(ctx context.Context, args []string, reason string, 
 			fmt.Printf("%s Unclaimed %s%s\n", ui.RenderPass("✓"), id, reasonMsg)
 		}
 	}
-
 	if len(res.errs) > 0 {
 		return SilentExit()
 	}
@@ -124,12 +130,12 @@ func runUnclaimProxiedServer(ctx context.Context, args []string, reason string, 
 }
 
 func runReclaimProxiedServer(ctx context.Context, olderThan time.Duration, filter types.ReclaimFilter) error {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return HandleError("proxied-server UOW provider not initialized")
 	}
 
-	reclaimed, err := uow.RunTxResult(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) ([]types.ReclaimedLease, string, error) {
-		out, rerr := uw.IssueUseCase().ReclaimExpiredLeases(ctx, olderThan, filter, actor)
+	reclaimed, err := uow.RunTxResult(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) ([]types.ReclaimedLease, string, error) {
+		out, rerr := uw.IssueUseCase().ReclaimExpiredLeases(ctx, olderThan, filter, getActor())
 		if rerr != nil {
 			return nil, "", rerr
 		}

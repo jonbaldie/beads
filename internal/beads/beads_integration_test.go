@@ -28,12 +28,18 @@ func newIntegrationHelper(t *testing.T, store beads.Storage) *integrationTestHel
 
 func (h *integrationTestHelper) createIssue(title string, issueType types.IssueType, priority int) *types.Issue {
 	issue := &types.Issue{
-		Title:     title,
-		Status:    types.StatusOpen,
-		Priority:  priority,
-		IssueType: issueType,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		IssueContent: types.IssueContent{
+			Title: title,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  priority,
+			IssueType: issueType,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
 	}
 	if err := h.store.CreateIssue(h.ctx, issue, "test-actor"); err != nil {
 		h.t.Fatalf("CreateIssue failed: %v", err)
@@ -43,17 +49,23 @@ func (h *integrationTestHelper) createIssue(title string, issueType types.IssueT
 
 func (h *integrationTestHelper) createFullIssue(desc, design, acceptance, notes, assignee string) *types.Issue {
 	issue := &types.Issue{
-		Title:              "Complete issue",
-		Description:        desc,
-		Design:             design,
-		AcceptanceCriteria: acceptance,
-		Notes:              notes,
-		Status:             types.StatusOpen,
-		Priority:           1,
-		IssueType:          types.TypeFeature,
-		Assignee:           assignee,
-		CreatedAt:          time.Now(),
-		UpdatedAt:          time.Now(),
+		IssueContent: types.IssueContent{
+			Title:              "Complete issue",
+			Description:        desc,
+			Design:             design,
+			AcceptanceCriteria: acceptance,
+			Notes:              notes,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeFeature,
+			Assignee:  assignee,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
 	}
 	if err := h.store.CreateIssue(h.ctx, issue, "test-actor"); err != nil {
 		h.t.Fatalf("CreateIssue failed: %v", err)
@@ -241,7 +253,7 @@ func TestLibraryIntegration(t *testing.T) {
 		for i := 0; i < 3; i++ {
 			h.createIssue("Ready work test", types.TypeTask, i)
 		}
-		ready, err := store.GetReadyWork(h.ctx, types.WorkFilter{Status: types.StatusOpen, Limit: 5})
+		ready, err := store.GetReadyWork(h.ctx, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Status: types.StatusOpen, Limit: 5}})
 		if err != nil {
 			t.Fatalf("GetReadyWork failed: %v", err)
 		}
@@ -351,12 +363,18 @@ func TestBatchCreateIssues(t *testing.T) {
 	issues := make([]*types.Issue, 5)
 	for i := 0; i < 5; i++ {
 		issues[i] = &types.Issue{
-			Title:     "Batch test",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Batch test",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+				UpdatedAt: time.Now(),
+			},
 		}
 	}
 

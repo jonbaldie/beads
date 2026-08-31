@@ -110,7 +110,7 @@ func TestPersistentPostRunStrictReadonlySuppressesMaintenance(t *testing.T) {
 	originalProxied := proxiedServerMode
 	originalRootCtx := rootCtx
 	originalRootCancel := rootCancel
-	originalCommandSpan := commandSpan
+	originalCommandSpan := commandSpan.Load()
 	originalProfileFile := profileFile
 	originalTraceFile := traceFile
 	storeMutex.Lock()
@@ -135,7 +135,7 @@ func TestPersistentPostRunStrictReadonlySuppressesMaintenance(t *testing.T) {
 		proxiedServerMode = originalProxied
 		rootCtx = originalRootCtx
 		rootCancel = originalRootCancel
-		commandSpan = originalCommandSpan
+		commandSpan.Store(originalCommandSpan)
 		profileFile = originalProfileFile
 		traceFile = originalTraceFile
 		storeMutex.Lock()
@@ -168,7 +168,7 @@ func TestPersistentPostRunStrictReadonlySuppressesMaintenance(t *testing.T) {
 	proxiedServerMode = false
 	rootCtx = context.Background()
 	rootCancel = nil
-	commandSpan = nil
+	setCommandSpan(nil)
 	profileFile = nil
 	traceFile = nil
 	commandDidWrite.Store(true)
@@ -307,12 +307,16 @@ func TestConfigValidateReadOnlyIsHermetic(t *testing.T) {
 		t.Fatalf("save isolated metadata: %v", err)
 	}
 	store, err := dolt.New(context.Background(), &dolt.Config{
-		Path:            doltPath,
-		BeadsDir:        beadsDir,
-		ServerHost:      "127.0.0.1",
-		ServerPort:      port,
-		Database:        database,
-		CreateIfMissing: true,
+		Path:     doltPath,
+		BeadsDir: beadsDir,
+		ServerOptions: dolt.ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: port,
+		},
+		Database: database,
+		RemoteOptions: dolt.RemoteOptions{
+			CreateIfMissing: true,
+		},
 	})
 	if err != nil {
 		t.Fatalf("create isolated database: %v", err)

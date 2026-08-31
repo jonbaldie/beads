@@ -69,12 +69,14 @@ NOTE: This is a rare operation. Most users never need this command.`,
 		repair, _ := cmd.Flags().GetBool("repair")
 
 		if !dryRun {
-			CheckReadonly("rename-prefix")
+			if err := CheckReadonly("rename-prefix"); err != nil {
+				return err
+			}
 		}
 
-		ctx := rootCtx
+		ctx := getRootContext()
 
-		if store == nil {
+		if getStore() == nil {
 			if err := ensureStoreActive(); err != nil {
 				return HandleError("%v", err)
 			}
@@ -84,14 +86,14 @@ NOTE: This is a rare operation. Most users never need this command.`,
 			return HandleError("%v", err)
 		}
 
-		oldPrefix, err := store.GetConfig(ctx, "issue_prefix")
+		oldPrefix, err := getStore().GetConfig(ctx, "issue_prefix")
 		if err != nil || oldPrefix == "" {
 			return HandleError("failed to get current prefix: %v", err)
 		}
 
 		newPrefix = strings.TrimRight(newPrefix, "-")
 
-		issues, err := store.SearchIssues(ctx, "", types.IssueFilter{})
+		issues, err := getStore().SearchIssues(ctx, "", types.IssueFilter{})
 		if err != nil {
 			return HandleError("failed to list issues: %v", err)
 		}
@@ -112,7 +114,7 @@ NOTE: This is a rare operation. Most users never need this command.`,
 				)
 			}
 
-			if err := repairPrefixes(ctx, store, actor, newPrefix, issues, prefixes, dryRun); err != nil {
+			if err := repairPrefixes(ctx, getStore(), getActor(), newPrefix, issues, prefixes, dryRun); err != nil {
 				return HandleError("failed to repair prefixes: %v", err)
 			}
 			if !dryRun {
@@ -128,7 +130,7 @@ NOTE: This is a rare operation. Most users never need this command.`,
 		if len(issues) == 0 {
 			fmt.Printf("No issues to rename. Updating prefix to %s\n", newPrefix)
 			if !dryRun {
-				if err := store.SetConfig(ctx, "issue_prefix", newPrefix); err != nil {
+				if err := getStore().SetConfig(ctx, "issue_prefix", newPrefix); err != nil {
 					return HandleError("failed to update prefix: %v", err)
 				}
 				commandDidWrite.Store(true)
@@ -155,12 +157,12 @@ NOTE: This is a rare operation. Most users never need this command.`,
 				fmt.Printf("DRY RUN: config prefix disagrees with issue IDs — would repair config only: '%s' -> '%s' (%d issue IDs already correct)\n", oldPrefix, newPrefix, len(issues))
 				return nil
 			}
-			if err := store.SetConfig(ctx, "issue_prefix", newPrefix); err != nil {
+			if err := getStore().SetConfig(ctx, "issue_prefix", newPrefix); err != nil {
 				return HandleError("failed to update prefix: %v", err)
 			}
 			commandDidWrite.Store(true)
 			fmt.Printf("%s Repaired config prefix: '%s' -> '%s' (%d issue IDs already correct, none rewritten)\n", ui.RenderPass("✓"), ui.RenderAccent(oldPrefix), ui.RenderAccent(newPrefix), len(issues))
-			if jsonOutput {
+			if isJSONOutput() {
 				result := map[string]interface{}{
 					"old_prefix":      oldPrefix,
 					"new_prefix":      newPrefix,
@@ -203,7 +205,7 @@ NOTE: This is a rare operation. Most users never need this command.`,
 
 		fmt.Printf("%s Successfully renamed prefix from %s to %s\n", ui.RenderPass("✓"), ui.RenderAccent(detected), ui.RenderAccent(newPrefix))
 
-		if jsonOutput {
+		if isJSONOutput() {
 			result := map[string]interface{}{
 				"old_prefix":   detected,
 				"new_prefix":   newPrefix,
@@ -263,96 +265,41 @@ type issueSort struct {
 // Issues with incorrect prefixes get new hash-based IDs.
 func repairPrefixes(ctx context.Context, st storage.DoltStorage, actorName string, targetPrefix string, issues []*types.Issue, prefixes map[string]int, dryRun bool) error {
 
-	// Separate issues into correct and incorrect prefix groups
-	var correctIssues []*types.Issue
-	var incorrectIssues []issueSort
-
-	for _, issue := range issues {
-		prefix := utils.ExtractIssuePrefix(issue.ID)
-		number := utils.ExtractIssueNumber(issue.ID)
-
-		if prefix == targetPrefix {
-			correctIssues = append(correctIssues, issue)
-		} else {
-			incorrectIssues = append(incorrectIssues, issueSort{
-				issue:  issue,
-				prefix: prefix,
-				number: number,
-			})
-		}
-	}
-
-	// Sort incorrect issues: first by prefix lexicographically, then by number
-	slices.SortFunc(incorrectIssues, func(a, b issueSort) int {
-		return cmp.Or(
-			cmp.Compare(a.prefix, b.prefix),
-			cmp.Compare(a.number, b.number),
-		)
-	})
-
-	// Build a map of all renames for text replacement using hash IDs
-	// Track used IDs to avoid collisions within the batch
-	renameMap := make(map[string]string)
-	usedIDs := make(map[string]bool)
-
-	// Mark existing correct IDs as used
-	for _, issue := range correctIssues {
-		usedIDs[issue.ID] = true
-	}
-
-	// Generate hash IDs for all incorrect issues
-	for _, is := range incorrectIssues {
-		newID, err := generateRepairHashID(targetPrefix, is.issue, actorName, usedIDs)
-		if err != nil {
-			return fmt.Errorf("failed to generate hash ID for %s: %w", is.issue.ID, err)
-		}
-		renameMap[is.issue.ID] = newID
-		usedIDs[newID] = true
+	correctIssues, incorrectIssues := partitionRepairIssues(issues, targetPrefix)
+	renameMap, err := planRepairRenames(targetPrefix, actorName, correctIssues, incorrectIssues)
+	if err != nil {
+		return err
 	}
 
 	if dryRun {
-		fmt.Printf("DRY RUN: Would repair %d issues with incorrect prefixes\n\n", len(incorrectIssues))
-		fmt.Printf("Issues with correct prefix (%s): %d\n", ui.RenderAccent(targetPrefix), len(correctIssues))
-		fmt.Printf("Issues to repair: %d\n\n", len(incorrectIssues))
-
-		fmt.Printf("Planned renames (showing first 10):\n")
-		for i, is := range incorrectIssues {
-			if i >= 10 {
-				fmt.Printf("... and %d more\n", len(incorrectIssues)-10)
-				break
-			}
-			oldID := is.issue.ID
-			newID := renameMap[oldID]
-			fmt.Printf("  %s -> %s\n", ui.RenderWarn(oldID), ui.RenderAccent(newID))
-		}
+		printRepairDryRun(targetPrefix, correctIssues, incorrectIssues, renameMap)
 		return nil
 	}
 
-	// Perform the repairs
+	if err := applyRepairRenames(ctx, st, actorName, targetPrefix, correctIssues, incorrectIssues, renameMap); err != nil {
+		return err
+	}
+	printRepairSuccess(targetPrefix, prefixes, correctIssues, incorrectIssues)
+	return nil
+}
+
+func applyRepairRenames(ctx context.Context, st storage.DoltStorage, actorName, targetPrefix string, correctIssues []*types.Issue, incorrectIssues []issueSort, renameMap map[string]string) error {
 	fmt.Printf("Repairing database with multiple prefixes...\n")
 	fmt.Printf("  Issues with correct prefix (%s): %d\n", ui.RenderAccent(targetPrefix), len(correctIssues))
 	fmt.Printf("  Issues to repair: %d\n\n", len(incorrectIssues))
 
-	// Pattern to match any issue ID reference in text (both hash and sequential IDs)
 	oldPrefixPattern := regexp.MustCompile(`\b[a-z][a-z0-9-]*-[a-z0-9]+\b`)
-
-	// Rename each issue
+	replaceFunc := func(match string) string {
+		if newID, ok := renameMap[match]; ok {
+			return newID
+		}
+		return match
+	}
 	for _, is := range incorrectIssues {
 		oldID := is.issue.ID
 		newID := renameMap[oldID]
-
-		// Apply text replacements in all issue fields
 		issue := is.issue
 		issue.ID = newID
-
-		// Replace all issue IDs in text fields using the rename map
-		replaceFunc := func(match string) string {
-			if newID, ok := renameMap[match]; ok {
-				return newID
-			}
-			return match
-		}
-
 		issue.Title = oldPrefixPattern.ReplaceAllStringFunc(issue.Title, replaceFunc)
 		issue.Description = oldPrefixPattern.ReplaceAllStringFunc(issue.Description, replaceFunc)
 		if issue.Design != "" {
@@ -364,37 +311,91 @@ func repairPrefixes(ctx context.Context, st storage.DoltStorage, actorName strin
 		if issue.Notes != "" {
 			issue.Notes = oldPrefixPattern.ReplaceAllStringFunc(issue.Notes, replaceFunc)
 		}
-
-		// Update the issue in the database
 		if err := st.UpdateIssueID(ctx, oldID, newID, issue, actorName); err != nil {
 			return fmt.Errorf("failed to update issue %s -> %s: %w", oldID, newID, err)
 		}
-
 		fmt.Printf("  Renamed %s -> %s\n", ui.RenderWarn(oldID), ui.RenderAccent(newID))
 	}
-
-	// Set the new prefix in config
 	if err := st.SetConfig(ctx, "issue_prefix", targetPrefix); err != nil {
 		return fmt.Errorf("failed to update config: %w", err)
 	}
+	return nil
+}
 
+func printRepairSuccess(targetPrefix string, prefixes map[string]int, correctIssues []*types.Issue, incorrectIssues []issueSort) {
 	fmt.Printf("\n%s Successfully consolidated %d prefixes into %s\n",
 		ui.RenderPass("✓"), len(prefixes), ui.RenderAccent(targetPrefix))
 	fmt.Printf("  %d issues repaired, %d issues unchanged\n", len(incorrectIssues), len(correctIssues))
-
-	if jsonOutput {
-		result := map[string]interface{}{
-			"target_prefix":    targetPrefix,
-			"prefixes_found":   len(prefixes),
-			"issues_repaired":  len(incorrectIssues),
-			"issues_unchanged": len(correctIssues),
-		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		_ = enc.Encode(result)
+	if !isJSONOutput() {
+		return
 	}
+	result := map[string]interface{}{
+		"target_prefix":    targetPrefix,
+		"prefixes_found":   len(prefixes),
+		"issues_repaired":  len(incorrectIssues),
+		"issues_unchanged": len(correctIssues),
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(result)
+}
 
-	return nil
+func partitionRepairIssues(issues []*types.Issue, targetPrefix string) ([]*types.Issue, []issueSort) {
+	var correctIssues []*types.Issue
+	var incorrectIssues []issueSort
+	for _, issue := range issues {
+		prefix := utils.ExtractIssuePrefix(issue.ID)
+		number := utils.ExtractIssueNumber(issue.ID)
+		if prefix == targetPrefix {
+			correctIssues = append(correctIssues, issue)
+			continue
+		}
+		incorrectIssues = append(incorrectIssues, issueSort{
+			issue:  issue,
+			prefix: prefix,
+			number: number,
+		})
+	}
+	slices.SortFunc(incorrectIssues, func(a, b issueSort) int {
+		return cmp.Or(
+			cmp.Compare(a.prefix, b.prefix),
+			cmp.Compare(a.number, b.number),
+		)
+	})
+	return correctIssues, incorrectIssues
+}
+
+func planRepairRenames(targetPrefix, actorName string, correctIssues []*types.Issue, incorrectIssues []issueSort) (map[string]string, error) {
+	renameMap := make(map[string]string)
+	usedIDs := make(map[string]bool)
+	for _, issue := range correctIssues {
+		usedIDs[issue.ID] = true
+	}
+	for _, is := range incorrectIssues {
+		newID, err := generateRepairHashID(targetPrefix, is.issue, actorName, usedIDs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate hash ID for %s: %w", is.issue.ID, err)
+		}
+		renameMap[is.issue.ID] = newID
+		usedIDs[newID] = true
+	}
+	return renameMap, nil
+}
+
+func printRepairDryRun(targetPrefix string, correctIssues []*types.Issue, incorrectIssues []issueSort, renameMap map[string]string) {
+	fmt.Printf("DRY RUN: Would repair %d issues with incorrect prefixes\n\n", len(incorrectIssues))
+	fmt.Printf("Issues with correct prefix (%s): %d\n", ui.RenderAccent(targetPrefix), len(correctIssues))
+	fmt.Printf("Issues to repair: %d\n\n", len(incorrectIssues))
+	fmt.Printf("Planned renames (showing first 10):\n")
+	for i, is := range incorrectIssues {
+		if i >= 10 {
+			fmt.Printf("... and %d more\n", len(incorrectIssues)-10)
+			break
+		}
+		oldID := is.issue.ID
+		newID := renameMap[oldID]
+		fmt.Printf("  %s -> %s\n", ui.RenderWarn(oldID), ui.RenderAccent(newID))
+	}
 }
 
 // rewriteIssueID maps oldID from oldPrefix to newPrefix. oldPrefix must be
@@ -456,12 +457,12 @@ func renamePrefixInDB(ctx context.Context, oldPrefix, newPrefix string, issues [
 		}
 
 		issue.ID = newID
-		if err := store.UpdateIssueID(ctx, oldID, newID, issue, actor); err != nil {
+		if err := getStore().UpdateIssueID(ctx, oldID, newID, issue, getActor()); err != nil {
 			return fmt.Errorf("failed to update issue %s: %w", oldID, err)
 		}
 	}
 
-	if err := store.SetConfig(ctx, "issue_prefix", newP); err != nil {
+	if err := getStore().SetConfig(ctx, "issue_prefix", newP); err != nil {
 		return fmt.Errorf("failed to update config: %w", err)
 	}
 

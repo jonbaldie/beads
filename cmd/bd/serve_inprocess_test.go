@@ -35,18 +35,18 @@ func restoreServeGlobals(t *testing.T) {
 	t.Helper()
 	origStore, origDBPath := store, dbPath
 	origServer, origProxied := serverMode, proxiedServerMode
-	origAddr, origNonLoopback := serveAddr, serveAllowNonLoopback
 	origCtx, origCancel := rootCtx, rootCancel
 	origCmdCtx, origUseGlobals := cmdCtx, testModeUseGlobals
+	serveCmd.ResetFlags()
+	registerServeFlags(serveCmd)
 	t.Cleanup(func() {
 		if store != nil && store != origStore {
 			store.Close()
 		}
 		serveCmd.ResetFlags()
-		registerServeFlags(serveCmd) // rebinds serveAddr/serveAllowNonLoopback to the defaults
+		registerServeFlags(serveCmd) // restores the command-local serve flags to their defaults
 		store, dbPath = origStore, origDBPath
 		serverMode, proxiedServerMode = origServer, origProxied
-		serveAddr, serveAllowNonLoopback = origAddr, origNonLoopback
 		rootCtx, rootCancel = origCtx, origCancel
 		cmdCtx, testModeUseGlobals = origCmdCtx, origUseGlobals
 		rootCmd.SetArgs(nil)

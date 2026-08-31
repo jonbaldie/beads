@@ -160,78 +160,23 @@ func resolveViaPrefixRouting(ctx context.Context, id string) (*RoutedResult, err
 // the command inside that rig; false keeps the read-only open that guarantees a
 // routed read cannot mutate the target (bd-6dnrw.32).
 func resolveViaPrefixRoutingWithAccess(ctx context.Context, id string, writable bool) (*RoutedResult, error) {
-	// Extract prefix from the bead ID (e.g., "hr-" from "hr-8wn.1")
 	prefix := extractBeadPrefix(id)
 	if prefix == "" {
 		return nil, fmt.Errorf("no prefix in ID %q", id)
 	}
-
-	// Find the resolved beads directory (where routes.jsonl lives)
-	currentBeadsDir := resolveCommandBeadsDir(dbPath)
-	if currentBeadsDir == "" {
-		return nil, fmt.Errorf("no beads directory available")
+	route, currentBeadsDir, err := findPrefixRoute(prefix)
+	if err != nil {
+		return nil, err
 	}
-
-	// Load routes from routes.jsonl
-	routes, err := loadPrefixRoutes(currentBeadsDir)
-	if err != nil || len(routes) == 0 {
-		return nil, fmt.Errorf("no routes available")
+	targetBeadsDir, targetDB, err := prefixRouteTarget(currentBeadsDir, route)
+	if err != nil {
+		return nil, err
 	}
-
-	// Find matching route for this prefix
-	var matchedRoute *prefixRoute
-	for i, r := range routes {
-		if r.Prefix == prefix {
-			matchedRoute = &routes[i]
-			break
-		}
+	debug.Logf("[routing] Prefix %q matched route to %s (database: %s)\n", prefix, route.Path, targetDB)
+	targetStore, err := openPrefixRouteStore(ctx, targetBeadsDir, targetDB, writable)
+	if err != nil {
+		return nil, fmt.Errorf("opening routed store for %s: %w", route.Path, err)
 	}
-	if matchedRoute == nil {
-		return nil, fmt.Errorf("no route for prefix %q", prefix)
-	}
-
-	// Skip if the route points to current directory (town-level, already checked)
-	if matchedRoute.Path == "." {
-		return nil, fmt.Errorf("route points to current database")
-	}
-
-	// Derive the town root from the current beads dir.
-	// currentBeadsDir is typically <town_root>/.beads
-	townRoot := filepath.Dir(currentBeadsDir)
-
-	// Resolve the target rig's .beads directory
-	rigDir := filepath.Join(townRoot, matchedRoute.Path)
-	targetBeadsDir := beads.FollowRedirect(filepath.Join(rigDir, ".beads"))
-
-	// Check that the target has a different dolt_database
-	targetDB := readDoltDatabase(targetBeadsDir)
-	if targetDB == "" {
-		return nil, fmt.Errorf("target rig has no dolt_database configured")
-	}
-
-	debug.Logf("[routing] Prefix %q matched route to %s (database: %s)\n", prefix, matchedRoute.Path, targetDB)
-
-	// We need to temporarily override BEADS_DOLT_SERVER_DATABASE so server-mode
-	// stores connect to the correct database on the shared Dolt server.
-	origDB := os.Getenv("BEADS_DOLT_SERVER_DATABASE")
-	_ = os.Setenv("BEADS_DOLT_SERVER_DATABASE", targetDB)
-	var targetStore storage.DoltStorage
-	var openErr error
-	if writable {
-		targetStore, openErr = newDoltStoreFromConfig(ctx, targetBeadsDir)
-	} else {
-		targetStore, openErr = newReadOnlyStoreFromConfig(ctx, targetBeadsDir)
-	}
-	// Restore the original env var
-	if origDB != "" {
-		_ = os.Setenv("BEADS_DOLT_SERVER_DATABASE", origDB)
-	} else {
-		_ = os.Unsetenv("BEADS_DOLT_SERVER_DATABASE")
-	}
-	if openErr != nil {
-		return nil, fmt.Errorf("opening routed store for %s: %w", matchedRoute.Path, openErr)
-	}
-
 	result, err := resolveAndGetFromStore(ctx, targetStore, id, true)
 	if err != nil {
 		_ = targetStore.Close()
@@ -239,11 +184,62 @@ func resolveViaPrefixRoutingWithAccess(ctx context.Context, id string, writable 
 	}
 	result.closeFn = func() { _ = targetStore.Close() }
 
-	if os.Getenv("BD_DEBUG_ROUTING") != "" {
-		fmt.Fprintf(os.Stderr, "[routing] Resolved %s via prefix route to %s (database: %s)\n", id, matchedRoute.Path, targetDB)
-	}
+	logPrefixResolution(id, route, targetDB)
 
 	return result, nil
+}
+
+func findPrefixRoute(prefix string) (*prefixRoute, string, error) {
+	currentBeadsDir := resolveCommandBeadsDir(getDBPath())
+	if currentBeadsDir == "" {
+		return nil, "", fmt.Errorf("no beads directory available")
+	}
+	routes, err := loadPrefixRoutes(currentBeadsDir)
+	if err != nil || len(routes) == 0 {
+		return nil, "", fmt.Errorf("no routes available")
+	}
+	for i := range routes {
+		if routes[i].Prefix == prefix {
+			if routes[i].Path == "." {
+				return nil, "", fmt.Errorf("route points to current database")
+			}
+			return &routes[i], currentBeadsDir, nil
+		}
+	}
+	return nil, "", fmt.Errorf("no route for prefix %q", prefix)
+}
+
+func prefixRouteTarget(currentBeadsDir string, route *prefixRoute) (string, string, error) {
+	townRoot := filepath.Dir(currentBeadsDir)
+	rigDir := filepath.Join(townRoot, route.Path)
+	targetBeadsDir := beads.FollowRedirect(filepath.Join(rigDir, ".beads"))
+	targetDB := readDoltDatabase(targetBeadsDir)
+	if targetDB == "" {
+		return "", "", fmt.Errorf("target rig has no dolt_database configured")
+	}
+	return targetBeadsDir, targetDB, nil
+}
+
+func openPrefixRouteStore(ctx context.Context, targetBeadsDir, targetDB string, writable bool) (storage.DoltStorage, error) {
+	origDB := os.Getenv("BEADS_DOLT_SERVER_DATABASE")
+	_ = os.Setenv("BEADS_DOLT_SERVER_DATABASE", targetDB)
+	defer func() {
+		if origDB != "" {
+			_ = os.Setenv("BEADS_DOLT_SERVER_DATABASE", origDB)
+		} else {
+			_ = os.Unsetenv("BEADS_DOLT_SERVER_DATABASE")
+		}
+	}()
+	if writable {
+		return newDoltStoreFromConfig(ctx, targetBeadsDir)
+	}
+	return newReadOnlyStoreFromConfig(ctx, targetBeadsDir)
+}
+
+func logPrefixResolution(id string, route *prefixRoute, targetDB string) {
+	if os.Getenv("BD_DEBUG_ROUTING") != "" {
+		fmt.Fprintf(os.Stderr, "[routing] Resolved %s via prefix route to %s (database: %s)\n", id, route.Path, targetDB)
+	}
 }
 
 // extractBeadPrefix extracts the prefix from a bead ID.

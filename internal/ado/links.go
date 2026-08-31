@@ -229,6 +229,11 @@ var removableRelTypes = map[string]bool{
 	RelRelated:   true, // Related
 }
 
+type currentLink struct {
+	key   adoLinkKey
+	index int
+}
+
 // PushLinks synchronizes beads dependencies to ADO work item relations.
 // It compares the desired state (from beads deps) against current ADO relations,
 // adding missing links and removing stale ones for idempotent convergence.
@@ -242,31 +247,37 @@ var removableRelTypes = map[string]bool{
 // hierarchy/dependency links and human-created Related/Predecessor-Successor
 // links to untracked items — instead of clobbering them. See GH#4522.
 func (r *LinkResolver) PushLinks(ctx context.Context, workItemID int, currentRelations []WorkItemRelation, desiredDeps []tracker.DependencyInfo, managedTargets map[int]bool) []error {
-	// Build desired link set.
+	desired := desiredLinks(desiredDeps)
+	current, currentSet := currentLinks(currentRelations)
+
+	var errs []error
+
+	errs = append(errs, r.removeStaleLinks(ctx, workItemID, current, desired, managedTargets)...)
+	errs = append(errs, r.addMissingLinks(ctx, workItemID, desired, currentSet)...)
+
+	return errs
+}
+
+func desiredLinks(deps []tracker.DependencyInfo) map[adoLinkKey]tracker.DependencyInfo {
 	desired := make(map[adoLinkKey]tracker.DependencyInfo)
-	for _, dep := range desiredDeps {
-		rel := beadsDepToADORel(dep.Type)
+	for _, dep := range deps {
 		targetID, err := strconv.Atoi(dep.ToExternalID)
 		if err != nil {
 			continue
 		}
-		key := adoLinkKey{
-			Rel:       rel,
+		desired[adoLinkKey{
+			Rel:       beadsDepToADORel(dep.Type),
 			TargetID:  targetID,
 			Commented: dep.Type == "discovered-from",
-		}
-		desired[key] = dep
+		}] = dep
 	}
+	return desired
+}
 
-	// Build current link set, tracking relation indices for removal.
-	type currentLink struct {
-		key   adoLinkKey
-		index int
-	}
+func currentLinks(relations []WorkItemRelation) ([]currentLink, map[adoLinkKey]bool) {
 	var current []currentLink
 	currentSet := make(map[adoLinkKey]bool)
-
-	for i, rel := range currentRelations {
+	for i, rel := range relations {
 		if !isLinkRelation(rel.Rel) {
 			continue
 		}
@@ -274,61 +285,49 @@ func (r *LinkResolver) PushLinks(ctx context.Context, workItemID int, currentRel
 		if err != nil {
 			continue
 		}
-		key := adoLinkKey{
-			Rel:       rel.Rel,
-			TargetID:  targetID,
-			Commented: hasDiscoveredFromAttribute(rel.Attributes),
-		}
+		key := adoLinkKey{Rel: rel.Rel, TargetID: targetID, Commented: hasDiscoveredFromAttribute(rel.Attributes)}
 		current = append(current, currentLink{key: key, index: i})
 		currentSet[key] = true
 	}
+	return current, currentSet
+}
 
-	var errs []error
-
-	// Find relations to remove (in current but not desired).
-	// Only remove links beads owns: a type it emits (see removableRelTypes),
-	// pointing at a work item beads tracks. Links of the opposite hierarchy/
-	// dependency direction and links to untracked items (e.g. human-created
-	// Related / Predecessor-Successor links) are left untouched so the push
-	// does not clobber them. See GH#4522.
-	// Collect indices and remove in reverse order to avoid index shifting.
-	var removeIndices []int
-	for _, cl := range current {
-		if _, ok := desired[cl.key]; ok {
+func staleLinkIndices(current []currentLink, desired map[adoLinkKey]tracker.DependencyInfo, managedTargets map[int]bool) []int {
+	var indices []int
+	for _, link := range current {
+		if _, exists := desired[link.key]; exists || !removableRelTypes[link.key.Rel] || !managedTargets[link.key.TargetID] {
 			continue
 		}
-		if !removableRelTypes[cl.key.Rel] {
-			continue
-		}
-		if !managedTargets[cl.key.TargetID] {
-			continue
-		}
-		removeIndices = append(removeIndices, cl.index)
+		indices = append(indices, link.index)
 	}
-	// Sort descending so higher indices are removed first.
-	sort.Sort(sort.Reverse(sort.IntSlice(removeIndices)))
+	sort.Sort(sort.Reverse(sort.IntSlice(indices)))
+	return indices
+}
 
-	for _, idx := range removeIndices {
+func (r *LinkResolver) removeStaleLinks(ctx context.Context, workItemID int, current []currentLink, desired map[adoLinkKey]tracker.DependencyInfo, managedTargets map[int]bool) []error {
+	var errs []error
+	for _, idx := range staleLinkIndices(current, desired, managedTargets) {
 		if err := r.Client.RemoveWorkItemLink(ctx, workItemID, idx); err != nil {
 			errs = append(errs, fmt.Errorf("remove relation %d: %w", idx, err))
 		}
 	}
+	return errs
+}
 
-	// Find relations to add (in desired but not current).
+func (r *LinkResolver) addMissingLinks(ctx context.Context, workItemID int, desired map[adoLinkKey]tracker.DependencyInfo, currentSet map[adoLinkKey]bool) []error {
+	var errs []error
 	for key, dep := range desired {
 		if currentSet[key] {
 			continue
 		}
-		targetURL := r.buildWorkItemURL(key.TargetID)
 		rel := beadsDepToADORel(dep.Type)
 		comment := ""
 		if dep.Type == "discovered-from" {
 			comment = discoveredFromComment
 		}
-		if err := r.Client.AddWorkItemLink(ctx, workItemID, targetURL, rel, comment); err != nil {
+		if err := r.Client.AddWorkItemLink(ctx, workItemID, r.buildWorkItemURL(key.TargetID), rel, comment); err != nil {
 			errs = append(errs, fmt.Errorf("add link %s to %d: %w", rel, key.TargetID, err))
 		}
 	}
-
 	return errs
 }

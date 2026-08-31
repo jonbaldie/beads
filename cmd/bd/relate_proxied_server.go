@@ -43,11 +43,11 @@ func runRelateProxiedServer(ctx context.Context, args []string) error {
 	if id1 == id2 {
 		return HandleErrorRespectJSON("cannot relate an issue to itself")
 	}
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return HandleErrorRespectJSON("proxied-server UOW provider not initialized")
 	}
 
-	err := uow.RunTx(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (string, error) {
+	err := uow.RunTx(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (string, error) {
 		// The direct route refuses a missing endpoint before writing anything;
 		// keep its exact wording rather than the bulk path's anonymous
 		// ghost-source refusal (bd-yby99.9).
@@ -66,7 +66,7 @@ func runRelateProxiedServer(ctx context.Context, args []string) error {
 		}
 		// bd relate is an explicit dependency verb, so the bulk path's
 		// EmitEvent trail matches the direct route's history behavior.
-		if _, err := uw.DependencyUseCase().AddDependencies(ctx, deps, actor, domain.BulkAddDepsOpts{}); err != nil {
+		if _, err := uw.DependencyUseCase().AddDependencies(ctx, deps, getActor(), domain.BulkAddDepsOpts{}); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("bd: relate %s %s", id1, id2), nil
@@ -75,7 +75,7 @@ func runRelateProxiedServer(ctx context.Context, args []string) error {
 		return HandleErrorRespectJSON("%v", err)
 	}
 
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(map[string]interface{}{
 			"id1":     id1,
 			"id2":     id2,
@@ -97,38 +97,18 @@ func runUnrelateProxiedServer(ctx context.Context, args []string) error {
 	id1 := args[0]
 	id2 := args[1]
 
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return HandleErrorRespectJSON("proxied-server UOW provider not initialized")
 	}
 
-	err := uow.RunTx(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (string, error) {
-		for _, id := range []string{id1, id2} {
-			issue, err := proxiedRequireIssue(ctx, uw, id)
-			if err != nil {
-				return "", err
-			}
-			if issue == nil {
-				return "", fmt.Errorf("issue not found: %s", id)
-			}
-		}
-		removed1, err := uw.DependencyUseCase().RemoveDependencyBySource(ctx, id1, id2, actor)
-		if err != nil {
-			return "", fmt.Errorf("failed to remove relates-to %s -> %s: %w", id1, id2, err)
-		}
-		removed2, err := uw.DependencyUseCase().RemoveDependencyBySource(ctx, id2, id1, actor)
-		if err != nil {
-			return "", fmt.Errorf("failed to remove relates-to %s -> %s: %w", id2, id1, err)
-		}
-		if !removed1 && !removed2 {
-			return "", nil
-		}
-		return fmt.Sprintf("bd: unrelate %s %s", id1, id2), nil
+	err := uow.RunTx(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (string, error) {
+		return unrelateInTx(ctx, uw, id1, id2)
 	})
 	if err != nil {
 		return HandleErrorRespectJSON("%v", err)
 	}
 
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(map[string]interface{}{
 			"id1":       id1,
 			"id2":       id2,
@@ -137,5 +117,36 @@ func runUnrelateProxiedServer(ctx context.Context, args []string) error {
 	}
 
 	fmt.Printf("%s Unlinked %s ↔ %s\n", ui.RenderPass("✓"), id1, id2)
+	return nil
+}
+
+func unrelateInTx(ctx context.Context, uw uow.UnitOfWork, id1, id2 string) (string, error) {
+	if err := requireRelatedIssues(ctx, uw, id1, id2); err != nil {
+		return "", err
+	}
+	removed1, err := uw.DependencyUseCase().RemoveDependencyBySource(ctx, id1, id2, getActor())
+	if err != nil {
+		return "", fmt.Errorf("failed to remove relates-to %s -> %s: %w", id1, id2, err)
+	}
+	removed2, err := uw.DependencyUseCase().RemoveDependencyBySource(ctx, id2, id1, getActor())
+	if err != nil {
+		return "", fmt.Errorf("failed to remove relates-to %s -> %s: %w", id2, id1, err)
+	}
+	if !removed1 && !removed2 {
+		return "", nil
+	}
+	return fmt.Sprintf("bd: unrelate %s %s", id1, id2), nil
+}
+
+func requireRelatedIssues(ctx context.Context, uw uow.UnitOfWork, id1, id2 string) error {
+	for _, id := range []string{id1, id2} {
+		issue, err := proxiedRequireIssue(ctx, uw, id)
+		if err != nil {
+			return err
+		}
+		if issue == nil {
+			return fmt.Errorf("issue not found: %s", id)
+		}
+	}
 	return nil
 }

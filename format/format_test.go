@@ -56,11 +56,17 @@ func TestDependencyInfo(t *testing.T) {
 
 func TestPrettyIssue(t *testing.T) {
 	issue := &types.Issue{
-		ID:        "gas-abc",
-		Title:     "Fix the thing",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: "task",
+		IssueID: types.IssueID{
+			ID: "gas-abc",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Fix the thing",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: "task",
+		},
 	}
 	got := PrettyIssue(issue)
 	if !strings.Contains(got, "gas-abc") {
@@ -73,11 +79,17 @@ func TestPrettyIssue(t *testing.T) {
 
 func TestPrettyIssue_Epic(t *testing.T) {
 	issue := &types.Issue{
-		ID:        "gas-xyz",
-		Title:     "Big project",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: "epic",
+		IssueID: types.IssueID{
+			ID: "gas-xyz",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Big project",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: "epic",
+		},
 	}
 	got := PrettyIssue(issue)
 	if !strings.Contains(got, "[epic]") {
@@ -87,11 +99,17 @@ func TestPrettyIssue_Epic(t *testing.T) {
 
 func TestPrettyIssue_Closed(t *testing.T) {
 	issue := &types.Issue{
-		ID:        "gas-done",
-		Title:     "Completed work",
-		Status:    types.StatusClosed,
-		Priority:  2,
-		IssueType: "task",
+		IssueID: types.IssueID{
+			ID: "gas-done",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Completed work",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  2,
+			IssueType: "task",
+		},
 	}
 	got := PrettyIssue(issue)
 	if !strings.Contains(got, "gas-done") {
@@ -113,13 +131,19 @@ func TestListSummary(t *testing.T) {
 
 func TestLongIssue(t *testing.T) {
 	issue := &types.Issue{
-		ID:          "gas-abc",
-		Title:       "Fix the thing",
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   "task",
-		Assignee:    "mayor",
-		Description: "A longer description",
+		IssueID: types.IssueID{
+			ID: "gas-abc",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Fix the thing",
+			Description: "A longer description",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: "task",
+			Assignee:  "mayor",
+		},
 	}
 	got := LongIssue(issue, []string{"gt:task"})
 	if !strings.Contains(got, "gas-abc") {

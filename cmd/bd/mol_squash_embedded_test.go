@@ -34,22 +34,34 @@ func TestEmbeddedSquashWispMoleculeClearsRootEphemeral(t *testing.T) {
 	}
 
 	root := &types.Issue{
-		Title:     "Wisp Molecule Root",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
-		Ephemeral: true,
+		IssueContent: types.IssueContent{
+			Title: "Wisp Molecule Root",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := s.CreateIssue(ctx, root, "test"); err != nil {
 		t.Fatalf("CreateIssue root: %v", err)
 	}
 
 	child := &types.Issue{
-		Title:     "Wisp Step",
-		Status:    types.StatusClosed,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueContent: types.IssueContent{
+			Title: "Wisp Step",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := s.CreateIssue(ctx, child, "test"); err != nil {
 		t.Fatalf("CreateIssue child: %v", err)

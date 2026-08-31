@@ -126,18 +126,19 @@ func ensureCleanGlobalState(t *testing.T) {
 	t.Setenv("BEADS_DIR", os.Getenv("BEADS_DIR"))
 }
 
+var exportTestOptions exportOptions
+
+func runExportForTest() error {
+	return runExportWithOptions(rootCtx, exportTestOptions)
+}
+
 // savedGlobals holds a snapshot of package-level globals for safe restoration.
 // Used by saveAndRestoreGlobals to ensure test isolation.
 type savedGlobals struct {
-	dbPath                string
-	store                 storage.DoltStorage
-	storeActive           bool
-	exportOutput          string
-	exportAll             bool
-	exportIncludeInfra    bool
-	exportScrub           bool
-	exportNoMemories      bool
-	exportIncludeMemories bool
+	dbPath      string
+	store       storage.DoltStorage
+	storeActive bool
+	exportOpts  exportOptions
 }
 
 // saveAndRestoreGlobals snapshots all commonly-mutated package-level globals
@@ -158,15 +159,10 @@ type savedGlobals struct {
 func saveAndRestoreGlobals(t *testing.T) *savedGlobals {
 	t.Helper()
 	saved := &savedGlobals{
-		dbPath:                dbPath,
-		store:                 store,
-		storeActive:           storeActive,
-		exportOutput:          exportOutput,
-		exportAll:             exportAll,
-		exportIncludeInfra:    exportIncludeInfra,
-		exportScrub:           exportScrub,
-		exportNoMemories:      exportNoMemories,
-		exportIncludeMemories: exportIncludeMemories,
+		dbPath:      dbPath,
+		store:       store,
+		storeActive: storeActive,
+		exportOpts:  exportTestOptions,
 	}
 	t.Cleanup(func() {
 		dbPath = saved.dbPath
@@ -174,12 +170,7 @@ func saveAndRestoreGlobals(t *testing.T) *savedGlobals {
 		storeMutex.Lock()
 		storeActive = saved.storeActive
 		storeMutex.Unlock()
-		exportOutput = saved.exportOutput
-		exportAll = saved.exportAll
-		exportIncludeInfra = saved.exportIncludeInfra
-		exportScrub = saved.exportScrub
-		exportNoMemories = saved.exportNoMemories
-		exportIncludeMemories = saved.exportIncludeMemories
+		exportTestOptions = saved.exportOpts
 	})
 	return saved
 }

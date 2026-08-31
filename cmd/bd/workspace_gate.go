@@ -74,7 +74,7 @@ func exclusiveGateOptions(reason string) workspacegate.Options {
 		Wait:   exclusiveGateWait,
 		Reason: reason,
 		OnWait: func(holder string) {
-			if !quietFlag {
+			if !isQuiet() {
 				// %q: the holder string comes from another process's gate
 				// sidecar; quoting neutralizes terminal escape sequences a
 				// hostile or corrupt sidecar could smuggle into stderr.
@@ -93,20 +93,20 @@ func exclusiveGateOptions(reason string) workspacegate.Options {
 // nil out store/uowProvider after their own close, so this is a no-op
 // there.
 func closeStoreBeforeGateRelease() {
-	ctx := rootCtx
+	ctx := getRootContext()
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if uowProvider != nil {
-		_ = uowProvider.Close(ctx) // Best effort: we are on an error exit already
-		uowProvider = nil
+	if provider := getUOWProvider(); provider != nil {
+		_ = provider.Close(ctx) // Best effort: we are on an error exit already
+		setUOWProvider(nil)
 	}
-	if store != nil {
+	if getStore() != nil {
 		storeMutex.Lock()
-		storeActive = false
+		setStoreActive(false)
 		storeMutex.Unlock()
-		_ = store.Close() // Best effort: we are on an error exit already
-		store = nil
+		_ = getStore().Close() // Best effort: we are on an error exit already
+		setStore(nil)
 	}
 }
 
@@ -116,9 +116,9 @@ func closeStoreBeforeGateRelease() {
 // PersistentPreRunE's error paths both call it, and double release is a
 // no-op.
 func releaseWorkspaceGates() {
-	if workspaceGateHandle != nil {
-		_ = workspaceGateHandle.Release() // Best effort: the flock dies with the process anyway
-		workspaceGateHandle = nil
+	if getWorkspaceGateHandle() != nil {
+		_ = getWorkspaceGateHandle().Release() // Best effort: the flock dies with the process anyway
+		setWorkspaceGateHandle(nil)
 	}
 }
 
@@ -183,13 +183,7 @@ func acquireCommandWorkspaceGates(ctx context.Context, cmd *cobra.Command, beads
 
 	gates, err := buildWorkspaceGateSet(beadsDir)
 	if err != nil {
-		if exclusive {
-			return HandleErrorRespectJSON("workspace gate: %v", err)
-		}
-		if !quietFlag {
-			fmt.Fprintf(os.Stderr, "warning: workspace gate unavailable, continuing ungated: %v\n", err)
-		}
-		return nil
+		return handleWorkspaceGateBuildError(err, exclusive)
 	}
 
 	mode := workspacegate.Shared
@@ -200,27 +194,35 @@ func acquireCommandWorkspaceGates(ctx context.Context, cmd *cobra.Command, beads
 	}
 	h, err := workspacegate.AcquireAll(ctx, mode, opts, gates...)
 	if err != nil {
-		if errors.Is(err, workspacegate.ErrBusy) {
-			// Contention is never fail-open, in either mode — but the two
-			// modes are blocked by OPPOSITE kinds of holders, so the
-			// message must not claim "a maintenance operation" for both:
-			// a SHARED attempt is blocked only by an exclusive maintenance
-			// holder, while an EXCLUSIVE attempt (backup restore) is
-			// usually blocked by ordinary shared commands.
-			if exclusive {
-				return HandleErrorRespectJSON("other bd commands are using this workspace; wait for them to finish and retry: %v", err)
-			}
-			return HandleErrorRespectJSON("a maintenance operation is running on this workspace; retry when it completes: %v", err)
-		}
-		if exclusive {
-			return HandleErrorRespectJSON("workspace gate: %v", err)
-		}
-		if !quietFlag {
-			fmt.Fprintf(os.Stderr, "warning: workspace gate acquisition failed, continuing ungated: %v\n", err)
-		}
-		return nil
+		return handleWorkspaceGateAcquireError(err, exclusive)
 	}
-	workspaceGateHandle = h
+	setWorkspaceGateHandle(h)
+	return nil
+}
+
+func handleWorkspaceGateBuildError(err error, exclusive bool) error {
+	if exclusive {
+		return HandleErrorRespectJSON("workspace gate: %v", err)
+	}
+	if !isQuiet() {
+		fmt.Fprintf(os.Stderr, "warning: workspace gate unavailable, continuing ungated: %v\n", err)
+	}
+	return nil
+}
+
+func handleWorkspaceGateAcquireError(err error, exclusive bool) error {
+	if errors.Is(err, workspacegate.ErrBusy) {
+		if exclusive {
+			return HandleErrorRespectJSON("other bd commands are using this workspace; wait for them to finish and retry: %v", err)
+		}
+		return HandleErrorRespectJSON("a maintenance operation is running on this workspace; retry when it completes: %v", err)
+	}
+	if exclusive {
+		return HandleErrorRespectJSON("workspace gate: %v", err)
+	}
+	if !isQuiet() {
+		fmt.Fprintf(os.Stderr, "warning: workspace gate acquisition failed, continuing ungated: %v\n", err)
+	}
 	return nil
 }
 

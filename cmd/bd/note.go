@@ -96,11 +96,12 @@ See: bd note --help`)
 	return nil
 }
 
-var noteCmd = &cobra.Command{
-	Use:     "note <id> [text...]",
-	GroupID: "issues",
-	Short:   "Append a note to an issue",
-	Long: `Append a note to an issue's notes field.
+func newNoteCmd() *cobra.Command {
+	noteCmd := &cobra.Command{
+		Use:     "note <id> [text...]",
+		GroupID: "issues",
+		Short:   "Append a note to an issue",
+		Long: `Append a note to an issue's notes field.
 
 Shorthand for 'bd update <id> --append-notes "text"'.
 
@@ -112,94 +113,77 @@ Examples:
 
 Note: "note" has NO subcommands — it only appends.
 To read notes on an issue, use: bd show <id>`,
-	Args:          validateNoteArgs,
-	SilenceUsage:  true,
-	SilenceErrors: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		CheckReadonly("note")
+		Args:          validateNoteArgs,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE:          runNote,
+	}
+	registerTextSourceFlags(noteCmd, "note text")
+	noteCmd.ValidArgsFunction = issueIDCompletion
+	return noteCmd
+}
 
-		evt := metrics.NewCommandEvent("note")
-		defer func() {
-			if c := metrics.Global(); c != nil {
-				c.CloseEventAndAdd(evt)
-			}
-		}()
-
-		id := args[0]
-		textArgs := args[1:]
-
-		noteText, err := requireTextFromSources("note text", "use positional args, --stdin, or --file",
-			cmdTextSources(cmd, textArgs))
-		if err != nil {
-			return HandleErrorRespectJSON("%v", err)
+func runNote(cmd *cobra.Command, args []string) error {
+	if err := CheckReadonly("note"); err != nil {
+		return err
+	}
+	evt := metrics.NewCommandEvent("note")
+	defer func() {
+		if c := metrics.Global(); c != nil {
+			c.CloseEventAndAdd(evt)
 		}
+	}()
+	id := args[0]
+	noteText, err := requireTextFromSources("note text", "use positional args, --stdin, or --file",
+		cmdTextSources(cmd, args[1:]))
+	if err != nil {
+		return HandleErrorRespectJSON("%v", err)
+	}
+	if usesProxiedServer() {
+		return runNoteProxiedServer(getRootContext(), id, noteText)
+	}
+	return runNoteDirect(id, noteText)
+}
 
-		if usesProxiedServer() {
-			return runNoteProxiedServer(rootCtx, id, noteText)
-		}
+func runNoteDirect(id, noteText string) error {
+	result, err := resolveIssueMutationForCommand(id)
+	if err != nil {
+		return err
+	}
+	defer result.Close()
+	if err := validateIssueUpdatable(id, result.Issue); err != nil {
+		return HandleErrorRespectJSON("%s", err)
+	}
+	updates := map[string]interface{}{issueops.OpAppendNotes: noteText}
+	if err := result.Store.UpdateIssue(getRootContext(), result.ResolvedID, updates, getActor()); err != nil {
+		return HandleErrorRespectJSON("updating %s: %v", id, err)
+	}
+	if err := commitPendingIfEmbedded(getRootContext(), result.Store, getActor(), doltAutoCommitParams{
+		Command:  "note",
+		IssueIDs: []string{result.ResolvedID},
+	}); err != nil {
+		return HandleErrorRespectJSON("failed to commit: %v", err)
+	}
+	SetLastTouchedID(result.ResolvedID)
+	return reportNoteResult(result)
+}
 
-		ctx := rootCtx
-
-		result, err := resolveAndGetIssueForMutation(ctx, store, id)
-		if err != nil {
-			if result != nil {
-				result.Close()
-			}
-			return HandleErrorRespectJSON("resolving %s: %v", id, err)
-		}
-		if result == nil || result.Issue == nil {
-			if result != nil {
-				result.Close()
-			}
-			return HandleErrorRespectJSON("issue %s not found", id)
-		}
-		defer result.Close()
-
-		issue := result.Issue
-		issueStore := result.Store
-
-		if err := validateIssueUpdatable(id, issue); err != nil {
-			return HandleErrorRespectJSON("%s", err)
-		}
-
-		// Passed as an append OPERATION, not a pre-merged value: the storage
-		// layer re-reads the row inside the mutation transaction and appends
-		// there. Concatenating onto the `issue` snapshot here (read in an
-		// earlier transaction) silently erased notes committed by a concurrent
-		// `bd note` / `bd update --append-notes` — both processes exited 0.
-		updates := map[string]interface{}{
-			issueops.OpAppendNotes: noteText,
-		}
-		if err := issueStore.UpdateIssue(ctx, result.ResolvedID, updates, actor); err != nil {
-			return HandleErrorRespectJSON("updating %s: %v", id, err)
-		}
-		if err := commitPendingIfEmbedded(ctx, issueStore, actor, doltAutoCommitParams{
-			Command:  "note",
-			IssueIDs: []string{result.ResolvedID},
-		}); err != nil {
-			return HandleErrorRespectJSON("failed to commit: %v", err)
-		}
-
-		SetLastTouchedID(result.ResolvedID)
-
-		updatedIssue, _ := issueStore.GetIssue(ctx, result.ResolvedID)
-		title := ""
+func reportNoteResult(result *RoutedResult) error {
+	updatedIssue, _ := result.Store.GetIssue(getRootContext(), result.ResolvedID)
+	if isJSONOutput() {
 		if updatedIssue != nil {
-			title = updatedIssue.Title
+			return outputJSON(updatedIssue)
 		}
-		if jsonOutput {
-			if updatedIssue != nil {
-				return outputJSON(updatedIssue)
-			}
-			return nil
-		}
-		fmt.Printf("%s Note added to %s\n", ui.RenderPass("✓"), formatFeedbackID(result.ResolvedID, title))
 		return nil
-	},
+	}
+	title := ""
+	if updatedIssue != nil {
+		title = updatedIssue.Title
+	}
+	fmt.Printf("%s Note added to %s\n", ui.RenderPass("✓"), formatFeedbackID(result.ResolvedID, title))
+	return nil
 }
 
 func init() {
-	registerTextSourceFlags(noteCmd, "note text")
-	noteCmd.ValidArgsFunction = issueIDCompletion
-	rootCmd.AddCommand(noteCmd)
+	rootCmd.AddCommand(newNoteCmd())
 }

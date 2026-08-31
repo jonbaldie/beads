@@ -67,7 +67,7 @@ func TestPrintBlockedHumanStoredHold(t *testing.T) {
 
 	held := captureStdout(t, func() error {
 		printBlockedHuman([]*types.BlockedIssue{{
-			Issue:          types.Issue{ID: "bd-hold", Title: "Parked", Priority: 2},
+			Issue:          types.Issue{IssueID: types.IssueID{ID: "bd-hold"}, IssueContent: types.IssueContent{Title: "Parked"}, IssueWorkflow: types.IssueWorkflow{Priority: 2}},
 			BlockedByCount: 0,
 		}})
 		return nil
@@ -81,7 +81,7 @@ func TestPrintBlockedHumanStoredHold(t *testing.T) {
 
 	deps := captureStdout(t, func() error {
 		printBlockedHuman([]*types.BlockedIssue{{
-			Issue:          types.Issue{ID: "bd-wait", Title: "Waiting", Priority: 1},
+			Issue:          types.Issue{IssueID: types.IssueID{ID: "bd-wait"}, IssueContent: types.IssueContent{Title: "Waiting"}, IssueWorkflow: types.IssueWorkflow{Priority: 1}},
 			BlockedByCount: 1,
 			BlockedBy:      []string{"bd-blocker"},
 		}})

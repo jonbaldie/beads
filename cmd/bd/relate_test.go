@@ -23,20 +23,36 @@ func TestRelateCommand(t *testing.T) {
 	t.Run("relate creates bidirectional link", func(t *testing.T) {
 		// Create two issues
 		issue1 := &types.Issue{
-			ID:        "test-relate-1",
-			Title:     "Issue 1",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueID: types.IssueID{
+				ID: "test-relate-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Issue 1",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 		issue2 := &types.Issue{
-			ID:        "test-relate-2",
-			Title:     "Issue 2",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueID: types.IssueID{
+				ID: "test-relate-2",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Issue 2",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 
 		if err := s.CreateIssue(ctx, issue1, "test"); err != nil {
@@ -98,20 +114,36 @@ func TestRelateCommand(t *testing.T) {
 	t.Run("unrelate removes bidirectional link", func(t *testing.T) {
 		// Create two issues
 		issue1 := &types.Issue{
-			ID:        "test-unrelate-1",
-			Title:     "Issue 1",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueID: types.IssueID{
+				ID: "test-unrelate-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Issue 1",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 		issue2 := &types.Issue{
-			ID:        "test-unrelate-2",
-			Title:     "Issue 2",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueID: types.IssueID{
+				ID: "test-unrelate-2",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Issue 2",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 
 		if err := s.CreateIssue(ctx, issue1, "test"); err != nil {
@@ -172,20 +204,36 @@ func TestRelateCommand(t *testing.T) {
 	t.Run("relates-to does not block", func(t *testing.T) {
 		// Create two issues
 		issue1 := &types.Issue{
-			ID:        "test-noblock-1",
-			Title:     "Issue 1",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueID: types.IssueID{
+				ID: "test-noblock-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Issue 1",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 		issue2 := &types.Issue{
-			ID:        "test-noblock-2",
-			Title:     "Issue 2",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueID: types.IssueID{
+				ID: "test-noblock-2",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Issue 2",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 
 		if err := s.CreateIssue(ctx, issue1, "test"); err != nil {
@@ -220,6 +268,7 @@ func TestRelateCommand(t *testing.T) {
 
 // TestRelateCommandInit tests that the relate and unrelate commands are properly initialized.
 func TestRelateCommandInit(t *testing.T) {
+	relateCmd := newRelateCmd()
 	if relateCmd == nil {
 		t.Fatal("relateCmd should be initialized")
 	}
@@ -227,6 +276,7 @@ func TestRelateCommandInit(t *testing.T) {
 		t.Errorf("Expected Use='relate <id1> <id2>', got %q", relateCmd.Use)
 	}
 
+	unrelateCmd := newUnrelateCmd()
 	if unrelateCmd == nil {
 		t.Fatal("unrelateCmd should be initialized")
 	}

@@ -17,12 +17,12 @@ import (
 // command resolves no ids, so there is nothing to look up first and no
 // lookup-only provider to trip over.
 func proxiedStatsReporter() (issueops.StatsReporter, error) {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return nil, errors.New("proxied-server UOW provider not initialized")
 	}
-	src, ok := uowProvider.(uow.StatsReporterSource)
+	src, ok := getUOWProvider().(uow.StatsReporterSource)
 	if !ok {
-		return nil, fmt.Errorf("proxied-server provider %T does not offer the summary-statistics surface", uowProvider)
+		return nil, fmt.Errorf("proxied-server provider %T does not offer the summary-statistics surface", getUOWProvider())
 	}
 	return src.StatsReporter()
 }

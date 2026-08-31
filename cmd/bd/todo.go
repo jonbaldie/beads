@@ -50,7 +50,9 @@ var addTodoCmd = &cobra.Command{
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		CheckReadonly("todo add")
+		if err := CheckReadonly("todo add"); err != nil {
+			return err
+		}
 
 		evt := metrics.NewCommandEvent("todo-add")
 		defer func() {
@@ -60,7 +62,7 @@ var addTodoCmd = &cobra.Command{
 		}()
 
 		if usesProxiedServer() {
-			return runTodoAddProxiedServer(cmd, rootCtx, args)
+			return runTodoAddProxiedServer(cmd, getRootContext(), args)
 		}
 
 		title := strings.Join(args, " ")
@@ -68,18 +70,24 @@ var addTodoCmd = &cobra.Command{
 		priority, _ := cmd.Flags().GetInt("priority")
 		description, _ := cmd.Flags().GetString("description")
 
-		ctx := rootCtx
+		ctx := getRootContext()
 
 		issueType := types.TypeTask
 		issue := &types.Issue{
-			Title:       title,
-			Description: description,
-			Priority:    priority,
-			IssueType:   issueType,
-			Status:      types.StatusOpen,
-			Assignee:    getActorWithGit(),
-			Owner:       getOwner(),
-			CreatedBy:   getActorWithGit(),
+			IssueContent: types.IssueContent{
+				Title:       title,
+				Description: description,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  priority,
+				IssueType: issueType,
+				Status:    types.StatusOpen,
+				Assignee:  getActorWithGit(),
+				Owner:     getOwner(),
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedBy: getActorWithGit(),
+			},
 		}
 
 		if err := getStore().CreateIssue(ctx, issue, getActorWithGit()); err != nil {
@@ -88,7 +96,7 @@ var addTodoCmd = &cobra.Command{
 
 		commandDidWrite.Store(true)
 
-		if jsonOutput {
+		if isJSONOutput() {
 			data, err := json.MarshalIndent(issue, "", "  ")
 			if err != nil {
 				return HandleError("failed to marshal JSON: %v", err)
@@ -124,11 +132,13 @@ var listTodosCmd = &cobra.Command{
 func runTodoListCore(cmd *cobra.Command, _ []string) error {
 	showAll, _ := cmd.Flags().GetBool("all")
 
-	ctx := rootCtx
+	ctx := getRootContext()
 
 	taskType := types.TypeTask
 	filter := types.IssueFilter{
-		IssueType: &taskType,
+		IssueFilterCore: types.IssueFilterCore{
+			IssueType: &taskType,
+		},
 	}
 	if !showAll {
 		openStatus := types.StatusOpen
@@ -150,7 +160,7 @@ func runTodoListCore(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	if jsonOutput {
+	if isJSONOutput() {
 		data, err := json.MarshalIndent(issues, "", "  ")
 		if err != nil {
 			return HandleError("failed to marshal JSON: %v", err)
@@ -186,7 +196,9 @@ var doneTodoCmd = &cobra.Command{
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		CheckReadonly("todo done")
+		if err := CheckReadonly("todo done"); err != nil {
+			return err
+		}
 
 		evt := metrics.NewCommandEvent("todo-done")
 		defer func() {
@@ -196,10 +208,10 @@ var doneTodoCmd = &cobra.Command{
 		}()
 
 		if usesProxiedServer() {
-			return runTodoDoneProxiedServer(cmd, rootCtx, args)
+			return runTodoDoneProxiedServer(cmd, getRootContext(), args)
 		}
 
-		ctx := rootCtx
+		ctx := getRootContext()
 
 		reason, _ := cmd.Flags().GetString("reason")
 		if reason == "" {
@@ -229,7 +241,7 @@ var doneTodoCmd = &cobra.Command{
 			commandDidWrite.Store(true)
 		}
 
-		if jsonOutput {
+		if isJSONOutput() {
 			data, err := json.MarshalIndent(map[string]interface{}{
 				"closed": closedIDs,
 				"reason": reason,

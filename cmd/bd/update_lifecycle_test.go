@@ -9,6 +9,7 @@ import (
 	"time"
 
 	storageissueops "github.com/jonbaldie/beads/internal/storage/issueops"
+	"github.com/jonbaldie/beads/internal/types"
 	"github.com/jonbaldie/beads/issueops"
 )
 
@@ -108,7 +109,7 @@ func TestRunDirectUpdateMutationBuildsLifecycleRequest(t *testing.T) {
 
 func TestRunDirectUpdateMutationPropagatesErrorUnchanged(t *testing.T) {
 	wantErr := errors.New("update failed")
-	wantIssue := &issueops.Issue{ID: "bd-result"}
+	wantIssue := &issueops.Issue{IssueID: types.IssueID{ID: "bd-result"}}
 	updater := &recordingDirectIssueUpdater{
 		result: issueops.UpdateResult{Issue: wantIssue, Changed: true},
 		err:    wantErr,
@@ -150,12 +151,12 @@ func TestBuildUpdatePatchMapsSupportedFields(t *testing.T) {
 		{
 			name:    "design",
 			updates: map[string]any{"design": "new design"},
-			want:    issueops.IssuePatch{Design: setField("new design")},
+			want:    issueops.IssuePatch{IssuePatchDetails: issueops.IssuePatchDetails{Design: setField("new design")}},
 		},
 		{
 			name:    "acceptance criteria",
 			updates: map[string]any{"acceptance_criteria": "new criteria"},
-			want:    issueops.IssuePatch{AcceptanceCriteria: setField("new criteria")},
+			want:    issueops.IssuePatch{IssuePatchDetails: issueops.IssuePatchDetails{AcceptanceCriteria: setField("new criteria")}},
 		},
 		{
 			name:    "notes",
@@ -165,22 +166,22 @@ func TestBuildUpdatePatchMapsSupportedFields(t *testing.T) {
 		{
 			name:    "append notes",
 			updates: map[string]any{storageissueops.OpAppendNotes: "additional notes"},
-			want:    issueops.IssuePatch{AppendNotes: setField("additional notes")},
+			want:    issueops.IssuePatch{IssuePatchDetails: issueops.IssuePatchDetails{AppendNotes: setField("additional notes")}},
 		},
 		{
 			name:    "spec ID",
 			updates: map[string]any{"spec_id": "spec-123"},
-			want:    issueops.IssuePatch{SpecID: setField("spec-123")},
+			want:    issueops.IssuePatch{IssuePatchDetails: issueops.IssuePatchDetails{SpecID: setField("spec-123")}},
 		},
 		{
 			name:    "await ID",
 			updates: map[string]any{"await_id": "await-123"},
-			want:    issueops.IssuePatch{AwaitID: setField("await-123")},
+			want:    issueops.IssuePatch{IssuePatchDetails: issueops.IssuePatchDetails{AwaitID: setField("await-123")}},
 		},
 		{
 			name:    "closed by session",
 			updates: map[string]any{"closed_by_session": "session-123"},
-			want:    issueops.IssuePatch{ClosedBySession: setField("session-123")},
+			want:    issueops.IssuePatch{IssuePatchDetails: issueops.IssuePatchDetails{ClosedBySession: setField("session-123")}},
 		},
 		{
 			name:    "assignee",
@@ -210,7 +211,7 @@ func TestBuildUpdatePatchMapsSupportedFields(t *testing.T) {
 		{
 			name:    "estimated minutes zero",
 			updates: map[string]any{"estimated_minutes": 0},
-			want:    issueops.IssuePatch{EstimatedMinutes: setField(&estimate)},
+			want:    issueops.IssuePatch{IssuePatchDetails: issueops.IssuePatchDetails{EstimatedMinutes: setField(&estimate)}},
 		},
 		{
 			name:    "external reference",
@@ -280,27 +281,27 @@ func TestBuildUpdatePatchMapsSupportedFields(t *testing.T) {
 		{
 			name:    "wisp enabled",
 			updates: map[string]any{"wisp": true},
-			want:    issueops.IssuePatch{Persistence: setField(issueops.PersistenceModeEphemeral)},
+			want:    issueops.IssuePatch{IssuePatchDetails: issueops.IssuePatchDetails{Persistence: setField(issueops.PersistenceModeEphemeral)}},
 		},
 		{
 			name:    "wisp disabled",
 			updates: map[string]any{"wisp": false},
-			want:    issueops.IssuePatch{Persistence: setField(issueops.PersistenceModePersistent)},
+			want:    issueops.IssuePatch{IssuePatchDetails: issueops.IssuePatchDetails{Persistence: setField(issueops.PersistenceModePersistent)}},
 		},
 		{
 			name:    "history disabled",
 			updates: map[string]any{"no_history": true},
-			want:    issueops.IssuePatch{Persistence: setField(issueops.PersistenceModeNoHistory)},
+			want:    issueops.IssuePatch{IssuePatchDetails: issueops.IssuePatchDetails{Persistence: setField(issueops.PersistenceModeNoHistory)}},
 		},
 		{
 			name:    "history enabled",
 			updates: map[string]any{"no_history": false},
-			want:    issueops.IssuePatch{Persistence: setField(issueops.PersistenceModePersistent)},
+			want:    issueops.IssuePatch{IssuePatchDetails: issueops.IssuePatchDetails{Persistence: setField(issueops.PersistenceModePersistent)}},
 		},
 		{
 			name:    "wisp takes precedence over history",
 			updates: map[string]any{"wisp": true, "no_history": true},
-			want:    issueops.IssuePatch{Persistence: setField(issueops.PersistenceModeEphemeral)},
+			want:    issueops.IssuePatch{IssuePatchDetails: issueops.IssuePatchDetails{Persistence: setField(issueops.PersistenceModeEphemeral)}},
 		},
 	}
 

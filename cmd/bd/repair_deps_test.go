@@ -15,9 +15,9 @@ func TestRepairDeps_NoOrphans(t *testing.T) {
 	store := newTestStoreWithPrefix(t, filepath.Join(t.TempDir(), "test.db"), "test")
 
 	// Create two issues with valid dependency
-	i1 := &types.Issue{Title: "Issue 1", Priority: 1, Status: "open", IssueType: "task"}
+	i1 := &types.Issue{IssueContent: types.IssueContent{Title: "Issue 1"}, IssueWorkflow: types.IssueWorkflow{Priority: 1, Status: "open", IssueType: "task"}}
 	store.CreateIssue(ctx, i1, "test")
-	i2 := &types.Issue{Title: "Issue 2", Priority: 1, Status: "open", IssueType: "task"}
+	i2 := &types.Issue{IssueContent: types.IssueContent{Title: "Issue 2"}, IssueWorkflow: types.IssueWorkflow{Priority: 1, Status: "open", IssueType: "task"}}
 	store.CreateIssue(ctx, i2, "test")
 	store.AddDependency(ctx, &types.Dependency{
 		IssueID:     i2.ID,

@@ -21,8 +21,8 @@ func EnsureBeadsDir(path string) error {
 
 // CheckBeadsDirPermissions is a no-op on Windows where filesystem
 // permissions use ACLs rather than Unix permission bits.
-func CheckBeadsDirPermissions(path string) {}
+func CheckBeadsDirPermissions(_ string) {}
 
 // FixBeadsDirPermissions is a no-op on Windows where filesystem
 // permissions use ACLs rather than Unix permission bits.
-func FixBeadsDirPermissions(path string) (bool, error) { return false, nil }
+func FixBeadsDirPermissions(_ string) (bool, error) { return false, nil }

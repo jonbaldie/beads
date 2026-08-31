@@ -9,16 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jonbaldie/beads/internal/audit"
-	"github.com/jonbaldie/beads/internal/debug"
-	"github.com/jonbaldie/beads/internal/metrics"
 	"github.com/jonbaldie/beads/internal/storage"
-	storageissueops "github.com/jonbaldie/beads/internal/storage/issueops"
-	"github.com/jonbaldie/beads/internal/timeparsing"
 	"github.com/jonbaldie/beads/internal/types"
-	"github.com/jonbaldie/beads/internal/ui"
-	"github.com/jonbaldie/beads/internal/utils"
-	"github.com/jonbaldie/beads/internal/validation"
 	"github.com/jonbaldie/beads/issueops"
 	"github.com/spf13/cobra"
 )
@@ -65,9 +57,10 @@ func runCommandUpdateMutation(ctx context.Context, updater commandIssueUpdater, 
 }
 
 var updateCmd = &cobra.Command{
-	Use:     "update [id...]",
-	GroupID: "issues",
-	Short:   "Update one or more issues",
+	Use:               "update [id...]",
+	GroupID:           "issues",
+	Short:             "Update one or more issues",
+	ValidArgsFunction: issueIDCompletion,
 	Long: `Update one or more issues.
 
 If no issue ID is provided, updates the last touched issue (from most recent
@@ -98,674 +91,13 @@ pointless).`,
 	},
 	SilenceUsage:  true,
 	SilenceErrors: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		CheckReadonly("update")
-
-		evt := metrics.NewCommandEvent("update")
-		defer func() {
-			if c := metrics.Global(); c != nil {
-				c.CloseEventAndAdd(evt)
-			}
-		}()
-
-		// Refuse a mis-typed flag value that cobra parsed as a positional issue
-		// id, before any write path (direct or proxied) can apply a partial
-		// update. See bd-5247.
-		if err := errStrayFlagValuePositional(args); err != nil {
-			return HandleErrorRespectJSON("%s", err)
-		}
-
-		if usesProxiedServer() {
-			return runUpdateProxiedServer(cmd, rootCtx, args)
-		}
-
-		// If no IDs provided, use last touched issue (interactive only;
-		// the non-interactive case was already refused in Args validation)
-		if len(args) == 0 {
-			lastTouched := GetLastTouchedID()
-			if lastTouched == "" {
-				return HandleErrorRespectJSON("no issue ID provided and no last touched issue")
-			}
-			args = []string{lastTouched}
-		}
-
-		updates := make(map[string]interface{})
-		// clearDeferStatus: set per-issue in the update loop when --defer=""
-		// was given without an explicit --status, to flip status=deferred back
-		// to open (matches the help text's "show in bd ready immediately").
-		var clearDeferStatus bool
-
-		if cmd.Flags().Changed("status") {
-			status, _ := cmd.Flags().GetString("status")
-			var customStatuses []string
-			if store != nil {
-				cs, err := store.GetCustomStatuses(rootCtx)
-				if err != nil {
-					if !jsonOutput {
-						fmt.Fprintf(os.Stderr, "%s Failed to get custom statuses: %v\n", ui.RenderWarn("!"), err)
-					}
-				} else {
-					customStatuses = cs
-				}
-			}
-			if !types.Status(status).IsValidWithCustom(customStatuses) {
-				return HandleErrorRespectJSON("invalid status %q (built-in: open, in_progress, blocked, deferred, closed, pinned, hooked; or configure custom statuses via 'bd config set status.custom')", status)
-			}
-			updates["status"] = status
-			if status == string(types.StatusBlocked) && !jsonOutput {
-				fmt.Fprintf(os.Stderr, "%s status %q is stored, not computed from dependencies. The issue leaves the ready queue. Add a blocker with `bd dep add` if another issue is blocking this work. Resume with `bd update --claim` or `--status open`.\n", ui.RenderWarn("!"), status)
-			}
-
-			// If status is being set to closed, include session if provided
-			if status == "closed" {
-				session, _ := cmd.Flags().GetString("session")
-				if session == "" {
-					session = os.Getenv("CLAUDE_SESSION_ID")
-				}
-				if session != "" {
-					updates["closed_by_session"] = session
-				}
-			}
-		}
-		if cmd.Flags().Changed("priority") {
-			priorityStr, _ := cmd.Flags().GetString("priority")
-			priority, err := validation.ValidatePriority(priorityStr)
-			if err != nil {
-				return HandleErrorRespectJSON("%v", err)
-			}
-			updates["priority"] = priority
-		}
-		if cmd.Flags().Changed("title") {
-			title, _ := cmd.Flags().GetString("title")
-			title = strings.TrimSpace(title)
-			if title == "" {
-				return HandleErrorRespectJSON("title cannot be empty")
-			}
-			updates["title"] = title
-		}
-		if cmd.Flags().Changed("assignee") {
-			assignee, _ := cmd.Flags().GetString("assignee")
-			updates["assignee"] = assignee
-		}
-		description, descChanged, err := getDescriptionFlag(cmd)
-		if err != nil {
-			return err
-		}
-		if descChanged {
-			if err := validateDescriptionUpdate(cmd, description, descChanged); err != nil {
-				return HandleErrorRespectJSON("%v", err)
-			}
-			updates["description"] = description
-		}
-		design, designChanged, err := getDesignFlag(cmd)
-		if err != nil {
-			return err
-		}
-		if designChanged {
-			updates["design"] = design
-		}
-		if cmd.Flags().Changed("notes") && cmd.Flags().Changed("append-notes") {
-			return HandleErrorRespectJSON("cannot specify both --notes and --append-notes")
-		}
-		if cmd.Flags().Changed("notes") {
-			notes, _ := cmd.Flags().GetString("notes")
-			updates["notes"] = notes
-		}
-		if cmd.Flags().Changed("append-notes") {
-			appendNotes, _ := cmd.Flags().GetString("append-notes")
-			updates[storageissueops.OpAppendNotes] = appendNotes
-		}
-		if cmd.Flags().Changed("acceptance") || cmd.Flags().Changed("acceptance-criteria") {
-			var acceptanceCriteria string
-			if cmd.Flags().Changed("acceptance") {
-				acceptanceCriteria, _ = cmd.Flags().GetString("acceptance")
-			} else {
-				acceptanceCriteria, _ = cmd.Flags().GetString("acceptance-criteria")
-			}
-			updates["acceptance_criteria"] = acceptanceCriteria
-		}
-		if cmd.Flags().Changed("external-ref") {
-			externalRef, _ := cmd.Flags().GetString("external-ref")
-			// Empty string clears the ref to SQL NULL, mirroring buildCreateIssue's
-			// nil-when-empty pointer semantics so cleared refs round-trip as a
-			// missing field (omitempty) instead of an empty string. GH#3902.
-			if externalRef == "" {
-				updates["external_ref"] = nil
-			} else {
-				updates["external_ref"] = externalRef
-			}
-		}
-		if cmd.Flags().Changed("spec-id") {
-			specID, _ := cmd.Flags().GetString("spec-id")
-			updates["spec_id"] = specID
-		}
-		if cmd.Flags().Changed("estimate") {
-			estimate, _ := cmd.Flags().GetInt("estimate")
-			if estimate < 0 {
-				return HandleErrorRespectJSON("estimate must be a non-negative number of minutes")
-			}
-			updates["estimated_minutes"] = estimate
-		}
-		if cmd.Flags().Changed("type") {
-			issueType, _ := cmd.Flags().GetString("type")
-			// Normalize aliases (e.g., "enhancement" -> "feature") before validating.
-			// Type validation (including custom types) is handled by the storage
-			// layer inside the transaction, matching the create path. (GH#3030)
-			issueType = utils.NormalizeIssueType(issueType)
-			updates["issue_type"] = issueType
-		}
-		if cmd.Flags().Changed("add-label") {
-			addLabels, _ := cmd.Flags().GetStringSlice("add-label")
-			updates["add_labels"] = addLabels
-		}
-		if cmd.Flags().Changed("remove-label") {
-			removeLabels, _ := cmd.Flags().GetStringSlice("remove-label")
-			updates["remove_labels"] = removeLabels
-		}
-		if cmd.Flags().Changed("set-labels") {
-			setLabels, _ := cmd.Flags().GetStringSlice("set-labels")
-			updates["set_labels"] = setLabels
-		}
-		if cmd.Flags().Changed("parent") {
-			parent, _ := cmd.Flags().GetString("parent")
-			updates["parent"] = parent
-		}
-		// Gate fields (bd-z6kw)
-		if cmd.Flags().Changed("await-id") {
-			awaitID, _ := cmd.Flags().GetString("await-id")
-			updates["await_id"] = awaitID
-		}
-		// Time-based scheduling flags (GH#820)
-		if cmd.Flags().Changed("due") {
-			dueStr, _ := cmd.Flags().GetString("due")
-			if dueStr == "" {
-				// Empty string clears the due date
-				updates["due_at"] = nil
-			} else {
-				t, err := timeparsing.ParseRelativeTime(dueStr, time.Now())
-				if err != nil {
-					return HandleErrorRespectJSON("invalid --due format %q. Examples: +6h, tomorrow, next monday, 2025-01-15", dueStr)
-				}
-				updates["due_at"] = t
-			}
-		}
-		if cmd.Flags().Changed("defer") {
-			deferStr, _ := cmd.Flags().GetString("defer")
-			if deferStr == "" {
-				// Empty string clears the defer_until and restores ready-work
-				// visibility (GH#3233). Explicit --status still wins.
-				updates["defer_until"] = nil
-				if _, ok := updates["status"]; !ok {
-					clearDeferStatus = true
-				}
-			} else {
-				t, err := timeparsing.ParseRelativeTime(deferStr, time.Now())
-				if err != nil {
-					return HandleErrorRespectJSON("invalid --defer format %q. Examples: +1h, tomorrow, next monday, 2025-01-15", deferStr)
-				}
-				// Warn if defer date is in the past (user probably meant future)
-				inPast := t.Before(time.Now())
-				if inPast && !jsonOutput {
-					fmt.Fprintf(os.Stderr, "%s Defer date %q is in the past. Issue will appear in bd ready immediately.\n",
-						ui.RenderWarn("!"), t.Local().Format("2006-01-02 15:04"))
-					fmt.Fprintf(os.Stderr, "  Did you mean a future date? Use --defer=+1h or --defer=tomorrow\n")
-				}
-				updates["defer_until"] = t
-				// Align with `bd defer`: set status=deferred so the ❄ icon
-				// shows and the issue leaves the ready queue (GH#3233).
-				// Skip for past dates so the "appears in bd ready immediately"
-				// warning stays truthful, and skip if --status was set explicitly.
-				if _, ok := updates["status"]; !ok && !inPast {
-					updates["status"] = string(types.StatusDeferred)
-				}
-			}
-		}
-		// Ephemeral/persistent flags
-		// Note: storage layer uses "wisp" field name, maps to "ephemeral" column
-		ephemeralChanged := cmd.Flags().Changed("ephemeral")
-		persistentChanged := cmd.Flags().Changed("persistent")
-		noHistoryChanged := cmd.Flags().Changed("no-history")
-		historyChanged := cmd.Flags().Changed("history")
-		if ephemeralChanged && persistentChanged {
-			return HandleErrorRespectJSON("cannot specify both --ephemeral and --persistent flags")
-		}
-		if noHistoryChanged && ephemeralChanged {
-			return HandleErrorRespectJSON("cannot specify both --no-history and --ephemeral flags")
-		}
-		if noHistoryChanged && historyChanged {
-			return HandleErrorRespectJSON("cannot specify both --no-history and --history flags")
-		}
-		if ephemeralChanged {
-			updates["wisp"] = true
-		}
-		if persistentChanged {
-			updates["wisp"] = false
-		}
-		if noHistoryChanged {
-			updates["no_history"] = true
-		}
-		if historyChanged {
-			updates["no_history"] = false
-		}
-		// Metadata flag (GH#1413)
-		if cmd.Flags().Changed("metadata") {
-			metadataValue, _ := cmd.Flags().GetString("metadata")
-			var metadataJSON string
-			if strings.HasPrefix(metadataValue, "@") {
-				// Read JSON from file
-				filePath := metadataValue[1:]
-				// #nosec G304 -- user explicitly provides file path via @file.json syntax
-				data, err := os.ReadFile(filePath)
-				if err != nil {
-					return HandleErrorRespectJSON("failed to read metadata file %s: %v", filePath, err)
-				}
-				metadataJSON = string(data)
-			} else {
-				metadataJSON = metadataValue
-			}
-			// Validate JSON
-			if !json.Valid([]byte(metadataJSON)) {
-				return HandleErrorRespectJSON("invalid JSON in --metadata: must be valid JSON")
-			}
-			// Passed as a merge OPERATION, not a pre-merged value: the storage
-			// layer re-reads and merges inside the mutation transaction so a
-			// concurrent writer's keys survive (lost-update fix).
-			updates[storageissueops.OpMergeMetadata] = json.RawMessage(metadataJSON)
-		}
-
-		// Incremental metadata edits (GH#1406)
-		setMetadataFlags, _ := cmd.Flags().GetStringArray("set-metadata")
-		unsetMetadataFlags, _ := cmd.Flags().GetStringArray("unset-metadata")
-		if (len(setMetadataFlags) > 0 || len(unsetMetadataFlags) > 0) && cmd.Flags().Changed("metadata") {
-			return HandleErrorRespectJSON("cannot combine --metadata with --set-metadata or --unset-metadata")
-		}
-		if len(setMetadataFlags) > 0 {
-			updates[storageissueops.OpSetMetadata] = setMetadataFlags
-		}
-		if len(unsetMetadataFlags) > 0 {
-			updates[storageissueops.OpUnsetMetadata] = unsetMetadataFlags
-		}
-
-		// Get claim flag
-		claimFlag, _ := cmd.Flags().GetBool("claim")
-		// --force bypasses the live-claim reassign fence (bd-98s5c); mutually
-		// exclusive with --if-assignee at the flag-group level.
-		forceFlag, _ := cmd.Flags().GetBool("force")
-
-		if len(updates) == 0 && !claimFlag {
-			fmt.Println("No updates specified")
-			return nil
-		}
-
-		// Conditional-update guards (bd-wsqvw): validated against the same
-		// status set as --status, mutually exclusive with --claim (which is
-		// its own compare-and-set), and only meaningful with a field update
-		// to ride on.
-		ifAssignee, ifStatus, err := updateGuardsFromFlags(cmd, claimFlag, updates)
-		if err != nil {
-			return err
-		}
-		var expectedStatus *issueops.Status
-		if ifStatus != nil {
-			expected := issueops.Status(*ifStatus)
-			expectedStatus = &expected
-		}
-
-		// One typed patch for the whole batch. The flag-derived map is still
-		// the source (the guard rules and the notes-overwrite warning read it);
-		// this reshapes it once instead of once per issue.
-		basePatch, err := buildUpdatePatch(updates)
-		if err != nil {
-			return HandleErrorRespectJSON("%v", err)
-		}
-		ctx := rootCtx
-		opsCtx, err := issueOpsContext(ctx)
-		if err != nil {
-			return HandleErrorRespectJSON("%v", err)
-		}
-
-		updatedIssues := []*types.Issue{}
-		var firstUpdatedID string // Track first successful update for last-touched
-		var failures []updateIDFailure
-		recordFailure := func(id, reason string) {
-			failures = append(failures, updateIDFailure{ID: id, Error: reason})
-		}
-		mutatedStores := map[storage.DoltStorage][]string{}
-		notesOverwriteWarnings := map[storage.DoltStorage][]string{}
-		mutatedResults := map[*RoutedResult]bool{}
-		pendingCloseResults := []*RoutedResult{}
-		trackMutation := func(result *RoutedResult) {
-			if result == nil || result.Store == nil {
-				return
-			}
-			if !mutatedResults[result] {
-				pendingCloseResults = append(pendingCloseResults, result)
-				mutatedResults[result] = true
-			}
-			mutatedStores[result.Store] = append(mutatedStores[result.Store], result.ResolvedID)
-		}
-		closeIfUnmutated := func(result *RoutedResult) {
-			if result == nil {
-				return
-			}
-			if mutatedResults[result] {
-				return
-			}
-			result.Close()
-		}
-		closePendingResults := func() {
-			for _, result := range pendingCloseResults {
-				result.Close()
-			}
-			pendingCloseResults = nil
-		}
-		for _, id := range args {
-			// Resolve and get issue with routing (e.g., gt-xyz routes to another rig)
-			result, err := resolveAndGetIssueForMutation(ctx, store, id)
-			if err != nil {
-				if result != nil {
-					result.Close()
-				}
-				fmt.Fprintf(os.Stderr, "Error resolving %s: %v\n", id, err)
-				recordFailure(id, fmt.Sprintf("resolving issue: %v", err))
-				continue
-			}
-			if result == nil || result.Issue == nil {
-				if result != nil {
-					result.Close()
-				}
-				fmt.Fprintf(os.Stderr, "Issue %s not found\n", id)
-				recordFailure(id, "issue not found")
-				continue
-			}
-			issue := result.Issue
-			issueStore := result.Store
-
-			if err := validateIssueUpdatable(id, issue); err != nil {
-				fmt.Fprintf(os.Stderr, "%s\n", err)
-				recordFailure(id, err.Error())
-				closeIfUnmutated(result)
-				continue
-			}
-
-			// bd-98s5c: an unguarded assignee update must not silently
-			// overwrite another actor's live claim. Skipped under
-			// --if-assignee: that CAS names the holder explicitly, which is
-			// how sanctioned X→Y transfers (park) stay possible without
-			// --force. Also skipped under --claim: the claim CAS is itself
-			// the anti-steal gate (a foreign live claim fails it with the
-			// canonical "already claimed" copy before any field update runs),
-			// and an assignee edit that rides a WON claim only ever touches
-			// the actor's own fresh claim. A policy refusal, so it exits 1,
-			// not 13.
-			if newAssignee, ok := updates["assignee"].(string); ok && ifAssignee == nil && !claimFlag {
-				if err := validateIssueReassignable(id, issue, actor, newAssignee,
-					storeClaimPoolAliases(ctx, issueStore), forceFlag); err != nil {
-					fmt.Fprintf(os.Stderr, "%s\n", err)
-					recordFailure(id, err.Error())
-					closeIfUnmutated(result)
-					continue
-				}
-			}
-
-			// One atomic operation carries the claim, every field edit, the
-			// label edits, the metadata edits and the reparent. Metadata edits
-			// (--metadata, --set-metadata, --unset-metadata) and --append-notes
-			// still resolve against the row re-read inside the mutation
-			// transaction: merging against the `issue` snapshot (read in an
-			// earlier transaction) silently erased concurrent writers' keys —
-			// both processes exited 0, one process's committed write vanished.
-			patch := basePatch
-			// GH#3233: --defer="" restores ready visibility only if the issue
-			// was actually deferred. Other statuses (blocked, in_progress, …)
-			// shouldn't be clobbered just because defer_until was stale.
-			if clearDeferStatus && issue.Status == types.StatusDeferred {
-				patch.Status = issueops.Field[issueops.Status]{Set: true, Value: types.StatusOpen}
-			}
-			notesOverwritten := replacesExistingNotes(issue.Notes, updates)
-
-			ops, err := writeOps(issueStore)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error updating %s: %v\n", id, err)
-				recordFailure(id, fmt.Sprintf("updating issue: %v", err))
-				closeIfUnmutated(result)
-				continue
-			}
-			// Guards ride the operation itself: a stale assignee/status refuses
-			// atomically with a typed mismatch error and MUST surface as a
-			// non-zero exit — never collapse it to success (finding #10).
-			// One --force, two overrides. The assignee half only applies to an
-			// assignee edit — asserting it without one is an invalid request,
-			// which is why it is conditioned here rather than passed straight
-			// through: `--force -s closed` is now a legitimate way to ask for
-			// the close-policy half alone.
-			updateResult, updateErr := runCommandUpdateMutation(opsCtx, ops, commandUpdateMutation{
-				actor:            actor,
-				issueID:          result.ResolvedID,
-				patch:            patch,
-				claim:            claimFlag,
-				force:            forceFlag,
-				expectedAssignee: ifAssignee,
-				expectedStatus:   expectedStatus,
-			})
-			if updateErr != nil {
-				fmt.Fprintf(os.Stderr, "Error updating %s: %v\n", id, updateErr)
-				failures = append(failures, updateIDFailure{
-					ID:            id,
-					Error:         fmt.Sprintf("updating issue: %v", updateErr),
-					GuardMismatch: isGuardMismatch(updateErr),
-				})
-				closeIfUnmutated(result)
-				continue
-			}
-			updatedIssue := updateResult.Issue
-			trackMutation(result)
-			if notesOverwritten {
-				notesOverwriteWarnings[issueStore] = append(notesOverwriteWarnings[issueStore], id)
-			}
-			// Audit log key field changes (survives Dolt GC flatten)
-			if patch.Status.Set {
-				audit.LogFieldChange(result.ResolvedID, "status", string(issue.Status), string(patch.Status.Value), actor, "")
-			}
-			if patch.Assignee.Set {
-				audit.LogFieldChange(result.ResolvedID, "assignee", issue.Assignee, patch.Assignee.Value, actor, "")
-			}
-			if patch.Priority.Set {
-				audit.LogFieldChange(result.ResolvedID, "priority", fmt.Sprintf("%d", issue.Priority), fmt.Sprintf("%d", patch.Priority.Value), actor, "")
-			}
-
-			// The operation's own post-state snapshot replaces the re-read.
-			// Dependency records are dropped from it because `bd update` has
-			// never printed them: GetIssue did not hydrate them either.
-			if updatedIssue != nil {
-				updatedIssue.Dependencies = nil
-			}
-			updateTitle := ""
-			if updatedIssue != nil {
-				updateTitle = updatedIssue.Title
-			}
-
-			if jsonOutput {
-				if updatedIssue != nil {
-					updatedIssues = append(updatedIssues, updatedIssue)
-				}
-			} else {
-				debug.PrintNormal("%s Updated issue: %s\n", ui.RenderPass("✓"), formatFeedbackID(result.ResolvedID, updateTitle))
-			}
-
-			// Track first successful update for last-touched
-			if firstUpdatedID == "" {
-				firstUpdatedID = result.ResolvedID
-			}
-			closeIfUnmutated(result)
-		}
-
-		if len(mutatedStores) > 0 {
-			for s, ids := range mutatedStores {
-				if s == nil {
-					continue
-				}
-				if err := commitPendingIfEmbedded(ctx, s, actor, doltAutoCommitParams{
-					Command:  "update",
-					IssueIDs: ids,
-				}); err != nil {
-					closePendingResults()
-					return HandleErrorRespectJSON("failed to commit: %v", err)
-				}
-				for _, id := range notesOverwriteWarnings[s] {
-					warnNotesReplacement(id)
-				}
-			}
-		}
-		closePendingResults()
-
-		// Set last touched after all updates complete
-		if firstUpdatedID != "" {
-			SetLastTouchedID(firstUpdatedID)
-		}
-
-		if jsonOutput && len(updatedIssues) > 0 {
-			if jerr := outputJSON(updatedIssues); jerr != nil {
-				return jerr
-			}
-		}
-
-		// Updates are per-ID, not atomic across IDs: successful updates above
-		// stay applied (and committed), but any per-ID failure must surface as
-		// a nonzero exit so callers can detect a partial batch (GH audit:
-		// multi-ID update used to exit 0 after mid-batch failures).
-		if len(failures) > 0 {
-			return reportUpdateFailures(failures, len(args))
-		}
-		return nil
-	},
+	RunE:          runUpdate,
 }
 
 // setField marks a patch field as supplied, including when the value is a zero
 // value the caller meant to write.
 func setField[T any](value T) issueops.Field[T] {
 	return issueops.Field[T]{Set: true, Value: value}
-}
-
-// buildUpdatePatch reshapes the flag-derived update map into the facade's typed
-// patch. Every key it handles is a key the flag parsing above wrote, so an
-// unrecognized one is a bug in this file rather than user input.
-func buildUpdatePatch(updates map[string]interface{}) (issueops.IssuePatch, error) {
-	var patch issueops.IssuePatch
-	var wisp, noHistory *bool
-	for key, value := range updates {
-		var ok bool
-		switch key {
-		case "title":
-			patch.Title, ok = stringField(value)
-		case "description":
-			patch.Description, ok = stringField(value)
-		case "design":
-			patch.Design, ok = stringField(value)
-		case "acceptance_criteria":
-			patch.AcceptanceCriteria, ok = stringField(value)
-		case "notes":
-			patch.Notes, ok = stringField(value)
-		case storageissueops.OpAppendNotes:
-			patch.AppendNotes, ok = stringField(value)
-		case "spec_id":
-			patch.SpecID, ok = stringField(value)
-		case "await_id":
-			patch.AwaitID, ok = stringField(value)
-		case "closed_by_session":
-			patch.ClosedBySession, ok = stringField(value)
-		case "assignee":
-			patch.Assignee, ok = stringField(value)
-		case "parent":
-			patch.ParentID, ok = stringField(value)
-		case "status":
-			var status issueops.Field[string]
-			if status, ok = stringField(value); ok {
-				patch.Status = setField(issueops.Status(status.Value))
-			}
-		case "issue_type":
-			var issueType issueops.Field[string]
-			if issueType, ok = stringField(value); ok {
-				patch.IssueType = setField(issueops.IssueType(issueType.Value))
-			}
-		case "priority":
-			var priority int
-			if priority, ok = value.(int); ok {
-				patch.Priority = setField(priority)
-			}
-		case "estimated_minutes":
-			var estimate int
-			if estimate, ok = value.(int); ok {
-				patch.EstimatedMinutes = setField(&estimate)
-			}
-		case "external_ref":
-			ok = true
-			if value == nil {
-				patch.ExternalRef = setField[*string](nil)
-			} else if ref, isString := value.(string); isString {
-				patch.ExternalRef = setField(&ref)
-			} else {
-				ok = false
-			}
-		case "due_at":
-			patch.DueAt, ok = optionalTimeField(value)
-		case "defer_until":
-			patch.DeferUntil, ok = optionalTimeField(value)
-		case "add_labels":
-			patch.Labels.Add, ok = value.([]string)
-		case "remove_labels":
-			patch.Labels.Remove, ok = value.([]string)
-		case "set_labels":
-			var labels []string
-			if labels, ok = value.([]string); ok {
-				patch.Labels.Replace = setField(labels)
-			}
-		case storageissueops.OpMergeMetadata:
-			var merge json.RawMessage
-			if merge, ok = value.(json.RawMessage); ok {
-				patch.Metadata.Merge = setField(merge)
-			}
-		case storageissueops.OpSetMetadata:
-			var flags []string
-			if flags, ok = value.([]string); ok {
-				set, err := parseSetMetadataFlags(flags)
-				if err != nil {
-					return issueops.IssuePatch{}, err
-				}
-				patch.Metadata.Set = set
-			}
-		case storageissueops.OpUnsetMetadata:
-			patch.Metadata.Unset, ok = value.([]string)
-		case "wisp":
-			var flag bool
-			if flag, ok = value.(bool); ok {
-				wisp = &flag
-			}
-		case "no_history":
-			var flag bool
-			if flag, ok = value.(bool); ok {
-				noHistory = &flag
-			}
-		default:
-			return issueops.IssuePatch{}, fmt.Errorf("unsupported update field %q", key)
-		}
-		if !ok {
-			return issueops.IssuePatch{}, fmt.Errorf("unsupported value %T for update field %q", value, key)
-		}
-	}
-	// --ephemeral/--persistent/--no-history/--history select one complete
-	// persistence state. The flag parsing already rejects the contradictory
-	// pairs; the remaining combinations resolve most-specific-first, which
-	// reproduces the column pairs the old two-boolean write produced.
-	switch {
-	case wisp != nil && *wisp:
-		patch.Persistence = setField(issueops.PersistenceModeEphemeral)
-	case noHistory != nil && *noHistory:
-		patch.Persistence = setField(issueops.PersistenceModeNoHistory)
-	case wisp != nil || noHistory != nil:
-		patch.Persistence = setField(issueops.PersistenceModePersistent)
-	}
-	return patch, nil
 }
 
 func stringField(value any) (issueops.Field[string], bool) {
@@ -861,7 +193,7 @@ func errStrayFlagValuePositional(args []string) error {
 // were already printed inline; this adds a summary naming every failed ID.
 func reportUpdateFailures(failures []updateIDFailure, total int) error {
 	msg := fmt.Sprintf("%d of %d issues failed to update", len(failures), total)
-	if jsonOutput {
+	if isJSONOutput() {
 		inner := map[string]interface{}{
 			"error":  msg,
 			"failed": failures,
@@ -934,22 +266,10 @@ func toJSONValue(s string) json.RawMessage {
 // is validated against the same built-in + custom status set as --status, so a
 // typo fails fast instead of mismatching forever.
 func updateGuardsFromFlags(cmd *cobra.Command, claimFlag bool, updates map[string]interface{}) (ifAssignee, ifStatus *string, err error) {
-	if cmd.Flags().Changed("if-assignee") {
-		v, _ := cmd.Flags().GetString("if-assignee")
-		ifAssignee = &v
-	}
-	if cmd.Flags().Changed("if-status") {
-		v, _ := cmd.Flags().GetString("if-status")
-		var customStatuses []string
-		if store != nil {
-			if cs, csErr := store.GetCustomStatuses(rootCtx); csErr == nil {
-				customStatuses = cs
-			}
-		}
-		if !types.Status(v).IsValidWithCustom(customStatuses) {
-			return nil, nil, HandleErrorRespectJSON("invalid --if-status %q (built-in: open, in_progress, blocked, deferred, closed, pinned, hooked; or configure custom statuses via 'bd config set status.custom')", v)
-		}
-		ifStatus = &v
+	ifAssignee = updateIfAssigneeFlag(cmd)
+	ifStatus, err = updateIfStatusFlag(cmd)
+	if err != nil {
+		return nil, nil, err
 	}
 	if ifAssignee == nil && ifStatus == nil {
 		return nil, nil, nil
@@ -957,18 +277,46 @@ func updateGuardsFromFlags(cmd *cobra.Command, claimFlag bool, updates map[strin
 	if claimFlag {
 		return nil, nil, HandleErrorRespectJSON("cannot combine --if-assignee/--if-status with --claim (--claim is already an atomic compare-and-set)")
 	}
-	hasFieldUpdate := false
+	if !updateGuardsHaveFieldUpdate(updates) {
+		return nil, nil, HandleErrorRespectJSON("--if-assignee/--if-status require at least one field update (e.g. -a, -s); label and parent edits are not covered by the guard")
+	}
+	return ifAssignee, ifStatus, nil
+}
+
+func updateIfAssigneeFlag(cmd *cobra.Command) *string {
+	if !cmd.Flags().Changed("if-assignee") {
+		return nil
+	}
+	v, _ := cmd.Flags().GetString("if-assignee")
+	return &v
+}
+
+func updateIfStatusFlag(cmd *cobra.Command) (*string, error) {
+	if !cmd.Flags().Changed("if-status") {
+		return nil, nil
+	}
+	v, _ := cmd.Flags().GetString("if-status")
+	var customStatuses []string
+	if getStore() != nil {
+		if cs, csErr := getStore().GetCustomStatuses(getRootContext()); csErr == nil {
+			customStatuses = cs
+		}
+	}
+	if !types.Status(v).IsValidWithCustom(customStatuses) {
+		return nil, HandleErrorRespectJSON("invalid --if-status %q (built-in: open, in_progress, blocked, deferred, closed, pinned, hooked; or configure custom statuses via 'bd config set status.custom')", v)
+	}
+	return &v, nil
+}
+
+func updateGuardsHaveFieldUpdate(updates map[string]interface{}) bool {
 	for k := range updates {
 		switch k {
 		case "add_labels", "remove_labels", "set_labels", "parent":
 		default:
-			hasFieldUpdate = true
+			return true
 		}
 	}
-	if !hasFieldUpdate {
-		return nil, nil, HandleErrorRespectJSON("--if-assignee/--if-status require at least one field update (e.g. -a, -s); label and parent edits are not covered by the guard")
-	}
-	return ifAssignee, ifStatus, nil
+	return false
 }
 
 func init() {
@@ -1023,6 +371,5 @@ func init() {
 	// Incremental metadata edits (GH#1406)
 	updateCmd.Flags().StringArray("set-metadata", nil, "Set metadata key=value (repeatable, e.g., --set-metadata team=platform)")
 	updateCmd.Flags().StringArray("unset-metadata", nil, "Remove metadata key (repeatable, e.g., --unset-metadata team)")
-	updateCmd.ValidArgsFunction = issueIDCompletion
 	rootCmd.AddCommand(updateCmd)
 }

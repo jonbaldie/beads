@@ -7,6 +7,7 @@ import (
 )
 
 func TestUnclaimCommand_Structure(t *testing.T) {
+	unclaimCmd := newUnclaimCmd()
 	// Test that the unclaim command is properly registered
 	if unclaimCmd == nil {
 		t.Fatal("unclaimCmd should not be nil")
@@ -32,6 +33,7 @@ func TestUnclaimCommand_Structure(t *testing.T) {
 }
 
 func TestUnclaimCommand_Flags(t *testing.T) {
+	unclaimCmd := newUnclaimCmd()
 	// Test that the reason flag is properly defined
 	reasonFlag := unclaimCmd.Flags().Lookup("reason")
 	if reasonFlag == nil {

@@ -564,13 +564,21 @@ func TestIssueToTracker(t *testing.T) {
 	})
 
 	issue := &types.Issue{
-		Title:       "Implement login",
-		Description: "Add OAuth2 support",
-		Status:      types.StatusInProgress,
-		Priority:    1,
-		IssueType:   types.TypeFeature,
-		Labels:      []string{"auth", "backend"},
-		Metadata:    json.RawMessage(meta),
+		IssueContent: types.IssueContent{
+			Title:       "Implement login",
+			Description: "Add OAuth2 support",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusInProgress,
+			Priority:  1,
+			IssueType: types.TypeFeature,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(meta),
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"auth", "backend"},
+		},
 	}
 
 	fields := m.IssueToTracker(issue)
@@ -629,10 +637,14 @@ func TestIssueToTracker_BugSetsSeverity(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			issue := &types.Issue{
-				Title:     "Bug issue",
-				Status:    types.StatusOpen,
-				Priority:  tt.priority,
-				IssueType: types.TypeBug,
+				IssueContent: types.IssueContent{
+					Title: "Bug issue",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  tt.priority,
+					IssueType: types.TypeBug,
+				},
 			}
 			fields := m.IssueToTracker(issue)
 
@@ -660,10 +672,14 @@ func TestIssueToTracker_NonBugNoSeverity(t *testing.T) {
 	for _, it := range nonBugTypes {
 		t.Run(string(it), func(t *testing.T) {
 			issue := &types.Issue{
-				Title:     "Non-bug issue",
-				Status:    types.StatusOpen,
-				Priority:  1,
-				IssueType: it,
+				IssueContent: types.IssueContent{
+					Title: "Non-bug issue",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  1,
+					IssueType: it,
+				},
 			}
 			fields := m.IssueToTracker(issue)
 
@@ -680,10 +696,14 @@ func TestIssueToTracker_CustomBugTypeName(t *testing.T) {
 	m := NewFieldMapper(nil, map[string]string{"bug": "Defect"})
 
 	issue := &types.Issue{
-		Title:     "Custom bug type",
-		Status:    types.StatusOpen,
-		Priority:  0,
-		IssueType: types.TypeBug,
+		IssueContent: types.IssueContent{
+			Title: "Custom bug type",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  0,
+			IssueType: types.TypeBug,
+		},
 	}
 	fields := m.IssueToTracker(issue)
 
@@ -861,7 +881,7 @@ func TestRestoreMetadata(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			issue := &types.Issue{Metadata: tt.metadata}
+			issue := &types.Issue{IssueMeta: types.IssueMeta{Metadata: tt.metadata}}
 			fields := map[string]interface{}{}
 			restoreMetadata(issue, fields)
 
@@ -890,10 +910,16 @@ func TestBlockedStatusRoundTrip(t *testing.T) {
 
 	// Push direction: blocked beads issue → ADO Active + beads:blocked tag.
 	issue := &types.Issue{
-		Title:    "Blocked task",
-		Status:   types.StatusBlocked,
-		Priority: 2,
-		Labels:   []string{"urgent"},
+		IssueContent: types.IssueContent{
+			Title: "Blocked task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:   types.StatusBlocked,
+			Priority: 2,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"urgent"},
+		},
 	}
 	fields := m.IssueToTracker(issue)
 	if fields[FieldState] != "Active" {
@@ -939,9 +965,13 @@ func TestBlockedStatusPush_NoLabels(t *testing.T) {
 
 	// Blocked issue with no labels should still get beads:blocked tag.
 	issue := &types.Issue{
-		Title:    "Blocked no labels",
-		Status:   types.StatusBlocked,
-		Priority: 2,
+		IssueContent: types.IssueContent{
+			Title: "Blocked no labels",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:   types.StatusBlocked,
+			Priority: 2,
+		},
 	}
 	fields := m.IssueToTracker(issue)
 	tagStr, ok := fields[FieldTags].(string)
@@ -987,9 +1017,13 @@ func TestPriorityRoundTrip(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Push: beads → ADO.
 			issue := &types.Issue{
-				Title:    "Priority test",
-				Priority: tt.beadsPriority,
-				Status:   types.StatusOpen,
+				IssueContent: types.IssueContent{
+					Title: "Priority test",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Priority: tt.beadsPriority,
+					Status:   types.StatusOpen,
+				},
 			}
 			fields := m.IssueToTracker(issue)
 			if fields[FieldPriority] != tt.wantADO {
@@ -1023,9 +1057,9 @@ func TestPriorityRoundTrip(t *testing.T) {
 			ti := &tracker.TrackerIssue{
 				ID:  "50",
 				Raw: wi,
-				Metadata: map[string]interface{}{
+				TrackerIssueDetails: tracker.TrackerIssueDetails{Metadata: map[string]interface{}{
 					"beads_priority": fmt.Sprintf("%d", tt.beadsPriority),
-				},
+				}},
 			}
 			conv := m.IssueToBeads(ti)
 			if conv == nil {

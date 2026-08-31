@@ -92,7 +92,7 @@ shared across all clones of this repository.`,
 			return HandleError("failed to add repository: %v", err)
 		}
 
-		if jsonOutput {
+		if isJSONOutput() {
 			result := map[string]interface{}{
 				"added": true,
 				"path":  repoPath,
@@ -136,14 +136,14 @@ that came from the removed repository.`,
 			return HandleError("%v", err)
 		}
 
-		ctx := rootCtx
+		ctx := getRootContext()
 
-		deletedCount, err := store.DeleteIssuesBySourceRepo(ctx, repoPath)
+		deletedCount, err := getStore().DeleteIssuesBySourceRepo(ctx, repoPath)
 		if err != nil {
 			return HandleError("failed to delete issues from repo: %v", err)
 		}
 
-		if err := store.ClearRepoMtime(ctx, repoPath); err != nil {
+		if err := getStore().ClearRepoMtime(ctx, repoPath); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to clear mtime cache: %v\n", err)
 		}
 
@@ -165,7 +165,7 @@ that came from the removed repository.`,
 
 		commandDidWrite.Store(true)
 
-		if jsonOutput {
+		if isJSONOutput() {
 			result := map[string]interface{}{
 				"removed":        true,
 				"path":           repoPath,
@@ -212,7 +212,7 @@ repositories configured for hydration.`,
 			return HandleError("failed to load config: %v", err)
 		}
 
-		if jsonOutput {
+		if isJSONOutput() {
 			primary := repos.Primary
 			if primary == "" {
 				primary = "."
@@ -268,7 +268,7 @@ Also triggers Dolt push/pull if a remote is configured.`,
 			return HandleError("%v", err)
 		}
 
-		ctx := rootCtx
+		ctx := getRootContext()
 		verbose, _ := cmd.Flags().GetBool("verbose")
 
 		configPath, err := config.FindConfigYAMLPath()
@@ -314,7 +314,7 @@ Also triggers Dolt push/pull if a remote is configured.`,
 					issue.SourceRepo = repoPath
 				}
 				if len(issues) > 0 {
-					if importErr := store.CreateIssuesWithFullOptions(ctx, issues, "repo-sync", storage.BatchCreateOptions{
+					if importErr := getStore().CreateIssuesWithFullOptions(ctx, issues, "repo-sync", storage.BatchCreateOptions{
 						SkipPrefixValidation: true,
 					}); importErr != nil {
 						fmt.Fprintf(os.Stderr, "Warning: failed to import from %s: %v\n", repoPath, importErr)
@@ -355,7 +355,7 @@ Also triggers Dolt push/pull if a remote is configured.`,
 
 			// Check mtime cache — skip if JSONL hasn't changed
 			currentMtime := info.ModTime().UnixNano()
-			cachedMtime, _ := store.GetRepoMtime(ctx, absPath)
+			cachedMtime, _ := getStore().GetRepoMtime(ctx, absPath)
 			if cachedMtime == currentMtime {
 				if verbose {
 					fmt.Fprintf(os.Stderr, "Skipping %s: JSONL unchanged\n", repoPath)
@@ -384,7 +384,7 @@ Also triggers Dolt push/pull if a remote is configured.`,
 			}
 
 			// Import with prefix validation skipped (cross-prefix hydration)
-			if err := store.CreateIssuesWithFullOptions(ctx, issues, "repo-sync", storage.BatchCreateOptions{
+			if err := getStore().CreateIssuesWithFullOptions(ctx, issues, "repo-sync", storage.BatchCreateOptions{
 				SkipPrefixValidation: true,
 			}); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: failed to import from %s: %v\n", repoPath, err)
@@ -392,7 +392,7 @@ Also triggers Dolt push/pull if a remote is configured.`,
 			}
 
 			// Update mtime cache
-			if err := store.SetRepoMtime(ctx, absPath, jsonlPath, currentMtime); err != nil {
+			if err := getStore().SetRepoMtime(ctx, absPath, jsonlPath, currentMtime); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: failed to update mtime cache for %s: %v\n", repoPath, err)
 			}
 
@@ -409,7 +409,7 @@ Also triggers Dolt push/pull if a remote is configured.`,
 			commandDidWrite.Store(true)
 		}
 
-		if jsonOutput {
+		if isJSONOutput() {
 			result := map[string]interface{}{
 				"synced":          true,
 				"repos_synced":    len(repos.Additional) - totalSkipped,
@@ -471,15 +471,16 @@ func parseIssuesFromJSONL(path string) ([]*types.Issue, error) {
 }
 
 func init() {
+	flags := persistentFlags()
 	repoCmd.AddCommand(repoAddCmd)
 	repoCmd.AddCommand(repoRemoveCmd)
 	repoCmd.AddCommand(repoListCmd)
 	repoCmd.AddCommand(repoSyncCmd)
 
-	repoAddCmd.Flags().BoolVar(&jsonOutput, "json", false, "Output JSON")
-	repoRemoveCmd.Flags().BoolVar(&jsonOutput, "json", false, "Output JSON")
-	repoListCmd.Flags().BoolVar(&jsonOutput, "json", false, "Output JSON")
-	repoSyncCmd.Flags().BoolVar(&jsonOutput, "json", false, "Output JSON")
+	repoAddCmd.Flags().BoolVar(&flags.JSONOutput, "json", false, "Output JSON")
+	repoRemoveCmd.Flags().BoolVar(&flags.JSONOutput, "json", false, "Output JSON")
+	repoListCmd.Flags().BoolVar(&flags.JSONOutput, "json", false, "Output JSON")
+	repoSyncCmd.Flags().BoolVar(&flags.JSONOutput, "json", false, "Output JSON")
 	repoSyncCmd.Flags().Bool("verbose", false, "Show detailed sync progress")
 
 	rootCmd.AddCommand(repoCmd)

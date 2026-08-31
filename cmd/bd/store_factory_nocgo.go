@@ -23,10 +23,7 @@ func isEmbeddedMode() bool {
 }
 
 func usesProxiedServer() bool {
-	if shouldUseGlobals() {
-		return proxiedServerMode
-	}
-	return cmdCtx != nil && cmdCtx.ProxiedServerMode
+	return isProxiedServerMode()
 }
 
 // newRegisteredBackendStore is the non-CGO twin of the CGO build's registry

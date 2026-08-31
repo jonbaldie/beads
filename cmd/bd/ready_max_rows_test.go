@@ -27,11 +27,17 @@ func TestGetReadyWork_MaxRowsSuite(t *testing.T) {
 	const totalReady = 6
 	for i := 0; i < totalReady; i++ {
 		iss := &types.Issue{
-			ID:        fmt.Sprintf("mr-rw-%d", i),
-			Title:     fmt.Sprintf("Ready max-rows %d", i),
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("mr-rw-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Ready max-rows %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, iss, "test"); err != nil {
 			t.Fatalf("CreateIssue(%s): %v", iss.ID, err)
@@ -40,9 +46,13 @@ func TestGetReadyWork_MaxRowsSuite(t *testing.T) {
 
 	t.Run("UnderCap", func(t *testing.T) {
 		results, err := store.GetReadyWork(ctx, types.WorkFilter{
-			Status:        "open",
-			MaxRows:       100,
-			MaxRowsSource: "--max-rows",
+			WorkFilterCore: types.WorkFilterCore{
+				Status: "open",
+			},
+			WorkFilterExtra: types.WorkFilterExtra{
+				MaxRows:       100,
+				MaxRowsSource: "--max-rows",
+			},
 		})
 		if err != nil {
 			t.Fatalf("GetReadyWork: %v", err)
@@ -54,9 +64,13 @@ func TestGetReadyWork_MaxRowsSuite(t *testing.T) {
 
 	t.Run("OverCap", func(t *testing.T) {
 		_, err := store.GetReadyWork(ctx, types.WorkFilter{
-			Status:        "open",
-			MaxRows:       3,
-			MaxRowsSource: "--max-rows",
+			WorkFilterCore: types.WorkFilterCore{
+				Status: "open",
+			},
+			WorkFilterExtra: types.WorkFilterExtra{
+				MaxRows:       3,
+				MaxRowsSource: "--max-rows",
+			},
 		})
 		if err == nil {
 			t.Fatal("expected ErrTooManyRows, got nil")
@@ -78,9 +92,13 @@ func TestGetReadyWork_MaxRowsSuite(t *testing.T) {
 
 	t.Run("OverCap_EnvSource", func(t *testing.T) {
 		_, err := store.GetReadyWork(ctx, types.WorkFilter{
-			Status:        "open",
-			MaxRows:       2,
-			MaxRowsSource: "BEADS_MAX_ROWS",
+			WorkFilterCore: types.WorkFilterCore{
+				Status: "open",
+			},
+			WorkFilterExtra: types.WorkFilterExtra{
+				MaxRows:       2,
+				MaxRowsSource: "BEADS_MAX_ROWS",
+			},
 		})
 		if err == nil {
 			t.Fatal("expected ErrTooManyRows, got nil")
@@ -96,9 +114,13 @@ func TestGetReadyWork_MaxRowsSuite(t *testing.T) {
 
 	t.Run("Zero_Disabled", func(t *testing.T) {
 		results, err := store.GetReadyWork(ctx, types.WorkFilter{
-			Status:        "open",
-			MaxRows:       0,
-			MaxRowsSource: "",
+			WorkFilterCore: types.WorkFilterCore{
+				Status: "open",
+			},
+			WorkFilterExtra: types.WorkFilterExtra{
+				MaxRows:       0,
+				MaxRowsSource: "",
+			},
 		})
 		if err != nil {
 			t.Fatalf("GetReadyWork with MaxRows=0: %v", err)
@@ -111,10 +133,14 @@ func TestGetReadyWork_MaxRowsSuite(t *testing.T) {
 	t.Run("WithLimit_LimitUnderCap_NoError", func(t *testing.T) {
 		// Limit caps at 2 well below MaxRows=100: cap never fires.
 		results, err := store.GetReadyWork(ctx, types.WorkFilter{
-			Status:        "open",
-			Limit:         2,
-			MaxRows:       100,
-			MaxRowsSource: "--max-rows",
+			WorkFilterCore: types.WorkFilterCore{
+				Status: "open",
+				Limit:  2,
+			},
+			WorkFilterExtra: types.WorkFilterExtra{
+				MaxRows:       100,
+				MaxRowsSource: "--max-rows",
+			},
 		})
 		if err != nil {
 			t.Fatalf("GetReadyWork: %v", err)
@@ -128,10 +154,14 @@ func TestGetReadyWork_MaxRowsSuite(t *testing.T) {
 		// Limit=10, MaxRows=3 with 6 rows in DB: EffectiveSearchLimit returns
 		// 4 (=cap+1), GetReadyWork scans 4 and EnforceMaxRowsCap fires.
 		_, err := store.GetReadyWork(ctx, types.WorkFilter{
-			Status:        "open",
-			Limit:         10,
-			MaxRows:       3,
-			MaxRowsSource: "BEADS_MAX_ROWS",
+			WorkFilterCore: types.WorkFilterCore{
+				Status: "open",
+				Limit:  10,
+			},
+			WorkFilterExtra: types.WorkFilterExtra{
+				MaxRows:       3,
+				MaxRowsSource: "BEADS_MAX_ROWS",
+			},
 		})
 		if err == nil {
 			t.Fatal("expected ErrTooManyRows, got nil")
@@ -153,10 +183,14 @@ func TestGetReadyWork_MaxRowsSuite(t *testing.T) {
 		// without overage detection. Matches EffectiveSearchLimit's "limit
 		// equals cap → limit" branch.
 		results, err := store.GetReadyWork(ctx, types.WorkFilter{
-			Status:        "open",
-			Limit:         3,
-			MaxRows:       3,
-			MaxRowsSource: "--max-rows",
+			WorkFilterCore: types.WorkFilterCore{
+				Status: "open",
+				Limit:  3,
+			},
+			WorkFilterExtra: types.WorkFilterExtra{
+				MaxRows:       3,
+				MaxRowsSource: "--max-rows",
+			},
 		})
 		if err != nil {
 			t.Fatalf("GetReadyWork: %v", err)
@@ -186,11 +220,17 @@ func TestClaimReadyIssue_MaxRows_LargePoolUnderLowCap(t *testing.T) {
 	const totalReady = 10
 	for i := 0; i < totalReady; i++ {
 		iss := &types.Issue{
-			ID:        fmt.Sprintf("mr-claim-%d", i),
-			Title:     fmt.Sprintf("Claim max-rows %d", i),
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("mr-claim-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Claim max-rows %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, iss, "test"); err != nil {
 			t.Fatalf("CreateIssue(%s): %v", iss.ID, err)
@@ -198,9 +238,13 @@ func TestClaimReadyIssue_MaxRows_LargePoolUnderLowCap(t *testing.T) {
 	}
 
 	claimed, err := store.ClaimReadyIssue(ctx, types.WorkFilter{
-		Status:        "open",
-		MaxRows:       3,
-		MaxRowsSource: "BEADS_MAX_ROWS",
+		WorkFilterCore: types.WorkFilterCore{
+			Status: "open",
+		},
+		WorkFilterExtra: types.WorkFilterExtra{
+			MaxRows:       3,
+			MaxRowsSource: "BEADS_MAX_ROWS",
+		},
 	}, "claimant")
 	if err != nil {
 		t.Fatalf("ClaimReadyIssue under cap=3 with %d-issue ready pool: unexpected error: %v", totalReady, err)

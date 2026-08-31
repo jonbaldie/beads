@@ -12,7 +12,7 @@ import (
 var gitExec = defaultGitExec
 
 // defaultGitExec uses RepoContext to execute git commands in the beads repository.
-func defaultGitExec(name string, args ...string) ([]byte, error) {
+func defaultGitExec(_ string, args ...string) ([]byte, error) {
 	// name is always "git" when called from GetCurrentCommitHash
 	rc, err := beads.GetRepoContext()
 	if err != nil {

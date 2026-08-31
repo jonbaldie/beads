@@ -223,31 +223,31 @@ func TestServeIssueRolesComeFromBeneathTheHookDecorator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("serveIssueRoles: %v", err)
 	}
-	if storage.RoleFiresHooks(roles.commenter) {
+	if storage.RoleFiresHooks(roles.issues.commenter) {
 		t.Error("bd serve would run this workspace's hooks on every HTTP comment")
 	}
 	// And the peel really landed on the layer beneath the hooks for all three,
 	// which is what "RoleFiresHooks is false" alone does not say: a peel two
 	// layers deep would also answer false and would drop the telemetry span.
-	if storage.RoleFiresHooks(roles.readyClaimer) || roles.readyClaimer != issueops.ReadyClaimer(middle.readyClaimer) {
-		t.Errorf("ready claimer came from %p, want the layer directly beneath the hooks (%p)", roles.readyClaimer, middle.readyClaimer)
+	if storage.RoleFiresHooks(roles.issues.readyClaimer) || roles.issues.readyClaimer != issueops.ReadyClaimer(middle.readyClaimer) {
+		t.Errorf("ready claimer came from %p, want the layer directly beneath the hooks (%p)", roles.issues.readyClaimer, middle.readyClaimer)
 	}
-	if storage.RoleFiresHooks(roles.batchCloser) || roles.batchCloser != issueops.BatchCloser(middle.batchCloser) {
-		t.Errorf("batch closer came from %p, want the layer directly beneath the hooks (%p)", roles.batchCloser, middle.batchCloser)
+	if storage.RoleFiresHooks(roles.issues.batchCloser) || roles.issues.batchCloser != issueops.BatchCloser(middle.batchCloser) {
+		t.Errorf("batch closer came from %p, want the layer directly beneath the hooks (%p)", roles.issues.batchCloser, middle.batchCloser)
 	}
-	if storage.RoleFiresHooks(roles.batchCreator) || roles.batchCreator != issueops.BatchCreator(middle.batchCreator) {
-		t.Errorf("batch creator came from %p, want the layer directly beneath the hooks (%p)", roles.batchCreator, middle.batchCreator)
+	if storage.RoleFiresHooks(roles.workspace.batchCreator) || roles.workspace.batchCreator != issueops.BatchCreator(middle.batchCreator) {
+		t.Errorf("batch creator came from %p, want the layer directly beneath the hooks (%p)", roles.workspace.batchCreator, middle.batchCreator)
 	}
-	if roles.commenter != issueops.Commenter(middle.commenter) {
-		t.Errorf("commenter came from %p, want the layer directly beneath the hooks (%p)", roles.commenter, middle.commenter)
+	if roles.issues.commenter != issueops.Commenter(middle.commenter) {
+		t.Errorf("commenter came from %p, want the layer directly beneath the hooks (%p)", roles.issues.commenter, middle.commenter)
 	}
-	if storage.RoleFiresHooks(roles.releaser) {
+	if storage.RoleFiresHooks(roles.issues.releaser) {
 		t.Error("bd serve would run this workspace's hooks on every HTTP release")
 	}
-	if roles.releaser != issueops.Releaser(middle.releaser) {
-		t.Errorf("releaser came from %p, want the layer directly beneath the hooks (%p)", roles.releaser, middle.releaser)
+	if roles.issues.releaser != issueops.Releaser(middle.releaser) {
+		t.Errorf("releaser came from %p, want the layer directly beneath the hooks (%p)", roles.issues.releaser, middle.releaser)
 	}
-	reader, claimer := roles.reader, roles.claimer
+	reader, claimer := roles.issues.reader, roles.issues.claimer
 	// The same predicate httpapi.Listen refuses on, so a regression here is a
 	// server that refuses to boot rather than one that runs hooks silently.
 	if storage.RoleFiresHooks(claimer) {
@@ -263,22 +263,22 @@ func TestServeIssueRolesComeFromBeneathTheHookDecorator(t *testing.T) {
 	// The lifecycle is the SECOND role the hook decorator wraps, and it wraps
 	// four verbs rather than one — so an unpeeled lifecycle would run this
 	// workspace's on_create, on_update and close hooks for every HTTP mutation.
-	if storage.RoleFiresHooks(roles.lifecycle) {
+	if storage.RoleFiresHooks(roles.issues.lifecycle) {
 		t.Error("bd serve would run this workspace's hooks on every HTTP lifecycle mutation")
 	}
-	if roles.lifecycle != issueops.Lifecycle(middle.lifecycle) {
-		t.Errorf("lifecycle came from %p, want the layer directly beneath the hooks (%p)", roles.lifecycle, middle.lifecycle)
+	if roles.issues.lifecycle != issueops.Lifecycle(middle.lifecycle) {
+		t.Errorf("lifecycle came from %p, want the layer directly beneath the hooks (%p)", roles.issues.lifecycle, middle.lifecycle)
 	}
 
 	// The dependency editor is the THIRD, and it fires the update hook once per
 	// DISTINCT SOURCE ISSUE — so an unpeeled editor would run this workspace's
 	// script several times for one HTTP batch.
-	if storage.RoleFiresHooks(roles.dependencyEditor) {
+	if storage.RoleFiresHooks(roles.issues.dependencyEditor) {
 		t.Error("bd serve would run this workspace's hooks on every HTTP dependency edit")
 	}
-	if roles.dependencyEditor != issueops.DependencyEditor(middle.dependencies) {
+	if roles.issues.dependencyEditor != issueops.DependencyEditor(middle.dependencies) {
 		t.Errorf("dependency editor came from %p, want the layer directly beneath the hooks (%p)",
-			roles.dependencyEditor, middle.dependencies)
+			roles.issues.dependencyEditor, middle.dependencies)
 	}
 
 	// The batch applier is the FOURTH, and the one where the peel is worth the
@@ -286,23 +286,23 @@ func TestServeIssueRolesComeFromBeneathTheHookDecorator(t *testing.T) {
 	// item, plus once per distinct edge source — so an unpeeled applier serving
 	// one hundred-item plan is up to a hundred of this workspace's own
 	// subprocesses spawned inside a single HTTP request.
-	if storage.RoleFiresHooks(roles.batchApplier) {
+	if storage.RoleFiresHooks(roles.issues.batchApplier) {
 		t.Error("bd serve would run this workspace's hooks once per item of every HTTP plan")
 	}
-	if roles.batchApplier != issueops.BatchApplier(middle.batchApplier) {
+	if roles.issues.batchApplier != issueops.BatchApplier(middle.batchApplier) {
 		t.Errorf("batch applier came from %p, want the layer directly beneath the hooks (%p)",
-			roles.batchApplier, middle.batchApplier)
+			roles.issues.batchApplier, middle.batchApplier)
 	}
 
 	// The compare-and-set is the FIFTH, and a coordination loop is its designed
 	// caller — so an unpeeled one runs this workspace's on_update script once per
 	// contended retry, at whatever rate the clients poll.
-	if storage.RoleFiresHooks(roles.metadataCAS) {
+	if storage.RoleFiresHooks(roles.workspace.metadataCAS) {
 		t.Error("bd serve would run this workspace's hooks on every HTTP compare-and-set")
 	}
-	if roles.metadataCAS != issueops.MetadataCAS(middle.metadataCAS) {
+	if roles.workspace.metadataCAS != issueops.MetadataCAS(middle.metadataCAS) {
 		t.Errorf("compare-and-set came from %p, want the layer directly beneath the hooks (%p)",
-			roles.metadataCAS, middle.metadataCAS)
+			roles.workspace.metadataCAS, middle.metadataCAS)
 	}
 
 	t.Run("a workspace with hooks disabled has no layer to peel", func(t *testing.T) {
@@ -313,7 +313,7 @@ func TestServeIssueRolesComeFromBeneathTheHookDecorator(t *testing.T) {
 		if err != nil {
 			t.Fatalf("serveIssueRoles: %v", err)
 		}
-		if roles.claimer != issueops.Claimer(middle.claimer) || roles.reader != issueops.Reader(middle.reader) {
+		if roles.issues.claimer != issueops.Claimer(middle.claimer) || roles.issues.reader != issueops.Reader(middle.reader) {
 			t.Error("serveIssueRoles peeled a layer that was not there")
 		}
 	})
@@ -345,7 +345,7 @@ func TestServeIssueRolesComeFromBeneathTheHookDecorator(t *testing.T) {
 		if err != nil {
 			t.Fatalf("serveIssueRoles with the journal off: %v", err)
 		}
-		if roles.eventsJournal != nil {
+		if roles.journal.eventsJournal != nil {
 			t.Error("a store that cannot read the journal produced a reader")
 		}
 

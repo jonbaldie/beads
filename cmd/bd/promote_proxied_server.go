@@ -32,58 +32,65 @@ import (
 // atomic beats warn-and-continue, and a comment insert on a row this same
 // transaction just promoted has no realistic standalone failure mode.
 func runPromoteProxiedServer(ctx context.Context, id, reason string) error {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return HandleErrorRespectJSON("proxied-server UOW provider not initialized")
 	}
-
-	// Resolve + precondition checks on a read UOW, mirroring the classic
-	// route's resolve/get/ephemeral-check before its write transaction. The
-	// promote below re-verifies the wisp is still active inside the write
-	// transaction (a lost race fails with "wisp <id> not found", as classic).
-	ruw, err := proxiedOpenReadUOW(ctx)
+	fullID, issue, err := resolvePromoteTarget(ctx, id)
 	if err != nil {
 		return err
-	}
-	fullID, err := utils.ResolvePartialID(ctx, uowMolReader{uw: ruw}, id)
-	if err != nil {
-		ruw.Close(ctx)
-		return HandleErrorRespectJSON("resolving %s: %v", id, err)
-	}
-	issue, _, err := workapi.GetIssueOrWisp(ctx, workapi.NewUOWDetailSource(ruw), fullID)
-	ruw.Close(ctx)
-	if err != nil {
-		if errors.Is(err, storage.ErrNotFound) {
-			return HandleErrorRespectJSON("issue %s not found", fullID)
-		}
-		return HandleErrorRespectJSON("getting issue %s: %v", fullID, err)
 	}
 	if !issue.Ephemeral {
 		return HandleErrorRespectJSON("%s is not a wisp (already persistent)", fullID)
 	}
+	if err := promoteWisp(ctx, fullID, reason); err != nil {
+		return HandleErrorRespectJSON("promoting %s: %v", fullID, err)
+	}
+	commandDidWrite.Store(true)
+	updated := readPromotedIssue(ctx, fullID)
+	return printPromoteResult(fullID, updated)
+}
 
-	err = uow.RunTx(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (string, error) {
-		if err := uw.IssueUseCase().PromoteWisp(ctx, fullID, actor); err != nil {
+func resolvePromoteTarget(ctx context.Context, id string) (string, *types.Issue, error) {
+	ruw, err := proxiedOpenReadUOW(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	defer ruw.Close(ctx)
+	fullID, err := utils.ResolvePartialID(ctx, uowMolReader{uw: ruw}, id)
+	if err != nil {
+		return "", nil, HandleErrorRespectJSON("resolving %s: %v", id, err)
+	}
+	issue, _, err := workapi.GetIssueOrWisp(ctx, workapi.NewUOWDetailSource(ruw), fullID)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return "", nil, HandleErrorRespectJSON("issue %s not found", fullID)
+		}
+		return "", nil, HandleErrorRespectJSON("getting issue %s: %v", fullID, err)
+	}
+	return fullID, issue, nil
+}
+
+func promoteWisp(ctx context.Context, fullID, reason string) error {
+	return uow.RunTx(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (string, error) {
+		if err := uw.IssueUseCase().PromoteWisp(ctx, fullID, getActor()); err != nil {
 			return "", err
 		}
-		if _, err := uw.CommentUseCase().AddCommentToIssue(ctx, fullID, actor, promotionComment(reason)); err != nil {
+		if _, err := uw.CommentUseCase().AddCommentToIssue(ctx, fullID, getActor(), promotionComment(reason)); err != nil {
 			return "", fmt.Errorf("adding promotion comment: %w", err)
 		}
 		return fmt.Sprintf("bd: promote %s", fullID), nil
 	})
+}
+
+func readPromotedIssue(ctx context.Context, fullID string) *types.Issue {
+	if !isJSONOutput() {
+		return nil
+	}
+	uwr, err := proxiedOpenReadUOW(ctx)
 	if err != nil {
-		return HandleErrorRespectJSON("promoting %s: %v", fullID, err)
+		return nil
 	}
-
-	commandDidWrite.Store(true)
-
-	var updated *types.Issue
-	if jsonOutput {
-		// Best-effort post-promote re-read for --json, matching the classic
-		// route's ignore-error re-read (labels included, like GetIssueInTx).
-		if uwr, rerr := proxiedOpenReadUOW(ctx); rerr == nil {
-			updated, _ = uowMolReader{uw: uwr}.GetIssue(ctx, fullID)
-			uwr.Close(ctx)
-		}
-	}
-	return printPromoteResult(fullID, updated)
+	defer uwr.Close(ctx)
+	updated, _ := uowMolReader{uw: uwr}.GetIssue(ctx, fullID)
+	return updated
 }

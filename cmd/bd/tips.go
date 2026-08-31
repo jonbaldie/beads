@@ -39,19 +39,58 @@ type Tip struct {
 }
 
 var (
-	// tips is the registry of all available tips
+	// tips remains a read-only compatibility view for tests that explicitly
+	// opt into legacy globals. Production state lives in tipRuntimeState.
 	tips []Tip
 
 	// tipsMutex protects the tips registry for thread-safe access
 	tipsMutex sync.RWMutex
 
-	// tipRand is the random number generator for probability rolls
+	// tipRand remains a read-only compatibility view for legacy tests.
 	// Can be seeded deterministically via BEADS_TIP_SEED for testing
 	tipRand *rand.Rand
 
 	// tipRandOnce ensures we only initialize the RNG once
 	tipRandOnce sync.Once
 )
+
+type tipRuntimeState struct {
+	tips []Tip
+	rand *rand.Rand
+}
+
+var tipRuntime = func() func() *tipRuntimeState {
+	state := &tipRuntimeState{}
+	return func() *tipRuntimeState { return state }
+}()
+
+func currentTips() []Tip {
+	if shouldUseGlobals() {
+		return tips
+	}
+	return tipRuntime().tips
+}
+
+func replaceTips(next []Tip) {
+	tipRuntime().tips = next
+	if callback := legacyCallbacks().Tips; callback != nil {
+		callback(next)
+	}
+}
+
+func currentTipRand() *rand.Rand {
+	if shouldUseGlobals() {
+		return tipRand
+	}
+	return tipRuntime().rand
+}
+
+func replaceTipRand(next *rand.Rand) {
+	tipRuntime().rand = next
+	if callback := legacyCallbacks().TipRand; callback != nil {
+		callback(next)
+	}
+}
 
 // initTipRand initializes the random number generator for tip selection
 // Uses BEADS_TIP_SEED env var for deterministic testing if set
@@ -65,7 +104,7 @@ func initTipRand() {
 		}
 		// Use deprecated rand.NewSource for Go 1.19 compatibility
 		// nolint:gosec,staticcheck // G404: deterministic seed via env var is intentional for testing
-		tipRand = rand.New(rand.NewSource(seed))
+		replaceTipRand(rand.New(rand.NewSource(seed)))
 	})
 }
 
@@ -73,7 +112,7 @@ func initTipRand() {
 // Respects --json and --quiet flags
 func maybeShowTip(store tipMetadataStore) {
 	// Skip tips in JSON output mode or quiet mode
-	if jsonOutput || quietFlag {
+	if isJSONOutput() || isQuiet() {
 		return
 	}
 
@@ -108,7 +147,7 @@ func selectNextTip(store tipMetadataReader) *Tip {
 	defer tipsMutex.RUnlock()
 
 	// Filter to eligible tips (condition + frequency check)
-	for _, tip := range tips {
+	for _, tip := range currentTips() {
 		// Check if tip's condition is met
 		if !tip.Condition() {
 			continue
@@ -134,8 +173,9 @@ func selectNextTip(store tipMetadataReader) *Tip {
 
 	// Apply probability roll (in priority order)
 	// Higher priority tips get first chance to show
+	rng := currentTipRand()
 	for i := range eligibleTips {
-		if tipRand.Float64() < eligibleTips[i].Probability {
+		if rng.Float64() < eligibleTips[i].Probability {
 			return &eligibleTips[i]
 		}
 	}
@@ -171,11 +211,7 @@ func recordTipShown(store tipMetadataWriter, tipID string) {
 	// committed as a separate Dolt commit in PostRun.
 	// This avoids tip metadata getting bundled into the main command commit.
 	if mode, err := getDoltAutoCommitMode(); err == nil && mode == doltAutoCommitOn {
-		commandDidWriteTipMetadata = true
-		if commandTipIDsShown == nil {
-			commandTipIDsShown = make(map[string]struct{})
-		}
-		commandTipIDsShown[tipID] = struct{}{}
+		trackTipMetadataWrite(tipID)
 		return
 	}
 
@@ -185,12 +221,18 @@ func recordTipShown(store tipMetadataWriter, tipID string) {
 	// Non-critical metadata, ok to fail silently.
 	// If it succeeds, track the write for tip auto-commit behavior.
 	if err := store.SetLocalMetadata(context.Background(), key, value); err == nil {
-		commandDidWriteTipMetadata = true
-		if commandTipIDsShown == nil {
-			commandTipIDsShown = make(map[string]struct{})
-		}
-		commandTipIDsShown[tipID] = struct{}{}
+		trackTipMetadataWrite(tipID)
 	}
+}
+
+func trackTipMetadataWrite(tipID string) {
+	setCommandDidWriteTipMetadata(true)
+	ids := getCommandTipIDsShown()
+	if ids == nil {
+		ids = make(map[string]struct{})
+		setCommandTipIDsShown(ids)
+	}
+	ids[tipID] = struct{}{}
 }
 
 // InjectTip adds a dynamic tip to the registry at runtime.
@@ -219,9 +261,10 @@ func InjectTip(id, message string, priority int, frequency time.Duration, probab
 	defer tipsMutex.Unlock()
 
 	// Check if tip with this ID already exists - update it if so
-	for i, tip := range tips {
+	registered := currentTips()
+	for i, tip := range registered {
 		if tip.ID == id {
-			tips[i] = Tip{
+			registered[i] = Tip{
 				ID:          id,
 				Condition:   condition,
 				Message:     message,
@@ -234,14 +277,14 @@ func InjectTip(id, message string, priority int, frequency time.Duration, probab
 	}
 
 	// Add new tip
-	tips = append(tips, Tip{
+	replaceTips(append(registered, Tip{
 		ID:          id,
 		Condition:   condition,
 		Message:     message,
 		Frequency:   frequency,
 		Priority:    priority,
 		Probability: probability,
-	})
+	}))
 }
 
 // RemoveTip removes a tip from the registry by ID.
@@ -251,9 +294,10 @@ func RemoveTip(id string) {
 	tipsMutex.Lock()
 	defer tipsMutex.Unlock()
 
-	for i, tip := range tips {
+	registered := currentTips()
+	for i, tip := range registered {
 		if tip.ID == id {
-			tips = append(tips[:i], tips[i+1:]...)
+			replaceTips(append(registered[:i], registered[i+1:]...))
 			return
 		}
 	}
@@ -290,37 +334,34 @@ func isClaudeSetupComplete() bool {
 	if err != nil {
 		return false
 	}
-
-	// Check if beads plugin is installed - plugin now provides hooks automatically
 	settingsPath := filepath.Join(home, ".claude", "settings.json")
+	if hasBeadsPlugin(settingsPath) || hasBeadsPrimeHooks(settingsPath) {
+		return true
+	}
+	return hasBeadsPrimeHooks(filepath.Join(home, ".claude", "settings.local.json"))
+}
+
+func hasBeadsPlugin(settingsPath string) bool {
 	// #nosec G304 - path is constructed from user home directory
-	if data, err := os.ReadFile(settingsPath); err == nil {
-		var settings map[string]interface{}
-		if err := json.Unmarshal(data, &settings); err == nil {
-			if enabledPlugins, ok := settings["enabledPlugins"].(map[string]interface{}); ok {
-				for key, value := range enabledPlugins {
-					if strings.Contains(strings.ToLower(key), "beads") {
-						if enabled, ok := value.(bool); ok && enabled {
-							return true // Plugin installed - provides hooks
-						}
-					}
-				}
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		return false
+	}
+	var settings map[string]interface{}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return false
+	}
+	enabledPlugins, ok := settings["enabledPlugins"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	for key, value := range enabledPlugins {
+		if strings.Contains(strings.ToLower(key), "beads") {
+			if enabled, ok := value.(bool); ok && enabled {
+				return true
 			}
 		}
 	}
-
-	// Check for manual hooks installation via 'bd setup claude'
-	// Global hooks in settings.json
-	if hasBeadsPrimeHooks(settingsPath) {
-		return true
-	}
-
-	// Project-level hooks in .claude/settings.local.json
-	localSettingsPath := filepath.Join(home, ".claude", "settings.local.json")
-	if hasBeadsPrimeHooks(localSettingsPath) {
-		return true
-	}
-
 	return false
 }
 
@@ -341,36 +382,46 @@ func hasBeadsPrimeHooks(settingsPath string) bool {
 	if !ok {
 		return false
 	}
-
-	// Check SessionStart and PreCompact for "bd prime"
 	for _, event := range []string{"SessionStart", "PreCompact"} {
-		eventHooks, ok := hooks[event].([]interface{})
+		if hasBeadsPrimeEvent(hooks[event]) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasBeadsPrimeEvent(raw interface{}) bool {
+	eventHooks, ok := raw.([]interface{})
+	if !ok {
+		return false
+	}
+	for _, hook := range eventHooks {
+		hookMap, ok := hook.(map[string]interface{})
 		if !ok {
 			continue
 		}
-
-		for _, hook := range eventHooks {
-			hookMap, ok := hook.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			commands, ok := hookMap["hooks"].([]interface{})
-			if !ok {
-				continue
-			}
-			for _, cmd := range commands {
-				cmdMap, ok := cmd.(map[string]interface{})
-				if !ok {
-					continue
-				}
-				cmdStr, _ := cmdMap["command"].(string)
-				if cmdStr == "bd prime" || cmdStr == "bd prime --stealth" {
-					return true
-				}
-			}
+		if hasBeadsPrimeCommands(hookMap["hooks"]) {
+			return true
 		}
 	}
+	return false
+}
 
+func hasBeadsPrimeCommands(raw interface{}) bool {
+	commands, ok := raw.([]interface{})
+	if !ok {
+		return false
+	}
+	for _, cmd := range commands {
+		cmdMap, ok := cmd.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		cmdStr, _ := cmdMap["command"].(string)
+		if cmdStr == "bd prime" || cmdStr == "bd prime --stealth" {
+			return true
+		}
+	}
 	return false
 }
 

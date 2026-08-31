@@ -1,19 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"regexp"
-	"sort"
 	"strings"
-	"time"
 
-	"github.com/jonbaldie/beads/internal/config"
 	"github.com/jonbaldie/beads/internal/formula"
-	"github.com/jonbaldie/beads/internal/storage"
-	"github.com/jonbaldie/beads/internal/storage/issueops"
 	"github.com/jonbaldie/beads/internal/types"
 	"github.com/jonbaldie/beads/internal/utils"
 )
@@ -131,8 +124,24 @@ func loadTemplateSubgraph(ctx context.Context, s molReader, templateID string) (
 // The visited set tracks IDs already expanded to detect cycles (GH#2719).
 // Without this, cyclic parent-child dependencies cause unbounded recursion leading to OOM.
 func loadDescendants(ctx context.Context, s molReader, subgraph *TemplateSubgraph, parentID string, visited map[string]bool) error {
-	// Track children we've already added to avoid duplicates
 	addedChildren := make(map[string]bool)
+	if err := loadExplicitDescendants(ctx, s, subgraph, parentID, visited, addedChildren); err != nil {
+		return err
+	}
+
+	// Strategy 2: Find hierarchical children by ID pattern
+	// This catches children that have missing or incorrect dependency types.
+	// Hierarchical IDs follow the pattern: parentID.N (e.g., "gt-abc.1", "gt-abc.2")
+	hierarchicalChildren, err := findHierarchicalChildren(ctx, s, parentID)
+	if err != nil {
+		// Non-fatal: continue with what we have
+		return nil
+	}
+
+	return loadHierarchicalDescendants(ctx, s, subgraph, parentID, visited, addedChildren, hierarchicalChildren)
+}
+
+func loadExplicitDescendants(ctx context.Context, s molReader, subgraph *TemplateSubgraph, parentID string, visited, addedChildren map[string]bool) error {
 
 	// Strategy 1: Get direct parent-child dependents with relationship metadata.
 	dependents, err := s.GetDependentsWithMetadata(ctx, parentID)
@@ -169,52 +178,20 @@ func loadDescendants(ctx context.Context, s molReader, subgraph *TemplateSubgrap
 		}
 	}
 
-	// Strategy 2: Find hierarchical children by ID pattern
-	// This catches children that have missing or incorrect dependency types.
-	// Hierarchical IDs follow the pattern: parentID.N (e.g., "gt-abc.1", "gt-abc.2")
-	hierarchicalChildren, err := findHierarchicalChildren(ctx, s, parentID)
-	if err != nil {
-		// Non-fatal: continue with what we have
-		return nil
-	}
+	return nil
+}
 
+func loadHierarchicalDescendants(ctx context.Context, s molReader, subgraph *TemplateSubgraph, parentID string, visited, addedChildren map[string]bool, hierarchicalChildren []*types.Issue) error {
 	for _, child := range hierarchicalChildren {
-		if addedChildren[child.ID] {
-			continue // Already added via dependency
-		}
-		if _, exists := subgraph.IssueMap[child.ID]; exists {
-			continue // Already in subgraph
-		}
-
-		// Cycle detection (GH#2719)
-		if visited[child.ID] {
+		if shouldSkipHierarchicalChild(child, subgraph, visited, addedChildren) {
 			continue
 		}
 
-		// Check if this hierarchical child has been reparented to a different parent (GH#2476).
-		// If it has an explicit parent-child dependency pointing elsewhere, skip it —
-		// the ID pattern match is stale and the child belongs to another molecule.
-		depRecs, err := s.GetDependencyRecords(ctx, child.ID)
-		if err == nil {
-			reparented := false
-			for _, dep := range depRecs {
-				if dep.Type == types.DepParentChild && dep.DependsOnID != parentID {
-					reparented = true
-					break
-				}
-			}
-			if reparented {
-				continue
-			}
+		if isReparentedChild(ctx, s, child.ID, parentID) {
+			continue
 		}
 
-		// Add to subgraph
-		subgraph.Issues = append(subgraph.Issues, child)
-		subgraph.IssueMap[child.ID] = child
-		addedChildren[child.ID] = true
-
-		// Mark visited before recursing
-		visited[child.ID] = true
+		addHierarchicalChild(subgraph, child, visited, addedChildren)
 		if err := loadDescendants(ctx, s, subgraph, child.ID, visited); err != nil {
 			return err
 		}
@@ -223,11 +200,44 @@ func loadDescendants(ctx context.Context, s molReader, subgraph *TemplateSubgrap
 	return nil
 }
 
+func shouldSkipHierarchicalChild(child *types.Issue, subgraph *TemplateSubgraph, visited, addedChildren map[string]bool) bool {
+	if addedChildren[child.ID] {
+		return true // Already added via dependency
+	}
+	if _, exists := subgraph.IssueMap[child.ID]; exists {
+		return true // Already in subgraph
+	}
+	return visited[child.ID] // Cycle detection (GH#2719)
+}
+
+func isReparentedChild(ctx context.Context, s molReader, childID, parentID string) bool {
+	// Check if this hierarchical child has been reparented to a different parent (GH#2476).
+	// If it has an explicit parent-child dependency pointing elsewhere, skip it —
+	// the ID pattern match is stale and the child belongs to another molecule.
+	depRecs, err := s.GetDependencyRecords(ctx, childID)
+	if err != nil {
+		return false
+	}
+	for _, dep := range depRecs {
+		if dep.Type == types.DepParentChild && dep.DependsOnID != parentID {
+			return true
+		}
+	}
+	return false
+}
+
+func addHierarchicalChild(subgraph *TemplateSubgraph, child *types.Issue, visited, addedChildren map[string]bool) {
+	subgraph.Issues = append(subgraph.Issues, child)
+	subgraph.IssueMap[child.ID] = child
+	addedChildren[child.ID] = true
+	visited[child.ID] = true
+}
+
 // findHierarchicalChildren finds issues with IDs that match the pattern parentID.N
 // This catches hierarchical children that may be missing parent-child dependencies.
 func findHierarchicalChildren(ctx context.Context, s molReader, parentID string) ([]*types.Issue, error) {
 	pattern := parentID + "."
-	candidates, err := s.SearchIssues(ctx, "", types.IssueFilter{IDPrefix: pattern})
+	candidates, err := s.SearchIssues(ctx, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: pattern}})
 	if err != nil {
 		return nil, err
 	}
@@ -252,42 +262,16 @@ func findHierarchicalChildren(ctx context.Context, s molReader, parentID string)
 // If that fails, it searches for protos with matching titles.
 // Returns the proto ID if found, or an error if not found or ambiguous.
 func resolveProtoIDOrTitle(ctx context.Context, s molReader, input string) (string, error) {
-	// Strategy 1: Try to resolve as an ID
-	protoID, err := utils.ResolvePartialID(ctx, s, input)
-	if err == nil {
-		// Verify it's a proto (has template label)
-		issue, getErr := s.GetIssue(ctx, protoID)
-		if getErr == nil && issue != nil {
-			labels, _ := s.GetLabels(ctx, protoID)
-			for _, label := range labels {
-				if label == BeadsTemplateLabel {
-					return protoID, nil // Found a valid proto by ID
-				}
-			}
-		}
-		// ID resolved but not a proto - continue to title search
+	if protoID, ok := resolveProtoID(ctx, s, input); ok {
+		return protoID, nil
 	}
 
-	// Strategy 2: Search for protos by title
 	protos, err := s.GetIssuesByLabel(ctx, BeadsTemplateLabel)
 	if err != nil {
 		return "", fmt.Errorf("failed to search protos: %w", err)
 	}
 
-	var matches []*types.Issue
-	var exactMatch *types.Issue
-
-	for _, proto := range protos {
-		// Check for exact title match (case-insensitive)
-		if strings.EqualFold(proto.Title, input) {
-			exactMatch = proto
-			break
-		}
-		// Check for partial title match (case-insensitive)
-		if strings.Contains(strings.ToLower(proto.Title), strings.ToLower(input)) {
-			matches = append(matches, proto)
-		}
-	}
+	exactMatch, matches := findProtoTitleMatches(protos, input)
 
 	if exactMatch != nil {
 		return exactMatch.ID, nil
@@ -309,506 +293,34 @@ func resolveProtoIDOrTitle(ctx context.Context, s molReader, input string) (stri
 	return "", fmt.Errorf("ambiguous: %q matches %d protos:\n  %s\nUse the ID or a more specific title", input, len(matches), strings.Join(matchNames, "\n  "))
 }
 
-// extractVariables finds all {{variable}} patterns in text.
-// Handlebars control keywords like "else", "this" are excluded.
-func extractVariables(text string) []string {
-	matches := variablePattern.FindAllStringSubmatch(text, -1)
-	seen := make(map[string]bool)
-	var vars []string
-	for _, match := range matches {
-		if len(match) >= 2 && !seen[match[1]] {
-			name := match[1]
-			// Skip Handlebars control keywords
-			if isHandlebarsKeyword(name) {
-				continue
-			}
-			vars = append(vars, name)
-			seen[name] = true
-		}
-	}
-	return vars
-}
-
-// isHandlebarsKeyword returns true for Handlebars control keywords
-// that look like variables but aren't (e.g., "else", "this").
-func isHandlebarsKeyword(name string) bool {
-	switch name {
-	case "else", "this", "root", "index", "key", "first", "last":
-		return true
-	default:
-		return false
-	}
-}
-
-// extractAllVariables finds all variables across the entire subgraph
-func extractAllVariables(subgraph *TemplateSubgraph) []string {
-	allText := ""
-	for _, issue := range subgraph.Issues {
-		allText += issue.Title + " " + issue.Description + " "
-		allText += issue.Design + " " + issue.AcceptanceCriteria + " " + issue.Notes + " "
-	}
-	return extractVariables(allText)
-}
-
-// extractRequiredVariables returns only variables that don't have defaults.
-// If VarDefs is available (from a cooked formula), uses it to filter out defaulted vars.
-// Otherwise, falls back to returning all variables.
-func extractRequiredVariables(subgraph *TemplateSubgraph) []string {
-	allVars := extractAllVariables(subgraph)
-
-	// If no VarDefs, assume all variables are required (legacy template behavior)
-	if subgraph.VarDefs == nil {
-		return allVars
-	}
-
-	// VarDefs exists (from a cooked formula) - only declared variables matter.
-	// Variables in text but NOT in VarDefs are ignored - they're documentation
-	// handlebars meant for LLM agents, not formula input variables (gt-ky9loa).
-	var required []string
-	for _, v := range allVars {
-		def, exists := subgraph.VarDefs[v]
-		if !exists {
-			// Not a declared formula variable - skip (documentation handlebars)
-			continue
-		}
-		// A declared variable is required if it has no default.
-		// nil Default = no default specified (must provide).
-		// Non-nil Default (including &"") = has explicit default (optional).
-		if def.Default == nil {
-			required = append(required, v)
-		}
-	}
-	return required
-}
-
-// applyVariableDefaults merges formula default values with provided variables.
-// Returns a new map with defaults applied for any missing variables.
-func applyVariableDefaults(vars map[string]string, subgraph *TemplateSubgraph) map[string]string {
-	if subgraph.VarDefs == nil {
-		return vars
-	}
-
-	result := make(map[string]string)
-	for k, v := range vars {
-		result[k] = v
-	}
-
-	// Apply defaults for missing variables (including empty-string defaults)
-	for name, def := range subgraph.VarDefs {
-		if _, exists := result[name]; !exists && def.Default != nil {
-			result[name] = *def.Default
-		}
-	}
-
-	return result
-}
-
-// substituteVariables replaces {{variable}} with values
-func substituteVariables(text string, vars map[string]string) string {
-	return variablePattern.ReplaceAllStringFunc(text, func(match string) string {
-		// Extract variable name from {{name}}
-		name := match[2 : len(match)-2]
-		if val, ok := vars[name]; ok {
-			return val
-		}
-		return match // Leave unchanged if not found
-	})
-}
-
-// substituteMetadataRepo substitutes {{variable}} placeholders in an issue's
-// metadata.repo value (SF2 follow-up). A formula gate step's `repo` selector
-// (e.g. repo = "{{gate_repo}}") is stored literally on the persisted proto's
-// metadata by createGateIssue/persistCookFormula - `bd cook --persist` keeps
-// the proto reusable across pours rather than substituting at compile time.
-// Substitution instead needs to happen at the same point as every other
-// var-bearing issue field (Title, Description, AwaitID, ...): here, in
-// cloneSubgraphInto, when a proto is poured/spawned into real issues.
-//
-// Restricted to gh:* gate types (SF4), matching createGateIssue's write-side
-// rule: `repo` on a human/timer/bead gate is unrelated, ordinary metadata,
-// not a GitHub repo selector, so it must not be touched here either.
-//
-// Metadata is arbitrary JSON on any issue, so this only touches a top-level
-// string-valued "repo" key; anything else (missing key, non-object, non-
-// string value) is left untouched for githubRepoFromIssue to validate at
-// check time. The round-trip unmarshals into map[string]json.RawMessage
-// rather than map[string]interface{} and replaces only the "repo" entry, so
-// every OTHER key's value survives byte-identical - interface{} would
-// mangle numbers to float64, and a full re-marshal of decoded values can
-// reshuffle nested object keys and HTML-escape strings that were never
-// touched.
-func substituteMetadataRepo(metadata json.RawMessage, awaitType string, vars map[string]string) json.RawMessage {
-	if len(metadata) == 0 || !isGitHubGateType(awaitType) {
-		return metadata
-	}
-
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(metadata, &raw); err != nil {
-		return metadata
-	}
-
-	repoRaw, hasRepo := raw["repo"]
-	if !hasRepo {
-		return metadata
-	}
-
-	var repoStr string
-	if err := json.Unmarshal(repoRaw, &repoStr); err != nil {
-		// Non-string (e.g. null) repo value: leave untouched for
-		// githubRepoFromIssue to reject at check time.
-		return metadata
-	}
-
-	substituted := substituteVariables(repoStr, vars)
-	if substituted == repoStr {
-		return metadata
-	}
-
-	substitutedJSON, err := marshalNoHTMLEscape(substituted)
+func resolveProtoID(ctx context.Context, s molReader, input string) (string, bool) {
+	protoID, err := utils.ResolvePartialID(ctx, s, input)
 	if err != nil {
-		return metadata
+		return "", false
 	}
-	raw["repo"] = substitutedJSON
 
-	out, err := marshalNoHTMLEscape(raw)
-	if err != nil {
-		return metadata
+	issue, err := s.GetIssue(ctx, protoID)
+	if err != nil || issue == nil {
+		return "", false
 	}
-	return out
+	labels, _ := s.GetLabels(ctx, protoID)
+	for _, label := range labels {
+		if label == BeadsTemplateLabel {
+			return protoID, true
+		}
+	}
+	return "", false
 }
 
-// marshalNoHTMLEscape is json.Marshal without HTML-escaping '<', '>', and
-// '&' - the stdlib's json.Marshal escapes them by default (aimed at
-// embedding JSON in HTML), which would silently corrupt an unrelated
-// metadata value round-tripped through substituteMetadataRepo.
-func marshalNoHTMLEscape(v interface{}) (json.RawMessage, error) {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(v); err != nil {
-		return nil, err
-	}
-	// json.Encoder.Encode appends a trailing newline; callers embed this
-	// result as a json.RawMessage value, which must not carry one.
-	return bytes.TrimRight(buf.Bytes(), "\n"), nil
-}
-
-// generateBondedID creates a custom ID for dynamically bonded molecules.
-// When bonding a proto to a parent molecule, this generates IDs like:
-//   - Root: parent.childref (e.g., "patrol-x7k.arm-ace")
-//   - Children: parent.childref.step (e.g., "patrol-x7k.arm-ace.capture")
-//
-// The childRef is variable-substituted before use.
-// Returns empty string if not a bonded operation (opts.ParentID empty).
-func generateBondedID(oldID string, rootID string, opts CloneOptions) (string, error) {
-	if opts.ParentID == "" {
-		return "", nil // Not a bonded operation
-	}
-
-	// Substitute variables in childRef
-	childRef := substituteVariables(opts.ChildRef, opts.Vars)
-
-	// Validate childRef after substitution
-	if childRef == "" {
-		return "", fmt.Errorf("childRef is empty after variable substitution")
-	}
-	if !bondedIDPattern.MatchString(childRef) {
-		return "", fmt.Errorf("invalid childRef '%s': must be alphanumeric, dash, underscore, or dot only", childRef)
-	}
-
-	if oldID == rootID {
-		// Root issue: parent.childref
-		newID := fmt.Sprintf("%s.%s", opts.ParentID, childRef)
-		return newID, nil
-	}
-
-	// Child issue: parent.childref.relative
-	// Extract the relative portion of the old ID (part after root)
-	relativeID := getRelativeID(oldID, rootID)
-	if relativeID == "" {
-		// No hierarchical relationship - use a suffix from the old ID to ensure uniqueness.
-		// Extract the last part of the old ID (after any prefix or dash)
-		suffix := extractIDSuffix(oldID)
-		newID := fmt.Sprintf("%s.%s.%s", opts.ParentID, childRef, suffix)
-		return newID, nil
-	}
-
-	newID := fmt.Sprintf("%s.%s.%s", opts.ParentID, childRef, relativeID)
-	return newID, nil
-}
-
-// extractIDSuffix extracts a suffix from an ID for use when IDs aren't hierarchical.
-// For "patrol-abc123", returns "abc123".
-// For "bd-xyz.1", returns "1".
-// This ensures child IDs remain unique when bonding.
-func extractIDSuffix(id string) string {
-	// First try to get the part after the last dot (for hierarchical IDs)
-	if lastDot := strings.LastIndex(id, "."); lastDot >= 0 {
-		return id[lastDot+1:]
-	}
-	// Otherwise, get the part after the last dash (for prefix-hash IDs)
-	if lastDash := strings.LastIndex(id, "-"); lastDash >= 0 {
-		return id[lastDash+1:]
-	}
-	// Fallback: use the whole ID
-	return id
-}
-
-// getRelativeID extracts the relative portion of a child ID from its parent.
-// For example: getRelativeID("bd-abc.step1.sub", "bd-abc") returns "step1.sub"
-// Returns empty string if oldID equals rootID or doesn't start with rootID.
-func getRelativeID(oldID, rootID string) string {
-	if oldID == rootID {
-		return ""
-	}
-	// Check if oldID starts with rootID followed by a dot
-	prefix := rootID + "."
-	if strings.HasPrefix(oldID, prefix) {
-		return oldID[len(prefix):]
-	}
-	return ""
-}
-
-// flattenUnregisteredIssueTypes flattens issue types that are neither
-// built-in nor already registered in types.custom, printing a warning
-// naming each flattened type. Issues with children (the DependsOnID side
-// of a parent-child dep) flatten to epic — matching the default for
-// undeclared parent step types — and leaves flatten to task.
-// Materializing a formula must not silently grow the type whitelist — a
-// typo'd step type would become a permanently registered custom type — so
-// unregistered types degrade instead; operators opt in with bd config set
-// types.custom before pouring. Without the flatten, issue creation fails
-// with "invalid issue type" on the first unregistered bead.
-// (GH#3213, GH#5443)
-func flattenUnregisteredIssueTypes(ctx context.Context, s configReader, issues []*types.Issue, deps []*types.Dependency) error {
-	// Seed with every non-built-in type used by the issues, then remove the
-	// registered ones below; what survives is unknown. IsBuiltIn (not
-	// IsValid) matches the validator this check exists to satisfy:
-	// IsValidWithCustom short-circuits on IsBuiltIn, so types like "event"
-	// need no types.custom entry.
-	unknown := make(map[types.IssueType]bool)
-	for _, issue := range issues {
-		t := issue.IssueType
-		if t == "" || t.IsBuiltIn() {
-			continue
+func findProtoTitleMatches(protos []*types.Issue, input string) (*types.Issue, []*types.Issue) {
+	var matches []*types.Issue
+	for _, proto := range protos {
+		if strings.EqualFold(proto.Title, input) {
+			return proto, nil
 		}
-		unknown[t] = true
-	}
-	if len(unknown) == 0 {
-		return nil
-	}
-
-	// Match insert validation's sources: the types.custom config value
-	// (kept in step with the custom_types table by SyncConfigTables)
-	// overlaid with config.yaml-declared types. Read through s so a
-	// transaction-bound caller sees in-transaction registration.
-	existing, err := s.GetConfig(ctx, "types.custom")
-	if err != nil {
-		// Don't degrade to "nothing registered": a transient read failure
-		// would silently flatten types the operator did register.
-		return fmt.Errorf("reading types.custom: %w", err)
-	}
-	for _, t := range issueops.ParseTypesConfigValue(existing) {
-		delete(unknown, types.IssueType(t))
-	}
-	for _, t := range config.GetCustomTypesFromYAML() {
-		delete(unknown, types.IssueType(t))
-	}
-	if len(unknown) == 0 {
-		return nil
-	}
-
-	names := make([]string, 0, len(unknown))
-	for t := range unknown {
-		names = append(names, string(t))
-	}
-	sort.Strings(names)
-	WarnError("flattening unregistered issue type(s) to task (epic for steps with children): %s (register with bd config set types.custom to keep them)", strings.Join(names, ", "))
-
-	hasChildren := make(map[string]bool)
-	for _, dep := range deps {
-		if dep.Type == types.DepParentChild {
-			hasChildren[dep.DependsOnID] = true
+		if strings.Contains(strings.ToLower(proto.Title), strings.ToLower(input)) {
+			matches = append(matches, proto)
 		}
 	}
-	for _, issue := range issues {
-		if unknown[issue.IssueType] {
-			if hasChildren[issue.ID] {
-				issue.IssueType = types.TypeEpic
-			} else {
-				issue.IssueType = types.TypeTask
-			}
-		}
-	}
-	return nil
-}
-
-// cloneSubgraph creates new issues from the template with variable substitution.
-// Uses CloneOptions to control all spawn/bond behavior including dynamic bonding.
-func cloneSubgraph(ctx context.Context, s storage.DoltStorage, subgraph *TemplateSubgraph, opts CloneOptions) (*InstantiateResult, error) {
-	if s == nil {
-		return nil, fmt.Errorf("no database connection")
-	}
-
-	var result *InstantiateResult
-	err := transact(ctx, s, "bd: clone template subgraph", func(tx storage.Transaction) error {
-		r, err := cloneSubgraphInto(ctx, storeMolWriter{DoltStorage: s, tx: tx}, subgraph, opts)
-		if err != nil {
-			return err
-		}
-		result = r
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return result, nil
-}
-
-func cloneSubgraphInto(ctx context.Context, w molWriter, subgraph *TemplateSubgraph, opts CloneOptions) (*InstantiateResult, error) {
-	if err := flattenUnregisteredIssueTypes(ctx, w, subgraph.Issues, subgraph.Dependencies); err != nil {
-		return nil, fmt.Errorf("checking custom types for subgraph: %w", err)
-	}
-
-	idMapping := make(map[string]string)
-
-	// First pass: create all issues with new IDs
-	for _, oldIssue := range subgraph.Issues {
-		// RootOnly: skip child issues, only create the root
-		if opts.RootOnly && oldIssue.ID != subgraph.Root.ID {
-			continue
-		}
-		// Determine assignee: use override for root epic, otherwise keep template's
-		issueAssignee := oldIssue.Assignee
-		if oldIssue.ID == subgraph.Root.ID && opts.Assignee != "" {
-			issueAssignee = opts.Assignee
-		}
-
-		newIssue := &types.Issue{
-			// ID will be set below based on bonding options
-			Title:              substituteVariables(oldIssue.Title, opts.Vars),
-			Description:        substituteVariables(oldIssue.Description, opts.Vars),
-			Design:             substituteVariables(oldIssue.Design, opts.Vars),
-			AcceptanceCriteria: substituteVariables(oldIssue.AcceptanceCriteria, opts.Vars),
-			Notes:              substituteVariables(oldIssue.Notes, opts.Vars),
-			Status:             types.StatusOpen, // Always start fresh
-			Priority:           oldIssue.Priority,
-			IssueType:          oldIssue.IssueType,
-			Assignee:           issueAssignee,
-			EstimatedMinutes:   oldIssue.EstimatedMinutes,
-			Ephemeral:          opts.Ephemeral, // mark for cleanup when closed
-			IDPrefix:           opts.Prefix,    // distinct prefixes for mols/wisps
-			// Gate fields (for async coordination)
-			AwaitType: oldIssue.AwaitType,
-			AwaitID:   substituteVariables(oldIssue.AwaitID, opts.Vars),
-			Timeout:   oldIssue.Timeout,
-			Labels:    oldIssue.Labels,
-			Metadata:  substituteMetadataRepo(oldIssue.Metadata, oldIssue.AwaitType, opts.Vars),
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
-		}
-
-		// Generate custom ID for dynamic bonding if ParentID is set
-		if opts.ParentID != "" {
-			bondedID, err := generateBondedID(oldIssue.ID, subgraph.Root.ID, opts)
-			if err != nil {
-				return nil, fmt.Errorf("failed to generate bonded ID for %s: %w", oldIssue.ID, err)
-			}
-			newIssue.ID = bondedID
-		}
-
-		if err := w.CreateIssue(ctx, newIssue, opts.Actor); err != nil {
-			return nil, fmt.Errorf("failed to create issue from %s: %w", oldIssue.ID, err)
-		}
-
-		idMapping[oldIssue.ID] = newIssue.ID
-	}
-
-	// Second pass: recreate dependencies with new IDs
-	for _, dep := range subgraph.Dependencies {
-		newFromID, ok1 := idMapping[dep.IssueID]
-		newToID, ok2 := idMapping[dep.DependsOnID]
-		if !ok1 || !ok2 {
-			continue // Skip if either end is outside the subgraph
-		}
-
-		newDep := &types.Dependency{
-			IssueID:     newFromID,
-			DependsOnID: newToID,
-			Type:        dep.Type,
-			Metadata:    dep.Metadata,
-		}
-		if err := w.AddDependency(ctx, newDep, opts.Actor); err != nil {
-			return nil, fmt.Errorf("failed to create dependency: %w", err)
-		}
-	}
-
-	// Atomic attachment: link spawned root to target molecule within
-	// the same transaction (bd-wvplu: prevents orphaned spawns)
-	if opts.AttachToID != "" {
-		attachDep := &types.Dependency{
-			IssueID:     idMapping[subgraph.Root.ID],
-			DependsOnID: opts.AttachToID,
-			Type:        opts.AttachDepType,
-		}
-		if err := w.AddDependency(ctx, attachDep, opts.Actor); err != nil {
-			return nil, fmt.Errorf("attaching to molecule: %w", err)
-		}
-	}
-
-	return &InstantiateResult{
-		NewEpicID: idMapping[subgraph.Root.ID],
-		IDMapping: idMapping,
-		Created:   len(idMapping),
-	}, nil
-}
-
-// printTemplateTree prints the template structure as a tree.
-// Uses a visited set to detect cycles (GH#2719) and avoid infinite recursion.
-func printTemplateTree(subgraph *TemplateSubgraph, parentID string, depth int, isRoot bool) {
-	visited := make(map[string]bool)
-	printTemplateTreeVisited(subgraph, parentID, depth, isRoot, visited)
-}
-
-// printTemplateTreeVisited is the internal recursive implementation with cycle tracking.
-func printTemplateTreeVisited(subgraph *TemplateSubgraph, parentID string, depth int, isRoot bool, visited map[string]bool) {
-	indent := strings.Repeat("  ", depth)
-
-	// Print root
-	if isRoot {
-		fmt.Printf("%s   %s (root)\n", indent, subgraph.Root.Title)
-		visited[parentID] = true
-	}
-
-	// Find children of this parent
-	var children []*types.Issue
-	for _, dep := range subgraph.Dependencies {
-		if dep.DependsOnID == parentID && dep.Type == types.DepParentChild {
-			if child, ok := subgraph.IssueMap[dep.IssueID]; ok {
-				children = append(children, child)
-			}
-		}
-	}
-
-	// Print children
-	for i, child := range children {
-		connector := "├──"
-		if i == len(children)-1 {
-			connector = "└──"
-		}
-		vars := extractVariables(child.Title)
-		varStr := ""
-		if len(vars) > 0 {
-			varStr = fmt.Sprintf(" [%s]", strings.Join(vars, ", "))
-		}
-
-		// Cycle detection (GH#2719)
-		if visited[child.ID] {
-			fmt.Printf("%s   %s %s%s (cycle detected, skipping)\n", indent, connector, child.Title, varStr)
-			continue
-		}
-		fmt.Printf("%s   %s %s%s\n", indent, connector, child.Title, varStr)
-		visited[child.ID] = true
-		printTemplateTreeVisited(subgraph, child.ID, depth+1, false, visited)
-	}
+	return nil, matches
 }

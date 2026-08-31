@@ -63,8 +63,8 @@ func trackBdVersionFile(persist bool) {
 	if lastVersion != "" && lastVersion != Version {
 		if doctor.CompareVersions(Version, lastVersion) > 0 {
 			// Version upgrade detected!
-			versionUpgradeDetected = true
-			previousVersion = lastVersion
+			setVersionUpgradeDetected(true)
+			setPreviousVersion(lastVersion)
 		}
 	}
 
@@ -142,15 +142,15 @@ func getVersionsSince(sinceVersion string) []VersionChange {
 // This is called by commands like 'bd ready' and 'bd list' to inform users of upgrades.
 func maybeShowUpgradeNotification() {
 	// Only show if upgrade detected and not yet acknowledged
-	if !versionUpgradeDetected || upgradeAcknowledged {
+	if !isVersionUpgradeDetected() || isUpgradeAcknowledged() {
 		return
 	}
 
 	// Mark as acknowledged so we only show once per session
-	upgradeAcknowledged = true
+	setUpgradeAcknowledged(true)
 
 	// Display notification
-	fmt.Printf("🔄 bd upgraded from v%s to v%s since last use\n", previousVersion, Version)
+	fmt.Printf("🔄 bd upgraded from v%s to v%s since last use\n", getPreviousVersion(), Version)
 	fmt.Println("💡 Run 'bd upgrade review' to see what changed")
 	if usesSQLServer() {
 		fmt.Println("💊 Run 'bd doctor' to verify upgrade completed cleanly")
@@ -167,85 +167,68 @@ func maybeShowUpgradeNotification() {
 //
 // beadsDir is the path to the .beads directory.
 func autoMigrateOnVersionBump(beadsDir string) {
-	// Only migrate if version upgrade was detected
-	if !versionUpgradeDetected {
+	dbPath, ok := autoMigrateReady(beadsDir)
+	if !ok {
 		return
 	}
+	recoverPreV56DoltIfNeeded(dbPath)
+	runAutoMigrate(beadsDir)
+}
 
-	// Validate beadsDir
+func autoMigrateReady(beadsDir string) (string, bool) {
+	if !isVersionUpgradeDetected() {
+		return "", false
+	}
 	if beadsDir == "" {
 		debug.Logf("auto-migrate: skipping migration, no beads directory")
-		return
+		return "", false
 	}
-
-	// Load config to determine the correct database path for this backend
 	cfg, err := configfile.Load(beadsDir)
 	if err != nil {
 		debug.Logf("auto-migrate: failed to load config: %v", err)
-		return
+		return "", false
 	}
 	if cfg == nil {
 		cfg = configfile.DefaultConfig()
 	}
 	if cfg.GetBackend() != configfile.BackendDolt {
 		debug.Logf("auto-migrate: skipping Dolt migration for backend %q", cfg.GetBackend())
-		return
+		return "", false
 	}
-
 	if cfg.IsDoltProxiedServerMode() {
 		debug.Logf("auto-migrate: skipping embedded migration, proxied-server handled after UOW provider init")
-		return
+		return "", false
 	}
-
-	// Check if database exists at the backend-appropriate path
 	dbPath := cfg.DatabasePath(beadsDir)
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		// No database - nothing to migrate
 		debug.Logf("auto-migrate: skipping migration, database does not exist: %s", dbPath)
-		return
+		return "", false
 	}
+	return dbPath, true
+}
 
+func recoverPreV56DoltIfNeeded(dbPath string) {
 	// GH#2137: If upgrading from pre-0.56, the dolt database may have been
 	// created by the old embedded Dolt mode. Recover by reinitializing.
-	if previousVersion != "" && doctor.CompareVersions(previousVersion, "0.56.0") < 0 {
-		recovered, recErr := doltserver.RecoverPreV56DoltDir(dbPath)
-		if recErr != nil {
-			debug.Logf("auto-migrate: pre-v56 recovery failed: %v", recErr)
-		}
-		if recovered {
-			debug.Logf("auto-migrate: rebuilt pre-v56 dolt database at %s", dbPath)
-		}
+	if getPreviousVersion() == "" || doctor.CompareVersions(getPreviousVersion(), "0.56.0") >= 0 {
+		return
 	}
-
-	// Open database using factory (respects backend config from metadata.json)
-	// Use rootCtx if available and not canceled, otherwise use Background
-	ctx := rootCtx
-	if ctx == nil || ctx.Err() != nil {
-		// rootCtx is nil or canceled - use fresh background context
-		ctx = context.Background()
+	recovered, recErr := doltserver.RecoverPreV56DoltDir(dbPath)
+	if recErr != nil {
+		debug.Logf("auto-migrate: pre-v56 recovery failed: %v", recErr)
 	}
-
-	// Read-only probe: if the DB is already at the current version, skip the
-	// writeable open. On current main the writeable-open gate reads remotes
-	// via doltutil.PersistedRemotes, a fast on-disk repo_state.json probe —
-	// not a `dolt remote -v` subprocess — so this doesn't save a 12s hang;
-	// it saves an unnecessary initSchema round-trip when no migration is
-	// needed. (be-1he)
-	//
-	// The probe asks the ROLE for the marker rather than reading the metadata
-	// key itself: a store opened read-only can answer it.
-	if roStore, roErr := dolt.NewFromConfigWithOptions(ctx, beadsDir, &dolt.Config{ReadOnly: true}); roErr == nil {
-		recorded, probeErr := recordedWorkspaceVersion(ctx, roStore)
-		_ = roStore.Close()
-		if probeErr == nil && recorded == Version {
-			debug.Logf("auto-migrate: database already at version %s (ro probe)", Version)
-			return
-		}
+	if recovered {
+		debug.Logf("auto-migrate: rebuilt pre-v56 dolt database at %s", dbPath)
 	}
+}
 
+func runAutoMigrate(beadsDir string) {
+	ctx := autoMigrateContext()
+	if alreadyAtCurrentVersion(ctx, beadsDir) {
+		return
+	}
 	store, err := dolt.NewFromConfig(ctx, beadsDir)
 	if err != nil {
-		// Failed to open database - skip migration
 		debug.Logf("auto-migrate: failed to open database: %v", err)
 		return
 	}
@@ -254,7 +237,19 @@ func autoMigrateOnVersionBump(beadsDir string) {
 			debug.Logf("auto-migrate: warning: failed to close database: %v", err)
 		}
 	}()
+	reconcileAutoMigrate(ctx, store)
+}
 
+func autoMigrateContext() context.Context {
+	// Open database using factory (respects backend config from metadata.json)
+	// Use rootCtx if available and not canceled, otherwise use Background
+	if getRootContext() == nil || getRootContext().Err() != nil {
+		return context.Background()
+	}
+	return getRootContext()
+}
+
+func reconcileAutoMigrate(ctx context.Context, store storage.Storage) {
 	// Everything the version markers mean — is this an upgrade, is it a
 	// downgrade to refuse, does the high-water mark move — is the role's. This
 	// front door reads the outcome and logs it.
@@ -271,7 +266,6 @@ func autoMigrateOnVersionBump(beadsDir string) {
 		debug.Logf("auto-migrate: failed to reconcile database version: %v", err)
 		return
 	}
-
 	switch {
 	case result.Downgrade:
 		debug.Logf("auto-migrate: refusing downgrade from %s to %s", result.Previous, Version)
@@ -280,6 +274,29 @@ func autoMigrateOnVersionBump(beadsDir string) {
 	default:
 		debug.Logf("auto-migrate: database already at version %s", Version)
 	}
+}
+
+func alreadyAtCurrentVersion(ctx context.Context, beadsDir string) bool {
+	// Read-only probe: if the DB is already at the current version, skip the
+	// writeable open. On current main the writeable-open gate reads remotes
+	// via doltutil.PersistedRemotes, a fast on-disk repo_state.json probe —
+	// not a `dolt remote -v` subprocess — so this doesn't save a 12s hang;
+	// it saves an unnecessary initSchema round-trip when no migration is
+	// needed. (be-1he)
+	//
+	// The probe asks the ROLE for the marker rather than reading the metadata
+	// key itself: a store opened read-only can answer it.
+	roStore, roErr := dolt.NewFromConfigWithOptions(ctx, beadsDir, &dolt.Config{ReadOnly: true})
+	if roErr != nil {
+		return false
+	}
+	recorded, probeErr := recordedWorkspaceVersion(ctx, roStore)
+	_ = roStore.Close()
+	if probeErr != nil || recorded != Version {
+		return false
+	}
+	debug.Logf("auto-migrate: database already at version %s (ro probe)", Version)
+	return true
 }
 
 // recordedWorkspaceVersion reads the marker through the role's accessor on a

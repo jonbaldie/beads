@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -176,119 +175,140 @@ func gatherWispCreateInput(cmd *cobra.Command, args []string) wispCreateInput {
 }
 
 func runWispCreateCore(cmd *cobra.Command, args []string) error {
-	CheckReadonly("wisp create")
+	if err := CheckReadonly("wisp create"); err != nil {
+		return err
+	}
 
 	in := gatherWispCreateInput(cmd, args)
 
 	if usesProxiedServer() {
-		return runWispCreateProxiedServer(rootCtx, in)
+		return runWispCreateProxiedServer(getRootContext(), in)
 	}
 
-	ctx := rootCtx
-
-	if store == nil {
+	if getStore() == nil {
 		return HandleErrorWithHint("no database connection", diagHint())
 	}
 
-	vars, err := parseVarFlags(in.varFlags)
+	prepared, err := prepareWispCreate(getRootContext(), in)
 	if err != nil {
-		return HandleError("%v", err)
-	}
-	args = []string{in.protoArg}
-	dryRun := in.dryRun
-	rootOnly := in.rootOnly
-
-	// Try to load as formula first (ephemeral proto)
-	// If that fails, fall back to loading from DB (legacy proto beads)
-	var subgraph *TemplateSubgraph
-	var protoID string
-
-	// Try to cook formula inline (ephemeral protos)
-	// This works for any valid formula name, not just "mol-" prefixed ones
-	// Pass vars for step condition filtering (bd-7zka.1)
-	sg, err := resolveAndCookFormulaWithVars(args[0], nil, vars)
-	if err == nil {
-		subgraph = sg
-		protoID = sg.Root.ID
-	} else if errors.Is(err, formula.ErrVarValidation) {
-		// args[0] IS a formula; the --var values it was given fail
-		// enum/pattern/required-empty constraints. Report that directly
-		// instead of falling through to the legacy proto-ID lookup below,
-		// which would otherwise mask this as "not found as formula or proto".
-		return HandleError("%v", err)
+		return err
 	}
 
-	if subgraph == nil {
-		// Resolve proto ID (legacy path)
-		protoID = args[0]
-		// Try to resolve partial ID if it doesn't look like a full ID
-		if !strings.HasPrefix(protoID, "bd-") && !strings.HasPrefix(protoID, "gt-") && !strings.HasPrefix(protoID, "mol-") {
-			// Might be a partial ID, try to resolve
-			if resolved, err := resolvePartialIDDirect(ctx, protoID); err == nil {
-				protoID = resolved
-			}
-		}
-
-		if strings.HasPrefix(protoID, "mol-") {
-			issues, err := store.SearchIssues(ctx, "", types.IssueFilter{
-				Labels: []string{MoleculeLabel},
-			})
-			if err != nil {
-				return HandleError("searching for proto: %v", err)
-			}
-			found := false
-			for _, issue := range issues {
-				if strings.Contains(issue.Title, protoID) || issue.ID == protoID {
-					protoID = issue.ID
-					found = true
-					break
-				}
-			}
-			if !found {
-				return HandleErrorWithHint(fmt.Sprintf("'%s' not found as formula or proto", args[0]), "run 'bd formula list' to see available formulas")
-			}
-		}
-
-		protoIssue, err := store.GetIssue(ctx, protoID)
-		if err != nil {
-			if errors.Is(err, storage.ErrNotFound) {
-				return HandleError("proto not found: %s", protoID)
-			}
-			return HandleError("loading proto %s: %v", protoID, err)
-		}
-		if !isProtoIssue(protoIssue) {
-			return HandleError("%s is not a proto (missing '%s' label)", protoID, MoleculeLabel)
-		}
-
-		subgraph, err = loadTemplateSubgraph(ctx, store, protoID)
-		if err != nil {
-			return HandleError("loading proto: %v", err)
-		}
-	}
-
-	vars = applyVariableDefaults(vars, subgraph)
-
-	if err := checkRequiredVars(subgraph, vars); err != nil {
-		return HandleErrorWithHint(err.Error(), fmt.Sprintf("Provide them with: --var %s=<value>", firstMissingVar(subgraph, vars)))
-	}
-
-	if dryRun {
-		renderWispCreateDryRun(protoID, subgraph, vars, rootOnly)
+	if in.dryRun {
+		renderWispCreateDryRun(prepared.protoID, prepared.subgraph, prepared.vars, in.rootOnly)
 		return nil
 	}
 
-	result, err := spawnMoleculeWithOptions(ctx, store, subgraph, CloneOptions{
-		Vars:      vars,
-		Actor:     actor,
+	result, err := spawnMoleculeWithOptions(getRootContext(), getStore(), prepared.subgraph, CloneOptions{
+		Vars:      prepared.vars,
+		Actor:     getActor(),
 		Ephemeral: true,
 		Prefix:    types.IDPrefixWisp,
-		RootOnly:  rootOnly,
+		RootOnly:  in.rootOnly,
 	})
 	if err != nil {
 		return HandleError("creating wisp: %v", err)
 	}
 
 	return renderWispCreateResult(result)
+}
+
+type preparedWispCreate struct {
+	subgraph *TemplateSubgraph
+	protoID  string
+	vars     map[string]string
+}
+
+func prepareWispCreate(ctx context.Context, in wispCreateInput) (preparedWispCreate, error) {
+	vars, err := parseVarFlags(in.varFlags)
+	if err != nil {
+		return preparedWispCreate{}, HandleError("%v", err)
+	}
+
+	subgraph, protoID, err := resolveWispCreateSource(in.protoArg, vars)
+	if err != nil {
+		return preparedWispCreate{}, err
+	}
+	if subgraph == nil {
+		subgraph, protoID, err = loadLegacyWispSource(ctx, in.protoArg)
+		if err != nil {
+			return preparedWispCreate{}, err
+		}
+	}
+
+	vars = applyVariableDefaults(vars, subgraph)
+	if err := checkRequiredVars(subgraph, vars); err != nil {
+		return preparedWispCreate{}, HandleErrorWithHint(err.Error(), fmt.Sprintf("Provide them with: --var %s=<value>", firstMissingVar(subgraph, vars)))
+	}
+
+	return preparedWispCreate{subgraph: subgraph, protoID: protoID, vars: vars}, nil
+}
+
+func resolveWispCreateSource(protoArg string, vars map[string]string) (*TemplateSubgraph, string, error) {
+	// Try to cook formula inline (ephemeral protos). This works for any valid
+	// formula name, not just "mol-" prefixed ones, and passes vars for step
+	// condition filtering (bd-7zka.1).
+	subgraph, err := resolveAndCookFormulaWithVars(protoArg, nil, vars)
+	if err == nil {
+		return subgraph, subgraph.Root.ID, nil
+	}
+	if errors.Is(err, formula.ErrVarValidation) {
+		// protoArg IS a formula; report invalid vars directly instead of
+		// masking the validation error as "not found as formula or proto".
+		return nil, "", HandleError("%v", err)
+	}
+	return nil, "", nil
+}
+
+func loadLegacyWispSource(ctx context.Context, protoArg string) (*TemplateSubgraph, string, error) {
+	protoID := protoArg
+	if !looksLikeFullWispID(protoID) {
+		if resolved, err := resolvePartialIDDirect(ctx, protoID); err == nil {
+			protoID = resolved
+		}
+	}
+
+	if strings.HasPrefix(protoID, "mol-") {
+		resolved, err := resolveWispProtoTitle(ctx, protoID)
+		if err != nil {
+			return nil, "", err
+		}
+		protoID = resolved
+	}
+
+	protoIssue, err := getStore().GetIssue(ctx, protoID)
+	if err != nil {
+		if errors.Is(err, storage.ErrNotFound) {
+			return nil, "", HandleError("proto not found: %s", protoID)
+		}
+		return nil, "", HandleError("loading proto %s: %v", protoID, err)
+	}
+	if !isProtoIssue(protoIssue) {
+		return nil, "", HandleError("%s is not a proto (missing '%s' label)", protoID, MoleculeLabel)
+	}
+
+	subgraph, err := loadTemplateSubgraph(ctx, getStore(), protoID)
+	if err != nil {
+		return nil, "", HandleError("loading proto: %v", err)
+	}
+	return subgraph, protoID, nil
+}
+
+func looksLikeFullWispID(id string) bool {
+	return strings.HasPrefix(id, "bd-") || strings.HasPrefix(id, "gt-") || strings.HasPrefix(id, "mol-")
+}
+
+func resolveWispProtoTitle(ctx context.Context, protoID string) (string, error) {
+	issues, err := getStore().SearchIssues(ctx, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Labels: []string{MoleculeLabel}}})
+	if err != nil {
+		return "", HandleError("searching for proto: %v", err)
+	}
+	for _, issue := range issues {
+		if strings.Contains(issue.Title, protoID) || issue.ID == protoID {
+			return issue.ID, nil
+		}
+	}
+	return "", HandleErrorWithHint(fmt.Sprintf("'%s' not found as formula or proto", protoID), "run 'bd formula list' to see available formulas")
 }
 
 func checkRequiredVars(subgraph *TemplateSubgraph, vars map[string]string) error {
@@ -335,7 +355,7 @@ func renderWispCreateDryRun(protoID string, subgraph *TemplateSubgraph, vars map
 }
 
 func renderWispCreateResult(result *InstantiateResult) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		type wispCreateResult struct {
 			*InstantiateResult
 			Phase string `json:"phase"`
@@ -366,12 +386,14 @@ func isProtoIssue(issue *types.Issue) bool {
 // resolvePartialIDDirect resolves a partial ID directly from store
 func resolvePartialIDDirect(ctx context.Context, partial string) (string, error) {
 	// Try direct lookup first
-	if issue, err := store.GetIssue(ctx, partial); err == nil {
+	if issue, err := getStore().GetIssue(ctx, partial); err == nil {
 		return issue.ID, nil
 	}
 	// Search by prefix
-	issues, err := store.SearchIssues(ctx, "", types.IssueFilter{
-		IDs: []string{partial + "*"},
+	issues, err := getStore().SearchIssues(ctx, "", types.IssueFilter{
+		IssueFilterCore: types.IssueFilterCore{
+			IDs: []string{partial + "*"},
+		},
 	})
 	if err != nil {
 		return "", err
@@ -383,625 +405,4 @@ func resolvePartialIDDirect(ctx context.Context, partial string) (string, error)
 		return "", fmt.Errorf("ambiguous ID: %s matches %d issues", partial, len(issues))
 	}
 	return "", fmt.Errorf("not found: %s", partial)
-}
-
-var wispListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List all wisps in current context",
-	Long: `List all wisps (ephemeral molecules) in the current context.
-
-Wisps are issues with Ephemeral=true in the main database. They are stored
-locally but not synced via git.
-
-The list shows:
-  - ID: Issue ID of the wisp
-  - Title: Wisp title
-  - Status: Current status (open, in_progress, closed)
-  - Started: When the wisp was created
-  - Updated: Last modification time
-
-Old wisp detection:
-  - Old wisps haven't been updated in 24+ hours
-  - Use 'bd mol wisp gc' to clean up old/abandoned wisps
-
-Examples:
-  bd mol wisp list              # List all wisps
-  bd mol wisp list --json       # JSON output for programmatic use
-  bd mol wisp list --all        # Include closed wisps`,
-	SilenceUsage:  true,
-	SilenceErrors: true,
-	RunE:          runWispList,
-}
-
-func wispListFilter(typeFilter string) types.IssueFilter {
-	ephemeralFlag := true
-	filter := types.IssueFilter{
-		Ephemeral: &ephemeralFlag,
-		Limit:     5000,
-	}
-	if typeFilter != "" {
-		it := types.IssueType(typeFilter)
-		filter.IssueType = &it
-	}
-	return filter
-}
-
-func buildWispListResult(issues []*types.Issue, showAll bool) WispListResult {
-	if !showAll {
-		var filtered []*types.Issue
-		for _, issue := range issues {
-			if issue.Status != types.StatusClosed {
-				filtered = append(filtered, issue)
-			}
-		}
-		issues = filtered
-	}
-
-	now := time.Now()
-	items := make([]WispListItem, 0, len(issues))
-	oldCount := 0
-
-	for _, issue := range issues {
-		item := WispListItem{
-			ID:        issue.ID,
-			Title:     issue.Title,
-			Status:    string(issue.Status),
-			Priority:  issue.Priority,
-			Type:      string(issue.IssueType),
-			Labels:    issue.Labels,
-			CreatedAt: issue.CreatedAt,
-			UpdatedAt: issue.UpdatedAt,
-		}
-		if now.Sub(issue.UpdatedAt) > OldThreshold {
-			item.Old = true
-			oldCount++
-		}
-		items = append(items, item)
-	}
-
-	slices.SortFunc(items, func(a, b WispListItem) int {
-		return b.UpdatedAt.Compare(a.UpdatedAt)
-	})
-
-	return WispListResult{
-		Wisps:    items,
-		Count:    len(items),
-		OldCount: oldCount,
-	}
-}
-
-func renderWispListResult(result WispListResult) error {
-	if jsonOutput {
-		return outputJSON(result)
-	}
-
-	if len(result.Wisps) == 0 {
-		fmt.Println("No wisps found")
-		return nil
-	}
-
-	fmt.Printf("Wisps (%d):\n\n", len(result.Wisps))
-	fmt.Printf("%-12s %-10s %-4s %-10s %-46s %s\n",
-		"ID", "STATUS", "PRI", "TYPE", "TITLE", "UPDATED")
-	fmt.Println(strings.Repeat("-", 100))
-
-	for _, item := range result.Wisps {
-		title := item.Title
-		if len(title) > 44 {
-			title = title[:41] + "..."
-		}
-		status := ui.RenderStatus(item.Status)
-		updated := formatTimeAgo(item.UpdatedAt)
-		if item.Old {
-			updated = ui.RenderWarn(updated + " ⚠")
-		}
-		fmt.Printf("%-12s %-10s P%-3d %-10s %-46s %s\n",
-			item.ID, status, item.Priority, item.Type, title, updated)
-	}
-
-	if result.OldCount > 0 {
-		fmt.Printf("\n%s %d old wisp(s) (not updated in 24+ hours)\n",
-			ui.RenderWarn("⚠"), result.OldCount)
-		fmt.Println("  Hint: Use 'bd mol wisp gc' to clean up old wisps")
-	}
-	return nil
-}
-
-func runWispList(cmd *cobra.Command, args []string) error {
-	evt := metrics.NewCommandEvent("wisp-list")
-	defer func() {
-		if c := metrics.Global(); c != nil {
-			c.CloseEventAndAdd(evt)
-		}
-	}()
-
-	showAll, _ := cmd.Flags().GetBool("all")
-	typeFilter, _ := cmd.Flags().GetString("type")
-
-	if usesProxiedServer() {
-		return runWispListProxiedServer(rootCtx, showAll, typeFilter)
-	}
-
-	ctx := rootCtx
-
-	if store == nil {
-		if jsonOutput {
-			return outputJSON(WispListResult{
-				Wisps: []WispListItem{},
-				Count: 0,
-			})
-		}
-		fmt.Println("No database connection")
-		return nil
-	}
-
-	issues, err := store.SearchIssues(ctx, "", wispListFilter(typeFilter))
-	if err != nil {
-		return HandleError("listing wisps: %v", err)
-	}
-
-	return renderWispListResult(buildWispListResult(issues, showAll))
-}
-
-// formatTimeAgo returns a human-readable relative time
-func formatTimeAgo(t time.Time) string {
-	d := time.Since(t)
-
-	switch {
-	case d < time.Minute:
-		return "just now"
-	case d < time.Hour:
-		mins := int(d.Minutes())
-		if mins == 1 {
-			return "1 min ago"
-		}
-		return fmt.Sprintf("%d mins ago", mins)
-	case d < 24*time.Hour:
-		hours := int(d.Hours())
-		if hours == 1 {
-			return "1 hour ago"
-		}
-		return fmt.Sprintf("%d hours ago", hours)
-	case d < 7*24*time.Hour:
-		days := int(d.Hours() / 24)
-		if days == 1 {
-			return "1 day ago"
-		}
-		return fmt.Sprintf("%d days ago", days)
-	default:
-		return t.Format("2006-01-02")
-	}
-}
-
-// formatTimeUntil returns a human-readable relative time for a future instant,
-// the forward-looking mirror of formatTimeAgo. Used for lease expiry in bd show.
-// A past (or present) instant renders as "expired".
-func formatTimeUntil(t time.Time) string {
-	d := time.Until(t)
-	if d <= 0 {
-		return "expired"
-	}
-	switch {
-	case d < time.Minute:
-		return "in <1 min"
-	case d < time.Hour:
-		mins := int(d.Minutes())
-		if mins == 1 {
-			return "in 1 min"
-		}
-		return fmt.Sprintf("in %d mins", mins)
-	case d < 24*time.Hour:
-		hours := int(d.Hours())
-		if hours == 1 {
-			return "in 1 hour"
-		}
-		return fmt.Sprintf("in %d hours", hours)
-	default:
-		days := int(d.Hours() / 24)
-		if days == 1 {
-			return "in 1 day"
-		}
-		return fmt.Sprintf("in %d days", days)
-	}
-}
-
-var wispGCCmd = &cobra.Command{
-	Use:   "gc",
-	Short: "Garbage collect old/abandoned wisps",
-	Long: `Garbage collect old or abandoned wisps from the database.
-
-A wisp is considered abandoned if:
-  - It hasn't been updated in --age duration and is not closed
-  - AND it is not live work: blocked steps (waiting on a dependency), pinned
-    beads, and any step whose status category is wip (in_progress, blocked,
-    hooked) or frozen (deferred, pinned) are never reclaimed by age, no matter
-    how long they have been waiting (GH#4394). Custom statuses count by their
-    configured category, so only plain open (active) and closed (done) steps
-    are age-reclaimable. If the blocked set or the custom-status list cannot be
-    read, the GC aborts rather than risk reclaiming live steps.
-
-Abandoned wisps are deleted without creating a digest. Use 'bd mol squash'
-if you want to preserve a summary before garbage collection.
-
-Use --closed to purge ALL closed wisps (regardless of age). This is the
-fastest way to reclaim space from accumulated wisp bloat. Safe by default:
-requires --force to actually delete.
-
-Note: This uses time-based cleanup, appropriate for ephemeral wisps.
-For graph-pressure staleness detection (blocking other work), see 'bd mol stale'.
-
-Examples:
-  bd mol wisp gc                                    # Clean abandoned wisps (default: 1h threshold)
-  bd mol wisp gc --dry-run                          # Preview what would be cleaned
-  bd mol wisp gc --age 24h                          # Custom age threshold
-  bd mol wisp gc --all                              # Also clean closed wisps older than threshold
-  bd mol wisp gc --closed                           # Preview closed wisp deletion
-  bd mol wisp gc --closed --force                   # Delete all closed wisps
-  bd mol wisp gc --closed --dry-run                 # Explicit dry-run (same as no --force)
-  bd mol wisp gc --exclude-type agent,rig           # Protect agent and rig wisps from GC
-  bd mol wisp gc --closed --force --exclude-type mol # Delete closed wisps except mol type`,
-	SilenceUsage:  true,
-	SilenceErrors: true,
-	RunE:          runWispGC,
-}
-
-// WispGCResult is the JSON output for wisp gc
-type WispGCResult struct {
-	CleanedIDs   []string `json:"cleaned_ids"`
-	CleanedCount int      `json:"cleaned_count"`
-	Candidates   int      `json:"candidates,omitempty"`
-	DryRun       bool     `json:"dry_run,omitempty"`
-}
-
-// protectedWispStatuses returns the statuses whose category means a wisp is
-// live work rather than abandoned, so age-based GC must never reclaim it.
-//
-// Protection is derived from the status *category* rather than a hand-written
-// list: CategoryWIP (in_progress/blocked/hooked) is work in flight, and
-// CategoryFrozen (deferred/pinned) is work deliberately put on ice — reclaiming
-// something a user explicitly deferred defeats the point of deferring it. Only
-// CategoryActive (plain open) and CategoryDone (closed) are age-reclaimable.
-//
-// Custom statuses (status.custom) participate on the same footing, matching the
-// sibling destructive command in purge.go. Reading them is required, not
-// best-effort: if we cannot enumerate them we must not under-protect and risk
-// deleting live molecule steps, so the error propagates and aborts the GC.
-func protectedWispStatuses(ctx context.Context, r molReader) (map[types.Status]bool, error) {
-	protected := make(map[types.Status]bool)
-	for _, s := range []types.Status{
-		types.StatusOpen,
-		types.StatusInProgress,
-		types.StatusBlocked,
-		types.StatusClosed,
-		types.StatusDeferred,
-		types.StatusPinned,
-		types.StatusHooked,
-	} {
-		switch types.BuiltInStatusCategory(s) {
-		case types.CategoryWIP, types.CategoryFrozen:
-			protected[s] = true
-		}
-	}
-
-	customStatuses, err := r.GetCustomStatusesDetailed(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("reading custom statuses for wisp age GC: %w", err)
-	}
-	for _, cs := range customStatuses {
-		switch cs.Category {
-		case types.CategoryWIP, types.CategoryFrozen:
-			protected[types.Status(cs.Name)] = true
-		}
-	}
-	return protected, nil
-}
-
-// isProtectedWisp reports whether a wisp is live work that age-based GC must
-// never reclaim. A wisp is protected if it is explicitly pinned, if it is
-// blocked on an open dependency (blockedSet, derived from is_blocked), or if
-// its status falls in a protected category. Reclaiming any of these
-// mid-execution destroys active molecules (GH#4394).
-//
-// Named isProtectedWisp rather than isActiveWisp to avoid confusion with
-// (*DoltStore).isActiveWisp in internal/storage/dolt, which is in this same
-// delete path but means only "a row for this ID exists in the wisps table".
-func isProtectedWisp(issue *types.Issue, blockedSet map[string]bool, protectedStatuses map[types.Status]bool) bool {
-	// The pinned flag is independent of the pinned status; the closed-purge
-	// branch of this same command already honors it (see runWispPurgeClosed).
-	if issue.Pinned {
-		return true
-	}
-	if blockedSet[issue.ID] {
-		return true
-	}
-	return protectedStatuses[issue.Status]
-}
-
-func runWispGC(cmd *cobra.Command, args []string) error {
-	CheckReadonly("wisp gc")
-
-	evt := metrics.NewCommandEvent("wisp-gc")
-	defer func() {
-		if c := metrics.Global(); c != nil {
-			c.CloseEventAndAdd(evt)
-		}
-	}()
-
-	ctx := rootCtx
-
-	dryRun, _ := cmd.Flags().GetBool("dry-run")
-	ageStr, _ := cmd.Flags().GetString("age")
-	cleanAll, _ := cmd.Flags().GetBool("all")
-	closedMode, _ := cmd.Flags().GetBool("closed")
-	force, _ := cmd.Flags().GetBool("force")
-	excludeTypeStrs, _ := cmd.Flags().GetStringSlice("exclude-type")
-
-	ageThreshold := time.Hour
-	if ageStr != "" {
-		var err error
-		ageThreshold, err = time.ParseDuration(ageStr)
-		if err != nil {
-			return HandleError("invalid --age duration: %v", err)
-		}
-	}
-
-	var excludeTypes []types.IssueType
-	for _, t := range excludeTypeStrs {
-		excludeTypes = append(excludeTypes, types.IssueType(t))
-	}
-
-	if usesProxiedServer() {
-		return runWispGCProxiedServer(rootCtx, dryRun, ageThreshold, cleanAll, closedMode, force, excludeTypes)
-	}
-
-	if store == nil {
-		return HandleErrorWithHint("no database connection", diagHint())
-	}
-
-	if closedMode {
-		return runWispPurgeClosed(ctx, dryRun, force, excludeTypes)
-	}
-
-	abandoned, err := findAbandonedWisps(ctx, store, cleanAll, ageThreshold, excludeTypes)
-	if err != nil && abandoned == nil {
-		return HandleError("%v", err)
-	}
-	if err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "Warning: cascade expansion incomplete: %v\n", err)
-	}
-
-	if len(abandoned) == 0 {
-		if jsonOutput {
-			return outputJSON(WispGCResult{
-				CleanedIDs:   []string{},
-				CleanedCount: 0,
-				DryRun:       dryRun,
-			})
-		}
-		fmt.Println("No abandoned wisps found")
-		return nil
-	}
-
-	if dryRun {
-		if jsonOutput {
-			ids := make([]string, len(abandoned))
-			for i, o := range abandoned {
-				ids[i] = o.ID
-			}
-			return outputJSON(WispGCResult{
-				CleanedIDs:   ids,
-				Candidates:   len(abandoned),
-				CleanedCount: 0,
-				DryRun:       true,
-			})
-		}
-		fmt.Printf("Dry run: would clean %d abandoned wisp(s):\n\n", len(abandoned))
-		for _, issue := range abandoned {
-			age := formatTimeAgo(issue.UpdatedAt)
-			fmt.Printf("  %s: %s (last updated: %s)\n", issue.ID, issue.Title, age)
-		}
-		fmt.Printf("\nRun without --dry-run to delete these wisps.\n")
-		return nil
-	}
-
-	ids := make([]string, len(abandoned))
-	for i, issue := range abandoned {
-		ids[i] = issue.ID
-	}
-	if err := deleteBatch(nil, ids, true, false, true, jsonOutput, false, "wisp gc"); err != nil {
-		return HandleError("%v", err)
-	}
-	return nil
-}
-
-func findAbandonedWisps(ctx context.Context, r molReader, cleanAll bool, ageThreshold time.Duration, excludeTypes []types.IssueType) ([]*types.Issue, error) {
-	ephemeralFlag := true
-	filter := types.IssueFilter{
-		Ephemeral:    &ephemeralFlag,
-		ExcludeTypes: excludeTypes,
-		Limit:        5000,
-	}
-	issues, err := r.SearchIssues(ctx, "", filter)
-	if err != nil {
-		return nil, err
-	}
-
-	blocked, err := r.GetBlockedIssues(ctx, types.WorkFilter{})
-	if err != nil {
-		return nil, fmt.Errorf("determining blocked wisps for age GC: %w", err)
-	}
-	blockedSet := make(map[string]bool, len(blocked))
-	for _, b := range blocked {
-		blockedSet[b.ID] = true
-	}
-
-	protectedStatuses, err := protectedWispStatuses(ctx, r)
-	if err != nil {
-		return nil, err
-	}
-
-	now := time.Now()
-	var abandoned []*types.Issue
-	for _, issue := range issues {
-		if r.IsInfraTypeCtx(ctx, issue.IssueType) {
-			continue
-		}
-		if issue.Status == types.StatusClosed && !cleanAll {
-			continue
-		}
-		if isProtectedWisp(issue, blockedSet, protectedStatuses) {
-			continue
-		}
-		if now.Sub(issue.UpdatedAt) > ageThreshold {
-			abandoned = append(abandoned, issue)
-		}
-	}
-
-	if len(abandoned) == 0 {
-		return abandoned, nil
-	}
-
-	parentIDs := make([]string, len(abandoned))
-	for i, issue := range abandoned {
-		parentIDs[i] = issue.ID
-	}
-	childIDs, cascadeErr := r.FindWispDependentsRecursive(ctx, parentIDs)
-	if len(childIDs) > 0 {
-		childIDSlice := make([]string, 0, len(childIDs))
-		for id := range childIDs {
-			childIDSlice = append(childIDSlice, id)
-		}
-		childIssues, fetchErr := r.GetIssuesByIDs(ctx, childIDSlice)
-		if fetchErr == nil {
-			abandonedSet := make(map[string]bool, len(abandoned))
-			for _, issue := range abandoned {
-				abandonedSet[issue.ID] = true
-			}
-			for _, child := range childIssues {
-				if abandonedSet[child.ID] {
-					continue
-				}
-				if r.IsInfraTypeCtx(ctx, child.IssueType) {
-					continue
-				}
-				if isProtectedWisp(child, blockedSet, protectedStatuses) {
-					continue
-				}
-				abandoned = append(abandoned, child)
-			}
-		}
-	}
-	return abandoned, cascadeErr
-}
-
-func runWispPurgeClosed(ctx context.Context, dryRun bool, force bool, excludeTypes []types.IssueType) error {
-	statusClosed := types.StatusClosed
-	ephemeralTrue := true
-	filter := types.IssueFilter{
-		Status:       &statusClosed,
-		Ephemeral:    &ephemeralTrue,
-		ExcludeTypes: excludeTypes,
-		Limit:        5000,
-	}
-
-	closedIssues, err := store.SearchIssues(ctx, "", filter)
-	if err != nil {
-		return HandleError("listing closed wisps: %v", err)
-	}
-
-	// Filter out pinned and infra issues (protected from cleanup)
-	pinnedCount := 0
-	infraCount := 0
-	filtered := make([]*types.Issue, 0, len(closedIssues))
-	for _, issue := range closedIssues {
-		if issue.Pinned {
-			pinnedCount++
-			continue
-		}
-		if store.IsInfraTypeCtx(ctx, issue.IssueType) {
-			infraCount++
-			continue
-		}
-		filtered = append(filtered, issue)
-	}
-	closedIssues = filtered
-
-	if pinnedCount > 0 && !jsonOutput {
-		fmt.Printf("Skipping %d pinned issue(s) (protected from cleanup)\n", pinnedCount)
-	}
-	if infraCount > 0 && !jsonOutput {
-		fmt.Printf("Skipping %d configured infra issue(s) protected from GC\n", infraCount)
-	}
-
-	if len(closedIssues) == 0 {
-		if jsonOutput {
-			return outputJSON(map[string]interface{}{
-				"deleted_count": 0,
-				"message":       "No closed wisps to delete",
-			})
-		}
-		fmt.Println("No closed wisps to delete")
-		return nil
-	}
-
-	ids := make([]string, len(closedIssues))
-	for i, issue := range closedIssues {
-		ids[i] = issue.ID
-	}
-
-	if !force && !dryRun {
-		if jsonOutput {
-			return outputJSON(map[string]interface{}{
-				"candidates": len(ids),
-				"dry_run":    true,
-			})
-		}
-		fmt.Printf("Found %d closed wisp(s) to delete\n", len(ids))
-		fmt.Printf("\nUse --force to proceed, or --dry-run for detailed preview.\n")
-		return nil
-	}
-
-	if !jsonOutput {
-		fmt.Printf("Found %d closed wisp(s)\n", len(ids))
-		if dryRun {
-			fmt.Println(ui.RenderWarn("DRY RUN - no changes will be made"))
-		}
-		fmt.Println()
-	}
-
-	if err := deleteBatch(nil, ids, force, dryRun, true, jsonOutput, false, "wisp gc --closed"); err != nil {
-		return HandleError("%v", err)
-	}
-
-	if !dryRun && force && !jsonOutput {
-		fmt.Printf("\nHint: Run 'bd compact --dolt' to reclaim disk space\n")
-	}
-	return nil
-}
-
-func init() {
-	// Wisp command flags (for direct create: bd mol wisp <proto>)
-	wispCmd.Flags().StringArray("var", []string{}, "Variable substitution (key=value)")
-	wispCmd.Flags().Bool("dry-run", false, "Preview what would be created")
-	wispCmd.Flags().Bool("root-only", false, "Create only the root issue (no child step issues)")
-
-	// Wisp create command flags (kept for backwards compat: bd mol wisp create <proto>)
-	wispCreateCmd.Flags().StringArray("var", []string{}, "Variable substitution (key=value)")
-	wispCreateCmd.Flags().Bool("dry-run", false, "Preview what would be created")
-	wispCreateCmd.Flags().Bool("root-only", false, "Create only the root issue (no child step issues)")
-
-	wispListCmd.Flags().Bool("all", false, "Include closed wisps")
-	wispListCmd.Flags().String("type", "", "Filter by issue type (e.g., agent, task, patrol)")
-
-	wispGCCmd.Flags().Bool("dry-run", false, "Preview what would be cleaned")
-	wispGCCmd.Flags().String("age", "1h", "Age threshold for abandoned wisp detection")
-	wispGCCmd.Flags().Bool("all", false, "Also clean closed wisps older than threshold")
-	wispGCCmd.Flags().Bool("closed", false, "Delete all closed wisps (ignores --age threshold)")
-	wispGCCmd.Flags().BoolP("force", "f", false, "Actually delete (default: preview only)")
-	wispGCCmd.Flags().StringSlice("exclude-type", nil, "Exclude wisps of these types from GC (comma-separated, e.g., agent,rig)")
-
-	wispCmd.AddCommand(wispCreateCmd)
-	wispCmd.AddCommand(wispListCmd)
-	wispCmd.AddCommand(wispGCCmd)
-	molCmd.AddCommand(wispCmd)
 }

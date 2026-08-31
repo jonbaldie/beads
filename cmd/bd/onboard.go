@@ -39,70 +39,58 @@ Run ` + "`bd prime`" + ` for workflow context, or install hooks (` + "`bd hooks 
 For full workflow details: ` + "`bd prime`" + ``
 
 func renderOnboardInstructions(w io.Writer) error {
-	writef := func(format string, args ...interface{}) error {
-		_, err := fmt.Fprintf(w, format, args...)
-		return err
-	}
-	writeln := func(text string) error {
-		_, err := fmt.Fprintln(w, text)
-		return err
-	}
-	writeBlank := func() error {
-		_, err := fmt.Fprintln(w)
-		return err
-	}
-
-	if err := writef("\n%s\n\n", ui.RenderBold("bd Onboarding")); err != nil {
-		return err
-	}
 	agentsFile := config.AgentsFile()
-	if err := writeln("Add this minimal snippet to " + agentsFile + " (or create it):"); err != nil {
-		return err
-	}
-	if err := writeBlank(); err != nil {
-		return err
-	}
+	writer := onboardInstructionWriter{out: w}
+	return writer.write(
+		writer.format("\n%s\n\n", ui.RenderBold("bd Onboarding")),
+		writer.line("Add this minimal snippet to "+agentsFile+" (or create it):"),
+		writer.blank(),
+		writer.format("%s\n", ui.RenderAccent("--- BEGIN AGENTS.MD CONTENT ---")),
+		writer.line(agentsContent),
+		writer.format("%s\n\n", ui.RenderAccent("--- END AGENTS.MD CONTENT ---")),
+		writer.format("%s\n", ui.RenderBold("For GitHub Copilot users:")),
+		writer.line("Add the same content to .github/copilot-instructions.md"),
+		writer.blank(),
+		writer.format("%s\n", ui.RenderBold("How it works:")),
+		writer.format("   • %s provides dynamic workflow context (~80 lines)\n", ui.RenderAccent("bd prime")),
+		writer.format("   • %s auto-injects bd prime at session start\n", ui.RenderAccent("bd hooks install")),
+		writer.line("   • "+agentsFile+" only needs this minimal pointer, not full instructions"),
+		writer.blank(),
+		writer.format("%s\n\n", ui.RenderPass("This keeps "+agentsFile+" lean while bd prime provides up-to-date workflow details.")),
+	)
+}
 
-	if err := writef("%s\n", ui.RenderAccent("--- BEGIN AGENTS.MD CONTENT ---")); err != nil {
-		return err
-	}
-	if err := writeln(agentsContent); err != nil {
-		return err
-	}
-	if err := writef("%s\n\n", ui.RenderAccent("--- END AGENTS.MD CONTENT ---")); err != nil {
-		return err
-	}
+type onboardInstructionWriter struct {
+	out io.Writer
+}
 
-	if err := writef("%s\n", ui.RenderBold("For GitHub Copilot users:")); err != nil {
+func (w onboardInstructionWriter) format(format string, args ...interface{}) func() error {
+	return func() error {
+		_, err := fmt.Fprintf(w.out, format, args...)
 		return err
 	}
-	if err := writeln("Add the same content to .github/copilot-instructions.md"); err != nil {
-		return err
-	}
-	if err := writeBlank(); err != nil {
-		return err
-	}
+}
 
-	if err := writef("%s\n", ui.RenderBold("How it works:")); err != nil {
+func (w onboardInstructionWriter) line(text string) func() error {
+	return func() error {
+		_, err := fmt.Fprintln(w.out, text)
 		return err
 	}
-	if err := writef("   • %s provides dynamic workflow context (~80 lines)\n", ui.RenderAccent("bd prime")); err != nil {
-		return err
-	}
-	if err := writef("   • %s auto-injects bd prime at session start\n", ui.RenderAccent("bd hooks install")); err != nil {
-		return err
-	}
-	if err := writeln("   • " + agentsFile + " only needs this minimal pointer, not full instructions"); err != nil {
-		return err
-	}
-	if err := writeBlank(); err != nil {
-		return err
-	}
+}
 
-	if err := writef("%s\n\n", ui.RenderPass("This keeps "+agentsFile+" lean while bd prime provides up-to-date workflow details.")); err != nil {
+func (w onboardInstructionWriter) blank() func() error {
+	return func() error {
+		_, err := fmt.Fprintln(w.out)
 		return err
 	}
+}
 
+func (w onboardInstructionWriter) write(steps ...func() error) error {
+	for _, step := range steps {
+		if err := step(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

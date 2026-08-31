@@ -106,6 +106,17 @@ func checkAgentSkill(env agentSkillEnv, setupCommand string) error {
 
 func removeAgentSkill(env agentSkillEnv) error {
 	_, _ = fmt.Fprintln(env.stdout, "Removing Beads agent skill...")
+	if err := removeAgentSkillFiles(env); err != nil {
+		return err
+	}
+	if err := removeEmptyAgentSkillDirs(env); err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintln(env.stdout, "✓ Beads agent skill removed")
+	return nil
+}
+
+func removeAgentSkillFiles(env agentSkillEnv) error {
 	for _, path := range []string{
 		agentSkillOpenAIYAMLPath(env.projectDir),
 		agentSkillPath(env.projectDir),
@@ -115,6 +126,10 @@ func removeAgentSkill(env agentSkillEnv) error {
 			return err
 		}
 	}
+	return nil
+}
+
+func removeEmptyAgentSkillDirs(env agentSkillEnv) error {
 	for _, dir := range []string{
 		filepath.Join(env.projectDir, ".agents", "skills", "beads", "agents"),
 		filepath.Join(env.projectDir, ".agents", "skills", "beads"),
@@ -136,6 +151,5 @@ func removeAgentSkill(env agentSkillEnv) error {
 			return err
 		}
 	}
-	_, _ = fmt.Fprintln(env.stdout, "✓ Beads agent skill removed")
 	return nil
 }

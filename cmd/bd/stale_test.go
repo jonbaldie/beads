@@ -21,25 +21,25 @@ func TestStaleSuite(t *testing.T) {
 	// Create ALL test data up front — one DB for all stale subtests.
 	issues := []*types.Issue{
 		// Basic stale detection
-		{ID: "test-stale-1", Title: "Very stale issue", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
-		{ID: "test-stale-2", Title: "Stale in-progress", Status: types.StatusInProgress, Priority: 2, IssueType: types.TypeTask},
-		{ID: "test-recent", Title: "Recently updated", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
-		{ID: "test-closed", Title: "Closed issue", Status: types.StatusClosed, Priority: 2, IssueType: types.TypeTask},
+		{IssueID: types.IssueID{ID: "test-stale-1"}, IssueContent: types.IssueContent{Title: "Very stale issue"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "test-stale-2"}, IssueContent: types.IssueContent{Title: "Stale in-progress"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "test-recent"}, IssueContent: types.IssueContent{Title: "Recently updated"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "test-closed"}, IssueContent: types.IssueContent{Title: "Closed issue"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed, Priority: 2, IssueType: types.TypeTask}},
 		// Status filter
-		{ID: "test-sf-open", Title: "Stale open", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
-		{ID: "test-sf-inprog", Title: "Stale in-progress", Status: types.StatusInProgress, Priority: 1, IssueType: types.TypeTask},
-		{ID: "test-sf-blocked", Title: "Stale blocked", Status: types.StatusBlocked, Priority: 1, IssueType: types.TypeTask},
+		{IssueID: types.IssueID{ID: "test-sf-open"}, IssueContent: types.IssueContent{Title: "Stale open"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "test-sf-inprog"}, IssueContent: types.IssueContent{Title: "Stale in-progress"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress, Priority: 1, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "test-sf-blocked"}, IssueContent: types.IssueContent{Title: "Stale blocked"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusBlocked, Priority: 1, IssueType: types.TypeTask}},
 		// Limit test
-		{ID: "test-stale-limit-1", Title: "Stale limit 1", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
-		{ID: "test-stale-limit-2", Title: "Stale limit 2", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
-		{ID: "test-stale-limit-3", Title: "Stale limit 3", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
-		{ID: "test-stale-limit-4", Title: "Stale limit 4", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
-		{ID: "test-stale-limit-5", Title: "Stale limit 5", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
+		{IssueID: types.IssueID{ID: "test-stale-limit-1"}, IssueContent: types.IssueContent{Title: "Stale limit 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "test-stale-limit-2"}, IssueContent: types.IssueContent{Title: "Stale limit 2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "test-stale-limit-3"}, IssueContent: types.IssueContent{Title: "Stale limit 3"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "test-stale-limit-4"}, IssueContent: types.IssueContent{Title: "Stale limit 4"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "test-stale-limit-5"}, IssueContent: types.IssueContent{Title: "Stale limit 5"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
 		// Recent-only (for "no stale" check with high threshold)
-		{ID: "test-recent-only", Title: "Recent issue", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
+		{IssueID: types.IssueID{ID: "test-recent-only"}, IssueContent: types.IssueContent{Title: "Recent issue"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
 		// Threshold comparison
-		{ID: "test-20-days", Title: "20 days stale", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
-		{ID: "test-50-days", Title: "50 days stale", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
+		{IssueID: types.IssueID{ID: "test-20-days"}, IssueContent: types.IssueContent{Title: "20 days stale"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "test-50-days"}, IssueContent: types.IssueContent{Title: "50 days stale"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
 	}
 
 	for _, issue := range issues {

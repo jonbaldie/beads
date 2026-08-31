@@ -17,78 +17,77 @@ import (
 )
 
 func runWispCreateProxiedServer(ctx context.Context, in wispCreateInput) error {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return HandleError("proxied-server UOW provider not initialized")
 	}
-
 	vars, err := parseVarFlags(in.varFlags)
 	if err != nil {
 		return HandleError("%v", err)
 	}
-
-	var formulaSubgraph *TemplateSubgraph
-	var formulaProtoID string
-	if sg, err := resolveAndCookFormulaWithVars(in.protoArg, nil, vars); err == nil {
-		formulaSubgraph = sg
-		formulaProtoID = sg.Root.ID
-	} else if errors.Is(err, formula.ErrVarValidation) {
-		// in.protoArg IS a formula; the --var values it was given fail
-		// enum/pattern/required-empty constraints. Report that directly
-		// instead of falling through to the proto-ID lookup below, which
-		// would otherwise mask this as "not found as formula or proto".
-		return HandleError("%v", err)
+	subgraph, protoID, err := resolveWispCreateSubgraph(ctx, in.protoArg, vars)
+	if err != nil {
+		return err
 	}
-
-	if formulaSubgraph == nil {
-		uw, err := proxiedOpenReadUOW(ctx)
-		if err != nil {
-			return err
-		}
-		r := uowMolReader{uw: uw}
-		protoID, err := utils.ResolvePartialID(ctx, r, in.protoArg)
-		if err != nil {
-			uw.Close(ctx)
-			return HandleErrorWithHint(fmt.Sprintf("'%s' not found as formula or proto", in.protoArg), "run 'bd formula list' to see available formulas")
-		}
-		protoIssue, err := r.GetIssue(ctx, protoID)
-		if err != nil {
-			uw.Close(ctx)
-			return HandleError("loading proto %s: %v", protoID, err)
-		}
-		if !isProtoIssue(protoIssue) {
-			uw.Close(ctx)
-			return HandleError("%s is not a proto (missing '%s' label)", protoID, MoleculeLabel)
-		}
-		sg, err := loadTemplateSubgraph(ctx, r, protoID)
-		uw.Close(ctx)
-		if err != nil {
-			return HandleError("loading proto: %v", err)
-		}
-		formulaSubgraph = sg
-		formulaProtoID = protoID
-	}
-
-	subgraph := formulaSubgraph
-	protoID := formulaProtoID
 	vars = applyVariableDefaults(vars, subgraph)
-
 	if err := checkRequiredVars(subgraph, vars); err != nil {
 		return HandleErrorWithHint(err.Error(), fmt.Sprintf("Provide them with: --var %s=<value>", firstMissingVar(subgraph, vars)))
 	}
-
 	if in.dryRun {
 		renderWispCreateDryRun(protoID, subgraph, vars, in.rootOnly)
 		return nil
 	}
+	return writeWispCreate(ctx, protoID, subgraph, vars, in.rootOnly)
+}
 
-	result, err := uow.RunTxResult(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (*InstantiateResult, string, error) {
+func resolveWispCreateSubgraph(ctx context.Context, protoArg string, vars map[string]string) (*TemplateSubgraph, string, error) {
+	sg, err := resolveAndCookFormulaWithVars(protoArg, nil, vars)
+	if err == nil {
+		return sg, sg.Root.ID, nil
+	}
+	if errors.Is(err, formula.ErrVarValidation) {
+		// protoArg IS a formula; the --var values it was given fail
+		// enum/pattern/required-empty constraints. Report that directly
+		// instead of falling through to the proto-ID lookup below, which
+		// would otherwise mask this as "not found as formula or proto".
+		return nil, "", HandleError("%v", err)
+	}
+	return loadWispCreateProto(ctx, protoArg)
+}
+
+func loadWispCreateProto(ctx context.Context, protoArg string) (*TemplateSubgraph, string, error) {
+	uw, err := proxiedOpenReadUOW(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	defer uw.Close(ctx)
+	r := uowMolReader{uw: uw}
+	protoID, err := utils.ResolvePartialID(ctx, r, protoArg)
+	if err != nil {
+		return nil, "", HandleErrorWithHint(fmt.Sprintf("'%s' not found as formula or proto", protoArg), "run 'bd formula list' to see available formulas")
+	}
+	protoIssue, err := r.GetIssue(ctx, protoID)
+	if err != nil {
+		return nil, "", HandleError("loading proto %s: %v", protoID, err)
+	}
+	if !isProtoIssue(protoIssue) {
+		return nil, "", HandleError("%s is not a proto (missing '%s' label)", protoID, MoleculeLabel)
+	}
+	sg, err := loadTemplateSubgraph(ctx, r, protoID)
+	if err != nil {
+		return nil, "", HandleError("loading proto: %v", err)
+	}
+	return sg, protoID, nil
+}
+
+func writeWispCreate(ctx context.Context, protoID string, subgraph *TemplateSubgraph, vars map[string]string, rootOnly bool) error {
+	result, err := uow.RunTxResult(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (*InstantiateResult, string, error) {
 		w := newUOWMolWriter(uw)
 		spawnResult, err := cloneSubgraphInto(ctx, w, subgraph, CloneOptions{
 			Vars:      vars,
-			Actor:     actor,
+			Actor:     getActor(),
 			Ephemeral: true,
 			Prefix:    types.IDPrefixWisp,
-			RootOnly:  in.rootOnly,
+			RootOnly:  rootOnly,
 		})
 		if err != nil {
 			return nil, "", fmt.Errorf("creating wisp: %w", err)
@@ -98,7 +97,6 @@ func runWispCreateProxiedServer(ctx context.Context, in wispCreateInput) error {
 	if err != nil {
 		return HandleError("%v", err)
 	}
-
 	return renderWispCreateResult(result)
 }
 
@@ -119,80 +117,77 @@ func runWispListProxiedServer(ctx context.Context, showAll bool, typeFilter stri
 }
 
 func runWispGCProxiedServer(ctx context.Context, dryRun bool, ageThreshold time.Duration, cleanAll, closedMode, force bool, excludeTypes []types.IssueType) error {
-	CheckReadonly("wisp gc")
-
-	if uowProvider == nil {
+	if err := CheckReadonly("wisp gc"); err != nil {
+		return err
+	}
+	if getUOWProvider() == nil {
 		return HandleError("proxied-server UOW provider not initialized")
 	}
-
 	if closedMode {
 		return runWispPurgeClosedProxiedServer(ctx, dryRun, force, excludeTypes)
 	}
-
-	uw, err := proxiedOpenReadUOW(ctx)
+	abandoned, err := loadAbandonedWisps(ctx, cleanAll, ageThreshold, excludeTypes)
 	if err != nil {
 		return err
+	}
+	if len(abandoned) == 0 {
+		return renderWispGCEmpty(dryRun)
+	}
+	if dryRun {
+		return renderWispGCDryRun(abandoned)
+	}
+	ids := make([]string, len(abandoned))
+	for i, issue := range abandoned {
+		ids[i] = issue.ID
+	}
+	return deleteWispsProxied(ctx, ids, "bd: wisp gc %d")
+}
+
+func loadAbandonedWisps(ctx context.Context, cleanAll bool, ageThreshold time.Duration, excludeTypes []types.IssueType) ([]*types.Issue, error) {
+	uw, err := proxiedOpenReadUOW(ctx)
+	if err != nil {
+		return nil, err
 	}
 	r := uowMolReader{uw: uw}
 	abandoned, err := findAbandonedWisps(ctx, r, cleanAll, ageThreshold, excludeTypes)
 	uw.Close(ctx)
 	if err != nil && abandoned == nil {
-		return HandleError("%v", err)
+		return nil, HandleError("%v", err)
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: cascade expansion incomplete: %v\n", err)
 	}
+	return abandoned, nil
+}
 
-	if len(abandoned) == 0 {
-		if jsonOutput {
-			return outputJSON(WispGCResult{CleanedIDs: []string{}, CleanedCount: 0, DryRun: dryRun})
-		}
-		fmt.Println("No abandoned wisps found")
-		return nil
+func renderWispGCEmpty(dryRun bool) error {
+	if isJSONOutput() {
+		return outputJSON(WispGCResult{CleanedIDs: []string{}, CleanedCount: 0, DryRun: dryRun})
 	}
+	fmt.Println("No abandoned wisps found")
+	return nil
+}
 
-	if dryRun {
-		if jsonOutput {
-			ids := make([]string, len(abandoned))
-			for i, o := range abandoned {
-				ids[i] = o.ID
-			}
-			return outputJSON(WispGCResult{CleanedIDs: ids, Candidates: len(abandoned), CleanedCount: 0, DryRun: true})
-		}
-		fmt.Printf("Dry run: would clean %d abandoned wisp(s):\n\n", len(abandoned))
-		for _, issue := range abandoned {
-			age := formatTimeAgo(issue.UpdatedAt)
-			fmt.Printf("  %s: %s (last updated: %s)\n", issue.ID, issue.Title, age)
-		}
-		fmt.Printf("\nRun without --dry-run to delete these wisps.\n")
-		return nil
-	}
-
-	ids := make([]string, len(abandoned))
-	for i, issue := range abandoned {
-		ids[i] = issue.ID
-	}
-
-	res, err := uow.RunTxResult(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (domain.DeleteIssuesResult, string, error) {
+func deleteWispsProxied(ctx context.Context, ids []string, commitFmt string) error {
+	res, err := uow.RunTxResult(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (domain.DeleteIssuesResult, string, error) {
 		res, err := uw.IssueUseCase().DeleteIssues(ctx, domain.DeleteIssuesParams{
 			IDs:                  ids,
 			Cascade:              true,
 			UpdateTextReferences: true,
-		}, actor)
+		}, getActor())
 		if err != nil {
 			return domain.DeleteIssuesResult{}, "", err
 		}
-		return res, fmt.Sprintf("bd: wisp gc %d", res.DeletedCount), nil
+		return res, fmt.Sprintf(commitFmt, res.DeletedCount), nil
 	})
 	if err != nil {
 		return HandleError("%v", err)
 	}
-
 	return renderWispGCDeleteResult(ids, res)
 }
 
 func renderWispGCDeleteResult(ids []string, res domain.DeleteIssuesResult) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(map[string]interface{}{
 			"deleted":              ids,
 			"deleted_count":        res.DeletedCount,
@@ -216,26 +211,51 @@ func renderWispGCDeleteResult(ids []string, res domain.DeleteIssuesResult) error
 }
 
 func runWispPurgeClosedProxiedServer(ctx context.Context, dryRun, force bool, excludeTypes []types.IssueType) error {
-	uw, err := proxiedOpenReadUOW(ctx)
+	closedIssues, err := loadClosedWispsForPurge(ctx, excludeTypes)
 	if err != nil {
 		return err
 	}
-	r := uowMolReader{uw: uw}
+	if len(closedIssues) == 0 {
+		return renderWispPurgeEmpty()
+	}
+	ids := make([]string, len(closedIssues))
+	for i, issue := range closedIssues {
+		ids[i] = issue.ID
+	}
+	if skip, err := confirmWispPurge(ids, dryRun, force); skip || err != nil {
+		return err
+	}
+	return deleteWispsProxied(ctx, ids, "bd: wisp gc --closed %d")
+}
 
+func loadClosedWispsForPurge(ctx context.Context, excludeTypes []types.IssueType) ([]*types.Issue, error) {
+	uw, err := proxiedOpenReadUOW(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer uw.Close(ctx)
+	r := uowMolReader{uw: uw}
 	statusClosed := types.StatusClosed
 	ephemeralTrue := true
-	filter := types.IssueFilter{
-		Status:       &statusClosed,
-		Ephemeral:    &ephemeralTrue,
-		ExcludeTypes: excludeTypes,
-		Limit:        5000,
-	}
-	closedIssues, err := r.SearchIssues(ctx, "", filter)
+	closedIssues, err := r.SearchIssues(ctx, "", types.IssueFilter{
+		IssueFilterCore: types.IssueFilterCore{
+			Status: &statusClosed,
+			Limit:  5000,
+		},
+		IssueFilterFlags: types.IssueFilterFlags{
+			Ephemeral: &ephemeralTrue,
+		},
+		IssueFilterHydrate: types.IssueFilterHydrate{
+			ExcludeTypes: excludeTypes,
+		},
+	})
 	if err != nil {
-		uw.Close(ctx)
-		return HandleError("listing closed wisps: %v", err)
+		return nil, HandleError("listing closed wisps: %v", err)
 	}
+	return filterClosedWisps(ctx, r, closedIssues), nil
+}
 
+func filterClosedWisps(ctx context.Context, r uowMolReader, closedIssues []*types.Issue) []*types.Issue {
 	pinnedCount := 0
 	infraCount := 0
 	filtered := make([]*types.Issue, 0, len(closedIssues))
@@ -250,70 +270,42 @@ func runWispPurgeClosedProxiedServer(ctx context.Context, dryRun, force bool, ex
 		}
 		filtered = append(filtered, issue)
 	}
-	closedIssues = filtered
-	uw.Close(ctx)
-
-	if pinnedCount > 0 && !jsonOutput {
+	if pinnedCount > 0 && !isJSONOutput() {
 		fmt.Printf("Skipping %d pinned issue(s) (protected from cleanup)\n", pinnedCount)
 	}
-	if infraCount > 0 && !jsonOutput {
+	if infraCount > 0 && !isJSONOutput() {
 		fmt.Printf("Skipping %d configured infra issue(s) protected from GC\n", infraCount)
 	}
+	return filtered
+}
 
-	if len(closedIssues) == 0 {
-		if jsonOutput {
-			return outputJSON(map[string]interface{}{
-				"deleted_count": 0,
-				"message":       "No closed wisps to delete",
-			})
-		}
-		fmt.Println("No closed wisps to delete")
-		return nil
+func renderWispPurgeEmpty() error {
+	if isJSONOutput() {
+		return outputJSON(map[string]interface{}{
+			"deleted_count": 0,
+			"message":       "No closed wisps to delete",
+		})
 	}
+	fmt.Println("No closed wisps to delete")
+	return nil
+}
 
-	ids := make([]string, len(closedIssues))
-	for i, issue := range closedIssues {
-		ids[i] = issue.ID
-	}
-
+func confirmWispPurge(ids []string, dryRun, force bool) (skip bool, err error) {
 	if !force && !dryRun {
-		if jsonOutput {
-			return outputJSON(map[string]interface{}{
-				"candidates": len(ids),
-				"dry_run":    true,
-			})
+		if isJSONOutput() {
+			return true, outputJSON(map[string]interface{}{"candidates": len(ids), "dry_run": true})
 		}
 		fmt.Printf("Found %d closed wisp(s) to delete\n", len(ids))
 		fmt.Printf("\nUse --force to proceed, or --dry-run for detailed preview.\n")
-		return nil
+		return true, nil
 	}
-
-	if dryRun {
-		if jsonOutput {
-			return outputJSON(map[string]interface{}{
-				"candidates": len(ids),
-				"dry_run":    true,
-			})
-		}
-		fmt.Printf("Found %d closed wisp(s)\n", len(ids))
-		fmt.Println("DRY RUN - no changes will be made")
-		return nil
+	if !dryRun {
+		return false, nil
 	}
-
-	res, err := uow.RunTxResult(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (domain.DeleteIssuesResult, string, error) {
-		res, err := uw.IssueUseCase().DeleteIssues(ctx, domain.DeleteIssuesParams{
-			IDs:                  ids,
-			Cascade:              true,
-			UpdateTextReferences: true,
-		}, actor)
-		if err != nil {
-			return domain.DeleteIssuesResult{}, "", err
-		}
-		return res, fmt.Sprintf("bd: wisp gc --closed %d", res.DeletedCount), nil
-	})
-	if err != nil {
-		return HandleError("%v", err)
+	if isJSONOutput() {
+		return true, outputJSON(map[string]interface{}{"candidates": len(ids), "dry_run": true})
 	}
-
-	return renderWispGCDeleteResult(ids, res)
+	fmt.Printf("Found %d closed wisp(s)\n", len(ids))
+	fmt.Println("DRY RUN - no changes will be made")
+	return true, nil
 }

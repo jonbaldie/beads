@@ -227,36 +227,17 @@ func installCursorHooks(path string) error {
 // it also verifies the rules file; global rules can't be verified from disk
 // (they live in Cursor Settings), so global scope checks hooks only.
 func CheckCursor(global bool) error {
-	missing := false
-
-	if !global {
-		if FileExists(cursorRulesPath) {
-			fmt.Printf("✓ Cursor rules installed: %s\n", cursorRulesPath)
-		} else {
-			fmt.Printf("✗ Cursor rules not installed: %s\n", cursorRulesPath)
-			missing = true
-		}
-	}
-
+	missing := checkCursorRules(global)
 	hooksPath, err := cursorHooksTargetPath(global)
 	if err != nil {
 		return HandleError("%v", err)
 	}
-	installed, err := cursorHooksInstalled(hooksPath)
+	hooksMissing, err := checkCursorHooks(hooksPath)
 	if err != nil {
-		return HandleError("%v", err)
+		return err
 	}
-	if installed {
-		fmt.Printf("✓ Cursor hooks installed: %s\n", hooksPath)
-	} else {
-		fmt.Printf("✗ Cursor hooks not installed: %s\n", hooksPath)
-		missing = true
-	}
-
-	setupCmd := "bd setup cursor"
-	if global {
-		setupCmd = "bd setup cursor --global"
-	}
+	missing = missing || hooksMissing
+	setupCmd := cursorSetupCommand(global)
 	skillEnv, err := cursorAgentSkillEnv(global)
 	if err != nil {
 		return HandleError("%v", err)
@@ -271,6 +252,38 @@ func CheckCursor(global bool) error {
 	return nil
 }
 
+func checkCursorRules(global bool) bool {
+	if global {
+		return false
+	}
+	if FileExists(cursorRulesPath) {
+		fmt.Printf("✓ Cursor rules installed: %s\n", cursorRulesPath)
+		return false
+	}
+	fmt.Printf("✗ Cursor rules not installed: %s\n", cursorRulesPath)
+	return true
+}
+
+func checkCursorHooks(path string) (bool, error) {
+	installed, err := cursorHooksInstalled(path)
+	if err != nil {
+		return false, HandleError("%v", err)
+	}
+	if installed {
+		fmt.Printf("✓ Cursor hooks installed: %s\n", path)
+		return false, nil
+	}
+	fmt.Printf("✗ Cursor hooks not installed: %s\n", path)
+	return true, nil
+}
+
+func cursorSetupCommand(global bool) string {
+	if global {
+		return "bd setup cursor --global"
+	}
+	return "bd setup cursor"
+}
+
 // RemoveCursor removes bd-managed hook entries (and, for project scope, the
 // rules file), preserving any non-bd hooks the user configured.
 func RemoveCursor(global bool) error {
@@ -281,48 +294,52 @@ func RemoveCursor(global bool) error {
 		return HandleError("%v", err)
 	}
 
-	rulesExisted := false
-	if !global {
-		rulesExisted = FileExists(cursorRulesPath)
-		if rulesExisted {
-			if err := os.Remove(cursorRulesPath); err != nil && !os.IsNotExist(err) {
-				return HandleError("failed to remove rules: %v", err)
-			}
-			// Best-effort: drop the rules dir if it is now empty.
-			_ = os.Remove(filepath.Dir(cursorRulesPath))
-		}
+	rulesExisted, err := removeCursorRules(global)
+	if err != nil {
+		return err
 	}
-
 	hooksExisted := FileExists(hooksPath)
 	if err := removeCursorHooks(hooksPath); err != nil {
 		return HandleError("%v", err)
 	}
 
-	// The agent skill is shared with Codex (same .agents/skills/beads path).
-	// Only remove it if Codex isn't still relying on it.
-	skillEnv, err := cursorAgentSkillEnv(global)
+	skillRemoved, err := removeCursorSharedSkill(global)
 	if err != nil {
-		return HandleError("%v", err)
+		return err
 	}
-	skillExisted := FileExists(agentSkillPath(skillEnv.projectDir))
-	skillRemoved := false
-	if codexIntegrationInstalled(global) {
-		fmt.Println("Keeping Beads agent skill (still used by Codex integration)")
-	} else if err := removeAgentSkill(skillEnv); err != nil {
-		return HandleError("%v", err)
-	} else {
-		skillRemoved = skillExisted
-	}
-
-	// Only claim removal for what we actually removed. The shared agent skill is
-	// kept when Codex still relies on it, so a lone kept skill is not a Cursor
-	// integration and must not report as "removed".
 	if rulesExisted || hooksExisted || skillRemoved {
 		fmt.Println("✓ Removed Cursor integration")
 	} else {
 		fmt.Println("No Cursor integration found")
 	}
 	return nil
+}
+
+func removeCursorRules(global bool) (bool, error) {
+	if global || !FileExists(cursorRulesPath) {
+		return false, nil
+	}
+	if err := os.Remove(cursorRulesPath); err != nil && !os.IsNotExist(err) {
+		return false, HandleError("failed to remove rules: %v", err)
+	}
+	_ = os.Remove(filepath.Dir(cursorRulesPath))
+	return true, nil
+}
+
+func removeCursorSharedSkill(global bool) (bool, error) {
+	skillEnv, err := cursorAgentSkillEnv(global)
+	if err != nil {
+		return false, HandleError("%v", err)
+	}
+	skillExisted := FileExists(agentSkillPath(skillEnv.projectDir))
+	if codexIntegrationInstalled(global) {
+		fmt.Println("Keeping Beads agent skill (still used by Codex integration)")
+		return false, nil
+	}
+	if err := removeAgentSkill(skillEnv); err != nil {
+		return false, HandleError("%v", err)
+	}
+	return skillExisted, nil
 }
 
 // cursorBeadsHooksPresent reports whether a parsed hooks.json config contains any
@@ -407,22 +424,7 @@ func removeCursorHooks(path string) error {
 	if config == nil {
 		return nil
 	}
-	hooks, ok := config["hooks"].(map[string]interface{})
-	if ok {
-		for event := range cursorManagedHooks() {
-			entries := removeCursorManagedEntries(toInterfaceSlice(hooks[event]))
-			if len(entries) == 0 {
-				delete(hooks, event)
-			} else {
-				hooks[event] = entries
-			}
-		}
-		if len(hooks) == 0 {
-			delete(config, "hooks")
-		}
-	}
-
-	// If nothing but the schema version remains, the file was ours; remove it.
+	removeCursorHooksFromConfig(config)
 	if cursorHooksConfigEmpty(config) {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return err
@@ -430,6 +432,24 @@ func removeCursorHooks(path string) error {
 		return nil
 	}
 	return writeCursorHooks(path, config)
+}
+
+func removeCursorHooksFromConfig(config map[string]interface{}) {
+	hooks, ok := config["hooks"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	for event := range cursorManagedHooks() {
+		entries := removeCursorManagedEntries(toInterfaceSlice(hooks[event]))
+		if len(entries) == 0 {
+			delete(hooks, event)
+		} else {
+			hooks[event] = entries
+		}
+	}
+	if len(hooks) == 0 {
+		delete(config, "hooks")
+	}
 }
 
 func cursorHooksInstalled(path string) (bool, error) {

@@ -265,10 +265,12 @@ func TestNewDoltStore_StrictReadOnlyRefusesWritesOnFreshDatabase(t *testing.T) {
 	strictBeadsDir := t.TempDir()
 	strictDataDir := filepath.Join(strictBeadsDir, "embeddeddolt")
 	_, err := newDoltStore(t.Context(), &dolt.Config{
-		ReadOnly:         true,
-		DisableAutoStart: true,
-		BeadsDir:         strictBeadsDir,
-		Database:         "testdb",
+		ReadOnly: true,
+		ServerOptions: dolt.ServerOptions{
+			DisableAutoStart: true,
+		},
+		BeadsDir: strictBeadsDir,
+		Database: "testdb",
 	})
 	if err == nil {
 		t.Fatal("newDoltStore(ReadOnly, DisableAutoStart) on a fresh database = nil error, want refusal")

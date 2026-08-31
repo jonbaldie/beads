@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -9,13 +10,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var unclaimCmd = &cobra.Command{
-	Use:           "unclaim [id...]",
-	GroupID:       "issues",
-	Short:         "Release a claimed issue",
-	SilenceUsage:  true,
-	SilenceErrors: true,
-	Long: `Release a claimed issue by clearing the assignee and resetting status to 'open'.
+func newUnclaimCmd() *cobra.Command {
+	unclaimCmd := &cobra.Command{
+		Use:           "unclaim [id...]",
+		GroupID:       "issues",
+		Short:         "Release a claimed issue",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		Long: `Release a claimed issue by clearing the assignee and resetting status to 'open'.
 
 Use this when an agent crashes mid-work or you need to abandon a claimed task.
 The issue becomes available for re-claiming by other agents.
@@ -42,102 +44,9 @@ Examples:
   bd unclaim bd-123 --reason "Agent crashed"
   bd unclaim bd-123 bd-456
   bd unclaim bd-123 --if-assignee worker-7   # only if still held by worker-7`,
-	Args: cobra.MinimumNArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		reason, _ := cmd.Flags().GetString("reason")
-		force, _ := cmd.Flags().GetBool("force")
-		ifAssignee, _ := cmd.Flags().GetString("if-assignee")
-		// A conditional release is selected by the presence of --if-assignee, not
-		// by a non-empty value. An explicitly empty --if-assignee "" is almost
-		// always an unset variable that expanded into the flag; treating it as an
-		// omitted flag would silently downgrade the compare-and-swap to an
-		// unconditional release, so reject it before touching any issue. (--force
-		// and --if-assignee are mutually exclusive at the flag-group level; this
-		// guards the remaining empty-value case.)
-		conditional := cmd.Flags().Changed("if-assignee")
-		if conditional && ifAssignee == "" {
-			return HandleErrorRespectJSON("--if-assignee requires a non-empty assignee; it releases the issue only while that assignee still holds it")
-		}
-
-		CheckReadonly("unclaim")
-
-		if usesProxiedServer() {
-			expected := ""
-			if conditional {
-				expected = ifAssignee
-			}
-			return runUnclaimProxiedServer(rootCtx, args, reason, force, expected)
-		}
-
-		ctx := rootCtx
-
-		unclaimedIssues := []*types.Issue{}
-		hasError := false
-		if store == nil {
-			return HandleErrorWithHint("database not initialized",
-				diagHint())
-		}
-		for _, id := range args {
-			// Resolve with prefix routing
-			result, err := resolveAndGetIssueWithRouting(ctx, store, id)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error resolving %s: %v\n", id, err)
-				hasError = true
-				continue
-			}
-			fullID := result.ResolvedID
-			issueStore := result.Store
-
-			var unclaimErr error
-			if conditional {
-				unclaimErr = issueStore.UnclaimIssueIfAssignee(ctx, fullID, actor, ifAssignee)
-			} else {
-				unclaimErr = issueStore.UnclaimIssue(ctx, fullID, actor, force)
-			}
-			if unclaimErr != nil {
-				fmt.Fprintf(os.Stderr, "Error unclaiming %s: %v\n", fullID, unclaimErr)
-				hasError = true
-				result.Close()
-				continue
-			}
-
-			if reason != "" {
-				if _, err := issueStore.AddIssueComment(ctx, fullID, actor, reason); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: failed to add reason comment: %v\n", err)
-				}
-			}
-
-			if jsonOutput {
-				updated, _ := issueStore.GetIssue(ctx, fullID)
-				if updated != nil {
-					unclaimedIssues = append(unclaimedIssues, updated)
-				}
-			} else {
-				reasonMsg := ""
-				if reason != "" {
-					reasonMsg = ": " + reason
-				}
-				fmt.Printf("%s Unclaimed %s%s\n", ui.RenderPass("✓"), fullID, reasonMsg)
-			}
-			result.Close()
-		}
-
-		commandDidWrite.Store(true)
-
-		if jsonOutput && len(unclaimedIssues) > 0 {
-			if err := outputJSON(unclaimedIssues); err != nil {
-				return HandleError("%v", err)
-			}
-		}
-
-		if hasError {
-			return SilentExit()
-		}
-		return nil
-	},
-}
-
-func init() {
+		Args: cobra.MinimumNArgs(1),
+		RunE: runUnclaim,
+	}
 	unclaimCmd.Flags().StringP("reason", "r", "", "Reason for unclaiming")
 	unclaimCmd.Flags().Bool("force", false, "Release the claim even if held by a different actor (admin/reaper use)")
 	unclaimCmd.Flags().String("if-assignee", "", "Only release if still assigned to this assignee (atomic compare-and-swap; exits nonzero without changing the issue when the holder differs)")
@@ -148,5 +57,111 @@ func init() {
 	// --if-assignee for one case.
 	unclaimCmd.MarkFlagsMutuallyExclusive("force", "if-assignee")
 	unclaimCmd.ValidArgsFunction = issueIDCompletion
-	rootCmd.AddCommand(unclaimCmd)
+	return unclaimCmd
+}
+
+type unclaimFlags struct {
+	reason      string
+	force       bool
+	ifAssignee  string
+	conditional bool
+}
+
+func readUnclaimFlags(cmd *cobra.Command) (unclaimFlags, error) {
+	flags := unclaimFlags{}
+	flags.reason, _ = cmd.Flags().GetString("reason")
+	flags.force, _ = cmd.Flags().GetBool("force")
+	flags.ifAssignee, _ = cmd.Flags().GetString("if-assignee")
+	flags.conditional = cmd.Flags().Changed("if-assignee")
+	if flags.conditional && flags.ifAssignee == "" {
+		return flags, HandleErrorRespectJSON("--if-assignee requires a non-empty assignee; it releases the issue only while that assignee still holds it")
+	}
+	return flags, nil
+}
+
+func runUnclaim(cmd *cobra.Command, args []string) error {
+	flags, err := readUnclaimFlags(cmd)
+	if err != nil {
+		return err
+	}
+	if err := CheckReadonly("unclaim"); err != nil {
+		return err
+	}
+	if usesProxiedServer() {
+		expectedAssignee := ""
+		if flags.conditional {
+			expectedAssignee = flags.ifAssignee
+		}
+		return runUnclaimProxiedServer(getRootContext(), args, flags.reason, flags.force, expectedAssignee)
+	}
+	return runUnclaimDirect(args, flags)
+}
+
+func runUnclaimDirect(ids []string, flags unclaimFlags) error {
+	if getStore() == nil {
+		return HandleErrorWithHint("database not initialized", diagHint())
+	}
+	unclaimedIssues := []*types.Issue{}
+	hasError := false
+	for _, id := range ids {
+		issue, err := unclaimOne(id, flags)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error %v\n", err)
+			hasError = true
+			continue
+		}
+		if issue != nil {
+			unclaimedIssues = append(unclaimedIssues, issue)
+		}
+	}
+	commandDidWrite.Store(true)
+	if isJSONOutput() && len(unclaimedIssues) > 0 {
+		if err := outputJSON(unclaimedIssues); err != nil {
+			return HandleError("%v", err)
+		}
+	}
+	if hasError {
+		return SilentExit()
+	}
+	return nil
+}
+
+func unclaimOne(id string, flags unclaimFlags) (*types.Issue, error) {
+	result, err := resolveAndGetIssueWithRouting(getRootContext(), getStore(), id)
+	if err != nil {
+		return nil, fmt.Errorf("resolving %s: %w", id, err)
+	}
+	defer result.Close()
+	if err := releaseClaim(result.Store, result.ResolvedID, flags); err != nil {
+		return nil, fmt.Errorf("unclaiming %s: %w", result.ResolvedID, err)
+	}
+	if flags.reason != "" {
+		if _, err := result.Store.AddIssueComment(getRootContext(), result.ResolvedID, getActor(), flags.reason); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to add reason comment: %v\n", err)
+		}
+	}
+	if isJSONOutput() {
+		issue, _ := result.Store.GetIssue(getRootContext(), result.ResolvedID)
+		return issue, nil
+	}
+	reasonMessage := ""
+	if flags.reason != "" {
+		reasonMessage = ": " + flags.reason
+	}
+	fmt.Printf("%s Unclaimed %s%s\n", ui.RenderPass("✓"), result.ResolvedID, reasonMessage)
+	return nil, nil
+}
+
+func releaseClaim(issueStore interface {
+	UnclaimIssue(ctx context.Context, id, actor string, force bool) error
+	UnclaimIssueIfAssignee(ctx context.Context, id, actor, expectedAssignee string) error
+}, id string, flags unclaimFlags) error {
+	if flags.conditional {
+		return issueStore.UnclaimIssueIfAssignee(getRootContext(), id, getActor(), flags.ifAssignee)
+	}
+	return issueStore.UnclaimIssue(getRootContext(), id, getActor(), flags.force)
+}
+
+func init() {
+	rootCmd.AddCommand(newUnclaimCmd())
 }

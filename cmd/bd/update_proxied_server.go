@@ -29,11 +29,20 @@ func runUpdateProxiedServer(cmd *cobra.Command, ctx context.Context, args []stri
 		return nil
 	}
 
-	// Derive success-output format from the global JSON decision (--json OR
-	// --format json OR config), the same signal reportUpdateFailures uses, so
-	// success output and the failure report never disagree on format within one
-	// invocation. This matches the non-proxied path in update.go.
-	jsonOut := jsonOutput
+	updated, failures, err := applyUpdatesProxied(ctx, args, in, isJSONOutput())
+	if err != nil {
+		return err
+	}
+	if isJSONOutput() && len(updated) > 0 {
+		_ = outputJSON(updated)
+	}
+	if len(failures) > 0 {
+		return reportUpdateFailures(failures, len(args))
+	}
+	return nil
+}
+
+func applyUpdatesProxied(ctx context.Context, ids []string, in *updateInput, jsonOut bool) ([]*types.Issue, []updateIDFailure, error) {
 	var updated []*types.Issue
 	// failures accumulates every requested ID that could not be updated —
 	// generic per-ID errors as well as a lost --claim race. In a mixed batch a
@@ -41,11 +50,10 @@ func runUpdateProxiedServer(cmd *cobra.Command, ctx context.Context, args []stri
 	// failed IDs from exit-code automation; report them all and exit non-zero,
 	// mirroring the non-proxied path in update.go (beads audit finding #10).
 	var failures []updateIDFailure
-
-	for _, id := range args {
+	for _, id := range ids {
 		issue, fail, err := applyUpdateProxiedOne(ctx, id, in)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 		if fail != nil {
 			failures = append(failures, *fail)
@@ -57,25 +65,18 @@ func runUpdateProxiedServer(cmd *cobra.Command, ctx context.Context, args []stri
 			fmt.Printf("%s Updated issue: %s\n", ui.RenderPass("✓"), formatFeedbackID(issue.ID, issue.Title))
 		}
 	}
-
-	if jsonOut && len(updated) > 0 {
-		_ = outputJSON(updated)
-	}
-	if len(failures) > 0 {
-		return reportUpdateFailures(failures, len(args))
-	}
-	return nil
+	return updated, failures, nil
 }
 
 // proxiedIssueLifecycle asks the unit-of-work provider for the write role, the
 // same way proxiedIssueReader asks it for the read one.
 func proxiedIssueLifecycle() (issueops.Lifecycle, error) {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return nil, errors.New("proxied-server UOW provider not initialized")
 	}
-	src, ok := uowProvider.(uow.IssueLifecycleSource)
+	src, ok := getUOWProvider().(uow.IssueLifecycleSource)
 	if !ok {
-		return nil, fmt.Errorf("proxied-server provider %T does not offer the issue-lifecycle surface", uowProvider)
+		return nil, fmt.Errorf("proxied-server provider %T does not offer the issue-lifecycle surface", getUOWProvider())
 	}
 	return src.IssueLifecycle()
 }
@@ -113,22 +114,14 @@ func applyUpdateProxiedOne(ctx context.Context, id string, in *updateInput) (*ty
 	}
 	notesOverwritten := replacesExistingNotes(before.Notes, in.fields)
 
-	var expectedStatus *issueops.Status
-	if in.ifStatus != nil {
-		// gatherUpdateInput refuses --if-assignee/--if-status alongside
-		// --claim, which is also what the request contract requires of a claim,
-		// so a claim reaches the contract with both guards nil by construction.
-		expected := issueops.Status(*in.ifStatus)
-		expectedStatus = &expected
-	}
 	result, err := runCommandUpdateMutation(ctx, ops, commandUpdateMutation{
-		actor:            actor,
+		actor:            getActor(),
 		issueID:          id,
 		patch:            patch,
 		claim:            in.claim,
 		force:            in.force,
 		expectedAssignee: in.ifAssignee,
-		expectedStatus:   expectedStatus,
+		expectedStatus:   proxiedExpectedStatus(in),
 		provenance:       fmt.Sprintf("bd: update %s", id),
 	})
 	if err != nil {
@@ -142,24 +135,10 @@ func applyUpdateProxiedOne(ctx context.Context, id string, in *updateInput) (*ty
 		}
 		return nil, proxiedUpdateFailure(id, err), nil
 	}
-	updated := result.Issue
-	if updated == nil {
+	updated, failure := normalizeProxiedUpdateResult(id, result.Issue, in.claim)
+	if failure != nil {
 		fmt.Fprintf(os.Stderr, "Error updating %s: the update reported no issue\n", id)
-		return nil, &updateIDFailure{ID: id, Error: "updating: no issue returned"}, nil
-	}
-	// `bd update` has never printed dependency records; the direct route drops
-	// them for the same reason.
-	updated.Dependencies = nil
-	if in.claim {
-		// A CLAIM answers an already-published surface, and that surface is the
-		// bare row: issueops.ClaimResult omits labels, dependency records and
-		// comments, but routing this path through Lifecycle hydrates labels.
-		// Stripping them keeps `bd update --claim --json` byte-identical to the
-		// v0 claim response, which TestProxiedServerServeClaim asserts with an
-		// EMPTY allowlist. A plain update carries labels, as the direct route
-		// does.
-		updated.Labels = nil
-		updated.Comments = nil
+		return nil, failure, nil
 	}
 
 	// Post-commit reporting: the write has landed, so these run exactly once no
@@ -168,6 +147,26 @@ func applyUpdateProxiedOne(ctx context.Context, id string, in *updateInput) (*ty
 		warnNotesReplacement(id)
 	}
 	return updated, nil, nil
+}
+
+func proxiedExpectedStatus(in *updateInput) *issueops.Status {
+	if in.ifStatus == nil {
+		return nil
+	}
+	expected := issueops.Status(*in.ifStatus)
+	return &expected
+}
+
+func normalizeProxiedUpdateResult(id string, updated *types.Issue, claim bool) (*types.Issue, *updateIDFailure) {
+	if updated == nil {
+		return nil, &updateIDFailure{ID: id, Error: "updating: no issue returned"}
+	}
+	updated.Dependencies = nil
+	if claim {
+		updated.Labels = nil
+		updated.Comments = nil
+	}
+	return updated, nil
 }
 
 // proxiedUpdateTarget reads the row an update is about through the query role,
@@ -206,7 +205,7 @@ func proxiedUpdateTarget(ctx context.Context, id string, in *updateInput) (*type
 	// what keeps the advice a user reads identical on both routes. A policy
 	// refusal: terminal per-issue failure, exit 1, never GuardMismatch/13.
 	if newAssignee, ok := in.fields["assignee"].(string); ok && in.ifAssignee == nil && !in.claim {
-		if err := validateIssueReassignable(id, current, actor, newAssignee,
+		if err := validateIssueReassignable(id, current, getActor(), newAssignee,
 			proxiedClaimPoolAliases(ctx), in.force); err != nil {
 			fmt.Fprintf(os.Stderr, "%s\n", err)
 			return nil, &updateIDFailure{ID: id, Error: err.Error()}
@@ -222,10 +221,10 @@ func proxiedUpdateTarget(ctx context.Context, id string, in *updateInput) (*type
 // fail-closed answer its siblings give.
 func proxiedClaimPoolAliases(ctx context.Context) func() []string {
 	return func() []string {
-		if uowProvider == nil {
+		if getUOWProvider() == nil {
 			return nil
 		}
-		uw, err := uowProvider.NewUOW(ctx)
+		uw, err := getUOWProvider().NewUOW(ctx)
 		if err != nil {
 			return nil
 		}
@@ -288,6 +287,17 @@ func proxiedUpdatePatch(in *updateInput, before *types.Issue) (issueops.IssuePat
 	}
 	patch.Labels.Add = in.addLabels
 	patch.Labels.Remove = in.removeLabels
+	applyProxiedUpdateFields(&patch, in)
+	if err := applyProxiedMetadataFields(&patch, in); err != nil {
+		return issueops.IssuePatch{}, err
+	}
+	if in.clearDeferStatus && before.Status == types.StatusDeferred {
+		patch.Status = setField(types.StatusOpen)
+	}
+	return patch, nil
+}
+
+func applyProxiedUpdateFields(patch *issueops.IssuePatch, in *updateInput) {
 	if in.setLabels != nil {
 		patch.Labels.Replace = setField(*in.setLabels)
 	}
@@ -297,23 +307,21 @@ func proxiedUpdatePatch(in *updateInput, before *types.Issue) (issueops.IssuePat
 	if in.hasAppendNotes {
 		patch.AppendNotes = setField(in.appendNotes)
 	}
+}
+
+func applyProxiedMetadataFields(patch *issueops.IssuePatch, in *updateInput) error {
 	if len(in.mergeMetadataIn) > 0 {
 		patch.Metadata.Merge = setField(in.mergeMetadataIn)
 	}
 	if len(in.setMetadata) > 0 {
 		set, err := parseSetMetadataFlags(in.setMetadata)
 		if err != nil {
-			return issueops.IssuePatch{}, err
+			return err
 		}
 		patch.Metadata.Set = set
 	}
 	if len(in.unsetMetadata) > 0 {
 		patch.Metadata.Unset = in.unsetMetadata
 	}
-	// GH#3233: --defer="" restores ready visibility only if the issue was
-	// actually deferred, exactly as the direct route decides it.
-	if in.clearDeferStatus && before.Status == types.StatusDeferred {
-		patch.Status = setField(types.StatusOpen)
-	}
-	return patch, nil
+	return nil
 }

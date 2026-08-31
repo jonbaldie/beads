@@ -26,20 +26,53 @@ actor or ref; only kind and ref-kind are structurally validated. Recording is
 idempotent on a deterministic id, so a producer firing twice is harmless.`,
 }
 
-var (
-	provIssue   string
-	provKind    string
-	provSource  string
-	provActor   string
-	provRef     string
-	provRefKind string
-	provAt      string
-	provPayload string
-	// provLogKind backs `provenance log --kind`; kept separate from provKind
-	// (which backs `record --kind`) so the two flags cannot race a shared
-	// package var across command runs.
-	provLogKind string
-)
+type provenanceRecordOptions struct {
+	issue   string
+	kind    string
+	source  string
+	actor   string
+	ref     string
+	refKind string
+	at      string
+	payload string
+}
+
+func provenanceRecordOptionsFromCommand(cmd *cobra.Command) provenanceRecordOptions {
+	if cmd == nil {
+		return provenanceRecordOptions{}
+	}
+	flags := cmd.Flags()
+	issue, _ := flags.GetString("issue")
+	kind, _ := flags.GetString("kind")
+	source, _ := flags.GetString("source")
+	actor, _ := flags.GetString("actor")
+	ref, _ := flags.GetString("ref")
+	refKind, _ := flags.GetString("ref-kind")
+	at, _ := flags.GetString("at")
+	payload, _ := flags.GetString("payload")
+	return provenanceRecordOptions{
+		issue:   issue,
+		kind:    kind,
+		source:  source,
+		actor:   actor,
+		ref:     ref,
+		refKind: refKind,
+		at:      at,
+		payload: payload,
+	}
+}
+
+type provenanceLogOptions struct {
+	kind string
+}
+
+func provenanceLogOptionsFromCommand(cmd *cobra.Command) provenanceLogOptions {
+	if cmd == nil {
+		return provenanceLogOptions{}
+	}
+	kind, _ := cmd.Flags().GetString("kind")
+	return provenanceLogOptions{kind: kind}
+}
 
 var provenanceRecordCmd = &cobra.Command{
 	Use:           "record --issue <id> --kind <k> --source <s>",
@@ -52,33 +85,36 @@ the same record is a no-op.
 
 An event recorded without --ref requires --at so the id is caller-owned.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		CheckReadonly("provenance record")
-		ctx := rootCtx
+		opts := provenanceRecordOptionsFromCommand(cmd)
+		if err := CheckReadonly("provenance record"); err != nil {
+			return err
+		}
+		ctx := getRootContext()
 
-		issueID, err := utils.ResolvePartialID(ctx, store, provIssue)
+		issueID, err := utils.ResolvePartialID(ctx, getStore(), opts.issue)
 		if err != nil {
-			return HandleErrorRespectJSON("resolving %s: %v", provIssue, err)
+			return HandleErrorRespectJSON("resolving %s: %v", opts.issue, err)
 		}
 
 		ev := types.ProvenanceEvent{
 			IssueID: issueID,
-			Kind:    types.ProvKind(provKind),
-			Source:  provSource,
+			Kind:    types.ProvKind(opts.kind),
+			Source:  opts.source,
 		}
-		if provActor != "" {
-			ev.Actor = &provActor
+		if opts.actor != "" {
+			ev.Actor = &opts.actor
 		}
-		if provRef != "" {
-			ev.Ref = &provRef
+		if opts.ref != "" {
+			ev.Ref = &opts.ref
 		}
-		if provRefKind != "" {
-			ev.RefKind = &provRefKind
+		if opts.refKind != "" {
+			ev.RefKind = &opts.refKind
 		}
-		if provPayload != "" {
-			ev.Payload = &provPayload
+		if opts.payload != "" {
+			ev.Payload = &opts.payload
 		}
-		if provAt != "" {
-			at, err := time.Parse(time.RFC3339, provAt)
+		if opts.at != "" {
+			at, err := time.Parse(time.RFC3339, opts.at)
 			if err != nil {
 				return HandleErrorRespectJSON("--at must be an RFC3339 timestamp (e.g. 2026-06-19T12:00:00Z): %v", err)
 			}
@@ -92,7 +128,7 @@ An event recorded without --ref requires --at so the id is caller-owned.`,
 			return HandleErrorRespectJSON("%v", err)
 		}
 
-		id, inserted, err := store.RecordProvenanceEvent(ctx, ev)
+		id, inserted, err := getStore().RecordProvenanceEvent(ctx, ev)
 		if err != nil {
 			return HandleErrorRespectJSON("%v", err)
 		}
@@ -100,36 +136,38 @@ An event recorded without --ref requires --at so the id is caller-owned.`,
 			commandDidWrite.Store(true)
 		}
 
-		if jsonOutput {
+		if isJSONOutput() {
 			return outputJSON(map[string]interface{}{
 				"id":       id,
 				"inserted": inserted,
 				"issue_id": issueID,
-				"kind":     provKind,
+				"kind":     opts.kind,
 			})
 		}
 		if inserted {
-			fmt.Printf("%s Recorded %s provenance %s on %s\n", ui.RenderPass("✓"), provKind, id, issueID)
+			fmt.Printf("%s Recorded %s provenance %s on %s\n", ui.RenderPass("✓"), opts.kind, id, issueID)
 		} else {
-			fmt.Printf("%s Provenance %s already recorded (id %s)\n", ui.RenderAccent("•"), provKind, id)
+			fmt.Printf("%s Provenance %s already recorded (id %s)\n", ui.RenderAccent("•"), opts.kind, id)
 		}
 		return nil
 	},
 }
 
 var provenanceLogCmd = &cobra.Command{
-	Use:           "log <issue-id>",
-	Short:         "List provenance events for an issue",
-	Args:          cobra.ExactArgs(1),
-	SilenceUsage:  true,
-	SilenceErrors: true,
+	Use:               "log <issue-id>",
+	Short:             "List provenance events for an issue",
+	Args:              cobra.ExactArgs(1),
+	SilenceUsage:      true,
+	SilenceErrors:     true,
+	ValidArgsFunction: issueIDCompletion,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := rootCtx
-		issueID, err := utils.ResolvePartialID(ctx, store, args[0])
+		opts := provenanceLogOptionsFromCommand(cmd)
+		ctx := getRootContext()
+		issueID, err := utils.ResolvePartialID(ctx, getStore(), args[0])
 		if err != nil {
 			return HandleErrorRespectJSON("resolving %s: %v", args[0], err)
 		}
-		events, err := store.GetProvenanceEvents(ctx, issueID, provLogKind)
+		events, err := getStore().GetProvenanceEvents(ctx, issueID, opts.kind)
 		if err != nil {
 			return HandleErrorRespectJSON("%v", err)
 		}
@@ -144,8 +182,8 @@ var provenanceByRefCmd = &cobra.Command{
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := rootCtx
-		events, err := store.GetProvenanceByRef(ctx, args[0])
+		ctx := getRootContext()
+		events, err := getStore().GetProvenanceByRef(ctx, args[0])
 		if err != nil {
 			return HandleErrorRespectJSON("%v", err)
 		}
@@ -154,7 +192,7 @@ var provenanceByRefCmd = &cobra.Command{
 }
 
 func outputProvenanceEvents(events []types.ProvenanceEvent) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		if events == nil {
 			events = []types.ProvenanceEvent{}
 		}
@@ -187,20 +225,19 @@ func outputProvenanceEvents(events []types.ProvenanceEvent) error {
 }
 
 func init() {
-	provenanceRecordCmd.Flags().StringVar(&provIssue, "issue", "", "issue id (required)")
-	provenanceRecordCmd.Flags().StringVar(&provKind, "kind", "", "event kind: cut|claim|suspend|resume|handoff|commit|land|used (required)")
-	provenanceRecordCmd.Flags().StringVar(&provSource, "source", "", "producer of the event, e.g. git-hook, orchestrator (required)")
-	provenanceRecordCmd.Flags().StringVar(&provActor, "actor", "", "opaque actor identifier (optional)")
-	provenanceRecordCmd.Flags().StringVar(&provRef, "ref", "", "opaque external reference, e.g. a SHA or PR url (optional)")
-	provenanceRecordCmd.Flags().StringVar(&provRefKind, "ref-kind", "", "ref kind: git-sha|pr|work-id|transcript|branch (optional)")
-	provenanceRecordCmd.Flags().StringVar(&provAt, "at", "", "event-time as RFC3339 (required for ref-less kinds)")
-	provenanceRecordCmd.Flags().StringVar(&provPayload, "payload", "", "opaque payload, e.g. JSON (optional)")
+	provenanceRecordCmd.Flags().String("issue", "", "issue id (required)")
+	provenanceRecordCmd.Flags().String("kind", "", "event kind: cut|claim|suspend|resume|handoff|commit|land|used (required)")
+	provenanceRecordCmd.Flags().String("source", "", "producer of the event, e.g. git-hook, orchestrator (required)")
+	provenanceRecordCmd.Flags().String("actor", "", "opaque actor identifier (optional)")
+	provenanceRecordCmd.Flags().String("ref", "", "opaque external reference, e.g. a SHA or PR url (optional)")
+	provenanceRecordCmd.Flags().String("ref-kind", "", "ref kind: git-sha|pr|work-id|transcript|branch (optional)")
+	provenanceRecordCmd.Flags().String("at", "", "event-time as RFC3339 (required for ref-less kinds)")
+	provenanceRecordCmd.Flags().String("payload", "", "opaque payload, e.g. JSON (optional)")
 	_ = provenanceRecordCmd.MarkFlagRequired("issue")
 	_ = provenanceRecordCmd.MarkFlagRequired("kind")
 	_ = provenanceRecordCmd.MarkFlagRequired("source")
 
-	provenanceLogCmd.Flags().StringVar(&provLogKind, "kind", "", "filter by kind (optional)")
-	provenanceLogCmd.ValidArgsFunction = issueIDCompletion
+	provenanceLogCmd.Flags().String("kind", "", "filter by kind (optional)")
 
 	provenanceCmd.AddCommand(provenanceRecordCmd)
 	provenanceCmd.AddCommand(provenanceLogCmd)

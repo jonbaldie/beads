@@ -103,7 +103,7 @@ func resolveAndProbeDolt(ctx context.Context, errPrefix string, quiet bool) (dol
 	// (see e.g. tips.go, metrics.go). WarnDue adds the cross-process gate:
 	// the advisory repeats at most once per day (per the probe cache's
 	// stamp), not on every bd invocation.
-	if res.Warning != nil && !quiet && !jsonOutput && res.WarnDue {
+	if res.Warning != nil && !quiet && !isJSONOutput() && res.WarnDue {
 		doltVersionWarnOnce.Do(func() {
 			fmt.Fprintf(os.Stderr, "Warning: %s\n", res.Warning.Message())
 			doltversion.MarkWarned(cachePath, time.Now())
@@ -215,49 +215,61 @@ func newSQLServerUOWProvider(ctx context.Context, beadsDir string, topology sqlS
 // writes land in the wrong database (split-brain) — and the identity assertion
 // below silently degrades to no assertion at all.
 func resolveProxiedServerUOWTopology(beadsDir, databaseOverride string, posture identityPosture) (sqlServerUOWTopology, error) {
-	persisted, err := configfile.Load(beadsDir)
-	if err != nil {
-		return sqlServerUOWTopology{}, fmt.Errorf(
-			"corrupt workspace config %s: %w — refusing to fall back to a fresh database; repair or remove the file to proceed",
-			configfile.ConfigPath(beadsDir), err)
-	}
 	topology := sqlServerUOWTopology{database: configfile.DefaultDoltDatabase}
-	if persisted != nil {
-		topology.database = persisted.GetDoltDatabase()
-		topology.teamServer = persisted.IsTeamServerManaged()
-		if posture == assertWorkspaceIdentity {
-			topology.expectedProjectID = persisted.ProjectID
-			// An empty local identity would reach checkTeamServerIdentity as
-			// "nothing to assert" — indistinguishable from the adoption path,
-			// which would silently disable the guard. A team-server workspace
-			// always has an adopted ProjectID after a successful init, so an
-			// empty one here is a broken workspace, not a legacy one.
-			if topology.teamServer && topology.expectedProjectID == "" {
-				return sqlServerUOWTopology{}, fmt.Errorf(
-					"newProxiedServerUOWProvider: this team-server workspace has no project identity in %s; re-run 'bd init --team-server' to adopt the identity provisioned in the shared database (it never writes to that database)",
-					configfile.ConfigFileName)
-			}
-		}
+	if err := applyPersistedUOWTopology(&topology, beadsDir, posture); err != nil {
+		return sqlServerUOWTopology{}, err
 	}
 	if databaseOverride != "" {
 		topology.database = databaseOverride
 	}
 
+	if err := applyProxiedServerInfo(&topology, beadsDir); err != nil {
+		return sqlServerUOWTopology{}, err
+	}
+	return topology, nil
+}
+
+func applyPersistedUOWTopology(topology *sqlServerUOWTopology, beadsDir string, posture identityPosture) error {
+	persisted, err := configfile.Load(beadsDir)
+	if err != nil {
+		return fmt.Errorf(
+			"corrupt workspace config %s: %w — refusing to fall back to a fresh database; repair or remove the file to proceed",
+			configfile.ConfigPath(beadsDir), err)
+	}
+	if persisted == nil {
+		return nil
+	}
+	topology.database = persisted.GetDoltDatabase()
+	topology.teamServer = persisted.IsTeamServerManaged()
+	if posture != assertWorkspaceIdentity {
+		return nil
+	}
+	topology.expectedProjectID = persisted.ProjectID
+	if topology.teamServer && topology.expectedProjectID == "" {
+		return fmt.Errorf(
+			"newProxiedServerUOWProvider: this team-server workspace has no project identity in %s; re-run 'bd init --team-server' to adopt the identity provisioned in the shared database (it never writes to that database)",
+			configfile.ConfigFileName)
+	}
+	return nil
+}
+
+func applyProxiedServerInfo(topology *sqlServerUOWTopology, beadsDir string) error {
 	info, err := configfile.LoadProxiedServerClientInfo(beadsDir)
 	if err != nil {
-		return sqlServerUOWTopology{}, fmt.Errorf(
+		return fmt.Errorf(
 			"corrupt proxied-server sidecar %s: %w — refusing to fall back to a fresh database; repair or remove the file to proceed",
 			configfile.ProxiedServerClientInfoPath(beadsDir), err)
 	}
-	if info != nil {
-		topology.proxyPort = info.Port
-		topology.proxyIdle = info.IdleTimeout
-		if info.External != nil {
-			topology.external = info.External
-			topology.rootPassword = os.Getenv(configfile.ExternalDoltPasswordEnvVar)
-		}
+	if info == nil {
+		return nil
 	}
-	return topology, nil
+	topology.proxyPort = info.Port
+	topology.proxyIdle = info.IdleTimeout
+	if info.External != nil {
+		topology.external = info.External
+		topology.rootPassword = os.Getenv(configfile.ExternalDoltPasswordEnvVar)
+	}
+	return nil
 }
 
 // serverModeSocketProbeTimeout is how long the socket-first / TCP-fallback
@@ -313,12 +325,28 @@ func resolveServerModeUOWTopology(ctx context.Context, beadsDir string) (sqlServ
 }
 
 func resolveServerModeUOWTopologyWithTransportResolver(ctx context.Context, beadsDir string, resolveTransport socketTransportResolver) (sqlServerUOWTopology, error) {
+	fileCfg, database, err := loadServerModeUOWConfig(beadsDir)
+	if err != nil {
+		return sqlServerUOWTopology{}, err
+	}
+	conn, err := resolveServerModeUOWConn(ctx, beadsDir, fileCfg)
+	if err != nil {
+		return sqlServerUOWTopology{}, err
+	}
+	external, err := serverModeUOWExternal(beadsDir, conn, resolveTransport)
+	if err != nil {
+		return sqlServerUOWTopology{}, err
+	}
+	return buildServerModeUOWTopology(database, conn, external), nil
+}
+
+func loadServerModeUOWConfig(beadsDir string) (*configfile.Config, string, error) {
 	if beadsDir == "" {
-		return sqlServerUOWTopology{}, fmt.Errorf("resolveServerModeUOWTopology: beadsDir must be set")
+		return nil, "", fmt.Errorf("resolveServerModeUOWTopology: beadsDir must be set")
 	}
 	fileCfg, err := configfile.Load(beadsDir)
 	if err != nil {
-		return sqlServerUOWTopology{}, fmt.Errorf("load %s: %w", configfile.ConfigPath(beadsDir), err)
+		return nil, "", fmt.Errorf("load %s: %w", configfile.ConfigPath(beadsDir), err)
 	}
 	// The database is resolved here rather than from the connection because the
 	// no-metadata.json corner below has to answer it differently.
@@ -337,7 +365,6 @@ func resolveServerModeUOWTopologyWithTransportResolver(ctx context.Context, bead
 	} else {
 		database = fileCfg.GetDoltDatabase()
 	}
-
 	// Decide the gateway refusal from the CONFIGURATION, before anything runs
 	// the operator's command. resolveDoltServerConnection would otherwise
 	// execute it — spawning a subprocess, minting a token, and spending
@@ -346,12 +373,20 @@ func resolveServerModeUOWTopologyWithTransportResolver(ctx context.Context, bead
 	// once for the DoltStore serve never touches; a refused `bd serve` must not
 	// make that twice.
 	if fileCfg.GetDoltCredentialCommand() != "" {
-		return sqlServerUOWTopology{}, errServeGatewayCredential()
+		return nil, "", errServeGatewayCredential()
 	}
+	return fileCfg, database, nil
+}
 
-	conn := &dolt.Config{BeadsDir: beadsDir, ServerMode: true}
+func resolveServerModeUOWConn(ctx context.Context, beadsDir string, fileCfg *configfile.Config) (*dolt.Config, error) {
+	conn := &dolt.Config{
+		BeadsDir: beadsDir,
+		ServerOptions: dolt.ServerOptions{
+			ServerMode: true,
+		},
+	}
 	if err := resolveDoltServerConnection(ctx, beadsDir, fileCfg, conn); err != nil {
-		return sqlServerUOWTopology{}, err
+		return nil, err
 	}
 	if conn.Gateway {
 		// Unreachable while a configured command is the only thing that can set
@@ -359,9 +394,12 @@ func resolveServerModeUOWTopologyWithTransportResolver(ctx context.Context, bead
 		// above already refused that case). It stays because this is a
 		// fail-closed boundary: if the credential ladder ever grows a second
 		// source, the refusal must not quietly stop applying.
-		return sqlServerUOWTopology{}, errServeGatewayCredential()
+		return nil, errServeGatewayCredential()
 	}
+	return conn, nil
+}
 
+func serverModeUOWExternal(beadsDir string, conn *dolt.Config, resolveTransport socketTransportResolver) (*configfile.ExternalDoltConfig, error) {
 	external := &configfile.ExternalDoltConfig{User: conn.ServerUser}
 	// Socket-first / TCP-fallback, the same policy dolt's own server-mode open
 	// applies (dolt.ResolveSocketTransport): a configured socket that is not
@@ -379,20 +417,22 @@ func resolveServerModeUOWTopologyWithTransportResolver(ctx context.Context, bead
 		// Port 0 means no source resolved one — for a Beads-managed server that
 		// is the case where nothing has started it yet, and the port file it
 		// would write does not exist.
-		return sqlServerUOWTopology{}, fmt.Errorf(
+		return nil, fmt.Errorf(
 			"cannot determine the Dolt server port for %s; start the server with `bd dolt start`, "+
 				"or set the port explicitly (BEADS_DOLT_SERVER_PORT or dolt.port in config.yaml)", beadsDir)
 	}
 	external.TLSRequired = conn.ServerTLS
+	return external, nil
+}
 
+func buildServerModeUOWTopology(database string, conn *dolt.Config, external *configfile.ExternalDoltConfig) sqlServerUOWTopology {
 	// --global selects the shared-server global database, exactly as it does for
 	// the store the CLI opens (main.go rejects the flag outside shared-server
 	// mode); without this the HTTP surface would answer from the project
 	// database while the CLI in the same process answered from the global one.
-	if globalFlag && doltserver.IsSharedServerMode() {
+	if isGlobalFlag() && doltserver.IsSharedServerMode() {
 		database = doltserver.GlobalDatabaseName
 	}
-
 	return sqlServerUOWTopology{
 		database: database,
 		external: external,
@@ -418,7 +458,7 @@ func resolveServerModeUOWTopologyWithTransportResolver(ctx context.Context, bead
 		// concurrent serve. `bd dolt stop` does not reap it in these modes.
 		proxyIdle:    proxy.IdleTimeoutNever,
 		rootPassword: conn.ServerPassword,
-	}, nil
+	}
 }
 
 // newExternalProxiedServerUOWProvider fronts a Dolt SQL server this process
@@ -452,16 +492,18 @@ func newExternalProxiedServerUOWProvider(ctx context.Context, beadsDir string, t
 
 	return uow.NewExternalDoltServerUOWProvider(
 		ctx,
-		rootPath,
-		topology.database,
-		logPath,
-		*topology.external,
-		topology.external.ResolvedUser(),
-		topology.rootPassword,
-		topology.proxyPort,
-		topology.proxyIdle,
-		topology.teamServer,
-		topology.expectedProjectID,
+		uow.ExternalDoltServerUOWOptions{
+			ServerRootDir:     rootPath,
+			Database:          topology.database,
+			ServerLogFilePath: logPath,
+			External:          *topology.external,
+			RootUser:          topology.external.ResolvedUser(),
+			RootPassword:      topology.rootPassword,
+			ProxyPort:         topology.proxyPort,
+			IdleTimeout:       topology.proxyIdle,
+			TeamServer:        topology.teamServer,
+			ExpectedProjectID: topology.expectedProjectID,
+		},
 		opts...,
 	)
 }
@@ -480,7 +522,7 @@ func newManagedProxiedServerUOWProvider(ctx context.Context, beadsDir string, to
 	// newSQLServerUOWProvider) also lands here, a hardcoded
 	// "newProxiedServerUOWProvider" would mislabel a `bd serve` failure as a
 	// proxied-server one.
-	doltBin, err := resolveAndProbeDolt(ctx, "newManagedProxiedServerUOWProvider", quietFlag)
+	doltBin, err := resolveAndProbeDolt(ctx, "newManagedProxiedServerUOWProvider", isQuiet())
 	if err != nil {
 		return nil, err
 	}
@@ -510,18 +552,20 @@ func newManagedProxiedServerUOWProvider(ctx context.Context, beadsDir string, to
 
 	return uow.NewDoltServerUOWProvider(
 		ctx,
-		rootPath,
-		topology.database,
-		logPath,
-		configPath,
-		proxy.BackendLocalServer,
-		"root",
-		"", // proxy is loopback-only, no auth
-		doltBin,
-		topology.proxyPort,
-		topology.proxyIdle,
-		topology.teamServer,
-		topology.expectedProjectID,
+		uow.DoltServerUOWOptions{
+			ServerRootDir:        rootPath,
+			Database:             topology.database,
+			ServerLogFilePath:    logPath,
+			ServerConfigFilePath: configPath,
+			Backend:              proxy.BackendLocalServer,
+			RootUser:             "root",
+			RootPassword:         "", // proxy is loopback-only, no auth
+			DoltBinExec:          doltBin,
+			ProxyPort:            topology.proxyPort,
+			IdleTimeout:          topology.proxyIdle,
+			TeamServer:           topology.teamServer,
+			ExpectedProjectID:    topology.expectedProjectID,
+		},
 		opts...,
 	)
 }

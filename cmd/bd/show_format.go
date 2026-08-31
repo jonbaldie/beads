@@ -24,9 +24,9 @@ func formatShortIssue(issue *types.Issue) string {
 	typeBadge := ""
 	switch issue.IssueType {
 	case "epic":
-		typeBadge = ui.TypeEpicStyle.Render("[epic]") + " "
+		typeBadge = ui.TypeEpicStyle().Render("[epic]") + " "
 	case "bug":
-		typeBadge = ui.TypeBugStyle.Render("[bug]") + " "
+		typeBadge = ui.TypeBugStyle().Render("[bug]") + " "
 	}
 
 	// Closed issues: entire line is muted
@@ -58,9 +58,9 @@ func formatIssueHeader(issue *types.Issue) string {
 	typeBadge := ""
 	switch issue.IssueType {
 	case "epic":
-		typeBadge = " " + ui.TypeEpicStyle.Render("[EPIC]")
+		typeBadge = " " + ui.TypeEpicStyle().Render("[EPIC]")
 	case "bug":
-		typeBadge = " " + ui.TypeBugStyle.Render("[BUG]")
+		typeBadge = " " + ui.TypeBugStyle().Render("[BUG]")
 	}
 
 	// Compaction indicator
@@ -83,9 +83,15 @@ func formatIssueHeader(issue *types.Issue) string {
 //
 //	Created: 2026-01-06 · Updated: 2026-01-08
 func formatIssueMetadata(issue *types.Issue) string {
-	var lines []string
+	lines := issueMetadataIdentityLines(issue)
+	lines = append(lines, issueMetadataTimeLines(issue)...)
+	lines = append(lines, issueMetadataLeaseLines(issue)...)
+	lines, closeReasonSection := appendIssueCloseReason(lines, issue)
+	lines = append(lines, issueMetadataRefLines(issue)...)
+	return strings.Join(lines, "\n") + closeReasonSection
+}
 
-	// Line 1: Owner/Assignee · Type
+func issueMetadataIdentityLines(issue *types.Issue) []string {
 	metaParts := []string{}
 	if issue.CreatedBy != "" {
 		metaParts = append(metaParts, fmt.Sprintf("Owner: %s", issue.CreatedBy))
@@ -93,61 +99,71 @@ func formatIssueMetadata(issue *types.Issue) string {
 	if issue.Assignee != "" {
 		metaParts = append(metaParts, fmt.Sprintf("Assignee: %s", issue.Assignee))
 	}
-
-	// Type with semantic color
 	typeStr := string(issue.IssueType)
 	switch issue.IssueType {
 	case "epic":
-		typeStr = ui.TypeEpicStyle.Render("epic")
+		typeStr = ui.TypeEpicStyle().Render("epic")
 	case "bug":
-		typeStr = ui.TypeBugStyle.Render("bug")
+		typeStr = ui.TypeBugStyle().Render("bug")
 	}
 	metaParts = append(metaParts, fmt.Sprintf("Type: %s", typeStr))
-
-	if len(metaParts) > 0 {
-		lines = append(lines, strings.Join(metaParts, " · "))
+	if len(metaParts) == 0 {
+		return nil
 	}
+	return []string{strings.Join(metaParts, " · ")}
+}
 
-	// Line 2: Created · Updated · Due/Defer
-	timeParts := []string{}
-	timeParts = append(timeParts, fmt.Sprintf("Created: %s", issue.CreatedAt.Format("2006-01-02")))
+func issueMetadataTimeLines(issue *types.Issue) []string {
+	timeParts := []string{
+		fmt.Sprintf("Created: %s", issue.CreatedAt.Format("2006-01-02")),
+	}
 	if issue.StartedAt != nil {
 		timeParts = append(timeParts, fmt.Sprintf("Started: %s", issue.StartedAt.Format("2006-01-02")))
 	}
 	timeParts = append(timeParts, fmt.Sprintf("Updated: %s", issue.UpdatedAt.Format("2006-01-02")))
-
 	if issue.DueAt != nil {
 		timeParts = append(timeParts, fmt.Sprintf("Due: %s", issue.DueAt.Local().Format("2006-01-02")))
 	}
 	if issue.DeferUntil != nil {
 		timeParts = append(timeParts, fmt.Sprintf("Deferred: %s", issue.DeferUntil.Local().Format("2006-01-02")))
 	}
-	if len(timeParts) > 0 {
-		lines = append(lines, strings.Join(timeParts, " · "))
-	}
+	return []string{strings.Join(timeParts, " · ")}
+}
 
+func issueMetadataLeaseLines(issue *types.Issue) []string {
 	// Lease line: only when an active lease is held (in_progress + non-null
 	// lease_expires_at). row_lock is internal and never surfaced.
-	if issue.Status == types.StatusInProgress && issue.LeaseExpiresAt != nil {
-		leaseLine := fmt.Sprintf("Lease: expires %s", formatTimeUntil(*issue.LeaseExpiresAt))
-		if issue.HeartbeatAt != nil {
-			leaseLine += fmt.Sprintf(" (heartbeat %s)", formatTimeAgo(*issue.HeartbeatAt))
-		}
-		// Granting replica: only worth a reader's attention when it is NOT
-		// this node, since that is the case where the lease is unenforceable
-		// here and bd reclaim will decline it. Unknown provenance ("") stays
-		// silent — it is the pre-wy-jpd3.7 shape, not a fact about the lease.
-		// The local node being unnamed silences it too: the guard is disarmed
-		// there, so reclaim will NOT decline the lease and claiming otherwise
-		// would be a promise the reaper does not keep.
-		if local := config.NodeID(); local != "" {
-			if node := issue.LeaseGrantedNode; node != "" && node != local {
-				leaseLine += fmt.Sprintf(" — granted by replica %s", node)
-			}
-		}
-		lines = append(lines, ui.RenderMuted(leaseLine))
+	if issue.Status != types.StatusInProgress || issue.LeaseExpiresAt == nil {
+		return nil
 	}
+	leaseLine := fmt.Sprintf("Lease: expires %s", formatTimeUntil(*issue.LeaseExpiresAt))
+	if issue.HeartbeatAt != nil {
+		leaseLine += fmt.Sprintf(" (heartbeat %s)", formatTimeAgo(*issue.HeartbeatAt))
+	}
+	leaseLine += issueLeaseReplicaSuffix(issue)
+	return []string{ui.RenderMuted(leaseLine)}
+}
 
+func issueLeaseReplicaSuffix(issue *types.Issue) string {
+	// Granting replica: only worth a reader's attention when it is NOT
+	// this node, since that is the case where the lease is unenforceable
+	// here and bd reclaim will decline it. Unknown provenance ("") stays
+	// silent — it is the pre-wy-jpd3.7 shape, not a fact about the lease.
+	// The local node being unnamed silences it too: the guard is disarmed
+	// there, so reclaim will NOT decline the lease and claiming otherwise
+	// would be a promise the reaper does not keep.
+	local := config.NodeID()
+	if local == "" {
+		return ""
+	}
+	node := issue.LeaseGrantedNode
+	if node == "" || node == local {
+		return ""
+	}
+	return fmt.Sprintf(" — granted by replica %s", node)
+}
+
+func appendIssueCloseReason(lines []string, issue *types.Issue) ([]string, string) {
 	// Line 3: Close reason (if closed). A reason too long or too structured to
 	// sit on a metadata line is body text, not metadata, so it gets the same
 	// markdown section treatment as DESCRIPTION — `bd close --reason-file`
@@ -157,39 +173,40 @@ func formatIssueMetadata(issue *types.Issue) string {
 	// Trimmed first: --reason-file and heredoc content virtually always ends
 	// in a newline, and without this a genuine one-liner would be promoted to
 	// a section on that byte alone.
-	closeReasonSection := ""
-	if issue.Status == types.StatusClosed {
-		if reason := strings.TrimSpace(issue.CloseReason); reason != "" {
-			if line := "Close reason: " + reason; fitsMetadataLine(line) {
-				lines = append(lines, ui.RenderMuted(line))
-			} else {
-				closeReasonSection = fmt.Sprintf("\n\n%s\n%s", ui.RenderBold("CLOSE REASON"),
-					strings.TrimRight(uimd.RenderMarkdown(reason), "\n"))
-			}
-		}
+	if issue.Status != types.StatusClosed {
+		return lines, ""
 	}
+	reason := strings.TrimSpace(issue.CloseReason)
+	if reason == "" {
+		return lines, ""
+	}
+	line := "Close reason: " + reason
+	if fitsMetadataLine(line) {
+		return append(lines, ui.RenderMuted(line)), ""
+	}
+	section := fmt.Sprintf("\n\n%s\n%s", ui.RenderBold("CLOSE REASON"),
+		strings.TrimRight(uimd.RenderMarkdown(reason), "\n"))
+	return lines, section
+}
 
-	// Line 4: External ref (if exists)
+func issueMetadataRefLines(issue *types.Issue) []string {
+	var lines []string
 	if issue.ExternalRef != nil && *issue.ExternalRef != "" {
 		lines = append(lines, fmt.Sprintf("External: %s", *issue.ExternalRef))
 	}
 	if issue.SpecID != "" {
 		lines = append(lines, fmt.Sprintf("Spec: %s", issue.SpecID))
 	}
-
-	// Line 5: Wisp type (if ephemeral with classification)
 	if issue.Ephemeral && issue.WispType != "" {
 		lines = append(lines, fmt.Sprintf("Wisp type: %s", ui.RenderMuted(string(issue.WispType))))
 	}
-
-	// Line 6: Compaction savings. A metadata line rather than a callout the
+	// Compaction savings. A metadata line rather than a callout the
 	// callers print after the block, so a promoted close reason cannot strand
 	// it below the body text, and so all five show paths report it alike.
 	if line := compactionSavingsLine(issue); line != "" {
 		lines = append(lines, line)
 	}
-
-	return strings.Join(lines, "\n") + closeReasonSection
+	return lines
 }
 
 // compactionSavingsLine reports how much a compacted issue's stored body shrank.
@@ -242,9 +259,9 @@ func formatDependencyLine(prefix string, dep *types.IssueWithDependencyMetadata)
 	// Type indicator for epics/bugs
 	typeStr := ""
 	if dep.IssueType == "epic" {
-		typeStr = ui.TypeEpicStyle.Render("(EPIC)") + " "
+		typeStr = ui.TypeEpicStyle().Render("(EPIC)") + " "
 	} else if dep.IssueType == "bug" {
-		typeStr = ui.TypeBugStyle.Render("(BUG)") + " "
+		typeStr = ui.TypeBugStyle().Render("(BUG)") + " "
 	}
 
 	return fmt.Sprintf("  %s %s %s: %s%s %s", prefix, statusIcon, idStr, typeStr, dep.Title, priorityTag)
@@ -360,127 +377,146 @@ func formatIssueCustomMetadata(issue *types.Issue) string {
 // formatIssueLongExtras returns additional detail sections for --long mode.
 // Only sections with data are included. Fields already shown in default mode are skipped.
 func formatIssueLongExtras(issue *types.Issue, formatTime func(time.Time) string) string {
-	var sections []string
-
-	// Extended timestamps and closure details
-	var closeParts []string
-	if issue.ClosedAt != nil {
-		closeParts = append(closeParts, fmt.Sprintf("  Closed at: %s", formatTime(*issue.ClosedAt)))
-	}
-	if issue.ClosedBySession != "" {
-		closeParts = append(closeParts, fmt.Sprintf("  Closed by session: %s", issue.ClosedBySession))
-	}
-	if issue.EstimatedMinutes != nil {
-		closeParts = append(closeParts, fmt.Sprintf("  Estimated: %d minutes", *issue.EstimatedMinutes))
-	}
-	if issue.SourceSystem != "" {
-		closeParts = append(closeParts, fmt.Sprintf("  Source system: %s", issue.SourceSystem))
-	}
-	if issue.Sender != "" {
-		closeParts = append(closeParts, fmt.Sprintf("  Sender: %s", issue.Sender))
-	}
-	if issue.Ephemeral {
-		closeParts = append(closeParts, "  Ephemeral: yes")
-	}
-	if issue.Pinned {
-		closeParts = append(closeParts, "  Pinned: yes")
-	}
-	if issue.IsTemplate {
-		closeParts = append(closeParts, "  Template: yes")
-	}
-	if issue.MolType != "" {
-		closeParts = append(closeParts, fmt.Sprintf("  Mol type: %s", issue.MolType))
-	}
-	if issue.WorkType != "" {
-		closeParts = append(closeParts, fmt.Sprintf("  Work type: %s", issue.WorkType))
-	}
-	if len(closeParts) > 0 {
-		sections = append(sections, fmt.Sprintf("%s\n%s",
-			ui.RenderBold("EXTENDED DETAILS"), strings.Join(closeParts, "\n")))
-	}
-
-	// Compaction details (beyond what default mode shows)
-	if issue.CompactionLevel > 0 {
-		var compactParts []string
-		compactParts = append(compactParts, fmt.Sprintf("  Level: %d", issue.CompactionLevel))
-		if issue.CompactedAt != nil {
-			compactParts = append(compactParts, fmt.Sprintf("  Compacted at: %s", formatTime(*issue.CompactedAt)))
-		}
-		if issue.CompactedAtCommit != nil {
-			compactParts = append(compactParts, fmt.Sprintf("  Compacted at commit: %s", *issue.CompactedAtCommit))
-		}
-		if issue.OriginalSize > 0 {
-			compactParts = append(compactParts, fmt.Sprintf("  Original size: %d bytes", issue.OriginalSize))
-		}
-		sections = append(sections, fmt.Sprintf("%s\n%s",
-			ui.RenderBold("COMPACTION"), strings.Join(compactParts, "\n")))
-	}
-
-	// Gate fields
-	var gateParts []string
-	if issue.AwaitType != "" {
-		gateParts = append(gateParts, fmt.Sprintf("  Await type: %s", issue.AwaitType))
-	}
-	if issue.AwaitID != "" {
-		gateParts = append(gateParts, fmt.Sprintf("  Await ID: %s", issue.AwaitID))
-	}
-	if issue.Timeout > 0 {
-		gateParts = append(gateParts, fmt.Sprintf("  Timeout: %s", issue.Timeout))
-	}
-	if len(issue.Waiters) > 0 {
-		gateParts = append(gateParts, fmt.Sprintf("  Waiters: %s", strings.Join(issue.Waiters, ", ")))
-	}
-	if len(gateParts) > 0 {
-		sections = append(sections, fmt.Sprintf("%s\n%s",
-			ui.RenderBold("GATE"), strings.Join(gateParts, "\n")))
-	}
-
-	// Source tracing
-	var sourceParts []string
-	if issue.SourceFormula != "" {
-		sourceParts = append(sourceParts, fmt.Sprintf("  Formula: %s", issue.SourceFormula))
-	}
-	if issue.SourceLocation != "" {
-		sourceParts = append(sourceParts, fmt.Sprintf("  Location: %s", issue.SourceLocation))
-	}
-	if len(sourceParts) > 0 {
-		sections = append(sections, fmt.Sprintf("%s\n%s",
-			ui.RenderBold("SOURCE TRACING"), strings.Join(sourceParts, "\n")))
-	}
-
-	// Bonded-from references
-	if len(issue.BondedFrom) > 0 {
-		var refs []string
-		for _, b := range issue.BondedFrom {
-			refs = append(refs, fmt.Sprintf("  %s (%s)", b.SourceID, b.BondType))
-		}
-		sections = append(sections, fmt.Sprintf("%s\n%s",
-			ui.RenderBold("BONDED FROM"), strings.Join(refs, "\n")))
-	}
-
-	// Event fields
-	var eventParts []string
-	if issue.EventKind != "" {
-		eventParts = append(eventParts, fmt.Sprintf("  Kind: %s", issue.EventKind))
-	}
-	if issue.Actor != "" {
-		eventParts = append(eventParts, fmt.Sprintf("  Actor: %s", issue.Actor))
-	}
-	if issue.Target != "" {
-		eventParts = append(eventParts, fmt.Sprintf("  Target: %s", issue.Target))
-	}
-	if issue.Payload != "" {
-		eventParts = append(eventParts, fmt.Sprintf("  Payload: %s", issue.Payload))
-	}
-	if len(eventParts) > 0 {
-		sections = append(sections, fmt.Sprintf("%s\n%s",
-			ui.RenderBold("EVENT"), strings.Join(eventParts, "\n")))
-	}
-
+	sections := collectIssueLongExtraSections(issue, formatTime)
 	if len(sections) == 0 {
 		return ""
 	}
 	return "\n" + strings.Join(sections, "\n\n") + "\n"
+}
+
+func collectIssueLongExtraSections(issue *types.Issue, formatTime func(time.Time) string) []string {
+	var sections []string
+	sections = appendLabeledSection(sections, "EXTENDED DETAILS", issueExtendedDetailLines(issue, formatTime))
+	sections = appendLabeledSection(sections, "COMPACTION", issueCompactionLines(issue, formatTime))
+	sections = appendLabeledSection(sections, "GATE", issueGateLines(issue))
+	sections = appendLabeledSection(sections, "SOURCE TRACING", issueSourceTracingLines(issue))
+	sections = appendLabeledSection(sections, "BONDED FROM", issueBondedFromLines(issue))
+	return appendLabeledSection(sections, "EVENT", issueEventLines(issue))
+}
+
+func appendLabeledSection(sections []string, title string, lines []string) []string {
+	if len(lines) == 0 {
+		return sections
+	}
+	return append(sections, fmt.Sprintf("%s\n%s", ui.RenderBold(title), strings.Join(lines, "\n")))
+}
+
+func issueExtendedDetailLines(issue *types.Issue, formatTime func(time.Time) string) []string {
+	lines := issueClosureDetailLines(issue, formatTime)
+	return append(lines, issueFlagDetailLines(issue)...)
+}
+
+func issueClosureDetailLines(issue *types.Issue, formatTime func(time.Time) string) []string {
+	var lines []string
+	if issue.ClosedAt != nil {
+		lines = append(lines, fmt.Sprintf("  Closed at: %s", formatTime(*issue.ClosedAt)))
+	}
+	if issue.ClosedBySession != "" {
+		lines = append(lines, fmt.Sprintf("  Closed by session: %s", issue.ClosedBySession))
+	}
+	if issue.EstimatedMinutes != nil {
+		lines = append(lines, fmt.Sprintf("  Estimated: %d minutes", *issue.EstimatedMinutes))
+	}
+	if issue.SourceSystem != "" {
+		lines = append(lines, fmt.Sprintf("  Source system: %s", issue.SourceSystem))
+	}
+	if issue.Sender != "" {
+		lines = append(lines, fmt.Sprintf("  Sender: %s", issue.Sender))
+	}
+	return lines
+}
+
+func issueFlagDetailLines(issue *types.Issue) []string {
+	var lines []string
+	if issue.Ephemeral {
+		lines = append(lines, "  Ephemeral: yes")
+	}
+	if issue.Pinned {
+		lines = append(lines, "  Pinned: yes")
+	}
+	if issue.IsTemplate {
+		lines = append(lines, "  Template: yes")
+	}
+	if issue.MolType != "" {
+		lines = append(lines, fmt.Sprintf("  Mol type: %s", issue.MolType))
+	}
+	if issue.WorkType != "" {
+		lines = append(lines, fmt.Sprintf("  Work type: %s", issue.WorkType))
+	}
+	return lines
+}
+
+func issueCompactionLines(issue *types.Issue, formatTime func(time.Time) string) []string {
+	if issue.CompactionLevel <= 0 {
+		return nil
+	}
+	lines := []string{fmt.Sprintf("  Level: %d", issue.CompactionLevel)}
+	if issue.CompactedAt != nil {
+		lines = append(lines, fmt.Sprintf("  Compacted at: %s", formatTime(*issue.CompactedAt)))
+	}
+	if issue.CompactedAtCommit != nil {
+		lines = append(lines, fmt.Sprintf("  Compacted at commit: %s", *issue.CompactedAtCommit))
+	}
+	if issue.OriginalSize > 0 {
+		lines = append(lines, fmt.Sprintf("  Original size: %d bytes", issue.OriginalSize))
+	}
+	return lines
+}
+
+func issueGateLines(issue *types.Issue) []string {
+	var lines []string
+	if issue.AwaitType != "" {
+		lines = append(lines, fmt.Sprintf("  Await type: %s", issue.AwaitType))
+	}
+	if issue.AwaitID != "" {
+		lines = append(lines, fmt.Sprintf("  Await ID: %s", issue.AwaitID))
+	}
+	if issue.Timeout > 0 {
+		lines = append(lines, fmt.Sprintf("  Timeout: %s", issue.Timeout))
+	}
+	if len(issue.Waiters) > 0 {
+		lines = append(lines, fmt.Sprintf("  Waiters: %s", strings.Join(issue.Waiters, ", ")))
+	}
+	return lines
+}
+
+func issueSourceTracingLines(issue *types.Issue) []string {
+	var lines []string
+	if issue.SourceFormula != "" {
+		lines = append(lines, fmt.Sprintf("  Formula: %s", issue.SourceFormula))
+	}
+	if issue.SourceLocation != "" {
+		lines = append(lines, fmt.Sprintf("  Location: %s", issue.SourceLocation))
+	}
+	return lines
+}
+
+func issueBondedFromLines(issue *types.Issue) []string {
+	if len(issue.BondedFrom) == 0 {
+		return nil
+	}
+	refs := make([]string, 0, len(issue.BondedFrom))
+	for _, b := range issue.BondedFrom {
+		refs = append(refs, fmt.Sprintf("  %s (%s)", b.SourceID, b.BondType))
+	}
+	return refs
+}
+
+func issueEventLines(issue *types.Issue) []string {
+	var lines []string
+	if issue.EventKind != "" {
+		lines = append(lines, fmt.Sprintf("  Kind: %s", issue.EventKind))
+	}
+	if issue.Actor != "" {
+		lines = append(lines, fmt.Sprintf("  Actor: %s", issue.Actor))
+	}
+	if issue.Target != "" {
+		lines = append(lines, fmt.Sprintf("  Target: %s", issue.Target))
+	}
+	if issue.Payload != "" {
+		lines = append(lines, fmt.Sprintf("  Payload: %s", issue.Payload))
+	}
+	return lines
 }
 
 // formatMetadataValue formats a single metadata value for display.

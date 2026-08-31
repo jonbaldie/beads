@@ -19,11 +19,17 @@ func newProvenanceTestIssue(t *testing.T, ctx context.Context, s interface {
 }) string {
 	t.Helper()
 	issue := &types.Issue{
-		Title:     "Provenance subject",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
-		CreatedAt: time.Now(),
+		IssueContent: types.IssueContent{
+			Title: "Provenance subject",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+		},
 	}
 	if err := s.CreateIssue(ctx, issue, "test"); err != nil {
 		t.Fatalf("create issue: %v", err)

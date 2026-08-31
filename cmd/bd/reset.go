@@ -40,7 +40,7 @@ func init() {
 	// Note: resetCmd is added to adminCmd in admin.go
 }
 
-func runReset(cmd *cobra.Command, args []string) error {
+func runReset(cmd *cobra.Command, _ []string) error {
 	if usesProxiedServer() {
 		return HandleErrorRespectJSON("admin reset is not supported in proxied-server mode")
 	}
@@ -50,56 +50,64 @@ func runReset(cmd *cobra.Command, args []string) error {
 			c.CloseEventAndAdd(evt)
 		}
 	}()
-
 	if err := requireServerMode("reset"); err != nil {
 		return HandleError("%v", err)
 	}
-	CheckReadonly("reset")
-
+	if err := CheckReadonly("reset"); err != nil {
+		return err
+	}
 	force, _ := cmd.Flags().GetBool("force")
-
-	gitCommonDir, err := git.GetGitCommonDir()
+	gitCommonDir, beadsDir, err := resolveResetPaths()
 	if err != nil {
-		if jsonOutput {
-			if jerr := outputJSON(map[string]interface{}{
-				"error": "not a git repository",
-			}); jerr != nil {
-				return jerr
-			}
-			return SilentExit()
-		}
-		return HandleError("not a git repository")
+		return err
 	}
+	items, preserved := collectResetItems(gitCommonDir, beadsDir)
+	if !force {
+		return showResetPreview(items, preserved)
+	}
+	return performReset(items, preserved, gitCommonDir, beadsDir)
+}
 
-	beadsDir := beads.FindBeadsDir()
+func resolveResetPaths() (gitCommonDir, beadsDir string, err error) {
+	gitCommonDir, err = git.GetGitCommonDir()
+	if err != nil {
+		return "", "", resetNotGitRepo()
+	}
+	beadsDir = beads.FindBeadsDir()
 	if beadsDir == "" {
-		if jsonOutput {
-			return outputJSON(map[string]interface{}{
-				"message": "beads not initialized",
-				"reset":   false,
-			})
-		}
-		fmt.Println("Beads is not initialized in this repository.")
-		fmt.Println("Nothing to reset.")
-		return nil
+		return "", "", resetNotInitialized()
 	}
-
 	home, _ := os.UserHomeDir()
 	repoRoot := git.GetRepoRoot()
 	if repoRoot == "" {
 		repoRoot = filepath.Dir(gitCommonDir)
 	}
 	if err := refuseGlobalBeadsDir(beadsDir, repoRoot, home); err != nil {
-		return HandleErrorRespectJSON("%v", err)
+		return "", "", HandleErrorRespectJSON("%v", err)
 	}
+	return gitCommonDir, beadsDir, nil
+}
 
-	items, preserved := collectResetItems(gitCommonDir, beadsDir)
-
-	if !force {
-		return showResetPreview(items, preserved)
+func resetNotGitRepo() error {
+	if isJSONOutput() {
+		if jerr := outputJSON(map[string]interface{}{"error": "not a git repository"}); jerr != nil {
+			return jerr
+		}
+		return SilentExit()
 	}
+	return HandleError("not a git repository")
+}
 
-	return performReset(items, preserved, gitCommonDir, beadsDir)
+func resetNotInitialized() error {
+	if isJSONOutput() {
+		return outputJSON(map[string]interface{}{
+			"message": "beads not initialized",
+			"reset":   false,
+		})
+	}
+	fmt.Println("Beads is not initialized in this repository.")
+	fmt.Println("Nothing to reset.")
+	return nil
 }
 
 type resetItem struct {
@@ -299,7 +307,7 @@ func isOnlyShebangOrBlank(content string) bool {
 }
 
 func showResetPreview(items, preserved []resetItem) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		result := map[string]interface{}{
 			"dry_run": true,
 			"items":   items,
@@ -348,67 +356,77 @@ func printPreservedHooks(preserved []resetItem) {
 }
 
 func performReset(items, preserved []resetItem, _, _ string) error {
-
 	var errors []string
-
 	for _, item := range items {
-		switch item.Type {
-		case "hook":
-			if err := os.Remove(item.Path); err != nil {
-				errors = append(errors, fmt.Sprintf("failed to remove hook %s: %v", item.Path, err))
-			} else if !jsonOutput {
-				fmt.Printf("%s Removed %s\n", ui.RenderPass("✓"), filepath.Base(item.Path))
-			}
-			// Restore backup if exists
-			backupPath := item.Path + ".backup"
-			if _, err := os.Stat(backupPath); err == nil {
-				if err := os.Rename(backupPath, item.Path); err == nil && !jsonOutput {
-					fmt.Printf("  Restored backup hook\n")
-				}
-			}
-
-		case "worktrees":
-			if err := os.RemoveAll(item.Path); err != nil {
-				errors = append(errors, fmt.Sprintf("failed to remove worktrees: %v", err))
-			} else if !jsonOutput {
-				fmt.Printf("%s Removed sync worktrees\n", ui.RenderPass("✓"))
-			}
-
-		case "directory":
-			if err := os.RemoveAll(item.Path); err != nil {
-				errors = append(errors, fmt.Sprintf("failed to remove .beads: %v", err))
-			} else if !jsonOutput {
-				fmt.Printf("%s Removed .beads directory\n", ui.RenderPass("✓"))
-			}
-		}
+		errors = append(errors, resetOneItem(item)...)
 	}
-
-	if jsonOutput {
-		result := map[string]interface{}{
-			"reset":   true,
-			"success": len(errors) == 0,
-		}
-		if len(errors) > 0 {
-			result["errors"] = errors
-		}
-		if len(preserved) > 0 {
-			result["preserved"] = preserved
-		}
-		return outputJSON(result)
+	if isJSONOutput() {
+		return outputResetJSON(errors, preserved)
 	}
-
 	printPreservedHooks(preserved)
-
 	fmt.Println()
 	if len(errors) > 0 {
 		fmt.Println("Completed with errors:")
 		for _, e := range errors {
 			fmt.Printf("  • %s\n", e)
 		}
-	} else {
-		fmt.Printf("%s Reset complete\n", ui.RenderPass("✓"))
-		fmt.Println()
-		fmt.Println("To reinitialize beads, run: bd init")
+		return nil
+	}
+	fmt.Printf("%s Reset complete\n", ui.RenderPass("✓"))
+	fmt.Println()
+	fmt.Println("To reinitialize beads, run: bd init")
+	return nil
+}
+
+func resetOneItem(item resetItem) []string {
+	switch item.Type {
+	case "hook":
+		return resetHookItem(item)
+	case "worktrees":
+		return resetPathItem(item.Path, "failed to remove worktrees: %v", "Removed sync worktrees")
+	case "directory":
+		return resetPathItem(item.Path, "failed to remove .beads: %v", "Removed .beads directory")
+	default:
+		return nil
+	}
+}
+
+func resetHookItem(item resetItem) []string {
+	if err := os.Remove(item.Path); err != nil {
+		return []string{fmt.Sprintf("failed to remove hook %s: %v", item.Path, err)}
+	}
+	if !isJSONOutput() {
+		fmt.Printf("%s Removed %s\n", ui.RenderPass("✓"), filepath.Base(item.Path))
+	}
+	backupPath := item.Path + ".backup"
+	if _, err := os.Stat(backupPath); err == nil {
+		if err := os.Rename(backupPath, item.Path); err == nil && !isJSONOutput() {
+			fmt.Printf("  Restored backup hook\n")
+		}
 	}
 	return nil
+}
+
+func resetPathItem(path, errFmt, okMsg string) []string {
+	if err := os.RemoveAll(path); err != nil {
+		return []string{fmt.Sprintf(errFmt, err)}
+	}
+	if !isJSONOutput() {
+		fmt.Printf("%s %s\n", ui.RenderPass("✓"), okMsg)
+	}
+	return nil
+}
+
+func outputResetJSON(errors []string, preserved []resetItem) error {
+	result := map[string]interface{}{
+		"reset":   true,
+		"success": len(errors) == 0,
+	}
+	if len(errors) > 0 {
+		result["errors"] = errors
+	}
+	if len(preserved) > 0 {
+		result["preserved"] = preserved
+	}
+	return outputJSON(result)
 }

@@ -13,7 +13,11 @@ import (
 // suggests "bd init --server" (not the old "--mode server") when ServerMode
 // is false.
 func TestNocgoNewDoltStore_ErrorSuggestsCorrectFlag(t *testing.T) {
-	cfg := &dolt.Config{ServerMode: false}
+	cfg := &dolt.Config{
+		ServerOptions: dolt.ServerOptions{
+			ServerMode: false,
+		},
+	}
 	_, err := newDoltStore(t.Context(), cfg)
 	if err == nil {
 		t.Fatal("expected error when ServerMode is false")

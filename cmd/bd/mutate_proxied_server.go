@@ -15,11 +15,11 @@ import (
 )
 
 func proxiedMutateIssue(ctx context.Context, id, commitMsg string, mutate func(ctx context.Context, uw uow.UnitOfWork, issue *types.Issue, isWisp bool) error) (*types.Issue, error) {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return nil, fmt.Errorf("proxied-server UOW provider not initialized")
 	}
 	var updated *types.Issue
-	err := uow.RunTx(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (string, error) {
+	err := uow.RunTx(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (string, error) {
 		issue, isWisp, rerr := workapi.GetIssueOrWisp(ctx, workapi.NewUOWDetailSource(uw), id)
 		if errors.Is(rerr, storage.ErrNotFound) {
 			return "", fmt.Errorf("issue %s not found", id)
@@ -54,15 +54,15 @@ func proxiedUpdateIssueFields(ctx context.Context, id, commitMsg string, updates
 		// bd-98s5c: an unguarded assignee update (bd assign via the proxied
 		// server) must not silently overwrite another actor's live claim.
 		if newAssignee, ok := updates["assignee"].(string); ok {
-			if err := validateIssueReassignable(id, issue, actor, newAssignee,
+			if err := validateIssueReassignable(id, issue, getActor(), newAssignee,
 				uowClaimPoolAliases(ctx, uw), force); err != nil {
 				return err
 			}
 		}
 		if isWisp {
-			return uw.IssueUseCase().UpdateWisp(ctx, issue.ID, updates, actor)
+			return uw.IssueUseCase().UpdateWisp(ctx, issue.ID, updates, getActor())
 		}
-		return uw.IssueUseCase().UpdateIssue(ctx, issue.ID, updates, actor)
+		return uw.IssueUseCase().UpdateIssue(ctx, issue.ID, updates, getActor())
 	})
 }
 
@@ -73,7 +73,7 @@ func runAssignProxiedServer(ctx context.Context, args []string, force bool) erro
 	if err != nil {
 		return HandleErrorRespectJSON("assign %s: %v", id, err)
 	}
-	if jsonOutput {
+	if isJSONOutput() {
 		if updated != nil {
 			return outputJSON(updated)
 		}
@@ -98,7 +98,7 @@ func runPriorityProxiedServer(ctx context.Context, args []string) error {
 	if err != nil {
 		return HandleErrorRespectJSON("priority %s: %v", id, err)
 	}
-	if jsonOutput {
+	if isJSONOutput() {
 		if updated != nil {
 			return outputJSON(updated)
 		}
@@ -117,14 +117,14 @@ func runNoteProxiedServer(ctx context.Context, id, noteText string) error {
 		combined += noteText
 		updates := map[string]any{"notes": combined}
 		if isWisp {
-			return uw.IssueUseCase().UpdateWisp(ctx, issue.ID, updates, actor)
+			return uw.IssueUseCase().UpdateWisp(ctx, issue.ID, updates, getActor())
 		}
-		return uw.IssueUseCase().UpdateIssue(ctx, issue.ID, updates, actor)
+		return uw.IssueUseCase().UpdateIssue(ctx, issue.ID, updates, getActor())
 	})
 	if err != nil {
 		return HandleErrorRespectJSON("note %s: %v", id, err)
 	}
-	if jsonOutput {
+	if isJSONOutput() {
 		if updated != nil {
 			return outputJSON(updated)
 		}
@@ -152,22 +152,10 @@ func runNoteProxiedServer(ctx context.Context, id, noteText string) error {
 func runTagProxiedServer(ctx context.Context, args []string) error {
 	id := args[0]
 	label := args[1]
-
-	reader, err := openIssueReader()
+	details, err := resolveTagDetails(ctx, id)
 	if err != nil {
-		return HandleErrorRespectJSON("tag %s: %v", id, err)
+		return err
 	}
-	details, err := reader.Get(ctx, issueops.GetRequest{ID: id})
-	if errors.Is(err, storage.ErrNotFound) {
-		return HandleErrorRespectJSON("tag %s: issue %s not found", id, id)
-	}
-	if err != nil {
-		return HandleErrorRespectJSON("tag %s: resolving %s: %v", id, id, err)
-	}
-	if verr := validateIssueUpdatable(id, &details.Issue); verr != nil {
-		return HandleErrorRespectJSON("tag %s: %v", id, verr)
-	}
-
 	lifecycle, err := openIssueLifecycle()
 	if err != nil {
 		return HandleErrorRespectJSON("tag %s: %v", id, err)
@@ -180,7 +168,7 @@ func runTagProxiedServer(ctx context.Context, args []string) error {
 		return HandleErrorRespectJSON("tag %s: %v", id, err)
 	}
 	result, err := lifecycle.Update(ctx, issueops.UpdateRequest{
-		Actor:   actor,
+		Actor:   getActor(),
 		IssueID: details.ID,
 		Patch:   issueops.IssuePatch{Labels: issueops.LabelPatch{Add: []string{label}}},
 	})
@@ -189,7 +177,7 @@ func runTagProxiedServer(ctx context.Context, args []string) error {
 	}
 	commandDidWrite.Store(true)
 
-	if jsonOutput {
+	if isJSONOutput() {
 		if result.Issue != nil {
 			return outputJSON(result.Issue)
 		}
@@ -197,4 +185,22 @@ func runTagProxiedServer(ctx context.Context, args []string) error {
 	}
 	fmt.Printf("%s Added label %q to %s\n", ui.RenderPass("✓"), label, formatFeedbackID(id, issueTitleOrEmpty(result.Issue)))
 	return nil
+}
+
+func resolveTagDetails(ctx context.Context, id string) (*issueops.IssueDetails, error) {
+	reader, err := openIssueReader()
+	if err != nil {
+		return nil, HandleErrorRespectJSON("tag %s: %v", id, err)
+	}
+	details, err := reader.Get(ctx, issueops.GetRequest{ID: id})
+	if errors.Is(err, storage.ErrNotFound) {
+		return nil, HandleErrorRespectJSON("tag %s: issue %s not found", id, id)
+	}
+	if err != nil {
+		return nil, HandleErrorRespectJSON("tag %s: resolving %s: %v", id, id, err)
+	}
+	if verr := validateIssueUpdatable(id, &details.Issue); verr != nil {
+		return nil, HandleErrorRespectJSON("tag %s: %v", id, verr)
+	}
+	return details, nil
 }

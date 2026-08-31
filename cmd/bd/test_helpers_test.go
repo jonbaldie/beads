@@ -77,11 +77,15 @@ func newTestStoreIsolatedDB(t *testing.T, dbPath string, prefix string) *dolt.Do
 	ctx := context.Background()
 
 	cfg := &dolt.Config{
-		Path:            dbPath,
-		ServerHost:      "127.0.0.1",
-		ServerPort:      testDoltServerPort,
-		Database:        uniqueTestDBName(t),
-		CreateIfMissing: true,
+		Path: dbPath,
+		ServerOptions: dolt.ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: testDoltServerPort,
+		},
+		Database: uniqueTestDBName(t),
+		RemoteOptions: dolt.RemoteOptions{
+			CreateIfMissing: true,
+		},
 	}
 	writeTestMetadata(t, dbPath, cfg.Database)
 
@@ -134,11 +138,15 @@ func newTestStoreWithPrefix(t *testing.T, dbPath string, prefix string) *dolt.Do
 
 	// Fallback: per-test database (original slow path)
 	cfg := &dolt.Config{
-		Path:            dbPath,
-		ServerHost:      "127.0.0.1",
-		ServerPort:      testDoltServerPort,
-		Database:        uniqueTestDBName(t),
-		CreateIfMissing: true,
+		Path: dbPath,
+		ServerOptions: dolt.ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: testDoltServerPort,
+		},
+		Database: uniqueTestDBName(t),
+		RemoteOptions: dolt.RemoteOptions{
+			CreateIfMissing: true,
+		},
 	}
 	writeTestMetadata(t, dbPath, cfg.Database)
 
@@ -181,11 +189,15 @@ func newTestStoreSharedBranch(t *testing.T, dbPath string, prefix string) *dolt.
 	// (required for DOLT_CHECKOUT session affinity)
 	doltNewMutex.Lock()
 	s, err := dolt.New(ctx, &dolt.Config{
-		Path:         dbPath,
-		ServerHost:   "127.0.0.1",
-		ServerPort:   testDoltServerPort,
-		Database:     testSharedDB,
-		MaxOpenConns: 1,
+		Path: dbPath,
+		ServerOptions: dolt.ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: testDoltServerPort,
+		},
+		Database: testSharedDB,
+		PoolOptions: dolt.PoolOptions{
+			MaxOpenConns: 1,
+		},
 	})
 	doltNewMutex.Unlock()
 	if err != nil {

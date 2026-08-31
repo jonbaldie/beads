@@ -10,25 +10,23 @@ func descriptionUsesExternalInput(cmd *cobra.Command) bool {
 	if stdinFlag, _ := cmd.Flags().GetBool("stdin"); stdinFlag {
 		return true
 	}
-	if cmd.Flags().Changed("body-file") || cmd.Flags().Changed("description-file") {
+	if descriptionFileInputChanged(cmd) {
 		return true
 	}
-	if cmd.Flags().Changed("description") {
-		desc, _ := cmd.Flags().GetString("description")
-		if desc == "-" {
-			return true
-		}
-	}
-	if cmd.Flags().Changed("body") {
-		body, _ := cmd.Flags().GetString("body")
-		if body == "-" {
-			return true
-		}
-	}
-	if cmd.Flags().Changed("message") {
-		message, _ := cmd.Flags().GetString("message")
-		if message == "-" {
-			return true
+	return descriptionDashInputChanged(cmd)
+}
+
+func descriptionFileInputChanged(cmd *cobra.Command) bool {
+	return cmd.Flags().Changed("body-file") || cmd.Flags().Changed("description-file")
+}
+
+func descriptionDashInputChanged(cmd *cobra.Command) bool {
+	for _, flagName := range []string{"description", "body", "message"} {
+		if cmd.Flags().Changed(flagName) {
+			value, _ := cmd.Flags().GetString(flagName)
+			if value == "-" {
+				return true
+			}
 		}
 	}
 	return false

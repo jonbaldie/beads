@@ -218,7 +218,7 @@ func TestServeRefusesAnEmbeddedWorkspaceEndToEnd(t *testing.T) {
 	// No store, deliberately: the refusal must come from the classification and
 	// not from a role extraction that found nothing to take roles off.
 	store = nil
-	serveAddr = "127.0.0.1:0"
+	setServeFlag(t, "addr", "127.0.0.1:0")
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	setRootContext(ctx, cancel)
@@ -274,13 +274,21 @@ func seedRegisteredBackendWorkspace(t *testing.T, beadsDir string) string {
 	const id = "srv-1"
 	now := time.Now().UTC()
 	issue := &types.Issue{
-		ID:        id,
-		Title:     "Claimable over HTTP",
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		Priority:  2,
-		CreatedAt: now,
-		UpdatedAt: now,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: "Claimable over HTTP",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+			Priority:  2,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
 	}
 	if err := seed.CreateIssue(t.Context(), issue, "seed"); err != nil {
 		t.Fatalf("seed an issue: %v", err)
@@ -447,7 +455,8 @@ func TestServeRefusesStrictReadonlyOnARegisteredBackend(t *testing.T) {
 	}
 	store = opened
 
-	serveAddr, serveAllowNonLoopback = "127.0.0.1:0", false
+	setServeFlag(t, "addr", "127.0.0.1:0")
+	setServeFlag(t, "allow-non-loopback", "false")
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	setRootContext(ctx, cancel)

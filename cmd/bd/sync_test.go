@@ -819,7 +819,7 @@ func TestSyncConflictMessage(t *testing.T) {
 	// operator "the working set was restored" sends them away from a database
 	// that is conflicted right now.
 	t.Run("live conflict is never described as restored", func(t *testing.T) {
-		got := joined(&syncOutcome{Conflicts: []string{"issues"}, ConflictsLive: true})
+		got := joined(&syncOutcome{Conflicts: []string{"issues"}, syncConflictState: syncConflictState{ConflictsLive: true}})
 		if !strings.Contains(got, "LIVE in the working set") {
 			t.Errorf("message does not report the live rows:\n%s", got)
 		}
@@ -829,7 +829,7 @@ func TestSyncConflictMessage(t *testing.T) {
 	})
 
 	t.Run("pre-existing conflict says the replica was already conflicted", func(t *testing.T) {
-		got := joined(&syncOutcome{Conflicts: []string{"issues"}, ConflictsPreexisting: true, ConflictsLive: true})
+		got := joined(&syncOutcome{Conflicts: []string{"issues"}, syncConflictState: syncConflictState{ConflictsPreexisting: true, ConflictsLive: true}})
 		if !strings.Contains(got, "ALREADY in a conflicted state") {
 			t.Errorf("message does not report the pre-existing conflict:\n%s", got)
 		}
@@ -853,8 +853,8 @@ func TestSyncConflictMessage(t *testing.T) {
 	// left the operator to go find bd conflicts on their own.
 	t.Run("live and pre-existing conflicts name a concrete resolve command", func(t *testing.T) {
 		for _, out := range []*syncOutcome{
-			{Conflicts: []string{"issues"}, ConflictsLive: true},
-			{Conflicts: []string{"issues"}, ConflictsPreexisting: true, ConflictsLive: true},
+			{Conflicts: []string{"issues"}, syncConflictState: syncConflictState{ConflictsLive: true}},
+			{Conflicts: []string{"issues"}, syncConflictState: syncConflictState{ConflictsPreexisting: true, ConflictsLive: true}},
 		} {
 			got := joined(out)
 			if !strings.Contains(got, "bd conflicts resolve") {
@@ -1279,13 +1279,13 @@ func TestSyncConflictMessageReportsABlockedRepair(t *testing.T) {
 func TestSyncConflictMessageReportsADiscardedPullError(t *testing.T) {
 	got := strings.Join(syncConflictMessage(&syncOutcome{
 		Conflicts:          []string{"issues"},
-		ConflictsLive:      true,
+		syncConflictState:  syncConflictState{ConflictsLive: true},
 		DiscardedPullError: "dial tcp: connection refused",
 	}), "\n")
 	if !strings.Contains(got, "dial tcp: connection refused") {
 		t.Errorf("message does not name the discarded pull error:\n%s", got)
 	}
-	quiet := strings.Join(syncConflictMessage(&syncOutcome{Conflicts: []string{"issues"}, ConflictsLive: true}), "\n")
+	quiet := strings.Join(syncConflictMessage(&syncOutcome{Conflicts: []string{"issues"}, syncConflictState: syncConflictState{ConflictsLive: true}}), "\n")
 	if strings.Contains(quiet, "pull error:") {
 		t.Errorf("a halt with no discarded pull error must not mention one:\n%s", quiet)
 	}

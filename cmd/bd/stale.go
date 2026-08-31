@@ -45,10 +45,10 @@ This helps identify:
 		}
 
 		if usesProxiedServer() {
-			return runStaleProxiedServer(rootCtx, filter)
+			return runStaleProxiedServer(getRootContext(), filter)
 		}
 
-		issues, err := store.GetStaleIssues(rootCtx, filter)
+		issues, err := getStore().GetStaleIssues(getRootContext(), filter)
 		if err != nil {
 			return HandleErrorRespectJSON("%v", err)
 		}
@@ -57,7 +57,7 @@ This helps identify:
 }
 
 func renderStale(issues []*types.Issue, days int) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		if issues == nil {
 			issues = []*types.Issue{}
 		}

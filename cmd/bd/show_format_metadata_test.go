@@ -15,10 +15,24 @@ import (
 // in place would strand below the body text.
 func closedWithReason(reason string) *types.Issue {
 	return &types.Issue{
-		ID: "test-cr", Title: "t", IssueType: types.TypeTask,
-		Status: types.StatusClosed, CloseReason: reason,
-		ExternalRef:     strPtr("gh#1"),
-		CompactionLevel: 1, OriginalSize: 4096,
+		IssueID: types.IssueID{
+			ID: "test-cr",
+		},
+		IssueContent: types.IssueContent{
+			Title: "t",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusClosed,
+		},
+		IssueTimes: types.IssueTimes{
+			CloseReason: reason,
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef:     strPtr("gh#1"),
+			CompactionLevel: 1,
+			OriginalSize:    4096,
+		},
 	}
 }
 
@@ -131,7 +145,7 @@ func TestFormatIssueCustomMetadata_Nil(t *testing.T) {
 
 func TestFormatIssueCustomMetadata_EmptyObject(t *testing.T) {
 	t.Parallel()
-	issue := &types.Issue{Metadata: json.RawMessage(`{}`)}
+	issue := &types.Issue{IssueMeta: types.IssueMeta{Metadata: json.RawMessage(`{}`)}}
 	result := formatIssueCustomMetadata(issue)
 	if result != "" {
 		t.Errorf("expected empty string for {} metadata, got: %q", result)
@@ -140,7 +154,7 @@ func TestFormatIssueCustomMetadata_EmptyObject(t *testing.T) {
 
 func TestFormatIssueCustomMetadata_NullLiteral(t *testing.T) {
 	t.Parallel()
-	issue := &types.Issue{Metadata: json.RawMessage(`null`)}
+	issue := &types.Issue{IssueMeta: types.IssueMeta{Metadata: json.RawMessage(`null`)}}
 	result := formatIssueCustomMetadata(issue)
 	if result != "" {
 		t.Errorf("expected empty string for null metadata, got: %q", result)
@@ -149,7 +163,7 @@ func TestFormatIssueCustomMetadata_NullLiteral(t *testing.T) {
 
 func TestFormatIssueCustomMetadata_SingleScalar(t *testing.T) {
 	t.Parallel()
-	issue := &types.Issue{Metadata: json.RawMessage(`{"team":"platform"}`)}
+	issue := &types.Issue{IssueMeta: types.IssueMeta{Metadata: json.RawMessage(`{"team":"platform"}`)}}
 	result := formatIssueCustomMetadata(issue)
 	if !strings.Contains(result, "METADATA") {
 		t.Errorf("expected METADATA header, got: %q", result)
@@ -161,7 +175,7 @@ func TestFormatIssueCustomMetadata_SingleScalar(t *testing.T) {
 
 func TestFormatIssueCustomMetadata_MultipleKeys(t *testing.T) {
 	t.Parallel()
-	issue := &types.Issue{Metadata: json.RawMessage(`{"sprint":"Q1","team":"platform","version":"1.0"}`)}
+	issue := &types.Issue{IssueMeta: types.IssueMeta{Metadata: json.RawMessage(`{"sprint":"Q1","team":"platform","version":"1.0"}`)}}
 	result := formatIssueCustomMetadata(issue)
 	// Keys should be sorted alphabetically
 	sprintIdx := strings.Index(result, "sprint:")
@@ -177,7 +191,7 @@ func TestFormatIssueCustomMetadata_MultipleKeys(t *testing.T) {
 
 func TestFormatIssueCustomMetadata_NumberValue(t *testing.T) {
 	t.Parallel()
-	issue := &types.Issue{Metadata: json.RawMessage(`{"story_points":5}`)}
+	issue := &types.Issue{IssueMeta: types.IssueMeta{Metadata: json.RawMessage(`{"story_points":5}`)}}
 	result := formatIssueCustomMetadata(issue)
 	if !strings.Contains(result, "story_points: 5") {
 		t.Errorf("expected 'story_points: 5', got: %q", result)
@@ -186,7 +200,7 @@ func TestFormatIssueCustomMetadata_NumberValue(t *testing.T) {
 
 func TestFormatIssueCustomMetadata_FloatValue(t *testing.T) {
 	t.Parallel()
-	issue := &types.Issue{Metadata: json.RawMessage(`{"score":3.14}`)}
+	issue := &types.Issue{IssueMeta: types.IssueMeta{Metadata: json.RawMessage(`{"score":3.14}`)}}
 	result := formatIssueCustomMetadata(issue)
 	if !strings.Contains(result, "score: 3.14") {
 		t.Errorf("expected 'score: 3.14', got: %q", result)
@@ -195,7 +209,7 @@ func TestFormatIssueCustomMetadata_FloatValue(t *testing.T) {
 
 func TestFormatIssueCustomMetadata_BoolValue(t *testing.T) {
 	t.Parallel()
-	issue := &types.Issue{Metadata: json.RawMessage(`{"reviewed":true}`)}
+	issue := &types.Issue{IssueMeta: types.IssueMeta{Metadata: json.RawMessage(`{"reviewed":true}`)}}
 	result := formatIssueCustomMetadata(issue)
 	if !strings.Contains(result, "reviewed: true") {
 		t.Errorf("expected 'reviewed: true', got: %q", result)
@@ -204,7 +218,7 @@ func TestFormatIssueCustomMetadata_BoolValue(t *testing.T) {
 
 func TestFormatIssueCustomMetadata_NullValue(t *testing.T) {
 	t.Parallel()
-	issue := &types.Issue{Metadata: json.RawMessage(`{"optional":null}`)}
+	issue := &types.Issue{IssueMeta: types.IssueMeta{Metadata: json.RawMessage(`{"optional":null}`)}}
 	result := formatIssueCustomMetadata(issue)
 	if !strings.Contains(result, "optional: null") {
 		t.Errorf("expected 'optional: null', got: %q", result)
@@ -213,7 +227,7 @@ func TestFormatIssueCustomMetadata_NullValue(t *testing.T) {
 
 func TestFormatIssueCustomMetadata_ArrayValue(t *testing.T) {
 	t.Parallel()
-	issue := &types.Issue{Metadata: json.RawMessage(`{"files":["a.go","b.go"]}`)}
+	issue := &types.Issue{IssueMeta: types.IssueMeta{Metadata: json.RawMessage(`{"files":["a.go","b.go"]}`)}}
 	result := formatIssueCustomMetadata(issue)
 	if !strings.Contains(result, `files: ["a.go","b.go"]`) {
 		t.Errorf("expected compact JSON array, got: %q", result)
@@ -222,7 +236,7 @@ func TestFormatIssueCustomMetadata_ArrayValue(t *testing.T) {
 
 func TestFormatIssueCustomMetadata_NestedObject(t *testing.T) {
 	t.Parallel()
-	issue := &types.Issue{Metadata: json.RawMessage(`{"jira":{"sprint":"Q1","points":3}}`)}
+	issue := &types.Issue{IssueMeta: types.IssueMeta{Metadata: json.RawMessage(`{"jira":{"sprint":"Q1","points":3}}`)}}
 	result := formatIssueCustomMetadata(issue)
 	if !strings.Contains(result, "jira:") {
 		t.Errorf("expected 'jira:' key, got: %q", result)
@@ -235,7 +249,7 @@ func TestFormatIssueCustomMetadata_NestedObject(t *testing.T) {
 
 func TestFormatIssueCustomMetadata_InvalidJSON(t *testing.T) {
 	t.Parallel()
-	issue := &types.Issue{Metadata: json.RawMessage(`not-json`)}
+	issue := &types.Issue{IssueMeta: types.IssueMeta{Metadata: json.RawMessage(`not-json`)}}
 	result := formatIssueCustomMetadata(issue)
 	// Should still render something (raw fallback), not panic
 	if !strings.Contains(result, "METADATA") {
@@ -258,7 +272,7 @@ func TestHasCustomMetadata(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			issue := &types.Issue{Metadata: tt.metadata}
+			issue := &types.Issue{IssueMeta: types.IssueMeta{Metadata: tt.metadata}}
 			if got := hasCustomMetadata(issue); got != tt.want {
 				t.Errorf("hasCustomMetadata() = %v, want %v", got, tt.want)
 			}
@@ -281,7 +295,7 @@ func TestCountMetadataKeys(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			issue := &types.Issue{Metadata: tt.metadata}
+			issue := &types.Issue{IssueMeta: types.IssueMeta{Metadata: tt.metadata}}
 			if got := countMetadataKeys(issue); got != tt.want {
 				t.Errorf("countMetadataKeys() = %d, want %d", got, tt.want)
 			}
@@ -292,12 +306,20 @@ func TestCountMetadataKeys(t *testing.T) {
 func TestFormatIssueLong_WithMetadata(t *testing.T) {
 	t.Parallel()
 	issue := &types.Issue{
-		ID:        "test-meta1",
-		Title:     "Issue With Metadata",
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		Metadata:  json.RawMessage(`{"team":"platform","sprint":"Q1"}`),
+		IssueID: types.IssueID{
+			ID: "test-meta1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Issue With Metadata",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"team":"platform","sprint":"Q1"}`),
+		},
 	}
 	var buf strings.Builder
 	formatIssueLong(&buf, issue, nil, false)
@@ -310,11 +332,17 @@ func TestFormatIssueLong_WithMetadata(t *testing.T) {
 func TestFormatIssueLong_WithoutMetadata(t *testing.T) {
 	t.Parallel()
 	issue := &types.Issue{
-		ID:        "test-nometa",
-		Title:     "Issue Without Metadata",
-		Priority:  1,
-		IssueType: types.TypeBug,
-		Status:    types.StatusOpen,
+		IssueID: types.IssueID{
+			ID: "test-nometa",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Issue Without Metadata",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  1,
+			IssueType: types.TypeBug,
+			Status:    types.StatusOpen,
+		},
 	}
 	var buf strings.Builder
 	formatIssueLong(&buf, issue, nil, false)
@@ -338,12 +366,20 @@ func TestFormatIssueLong_NonObjectMetadata(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			issue := &types.Issue{
-				ID:        "test-nonobj",
-				Title:     "Non-object metadata",
-				Priority:  2,
-				IssueType: types.TypeTask,
-				Status:    types.StatusOpen,
-				Metadata:  tt.metadata,
+				IssueID: types.IssueID{
+					ID: "test-nonobj",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Non-object metadata",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Priority:  2,
+					IssueType: types.TypeTask,
+					Status:    types.StatusOpen,
+				},
+				IssueMeta: types.IssueMeta{
+					Metadata: tt.metadata,
+				},
 			}
 			var buf strings.Builder
 			formatIssueLong(&buf, issue, nil, false)
@@ -361,12 +397,20 @@ func TestFormatIssueLong_NonObjectMetadata(t *testing.T) {
 func TestFormatIssueLong_EmptyMetadata(t *testing.T) {
 	t.Parallel()
 	issue := &types.Issue{
-		ID:        "test-emptymeta",
-		Title:     "Issue With Empty Metadata",
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		Metadata:  json.RawMessage(`{}`),
+		IssueID: types.IssueID{
+			ID: "test-emptymeta",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Issue With Empty Metadata",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{}`),
+		},
 	}
 	var buf strings.Builder
 	formatIssueLong(&buf, issue, nil, false)

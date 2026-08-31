@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"sync"
 
 	"github.com/jonbaldie/beads/internal/ui"
 )
@@ -98,17 +99,18 @@ func wrapWithSchemaVersion(v interface{}) interface{} {
 	return m
 }
 
-var envelopeDeprecationEmitted bool
+var envelopeDeprecationOnce sync.Once
 
 func emitEnvelopeDeprecation() {
-	if envelopeDeprecationEmitted || !ui.IsStderrTerminal() {
+	if !ui.IsStderrTerminal() {
 		return
 	}
-	envelopeDeprecationEmitted = true
-	fmt.Fprintf(os.Stderr,
-		"NOTE: bd --json output format will change in v2.0. "+
-			"Set BD_JSON_ENVELOPE=1 to opt in early. "+
-			"See docs/reference/json-schema.md for migration details.\n")
+	envelopeDeprecationOnce.Do(func() {
+		fmt.Fprintf(os.Stderr,
+			"NOTE: bd --json output format will change in v2.0. "+
+				"Set BD_JSON_ENVELOPE=1 to opt in early. "+
+				"See docs/reference/json-schema.md for migration details.\n")
+	})
 }
 
 func outputJSONError(err error, code string) error {

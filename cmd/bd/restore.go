@@ -12,8 +12,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var restoreApply bool
-
 var restoreCmd = &cobra.Command{
 	Use:           "restore <issue-id>",
 	GroupID:       "sync",
@@ -35,14 +33,15 @@ before snapshot archiving), restore falls back to a best-effort reconstruction
 from Dolt version history, which can only be displayed, not applied.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		restoreApply, _ := cmd.Flags().GetBool("apply")
 		if usesProxiedServer() {
 			return HandleErrorRespectJSON("restore is not supported in proxied-server mode")
 		}
 		issueID := args[0]
-		ctx := rootCtx
+		ctx := getRootContext()
 
 		// Get the issue
-		issue, err := store.GetIssue(ctx, issueID)
+		issue, err := getStore().GetIssue(ctx, issueID)
 		if err != nil {
 			if errors.Is(err, storage.ErrNotFound) {
 				fmt.Fprintf(os.Stderr, "Error: issue '%s' not found\n", issueID)
@@ -61,7 +60,7 @@ from Dolt version history, which can only be displayed, not applied.`,
 
 		// Prefer the archived snapshot: it is the authoritative pre-compaction
 		// copy and the only source that can be safely written back.
-		snap, err := store.GetCompactionSnapshot(ctx, issueID)
+		snap, err := getStore().GetCompactionSnapshot(ctx, issueID)
 		if err != nil {
 			return HandleError("failed to read compaction snapshot: %v", err)
 		}
@@ -74,18 +73,18 @@ from Dolt version history, which can only be displayed, not applied.`,
 				fmt.Fprintf(os.Stderr, "      version reconstructed from Dolt history.\n")
 				return SilentExit()
 			}
-			applied, err := store.RestoreFromSnapshot(ctx, issueID)
+			applied, err := getStore().RestoreFromSnapshot(ctx, issueID)
 			if err != nil {
 				return HandleError("failed to restore issue: %v", err)
 			}
 			if applied == nil {
 				return HandleError("no archived snapshot for %s", issueID)
 			}
-			restored, err := store.GetIssue(ctx, issueID)
+			restored, err := getStore().GetIssue(ctx, issueID)
 			if err != nil {
 				return HandleError("restored, but failed to re-read issue: %v", err)
 			}
-			if jsonOutput {
+			if isJSONOutput() {
 				if err := outputJSON(restored); err != nil {
 					fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				}
@@ -100,7 +99,7 @@ from Dolt version history, which can only be displayed, not applied.`,
 		// Dolt-history heuristic when no snapshot exists.
 		if snap != nil {
 			view := snapshotView(issue, snap)
-			if jsonOutput {
+			if isJSONOutput() {
 				if err := outputJSON(view); err != nil {
 					fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				}
@@ -112,7 +111,7 @@ from Dolt version history, which can only be displayed, not applied.`,
 		}
 
 		// Query Dolt history for the pre-compaction version
-		history, err := store.History(ctx, issueID)
+		history, err := getStore().History(ctx, issueID)
 		if err != nil {
 			return HandleError("failed to query history: %v", err)
 		}
@@ -141,7 +140,7 @@ from Dolt version history, which can only be displayed, not applied.`,
 			return SilentExit()
 		}
 
-		if jsonOutput {
+		if isJSONOutput() {
 			if err := outputJSON(best.Issue); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			}
@@ -176,8 +175,9 @@ func issueContentSize(issue *types.Issue) int {
 }
 
 func init() {
-	restoreCmd.Flags().BoolVar(&jsonOutput, "json", false, "Output restore results in JSON format")
-	restoreCmd.Flags().BoolVar(&restoreApply, "apply", false, "Write the restored content back into the issue (default: display only)")
+	flags := persistentFlags()
+	restoreCmd.Flags().BoolVar(&flags.JSONOutput, "json", false, "Output restore results in JSON format")
+	restoreCmd.Flags().Bool("apply", false, "Write the restored content back into the issue (default: display only)")
 	rootCmd.AddCommand(restoreCmd)
 }
 
@@ -187,7 +187,14 @@ func init() {
 func displayRestoredIssue(issue *types.Issue, provenance string) {
 	fmt.Printf("\n%s %s (restored from %s)\n", ui.RenderAccent("📜"), ui.RenderBold(issue.ID), ui.RenderWarn(provenance))
 	fmt.Printf("%s\n\n", ui.RenderBold(issue.Title))
+	displayRestoredContent(issue)
+	displayRestoredMetadata(issue)
+	displayRestoredDependencies(issue)
+	displayRestoredCompaction(issue)
+	fmt.Println()
+}
 
+func displayRestoredContent(issue *types.Issue) {
 	if issue.Description != "" {
 		fmt.Printf("%s\n%s\n\n", ui.RenderBold("Description:"), issue.Description)
 	}
@@ -203,7 +210,9 @@ func displayRestoredIssue(issue *types.Issue, provenance string) {
 	if issue.Notes != "" {
 		fmt.Printf("%s\n%s\n\n", ui.RenderBold("Notes:"), issue.Notes)
 	}
+}
 
+func displayRestoredMetadata(issue *types.Issue) {
 	fmt.Printf("%s %s | %s %d | %s %s\n",
 		ui.RenderBold("Status:"), issue.Status,
 		ui.RenderBold("Priority:"), issue.Priority,
@@ -217,20 +226,25 @@ func displayRestoredIssue(issue *types.Issue, provenance string) {
 	if len(issue.Labels) > 0 {
 		fmt.Printf("%s %s\n", ui.RenderBold("Labels:"), strings.Join(issue.Labels, ", "))
 	}
+}
 
+func displayRestoredDependencies(issue *types.Issue) {
 	fmt.Printf("\n%s %s\n", ui.RenderBold("Created:"), issue.CreatedAt.Format("2006-01-02 15:04:05"))
 	fmt.Printf("%s %s\n", ui.RenderBold("Updated:"), issue.UpdatedAt.Format("2006-01-02 15:04:05"))
 	if issue.ClosedAt != nil {
 		fmt.Printf("%s %s\n", ui.RenderBold("Closed:"), issue.ClosedAt.Format("2006-01-02 15:04:05"))
 	}
 
-	if len(issue.Dependencies) > 0 {
-		fmt.Printf("\n%s\n", ui.RenderBold("Dependencies:"))
-		for _, dep := range issue.Dependencies {
-			fmt.Printf("  %s %s (%s)\n", ui.RenderPass("→"), dep.DependsOnID, dep.Type)
-		}
+	if len(issue.Dependencies) == 0 {
+		return
 	}
+	fmt.Printf("\n%s\n", ui.RenderBold("Dependencies:"))
+	for _, dep := range issue.Dependencies {
+		fmt.Printf("  %s %s (%s)\n", ui.RenderPass("→"), dep.DependsOnID, dep.Type)
+	}
+}
 
+func displayRestoredCompaction(issue *types.Issue) {
 	if issue.CompactionLevel > 0 {
 		fmt.Printf("\n%s Level %d", ui.RenderWarn("⚠️  This issue was compacted:"), issue.CompactionLevel)
 		if issue.CompactedAt != nil {
@@ -243,6 +257,4 @@ func displayRestoredIssue(issue *types.Issue, provenance string) {
 		}
 		fmt.Println()
 	}
-
-	fmt.Println()
 }

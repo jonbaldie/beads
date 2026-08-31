@@ -13,12 +13,12 @@ import (
 // the same two-step proxiedCounter performs, and for the same reason: the
 // accessor is where each layer is added.
 func proxiedSweeper() (issueops.Sweeper, error) {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return nil, errors.New("proxied-server UOW provider not initialized")
 	}
-	src, ok := uowProvider.(uow.SweeperSource)
+	src, ok := getUOWProvider().(uow.SweeperSource)
 	if !ok {
-		return nil, fmt.Errorf("proxied-server provider %T does not offer the bulk-clearance surface", uowProvider)
+		return nil, fmt.Errorf("proxied-server provider %T does not offer the bulk-clearance surface", getUOWProvider())
 	}
 	return src.Sweeper()
 }

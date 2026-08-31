@@ -52,25 +52,35 @@ func runReopenProxiedServer(cmd *cobra.Command, ctx context.Context, args []stri
 		return HandleErrorRespectJSON("%v", err)
 	}
 	if len(targets) == 0 {
-		if hasError {
-			return SilentExit()
-		}
-		return nil
+		return finishReopenWithoutTargets(hasError)
 	}
-
 	lifecycle, err := proxiedIssueLifecycle()
 	if err != nil {
 		return HandleErrorRespectJSON("%v", err)
 	}
+	reopenedIssues, processError := processReopenTargets(ctx, lifecycle, targets, reason, jsonOut)
+	if jsonOut && len(reopenedIssues) > 0 {
+		_ = outputJSON(reopenedIssues)
+	}
+	if processError {
+		return SilentExit()
+	}
+	return nil
+}
 
-	reopenedIssues := []*types.Issue{}
+func finishReopenWithoutTargets(hasError bool) error {
+	if hasError {
+		return SilentExit()
+	}
+	return nil
+}
+
+func processReopenTargets(ctx context.Context, lifecycle issueops.Lifecycle, targets []reopenProxiedTarget, reason string, jsonOut bool) ([]*types.Issue, bool) {
+	var reopenedIssues []*types.Issue
+	hasError := false
 	for _, target := range targets {
 		result, err := lifecycle.Reopen(ctx, issueops.ReopenRequest{
-			Actor:   actor,
-			IssueID: target.id,
-			Reason:  reason,
-			// The label the direct route spells, so one reopen reads the same
-			// in `bd dolt log` whichever route served it.
+			Actor: getActor(), IssueID: target.id, Reason: reason,
 			Provenance: "bd: reopen " + target.id,
 		})
 		if err != nil {
@@ -79,38 +89,28 @@ func runReopenProxiedServer(cmd *cobra.Command, ctx context.Context, args []stri
 			continue
 		}
 		if !result.Changed {
-			// Read off the result rather than off the pre-read: the status the
-			// reopen left in place is the one the operation saw inside its own
-			// transaction.
 			fmt.Fprintln(os.Stderr, reopenNoOpMessage(target.id, reopenStatusOf(result.Issue, nil)))
 			continue
 		}
-
-		audit.LogFieldChange(target.id, "status", string(target.status), string(types.StatusOpen), actor, reason)
+		audit.LogFieldChange(target.id, "status", string(target.status), string(types.StatusOpen), getActor(), reason)
 		if jsonOut {
-			if issue := result.Issue; issue != nil {
-				// `bd reopen` has never printed dependency records, on either
-				// route.
-				issue.Dependencies = nil
-				reopenedIssues = append(reopenedIssues, issue)
+			if result.Issue != nil {
+				result.Issue.Dependencies = nil
+				reopenedIssues = append(reopenedIssues, result.Issue)
 			}
 			continue
 		}
-		suffix := ""
-		if reason != "" {
-			suffix = ": " + reason
-		}
-		fmt.Printf("%s Reopened %s%s\n", ui.RenderAccent("↻"), target.id, suffix)
+		printReopenSuccess(target.id, reason)
 	}
+	return reopenedIssues, hasError
+}
 
-	if jsonOut && len(reopenedIssues) > 0 {
-		_ = outputJSON(reopenedIssues)
+func printReopenSuccess(id, reason string) {
+	suffix := ""
+	if reason != "" {
+		suffix = ": " + reason
 	}
-
-	if hasError {
-		return SilentExit()
-	}
-	return nil
+	fmt.Printf("%s Reopened %s%s\n", ui.RenderAccent("↻"), id, suffix)
 }
 
 // reopenProxiedResolve resolves every id in ONE read-only unit of work and
@@ -127,7 +127,7 @@ func runReopenProxiedServer(cmd *cobra.Command, ctx context.Context, args []stri
 func reopenProxiedResolve(ctx context.Context, ids []string) ([]reopenProxiedTarget, bool, error) {
 	var targets []reopenProxiedTarget
 	failed := false
-	_, err := uow.RunTxRead(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (struct{}, error) {
+	_, err := uow.RunTxRead(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (struct{}, error) {
 		source := workapi.NewUOWDetailSource(uw)
 		for _, id := range ids {
 			issue, _, err := workapi.GetIssueOrWisp(ctx, source, id)

@@ -123,26 +123,34 @@ func resolveOrCreateProxiedServerConfig(beadsDir string) (string, error) {
 	}
 
 	if isCustom {
-		info, err := os.Stat(path)
-		if err != nil {
-			return "", fmt.Errorf("ensureProxiedServerConfig: custom config %s: %w", path, err)
-		}
-		if !info.Mode().IsRegular() {
-			return "", fmt.Errorf("ensureProxiedServerConfig: custom config %s: not a regular file", path)
-		}
-		return path, nil
+		return validateCustomProxiedServerConfigPath(path)
 	}
+	return createManagedProxiedServerConfig(path)
+}
 
+func validateCustomProxiedServerConfigPath(path string) (string, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("ensureProxiedServerConfig: custom config %s: %w", path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("ensureProxiedServerConfig: custom config %s: not a regular file", path)
+	}
+	return path, nil
+}
+
+func createManagedProxiedServerConfig(path string) (string, error) {
 	root := filepath.Dir(path)
 	if err := os.MkdirAll(root, config.BeadsDirPerm); err != nil {
 		return "", fmt.Errorf("ensureProxiedServerConfig: mkdir %s: %w", root, err)
 	}
 
-	switch _, err := os.Stat(path); {
-	case err == nil:
+	exists, err := managedProxiedServerConfigExists(path)
+	if err != nil {
+		return "", err
+	}
+	if exists {
 		return path, nil
-	case !os.IsNotExist(err):
-		return "", fmt.Errorf("ensureProxiedServerConfig: stat %s: %w", path, err)
 	}
 
 	port, err := proxy.PickFreePort()
@@ -158,6 +166,17 @@ func resolveOrCreateProxiedServerConfig(beadsDir string) (string, error) {
 		return "", fmt.Errorf("ensureProxiedServerConfig: write %s: %w", path, err)
 	}
 	return path, nil
+}
+
+func managedProxiedServerConfigExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, fmt.Errorf("ensureProxiedServerConfig: stat %s: %w", path, err)
 }
 
 // resolveConfigWriteTarget resolves path to its physical location before
@@ -268,7 +287,7 @@ func validateManagedServerConfigPolicy(cfg servercfg.ServerConfig) error {
 // validated it at flag-parse time, and when no config env override is set it
 // IS the effective config, so there is nothing further to check.
 func validateManagedProxiedServerConfigAtInit(beadsDir, explicitPath, explicitRootPath string) error {
-	if explicitPath != "" && os.Getenv("BEADS_PROXIED_SERVER_CONFIG") == "" {
+	if initUsesExplicitProxiedConfig(explicitPath) {
 		return nil
 	}
 	path, isCustom, err := resolveProxiedServerConfigPath(beadsDir)
@@ -278,6 +297,14 @@ func validateManagedProxiedServerConfigAtInit(beadsDir, explicitPath, explicitRo
 	if !isCustom && explicitRootPath != "" && os.Getenv("BEADS_PROXIED_SERVER_ROOT_PATH") == "" {
 		path = filepath.Join(explicitRootPath, proxiedServerConfigName)
 	}
+	return validateExistingManagedProxiedConfig(path, isCustom)
+}
+
+func initUsesExplicitProxiedConfig(explicitPath string) bool {
+	return explicitPath != "" && os.Getenv("BEADS_PROXIED_SERVER_CONFIG") == ""
+}
+
+func validateExistingManagedProxiedConfig(path string, isCustom bool) error {
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) && !isCustom {
 			return nil

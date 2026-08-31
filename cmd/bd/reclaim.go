@@ -93,14 +93,16 @@ Examples:
 			return HandleErrorRespectJSON("%v", err)
 		}
 
-		CheckReadonly("reclaim")
-
-		if usesProxiedServer() {
-			return runReclaimProxiedServer(rootCtx, olderThan, filter)
+		if err := CheckReadonly("reclaim"); err != nil {
+			return err
 		}
 
-		ctx := rootCtx
-		reclaimed, err := store.ReclaimExpiredLeases(ctx, olderThan, filter, actor)
+		if usesProxiedServer() {
+			return runReclaimProxiedServer(getRootContext(), olderThan, filter)
+		}
+
+		ctx := getRootContext()
+		reclaimed, err := getStore().ReclaimExpiredLeases(ctx, olderThan, filter, getActor())
 		if err != nil {
 			return HandleErrorRespectJSON("reclaim: %v", err)
 		}
@@ -109,7 +111,7 @@ Examples:
 		for _, r := range reclaimed {
 			ids = append(ids, r.ID)
 		}
-		if err := commitPendingIfEmbedded(ctx, store, actor, doltAutoCommitParams{
+		if err := commitPendingIfEmbedded(ctx, getStore(), getActor(), doltAutoCommitParams{
 			Command:  "reclaim",
 			IssueIDs: ids,
 		}); err != nil {
@@ -121,7 +123,7 @@ Examples:
 }
 
 func renderReclaim(reclaimed []types.ReclaimedLease, scoped bool) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(map[string]interface{}{
 			"reclaimed": reclaimed,
 			"count":     len(reclaimed),
@@ -172,51 +174,53 @@ func registerReclaimScopeFlags(fs *pflag.FlagSet) {
 // into a global one that reaps every stale lease in a federated database. A
 // scope flag that resolves to nothing is operator error, not a wildcard.
 func reclaimFilterFromFlags(cmd *cobra.Command) (types.ReclaimFilter, error) {
-	get := func(name string) ([]string, error) {
-		values, err := cmd.Flags().GetStringSlice(name)
-		if err != nil {
-			return nil, fmt.Errorf("--%s: %w", name, err)
-		}
-		if !cmd.Flags().Changed(name) {
-			return nil, nil
-		}
-		var kept []string
-		for _, v := range values {
-			if strings.TrimSpace(v) != "" {
-				kept = append(kept, v)
-			}
-		}
-		if len(kept) == 0 {
-			return nil, fmt.Errorf("--%s was given no usable value (an empty scope flag would reclaim everything; drop the flag to sweep globally)", name)
-		}
-		return kept, nil
-	}
-
 	var filter types.ReclaimFilter
-	var err error
-	if filter.IDs, err = get("id"); err != nil {
-		return types.ReclaimFilter{}, err
+	fields := []struct {
+		name   string
+		values *[]string
+	}{
+		{name: "id", values: &filter.IDs},
+		{name: "assignee", values: &filter.Assignees},
+		{name: "label", values: &filter.Labels},
+		{name: "label-any", values: &filter.LabelsAny},
+		{name: "exclude-label", values: &filter.ExcludeLabels},
 	}
-	if filter.Assignees, err = get("assignee"); err != nil {
-		return types.ReclaimFilter{}, err
-	}
-	if filter.Labels, err = get("label"); err != nil {
-		return types.ReclaimFilter{}, err
-	}
-	if filter.LabelsAny, err = get("label-any"); err != nil {
-		return types.ReclaimFilter{}, err
-	}
-	if filter.ExcludeLabels, err = get("exclude-label"); err != nil {
-		return types.ReclaimFilter{}, err
+	for _, field := range fields {
+		values, err := reclaimScopeValues(cmd, field.name)
+		if err != nil {
+			return types.ReclaimFilter{}, err
+		}
+		*field.values = values
 	}
 	// --any-replica is an override, not a scope: it WIDENS the set past the
 	// granting-replica guard, so it deliberately skips the empty-value hard
 	// error above (a bool flag has no empty-value hazard) and never counts
 	// toward "scoped" in the reclaim report.
+	var err error
 	if filter.AnyReplica, err = cmd.Flags().GetBool("any-replica"); err != nil {
 		return types.ReclaimFilter{}, fmt.Errorf("--any-replica: %w", err)
 	}
 	return filter, nil
+}
+
+func reclaimScopeValues(cmd *cobra.Command, name string) ([]string, error) {
+	values, err := cmd.Flags().GetStringSlice(name)
+	if err != nil {
+		return nil, fmt.Errorf("--%s: %w", name, err)
+	}
+	if !cmd.Flags().Changed(name) {
+		return nil, nil
+	}
+	kept := make([]string, 0, len(values))
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			kept = append(kept, value)
+		}
+	}
+	if len(kept) == 0 {
+		return nil, fmt.Errorf("--%s was given no usable value (an empty scope flag would reclaim everything; drop the flag to sweep globally)", name)
+	}
+	return kept, nil
 }
 
 func init() {

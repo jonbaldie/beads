@@ -52,7 +52,7 @@ type StaleResult struct {
 	BlockingCount  int              `json:"blocking_count"`
 }
 
-func runMolStale(cmd *cobra.Command, args []string) error {
+func runMolStale(cmd *cobra.Command, _ []string) error {
 	evt := metrics.NewCommandEvent("mol-stale")
 	defer func() {
 		if c := metrics.Global(); c != nil {
@@ -65,24 +65,24 @@ func runMolStale(cmd *cobra.Command, args []string) error {
 	showAll, _ := cmd.Flags().GetBool("all")
 
 	if usesProxiedServer() {
-		return runMolStaleProxiedServer(rootCtx, blockingOnly, unassignedOnly, showAll)
+		return runMolStaleProxiedServer(getRootContext(), blockingOnly, unassignedOnly, showAll)
 	}
 
-	ctx := rootCtx
+	ctx := getRootContext()
 
 	var result *StaleResult
 	var err error
 
-	if store == nil {
+	if getStore() == nil {
 		return HandleErrorRespectJSON("no database connection")
 	}
 
-	result, err = findStaleMolecules(ctx, store, blockingOnly, unassignedOnly, showAll)
+	result, err = findStaleMolecules(ctx, getStore(), blockingOnly, unassignedOnly, showAll)
 	if err != nil {
 		return HandleErrorRespectJSON("%v", err)
 	}
 
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(result)
 	}
 	renderStaleResult(result, blockingOnly)
@@ -149,43 +149,12 @@ func findStaleMolecules(ctx context.Context, s molReader, blockingOnly, unassign
 	blockingCount := 0
 
 	for _, es := range epicStatuses {
-		// Skip if not eligible for close (not all children closed)
-		if !es.EligibleForClose {
+		mol, ok := staleMolecule(es, blockingMap, blockingOnly, unassignedOnly, showAll)
+		if !ok {
 			continue
 		}
-
-		// Skip if no children and not showing all
-		if es.TotalChildren == 0 && !showAll {
-			continue
-		}
-
-		// Filter by unassigned if requested
-		if unassignedOnly && es.Epic.Assignee != "" {
-			continue
-		}
-
-		// Find what this molecule is blocking
-		blocking := blockingMap[es.Epic.ID]
-		blockingIssueCount := len(blocking)
-
-		// Filter by blocking if requested
-		if blockingOnly && blockingIssueCount == 0 {
-			continue
-		}
-
-		mol := &StaleMolecule{
-			ID:             es.Epic.ID,
-			Title:          es.Epic.Title,
-			TotalChildren:  es.TotalChildren,
-			ClosedChildren: es.ClosedChildren,
-			Assignee:       es.Epic.Assignee,
-			BlockingIssues: blocking,
-			BlockingCount:  blockingIssueCount,
-		}
-
 		staleMolecules = append(staleMolecules, mol)
-
-		if blockingIssueCount > 0 {
+		if mol.BlockingCount > 0 {
 			blockingCount++
 		}
 	}
@@ -195,6 +164,25 @@ func findStaleMolecules(ctx context.Context, s molReader, blockingOnly, unassign
 		TotalCount:     len(staleMolecules),
 		BlockingCount:  blockingCount,
 	}, nil
+}
+
+func staleMolecule(es *types.EpicStatus, blockingMap map[string][]string, blockingOnly, unassignedOnly, showAll bool) (*StaleMolecule, bool) {
+	if !es.EligibleForClose || (es.TotalChildren == 0 && !showAll) {
+		return nil, false
+	}
+	if unassignedOnly && es.Epic.Assignee != "" {
+		return nil, false
+	}
+	blocking := blockingMap[es.Epic.ID]
+	if blockingOnly && len(blocking) == 0 {
+		return nil, false
+	}
+	return &StaleMolecule{
+		ID: es.Epic.ID, Title: es.Epic.Title,
+		TotalChildren: es.TotalChildren, ClosedChildren: es.ClosedChildren,
+		Assignee: es.Epic.Assignee, BlockingIssues: blocking,
+		BlockingCount: len(blocking),
+	}, true
 }
 
 // buildBlockingMap creates a map of issue ID -> list of issues it's blocking

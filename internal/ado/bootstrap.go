@@ -41,66 +41,15 @@ func NewBootstrapMatcher(mapper tracker.FieldMapper, heuristicMatch bool) *Boots
 // localIssues should be the full set of beads issues to search against.
 // adoItem is the incoming ADO TrackerIssue to find a match for.
 func (m *BootstrapMatcher) FindMatch(adoItem *tracker.TrackerIssue, localIssues []*types.Issue) MatchResult {
-	// 1. External ref match
-	for _, issue := range localIssues {
-		if issue.ExternalRef != nil && *issue.ExternalRef == adoItem.URL {
-			return MatchResult{
-				Matched:   true,
-				BeadsID:   issue.ID,
-				MatchType: "external_ref",
-			}
-		}
+	if issue, ok := findByExternalRef(localIssues, adoItem.URL); ok {
+		return matchedResult(issue, "external_ref")
 	}
-
-	// 2. Source system match
-	for _, issue := range localIssues {
-		id := extractIDFromSourceSystem(issue.SourceSystem)
-		if id != "" && id == adoItem.ID {
-			return MatchResult{
-				Matched:   true,
-				BeadsID:   issue.ID,
-				MatchType: "source_system",
-			}
-		}
+	if issue, ok := findBySourceSystem(localIssues, adoItem.ID); ok {
+		return matchedResult(issue, "source_system")
 	}
-
-	// 3. Heuristic match (opt-in)
 	if m.HeuristicMatch {
-		adoBeadsType := m.Mapper.TypeToBeads(adoItem.Type)
-		var candidates []*types.Issue
-		for _, issue := range localIssues {
-			if issue.Title != adoItem.Title {
-				continue
-			}
-			if issue.IssueType != adoBeadsType {
-				continue
-			}
-			diff := issue.CreatedAt.Sub(adoItem.CreatedAt)
-			if diff < 0 {
-				diff = -diff
-			}
-			if diff > bootstrapTimeWindow {
-				continue
-			}
-			candidates = append(candidates, issue)
-		}
-		if len(candidates) == 1 {
-			return MatchResult{
-				Matched:    true,
-				BeadsID:    candidates[0].ID,
-				MatchType:  "heuristic",
-				Candidates: 1,
-			}
-		}
-		if len(candidates) > 1 {
-			return MatchResult{
-				Matched:    false,
-				Candidates: len(candidates),
-			}
-		}
+		return heuristicMatch(m.Mapper, adoItem, localIssues, adoItem.Title)
 	}
-
-	// 4. No match
 	return MatchResult{}
 }
 
@@ -141,59 +90,73 @@ func (m *BootstrapMatcher) FindMatchIndexed(adoItem *tracker.TrackerIssue, idx *
 		return MatchResult{}
 	}
 
-	// 1. External ref match — O(1).
 	if issue, ok := idx.ExternalRefMap[adoItem.URL]; ok {
-		return MatchResult{
-			Matched:   true,
-			BeadsID:   issue.ID,
-			MatchType: "external_ref",
-		}
+		return matchedResult(issue, "external_ref")
 	}
 
-	// 2. Source system match — O(1).
 	if issue, ok := idx.SourceSystemMap[adoItem.ID]; ok {
-		return MatchResult{
-			Matched:   true,
-			BeadsID:   issue.ID,
-			MatchType: "source_system",
-		}
+		return matchedResult(issue, "source_system")
 	}
 
-	// 3. Heuristic match (opt-in) — O(K) where K = issues with same title.
 	if m.HeuristicMatch {
-		adoBeadsType := m.Mapper.TypeToBeads(adoItem.Type)
 		key := strings.ToLower(adoItem.Title)
-		candidates := make([]*types.Issue, 0)
-		for _, issue := range idx.TitleMap[key] {
-			if issue.IssueType != adoBeadsType {
-				continue
-			}
-			diff := issue.CreatedAt.Sub(adoItem.CreatedAt)
-			if diff < 0 {
-				diff = -diff
-			}
-			if diff > bootstrapTimeWindow {
-				continue
-			}
-			candidates = append(candidates, issue)
-		}
-		if len(candidates) == 1 {
-			return MatchResult{
-				Matched:    true,
-				BeadsID:    candidates[0].ID,
-				MatchType:  "heuristic",
-				Candidates: 1,
-			}
-		}
-		if len(candidates) > 1 {
-			return MatchResult{
-				Matched:    false,
-				Candidates: len(candidates),
-			}
+		return heuristicMatch(m.Mapper, adoItem, idx.TitleMap[key], "")
+	}
+	return MatchResult{}
+}
+
+func findByExternalRef(issues []*types.Issue, url string) (*types.Issue, bool) {
+	for _, issue := range issues {
+		if issue.ExternalRef != nil && *issue.ExternalRef == url {
+			return issue, true
 		}
 	}
+	return nil, false
+}
 
-	// 4. No match
+func findBySourceSystem(issues []*types.Issue, adoID string) (*types.Issue, bool) {
+	for _, issue := range issues {
+		if id := extractIDFromSourceSystem(issue.SourceSystem); id != "" && id == adoID {
+			return issue, true
+		}
+	}
+	return nil, false
+}
+
+func matchedResult(issue *types.Issue, matchType string) MatchResult {
+	return MatchResult{Matched: true, BeadsID: issue.ID, MatchType: matchType}
+}
+
+func heuristicMatch(mapper tracker.FieldMapper, adoItem *tracker.TrackerIssue, issues []*types.Issue, title string) MatchResult {
+	adoBeadsType := mapper.TypeToBeads(adoItem.Type)
+	candidates := make([]*types.Issue, 0)
+	for _, issue := range issues {
+		if title != "" && issue.Title != title {
+			continue
+		}
+		if issue.IssueType != adoBeadsType || !withinBootstrapWindow(issue, adoItem) {
+			continue
+		}
+		candidates = append(candidates, issue)
+	}
+	return heuristicResult(candidates)
+}
+
+func withinBootstrapWindow(issue *types.Issue, adoItem *tracker.TrackerIssue) bool {
+	diff := issue.CreatedAt.Sub(adoItem.CreatedAt)
+	if diff < 0 {
+		diff = -diff
+	}
+	return diff <= bootstrapTimeWindow
+}
+
+func heuristicResult(candidates []*types.Issue) MatchResult {
+	if len(candidates) == 1 {
+		return MatchResult{Matched: true, BeadsID: candidates[0].ID, MatchType: "heuristic", Candidates: 1}
+	}
+	if len(candidates) > 1 {
+		return MatchResult{Candidates: len(candidates)}
+	}
 	return MatchResult{}
 }
 

@@ -13,30 +13,30 @@ import (
 var (
 	thanksTitleStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(ui.ColorWarn)
+				Foreground(ui.ColorWarn())
 
 	thanksSubtitleStyle = lipgloss.NewStyle().
-				Foreground(ui.ColorMuted)
+				Foreground(ui.ColorMuted())
 
 	thanksSectionStyle = lipgloss.NewStyle().
-				Foreground(ui.ColorAccent).
+				Foreground(ui.ColorAccent()).
 				Bold(true)
 
 	thanksNameStyle = lipgloss.NewStyle().
-			Foreground(ui.ColorPass)
+			Foreground(ui.ColorPass())
 
 	thanksLabelStyle = lipgloss.NewStyle().
-				Foreground(ui.ColorWarn)
+				Foreground(ui.ColorWarn())
 
 	thanksDimStyle = lipgloss.NewStyle().
-			Foreground(ui.ColorMuted)
+			Foreground(ui.ColorMuted())
 )
 
 // thanksBoxStyle returns a box style with dynamic width
 func thanksBoxStyle(width int) lipgloss.Style {
 	return lipgloss.NewStyle().
 		BorderStyle(lipgloss.DoubleBorder()).
-		BorderForeground(ui.ColorMuted).
+		BorderForeground(ui.ColorMuted()).
 		Padding(1, 4).
 		Width(width - 4).
 		Align(lipgloss.Center)
@@ -207,9 +207,10 @@ func printThanksColumns(names []string, cols int) {
 	colWidth := maxWidth + 2
 
 	// print in rows, reading left to right
-	for i := 0; i < len(names); i += cols {
+	n := len(names)
+	for i := 0; i < n; i += cols {
 		fmt.Print("  ")
-		for j := 0; j < cols && i+j < len(names); j++ {
+		for j := 0; j < cols && i+j < n; j++ {
 			name := names[i+j]
 			if len(name) > 20 {
 				name = name[:17] + "..."

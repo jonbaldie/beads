@@ -77,13 +77,6 @@ func newWorktreeRemoveCommandWithHook(beforeFinalCheck func() error) *cobra.Comm
 	return newWorktreeRemoveCommandWithHooks(worktreeRemoveHooks{beforeFinalCheck: beforeFinalCheck})
 }
 
-type worktreeRemoveHooks struct {
-	afterTargetResolution func() error
-	beforeFinalCheck      func() error
-	beforeRemove          func() error
-	afterRemoval          func() error
-}
-
 func newWorktreeRemoveCommandWithHooks(hooks worktreeRemoveHooks) *cobra.Command {
 	options := &worktreeRemoveOptions{
 		force:      singleWorktreeBoolFlag{name: "force"},
@@ -194,23 +187,47 @@ func runWorktreeRemovalOrchestration(
 	mutator worktreeRemovalMutator,
 	presenter worktreeRemovalPresenter,
 ) error {
-	approval, err := observer.Prepare(ctx, request)
+	approval, plan, err := prepareWorktreeRemovalPlan(ctx, request, observer)
 	if err != nil {
-		return fmt.Errorf("cannot prepare worktree removal: %w", err)
-	}
-	plan, err := worktreeremove.Prepare(worktreeremove.Request{Mode: request.mode}, approval.facts)
-	if err != nil {
-		if approval.prepareErr != nil {
-			return fmt.Errorf("cannot prepare worktree removal: %w", approval.prepareErr)
-		}
-		return fmt.Errorf("cannot prepare worktree removal: %w", err)
-	}
-	if approval.prepareErr != nil {
-		return fmt.Errorf("cannot prepare worktree removal: %w", approval.prepareErr)
+		return err
 	}
 	mutation := plan.Mutation()
 	cleanup, requiresCleanup := plan.Cleanup()
 
+	if err := revalidateWorktreeRemoval(ctx, observer, approval, plan); err != nil {
+		return err
+	}
+
+	if err := mutator.Remove(ctx, mutation); err != nil {
+		return handleWorktreeRemovalFailure(ctx, observer, presenter, approval, plan, err)
+	}
+	if requiresCleanup {
+		if err := mutator.Cleanup(ctx, cleanup); err != nil {
+			return err
+		}
+	}
+	return presenter.Removed(mutation)
+}
+
+func prepareWorktreeRemovalPlan(ctx context.Context, request worktreeRemovalRequest, observer worktreeRemovalObserver) (worktreeRemovalApproval, worktreeremove.Plan, error) {
+	approval, err := observer.Prepare(ctx, request)
+	if err != nil {
+		return worktreeRemovalApproval{}, worktreeremove.Plan{}, fmt.Errorf("cannot prepare worktree removal: %w", err)
+	}
+	plan, err := worktreeremove.Prepare(worktreeremove.Request{Mode: request.mode}, approval.facts)
+	if err != nil {
+		if approval.prepareErr != nil {
+			return approval, worktreeremove.Plan{}, fmt.Errorf("cannot prepare worktree removal: %w", approval.prepareErr)
+		}
+		return approval, worktreeremove.Plan{}, fmt.Errorf("cannot prepare worktree removal: %w", err)
+	}
+	if approval.prepareErr != nil {
+		return approval, worktreeremove.Plan{}, fmt.Errorf("cannot prepare worktree removal: %w", approval.prepareErr)
+	}
+	return approval, plan, nil
+}
+
+func revalidateWorktreeRemoval(ctx context.Context, observer worktreeRemovalObserver, approval worktreeRemovalApproval, plan worktreeremove.Plan) error {
 	revalidation, err := observer.Revalidate(ctx, approval)
 	if err != nil {
 		return err
@@ -224,34 +241,29 @@ func runWorktreeRemovalOrchestration(
 	if revalidation.err != nil {
 		return fmt.Errorf("worktree changed before removal: %w; nothing was removed", revalidation.err)
 	}
+	return nil
+}
 
-	if err := mutator.Remove(ctx, mutation); err != nil {
-		var partial *worktreeRemovalPartialError
-		if errors.As(err, &partial) {
-			return err
-		}
-		var interrupted *worktreeRemovalPreMutationError
-		if errors.As(err, &interrupted) {
-			return err
-		}
-		failureObservation, failureErr := observer.Failure(ctx, approval, err)
-		if failureErr != nil {
-			return failureErr
-		}
-		failure, classifyErr := worktreeremove.ClassifyFailure(plan, failureObservation.facts, err)
-		if classifyErr != nil {
-			return fmt.Errorf("cannot classify worktree removal failure: %w", classifyErr)
-		}
-		presenter.Failure(failure.Kind, failure.RemoveErr)
-		if failureObservation.render != nil {
-			return failureObservation.render(failure.Kind, failure.RemoveErr)
-		}
-		return fmt.Errorf("git worktree remove failed: %w", failure.RemoveErr)
+func handleWorktreeRemovalFailure(ctx context.Context, observer worktreeRemovalObserver, presenter worktreeRemovalPresenter, approval worktreeRemovalApproval, plan worktreeremove.Plan, err error) error {
+	var partial *worktreeRemovalPartialError
+	if errors.As(err, &partial) {
+		return err
 	}
-	if requiresCleanup {
-		if err := mutator.Cleanup(ctx, cleanup); err != nil {
-			return err
-		}
+	var interrupted *worktreeRemovalPreMutationError
+	if errors.As(err, &interrupted) {
+		return err
 	}
-	return presenter.Removed(mutation)
+	failureObservation, failureErr := observer.Failure(ctx, approval, err)
+	if failureErr != nil {
+		return failureErr
+	}
+	failure, classifyErr := worktreeremove.ClassifyFailure(plan, failureObservation.facts, err)
+	if classifyErr != nil {
+		return fmt.Errorf("cannot classify worktree removal failure: %w", classifyErr)
+	}
+	presenter.Failure(failure.Kind, failure.RemoveErr)
+	if failureObservation.render != nil {
+		return failureObservation.render(failure.Kind, failure.RemoveErr)
+	}
+	return fmt.Errorf("git worktree remove failed: %w", failure.RemoveErr)
 }

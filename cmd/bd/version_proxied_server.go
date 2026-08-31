@@ -14,12 +14,12 @@ import (
 // proxied-server provider, through the provider's OWN capability accessor —
 // the same two-step proxiedCounter performs.
 func proxiedVersionReconciler() (issueops.VersionReconciler, error) {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return nil, errors.New("proxied-server UOW provider not initialized")
 	}
-	src, ok := uowProvider.(uow.VersionReconcilerSource)
+	src, ok := getUOWProvider().(uow.VersionReconcilerSource)
 	if !ok {
-		return nil, fmt.Errorf("proxied-server provider %T does not offer the version-marker surface", uowProvider)
+		return nil, fmt.Errorf("proxied-server provider %T does not offer the version-marker surface", getUOWProvider())
 	}
 	return src.VersionReconciler()
 }
@@ -32,7 +32,7 @@ func proxiedVersionReconciler() (issueops.VersionReconciler, error) {
 // PersistentPreRun before every proxied command: a workspace whose markers
 // cannot be read is a workspace whose commands must still run.
 func reconcileVersionProxiedServer(ctx context.Context) {
-	if !versionUpgradeDetected || uowProvider == nil {
+	if !isVersionUpgradeDetected() || getUOWProvider() == nil {
 		return
 	}
 

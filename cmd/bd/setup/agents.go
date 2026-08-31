@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"github.com/jonbaldie/beads/internal/config"
 	"github.com/jonbaldie/beads/internal/templates/agents"
@@ -56,15 +57,19 @@ func defaultAgentsEnv() agentsEnv {
 // appropriate RenderOpts. When no remote is configured, the rendered template
 // omits "bd dolt push" from session-completion instructions.
 // Exposed as a variable so tests can override.
-var detectRenderOptsImpl = func() agents.RenderOpts {
-	return agents.RenderOpts{
-		HasRemote: config.GetString("sync.remote") != "" || config.GetString("sync.git-remote") != "",
-		NoPush:    config.GetBool("no-push"),
-	}
+var detectRenderOptsImpl atomic.Value
+
+func init() {
+	detectRenderOptsImpl.Store(func() agents.RenderOpts {
+		return agents.RenderOpts{
+			HasRemote: config.GetString("sync.remote") != "" || config.GetString("sync.git-remote") != "",
+			NoPush:    config.GetBool("no-push"),
+		}
+	})
 }
 
 func detectRenderOpts() agents.RenderOpts {
-	return detectRenderOptsImpl()
+	return detectRenderOptsImpl.Load().(func() agents.RenderOpts)()
 }
 
 // containsBeadsMarker returns true if content contains a BEGIN BEADS INTEGRATION marker
@@ -97,75 +102,101 @@ func (env agentsEnv) markSkipped() {
 
 func installAgents(env agentsEnv, integration agentsIntegration) error {
 	_, _ = fmt.Fprintf(env.stdout, "Installing %s integration...\n", integration.name)
-	agentsFile := agentsFileName(env.agentsPath)
+	skipped, err := skipAgentsSymlink(env, integration)
+	if err != nil || skipped {
+		return err
+	}
+	currentContent, err := readAgentsFile(env)
+	if err != nil {
+		return err
+	}
+	profile := preserveAgentsProfile(env, currentContent, resolveProfile(integration))
+	opts := detectRenderOpts()
+	if err := writeAgentsContent(env, currentContent, profile, opts); err != nil {
+		return err
+	}
+	printAgentsInstalled(env, integration)
+	return nil
+}
 
+func skipAgentsSymlink(env agentsEnv, integration agentsIntegration) (bool, error) {
 	// Never inject managed sections through symlinks. Following symlink targets
 	// can unexpectedly mutate other instruction files and, in some workflows,
 	// corrupt tracked symlink entries.
-	if info, err := os.Lstat(env.agentsPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		target, readErr := os.Readlink(env.agentsPath)
-		targetHint := ""
-		if readErr == nil && target != "" {
-			targetHint = fmt.Sprintf(" to %s", target)
+	info, err := os.Lstat(env.agentsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
 		}
-		_, _ = fmt.Fprintf(env.stderr, "Warning: %s is a symlink%s; skipping managed section injection to preserve link mode/content. Update the target file directly, or replace the symlink with a regular file and re-run '%s'.\n", agentsFile, targetHint, integration.setupCommand)
-		env.markSkipped()
-		return nil
-	} else if err != nil && !os.IsNotExist(err) {
 		_, _ = fmt.Fprintf(env.stderr, "Error: failed to inspect %s: %v\n", env.agentsPath, err)
-		return err
+		return false, err
 	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return false, nil
+	}
+	target, readErr := os.Readlink(env.agentsPath)
+	targetHint := ""
+	if readErr == nil && target != "" {
+		targetHint = fmt.Sprintf(" to %s", target)
+	}
+	_, _ = fmt.Fprintf(env.stderr, "Warning: %s is a symlink%s; skipping managed section injection to preserve link mode/content. Update the target file directly, or replace the symlink with a regular file and re-run '%s'.\n", agentsFileName(env.agentsPath), targetHint, integration.setupCommand)
+	env.markSkipped()
+	return true, nil
+}
 
-	profile := resolveProfile(integration)
-	opts := detectRenderOpts()
-
-	var currentContent string
+func readAgentsFile(env agentsEnv) (string, error) {
 	data, err := os.ReadFile(env.agentsPath) // #nosec G304 -- env.agentsPath is trusted setup destination
 	if err == nil {
-		currentContent = string(data)
-	} else if !os.IsNotExist(err) {
-		_, _ = fmt.Fprintf(env.stderr, "Error: failed to read %s: %v\n", env.agentsPath, err)
-		return err
+		return string(data), nil
 	}
+	if os.IsNotExist(err) {
+		return "", nil
+	}
+	_, _ = fmt.Fprintf(env.stderr, "Error: failed to read %s: %v\n", env.agentsPath, err)
+	return "", err
+}
 
+func preserveAgentsProfile(env agentsEnv, currentContent string, profile agents.Profile) agents.Profile {
 	// Profile precedence: if the file already has a full profile and we're
 	// requesting minimal, preserve full to avoid information loss (e.g. when
 	// CLAUDE.md is a symlink to AGENTS.md and both Claude and Codex target it).
-	if currentContent != "" && containsBeadsMarker(currentContent) {
-		existingProfile := existingBeadsProfile(currentContent)
-		if existingProfile == agents.ProfileFull && profile == agents.ProfileMinimal {
-			_, _ = fmt.Fprintf(env.stdout, "  ℹ File already has full profile; preserving (higher-information) content\n")
-			profile = agents.ProfileFull
-		}
+	if currentContent == "" || !containsBeadsMarker(currentContent) {
+		return profile
 	}
+	if existingBeadsProfile(currentContent) != agents.ProfileFull || profile != agents.ProfileMinimal {
+		return profile
+	}
+	_, _ = fmt.Fprintf(env.stdout, "  ℹ File already has full profile; preserving (higher-information) content\n")
+	return agents.ProfileFull
+}
 
-	beadsSection := agents.RenderSectionWithOpts(profile, opts)
-
-	if currentContent != "" {
-		if containsBeadsMarker(currentContent) {
-			newContent := updateBeadsSectionWithOpts(currentContent, profile, opts)
-			if err := atomicWriteFile(env.agentsPath, []byte(newContent)); err != nil {
-				_, _ = fmt.Fprintf(env.stderr, "Error: write %s: %v\n", env.agentsPath, err)
-				return err
-			}
-			_, _ = fmt.Fprintf(env.stdout, "✓ Updated existing beads section in %s\n", agentsFile)
-		} else {
-			newContent := currentContent + "\n\n" + beadsSection
-			if err := atomicWriteFile(env.agentsPath, []byte(newContent)); err != nil {
-				_, _ = fmt.Fprintf(env.stderr, "Error: write %s: %v\n", env.agentsPath, err)
-				return err
-			}
-			_, _ = fmt.Fprintf(env.stdout, "✓ Added beads section to existing %s\n", agentsFile)
-		}
-	} else {
-		newContent := createNewAgentsFileWithOpts(profile, opts)
-		if err := atomicWriteFile(env.agentsPath, []byte(newContent)); err != nil {
+func writeAgentsContent(env agentsEnv, currentContent string, profile agents.Profile, opts agents.RenderOpts) error {
+	agentsFile := agentsFileName(env.agentsPath)
+	switch {
+	case currentContent == "":
+		if err := atomicWriteFile(env.agentsPath, []byte(createNewAgentsFileWithOpts(profile, opts))); err != nil {
 			_, _ = fmt.Fprintf(env.stderr, "Error: write %s: %v\n", env.agentsPath, err)
 			return err
 		}
 		_, _ = fmt.Fprintf(env.stdout, "✓ Created new %s with beads integration\n", agentsFile)
+	case containsBeadsMarker(currentContent):
+		if err := atomicWriteFile(env.agentsPath, []byte(updateBeadsSectionWithOpts(currentContent, profile, opts))); err != nil {
+			_, _ = fmt.Fprintf(env.stderr, "Error: write %s: %v\n", env.agentsPath, err)
+			return err
+		}
+		_, _ = fmt.Fprintf(env.stdout, "✓ Updated existing beads section in %s\n", agentsFile)
+	default:
+		newContent := currentContent + "\n\n" + agents.RenderSectionWithOpts(profile, opts)
+		if err := atomicWriteFile(env.agentsPath, []byte(newContent)); err != nil {
+			_, _ = fmt.Fprintf(env.stderr, "Error: write %s: %v\n", env.agentsPath, err)
+			return err
+		}
+		_, _ = fmt.Fprintf(env.stdout, "✓ Added beads section to existing %s\n", agentsFile)
 	}
+	return nil
+}
 
+func printAgentsInstalled(env agentsEnv, integration agentsIntegration) {
 	_, _ = fmt.Fprintf(env.stdout, "\n✓ %s integration installed\n", integration.name)
 	_, _ = fmt.Fprintf(env.stdout, "  File: %s\n", env.agentsPath)
 	if integration.readHint != "" {
@@ -175,55 +206,57 @@ func installAgents(env agentsEnv, integration agentsIntegration) error {
 		_, _ = fmt.Fprintf(env.stdout, "Review guide: %s\n", integration.docsURL)
 	}
 	_, _ = fmt.Fprintln(env.stdout, "No additional configuration needed!")
-	return nil
 }
 
 func checkAgents(env agentsEnv, integration agentsIntegration) error {
-	agentsFile := agentsFileName(env.agentsPath)
+	content, err := loadAgentsForCheck(env, integration)
+	if err != nil {
+		return err
+	}
+	return reportAgentsFreshness(env, integration, content)
+}
 
+func loadAgentsForCheck(env agentsEnv, integration agentsIntegration) (string, error) {
+	agentsFile := agentsFileName(env.agentsPath)
 	data, err := os.ReadFile(env.agentsPath)
 	if os.IsNotExist(err) {
 		_, _ = fmt.Fprintf(env.stdout, "✗ %s not found\n", agentsFile)
 		_, _ = fmt.Fprintf(env.stdout, "  Run: %s\n", integration.setupCommand)
-		return errAgentsFileMissing
-	} else if err != nil {
+		return "", errAgentsFileMissing
+	}
+	if err != nil {
 		_, _ = fmt.Fprintf(env.stderr, "Error: failed to read %s: %v\n", env.agentsPath, err)
-		return err
+		return "", err
 	}
-
 	content := string(data)
-	if !containsBeadsMarker(content) {
-		_, _ = fmt.Fprintf(env.stdout, "⚠ %s exists but no beads section found\n", agentsFile)
-		_, _ = fmt.Fprintf(env.stdout, "  Run: %s (to add beads section)\n", integration.setupCommand)
-		return errBeadsSectionMissing
+	if containsBeadsMarker(content) {
+		return content, nil
 	}
+	_, _ = fmt.Fprintf(env.stdout, "⚠ %s exists but no beads section found\n", agentsFile)
+	_, _ = fmt.Fprintf(env.stdout, "  Run: %s (to add beads section)\n", integration.setupCommand)
+	return "", errBeadsSectionMissing
+}
 
-	// Section exists — check freshness via profile and hash
+func reportAgentsFreshness(env agentsEnv, integration agentsIntegration, content string) error {
 	profile := resolveProfile(integration)
 	existingProf := existingBeadsProfile(content)
-
-	// Extract hash from marker
 	idx := findBeginMarker(content)
 	line := content[idx:]
 	if nl := strings.Index(line, "\n"); nl != -1 {
 		line = line[:nl]
 	}
 	meta := agents.ParseMarker(line)
-
 	checkProfile := profile
 	if profile == agents.ProfileMinimal && existingProf == agents.ProfileFull {
 		// Accept full profile as current when a minimal integration targets the same
 		// file (typically via symlinks like CLAUDE.md -> AGENTS.md).
 		checkProfile = agents.ProfileFull
 	}
-
 	currentHash := agents.CurrentHashWithOpts(checkProfile, detectRenderOpts())
 	if meta != nil && meta.Hash == currentHash && existingProf == checkProfile {
 		_, _ = fmt.Fprintf(env.stdout, "✓ %s integration installed: %s (current)\n", integration.name, env.agentsPath)
 		return nil
 	}
-
-	// Stale or legacy section
 	_, _ = fmt.Fprintf(env.stdout, "⚠ %s integration installed but stale: %s\n", integration.name, env.agentsPath)
 	_, _ = fmt.Fprintf(env.stdout, "  Run: %s (to update)\n", integration.setupCommand)
 	return errBeadsSectionStale

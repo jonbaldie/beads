@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math"
 	"net"
-	"sync"
 	"text/template"
 	"time"
 
@@ -20,6 +19,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -41,6 +41,7 @@ type haikuClient struct {
 	initialBackoff time.Duration
 	auditEnabled   bool
 	auditActor     string
+	metrics        aiMetrics
 }
 
 // newHaikuClient creates a new Haiku API client.
@@ -64,8 +65,6 @@ func newHaikuClient(apiKey string) (*haikuClient, error) {
 		return nil, fmt.Errorf("failed to parse tier1 template: %w", err)
 	}
 
-	aiMetricsOnce.Do(initAIMetrics)
-
 	return &haikuClient{
 		client:         client,
 		model:          config.DefaultAIModelFor(keySource),
@@ -74,6 +73,7 @@ func newHaikuClient(apiKey string) (*haikuClient, error) {
 		tier1Template:  tier1Tmpl,
 		maxRetries:     maxRetries,
 		initialBackoff: initialBackoff,
+		metrics:        initAIMetrics(),
 	}, nil
 }
 
@@ -103,29 +103,28 @@ func (h *haikuClient) SummarizeTier1(ctx context.Context, issue *types.Issue) (s
 	return resp, callErr
 }
 
-// aiMetrics holds lazily-initialized OTel instruments for Anthropic API calls.
-var aiMetrics struct {
+// aiMetrics holds OTel instruments for Anthropic API calls.
+type aiMetrics struct {
 	inputTokens  metric.Int64Counter
 	outputTokens metric.Int64Counter
 	duration     metric.Float64Histogram
 }
 
-var aiMetricsOnce sync.Once
-
-func initAIMetrics() {
+func initAIMetrics() aiMetrics {
 	m := telemetry.Meter("github.com/jonbaldie/beads/ai")
-	aiMetrics.inputTokens, _ = m.Int64Counter("bd.ai.input_tokens",
+	inputTokens, _ := m.Int64Counter("bd.ai.input_tokens",
 		metric.WithDescription("Anthropic API input tokens consumed"),
 		metric.WithUnit("{token}"),
 	)
-	aiMetrics.outputTokens, _ = m.Int64Counter("bd.ai.output_tokens",
+	outputTokens, _ := m.Int64Counter("bd.ai.output_tokens",
 		metric.WithDescription("Anthropic API output tokens generated"),
 		metric.WithUnit("{token}"),
 	)
-	aiMetrics.duration, _ = m.Float64Histogram("bd.ai.request.duration",
+	duration, _ := m.Float64Histogram("bd.ai.request.duration",
 		metric.WithDescription("Anthropic API request duration in milliseconds"),
 		metric.WithUnit("ms"),
 	)
+	return aiMetrics{inputTokens: inputTokens, outputTokens: outputTokens, duration: duration}
 }
 
 func (h *haikuClient) callWithRetry(ctx context.Context, prompt string) (string, error) {
@@ -147,41 +146,14 @@ func (h *haikuClient) callWithRetry(ctx context.Context, prompt string) (string,
 	}
 
 	for attempt := 0; attempt <= h.maxRetries; attempt++ {
-		if attempt > 0 {
-			backoff := h.initialBackoff * time.Duration(math.Pow(2, float64(attempt-1)))
-			select {
-			case <-time.After(backoff):
-			case <-ctx.Done():
-				return "", ctx.Err()
-			}
+		if err := waitRetry(ctx, h.initialBackoff, attempt); err != nil {
+			return "", err
 		}
 
-		t0 := time.Now()
-		message, err := h.client.Messages.New(ctx, params)
-		ms := float64(time.Since(t0).Milliseconds())
+		message, ms, err := h.callMessage(ctx, params)
 
 		if err == nil {
-			// Record token usage and latency.
-			modelAttr := attribute.String("bd.ai.model", h.model)
-			if aiMetrics.inputTokens != nil {
-				aiMetrics.inputTokens.Add(ctx, message.Usage.InputTokens, metric.WithAttributes(modelAttr))
-				aiMetrics.outputTokens.Add(ctx, message.Usage.OutputTokens, metric.WithAttributes(modelAttr))
-				aiMetrics.duration.Record(ctx, ms, metric.WithAttributes(modelAttr))
-			}
-			span.SetAttributes(
-				attribute.Int64("bd.ai.input_tokens", message.Usage.InputTokens),
-				attribute.Int64("bd.ai.output_tokens", message.Usage.OutputTokens),
-				attribute.Int("bd.ai.attempts", attempt+1),
-			)
-
-			if len(message.Content) > 0 {
-				content := message.Content[0]
-				if content.Type == "text" {
-					return content.Text, nil
-				}
-				return "", fmt.Errorf("unexpected response format: not a text block (type=%s)", content.Type)
-			}
-			return "", fmt.Errorf("unexpected response format: no content blocks")
+			return h.processMessage(ctx, span, message, ms, attempt)
 		}
 
 		lastErr = err
@@ -190,10 +162,8 @@ func (h *haikuClient) callWithRetry(ctx context.Context, prompt string) (string,
 			return "", ctx.Err()
 		}
 
-		if !isRetryable(err) {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			return "", fmt.Errorf("non-retryable error: %w", err)
+		if err := nonRetryableError(span, err); err != nil {
+			return "", err
 		}
 	}
 
@@ -202,6 +172,56 @@ func (h *haikuClient) callWithRetry(ctx context.Context, prompt string) (string,
 		span.SetStatus(codes.Error, lastErr.Error())
 	}
 	return "", fmt.Errorf("failed after %d retries: %w", h.maxRetries+1, lastErr)
+}
+
+func waitRetry(ctx context.Context, initialBackoff time.Duration, attempt int) error {
+	if attempt == 0 {
+		return nil
+	}
+	backoff := initialBackoff * time.Duration(math.Pow(2, float64(attempt-1)))
+	select {
+	case <-time.After(backoff):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (h *haikuClient) callMessage(ctx context.Context, params anthropic.MessageNewParams) (*anthropic.Message, float64, error) {
+	started := time.Now()
+	message, err := h.client.Messages.New(ctx, params)
+	return message, float64(time.Since(started).Milliseconds()), err
+}
+
+func (h *haikuClient) processMessage(ctx context.Context, span trace.Span, message *anthropic.Message, ms float64, attempt int) (string, error) {
+	modelAttr := attribute.String("bd.ai.model", h.model)
+	if h.metrics.inputTokens != nil {
+		h.metrics.inputTokens.Add(ctx, message.Usage.InputTokens, metric.WithAttributes(modelAttr))
+		h.metrics.outputTokens.Add(ctx, message.Usage.OutputTokens, metric.WithAttributes(modelAttr))
+		h.metrics.duration.Record(ctx, ms, metric.WithAttributes(modelAttr))
+	}
+	span.SetAttributes(
+		attribute.Int64("bd.ai.input_tokens", message.Usage.InputTokens),
+		attribute.Int64("bd.ai.output_tokens", message.Usage.OutputTokens),
+		attribute.Int("bd.ai.attempts", attempt+1),
+	)
+	if len(message.Content) == 0 {
+		return "", fmt.Errorf("unexpected response format: no content blocks")
+	}
+	content := message.Content[0]
+	if content.Type != "text" {
+		return "", fmt.Errorf("unexpected response format: not a text block (type=%s)", content.Type)
+	}
+	return content.Text, nil
+}
+
+func nonRetryableError(span trace.Span, err error) error {
+	if isRetryable(err) {
+		return nil
+	}
+	span.RecordError(err)
+	span.SetStatus(codes.Error, err.Error())
+	return fmt.Errorf("non-retryable error: %w", err)
 }
 
 func isRetryable(err error) bool {

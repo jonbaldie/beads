@@ -17,9 +17,15 @@ func TestSingleIssueSnapshot(t *testing.T) {
 	t.Parallel()
 	now := time.Now()
 	issue := &types.Issue{
-		ID:        "test-001",
-		Status:    types.StatusOpen,
-		UpdatedAt: now,
+		IssueID: types.IssueID{
+			ID: "test-001",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status: types.StatusOpen,
+		},
+		IssueTimes: types.IssueTimes{
+			UpdatedAt: now,
+		},
 	}
 
 	snap1 := singleIssueSnapshot(issue)
@@ -72,12 +78,20 @@ func TestWatchIssueDetectsStatusChange(t *testing.T) {
 
 	// Create an open issue
 	issue := &types.Issue{
-		ID:        generateUniqueTestID(t, "test", 0),
-		Title:     "watch regression test",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: generateUniqueTestID(t, "test", 0),
+		},
+		IssueContent: types.IssueContent{
+			Title: "watch regression test",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
 	}
 	if err := s.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -132,12 +146,20 @@ func TestWatchIssueDetectsFieldUpdate(t *testing.T) {
 	// create.go), making the gap deterministic.
 	seeded := time.Now().Add(-time.Hour)
 	issue := &types.Issue{
-		ID:        generateUniqueTestID(t, "test", 0),
-		Title:     "original title",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
-		CreatedAt: seeded,
-		UpdatedAt: seeded,
+		IssueID: types.IssueID{
+			ID: generateUniqueTestID(t, "test", 0),
+		},
+		IssueContent: types.IssueContent{
+			Title: "original title",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: seeded,
+			UpdatedAt: seeded,
+		},
 	}
 	if err := s.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)

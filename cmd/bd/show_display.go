@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jonbaldie/beads/internal/storage"
 	"github.com/jonbaldie/beads/internal/types"
 	"github.com/jonbaldie/beads/internal/ui"
 	"github.com/jonbaldie/beads/internal/uimd"
@@ -70,7 +71,7 @@ func watchIssue(ctx context.Context, issueID string) {
 
 // fetchIssue retrieves a single issue by ID, returning nil on error.
 func fetchIssue(ctx context.Context, issueID string) *types.Issue {
-	result, err := resolveAndGetIssueWithRouting(ctx, store, issueID)
+	result, err := resolveAndGetIssueWithRouting(ctx, getStore(), issueID)
 	if result != nil {
 		defer result.Close()
 	}
@@ -82,7 +83,7 @@ func fetchIssue(ctx context.Context, issueID string) *types.Issue {
 
 // displayShowIssueReturn displays a single issue and returns it for snapshot use.
 func displayShowIssueReturn(ctx context.Context, issueID string) *types.Issue {
-	result, err := resolveAndGetIssueWithRouting(ctx, store, issueID)
+	result, err := resolveAndGetIssueWithRouting(ctx, getStore(), issueID)
 	if result != nil {
 		defer result.Close()
 	}
@@ -94,62 +95,64 @@ func displayShowIssueReturn(ctx context.Context, issueID string) *types.Issue {
 		fmt.Printf("Issue not found: %s\n", issueID)
 		return nil
 	}
-	issue := result.Issue
-	issueStore := result.Store
+	renderDisplayedIssue(ctx, result.Store, result.Issue)
+	return result.Issue
+}
 
-	// Display the issue header and metadata
+func renderDisplayedIssue(ctx context.Context, issueStore storage.DoltStorage, issue *types.Issue) {
 	fmt.Println(formatIssueHeader(issue))
 	fmt.Println(formatIssueMetadata(issue))
+	renderDisplayedContent(issue)
+	renderDisplayedLabels(issueStore, issue)
+	renderDisplayedRelations(ctx, issueStore, issue)
+	renderDisplayedComments(ctx, issueStore, issue)
+	fmt.Println()
+}
 
-	// Content sections (matches standard bd show order)
-	if issue.Description != "" {
-		fmt.Printf("\n%s\n%s\n", ui.RenderBold("DESCRIPTION"), uimd.RenderMarkdown(issue.Description))
-	}
-	if issue.Design != "" {
-		fmt.Printf("\n%s\n%s\n", ui.RenderBold("DESIGN"), uimd.RenderMarkdown(issue.Design))
-	}
-	if issue.Notes != "" {
-		fmt.Printf("\n%s\n%s\n", ui.RenderBold("NOTES"), uimd.RenderMarkdown(issue.Notes))
-	}
-	if issue.AcceptanceCriteria != "" {
-		fmt.Printf("\n%s\n%s\n", ui.RenderBold("ACCEPTANCE CRITERIA"), uimd.RenderMarkdown(issue.AcceptanceCriteria))
-	}
+func renderDisplayedContent(issue *types.Issue) {
+	renderDisplayedField("DESCRIPTION", issue.Description)
+	renderDisplayedField("DESIGN", issue.Design)
+	renderDisplayedField("NOTES", issue.Notes)
+	renderDisplayedField("ACCEPTANCE CRITERIA", issue.AcceptanceCriteria)
+}
 
-	// Labels
-	labels, _ := issueStore.GetLabels(ctx, issue.ID)
+func renderDisplayedField(label, value string) {
+	if value != "" {
+		fmt.Printf("\n%s\n%s\n", ui.RenderBold(label), uimd.RenderMarkdown(value))
+	}
+}
+
+func renderDisplayedLabels(issueStore storage.DoltStorage, issue *types.Issue) {
+	labels, _ := issueStore.GetLabels(context.Background(), issue.ID)
 	if len(labels) > 0 {
 		fmt.Printf("\n%s %s\n", ui.RenderBold("LABELS:"), strings.Join(labels, ", "))
 	}
+}
 
-	// Dependencies (what this issue depends on)
+func renderDisplayedRelations(ctx context.Context, issueStore storage.DoltStorage, issue *types.Issue) {
 	relatedSeen := make(map[string]*types.IssueWithDependencyMetadata)
 	depsWithMeta, _ := issueStore.GetDependenciesWithMetadata(ctx, issue.ID)
 	for _, sec := range groupDepSections(depsWithMeta, true, relatedSeen) {
 		printDepSection(sec)
 	}
-
-	// Dependents (what depends on this issue)
 	dependentsWithMeta, _ := issueStore.GetDependentsWithMetadata(ctx, issue.ID)
 	for _, sec := range groupDepSections(dependentsWithMeta, false, relatedSeen) {
 		printDepSection(sec)
 	}
-
-	// Related (bidirectional, deduplicated)
 	printRelatedSection(relatedSeen)
+}
 
-	// Comments
+func renderDisplayedComments(ctx context.Context, issueStore storage.DoltStorage, issue *types.Issue) {
 	comments, _ := issueStore.GetIssueComments(ctx, issue.ID)
-	if len(comments) > 0 {
-		fmt.Printf("\n%s\n", ui.RenderBold("COMMENTS"))
-		for _, comment := range comments {
-			fmt.Printf("  %s %s\n", ui.RenderMuted(comment.CreatedAt.UTC().Format("2006-01-02 15:04")), comment.Author)
-			rendered := uimd.RenderMarkdown(comment.Text)
-			for _, line := range strings.Split(strings.TrimRight(rendered, "\n"), "\n") {
-				fmt.Printf("    %s\n", line)
-			}
+	if len(comments) == 0 {
+		return
+	}
+	fmt.Printf("\n%s\n", ui.RenderBold("COMMENTS"))
+	for _, comment := range comments {
+		fmt.Printf("  %s %s\n", ui.RenderMuted(comment.CreatedAt.UTC().Format("2006-01-02 15:04")), comment.Author)
+		rendered := uimd.RenderMarkdown(comment.Text)
+		for _, line := range strings.Split(strings.TrimRight(rendered, "\n"), "\n") {
+			fmt.Printf("    %s\n", line)
 		}
 	}
-
-	fmt.Println()
-	return issue
 }

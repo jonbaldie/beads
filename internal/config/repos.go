@@ -14,12 +14,6 @@ type ReposConfig struct {
 	Additional []string `yaml:"additional,omitempty,flow"`
 }
 
-// configFile represents the structure for reading/writing config.yaml
-// We use yaml.Node to preserve comments and formatting
-type configFile struct {
-	root yaml.Node
-}
-
 // FindConfigYAMLPath finds the config.yaml file in .beads directory
 // Walks up from CWD to find .beads/config.yaml
 func FindConfigYAMLPath() (string, error) {
@@ -33,134 +27,140 @@ func FindConfigYAMLPath() (string, error) {
 // GetReposFromYAML reads the repos configuration from config.yaml
 // Returns an empty ReposConfig if repos section doesn't exist
 func GetReposFromYAML(configPath string) (*ReposConfig, error) {
-	data, err := os.ReadFile(configPath) // #nosec G304 - config file path from caller
+	data, err := readReposConfig(configPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return &ReposConfig{}, nil
-		}
+		return nil, err
+	}
+	if data == nil {
+		return &ReposConfig{}, nil
+	}
+	return parseReposConfig(data)
+}
+
+func readReposConfig(configPath string) ([]byte, error) {
+	data, err := os.ReadFile(configPath) // #nosec G304 - config file path from caller
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
 		return nil, fmt.Errorf("failed to read config.yaml: %w", err)
 	}
+	return data, nil
+}
 
-	// Parse into a generic map to extract repos section
+func parseReposConfig(data []byte) (*ReposConfig, error) {
 	var cfg map[string]interface{}
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config.yaml: %w", err)
 	}
+	reposRaw := cfg["repos"]
+	if reposRaw == nil {
+		return &ReposConfig{}, nil
+	}
+	reposMap, ok := reposRaw.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("repos section is not a map")
+	}
+	return reposConfigFromMap(reposMap), nil
+}
 
+func reposConfigFromMap(reposMap map[string]interface{}) *ReposConfig {
 	repos := &ReposConfig{}
-	if reposRaw, ok := cfg["repos"]; ok && reposRaw != nil {
-		reposMap, ok := reposRaw.(map[string]interface{})
-		if !ok {
-			return nil, fmt.Errorf("repos section is not a map")
-		}
-
-		if primary, ok := reposMap["primary"].(string); ok {
-			repos.Primary = primary
-		}
-
-		if additional, ok := reposMap["additional"]; ok && additional != nil {
-			switch v := additional.(type) {
-			case []interface{}:
-				for _, item := range v {
-					if str, ok := item.(string); ok {
-						repos.Additional = append(repos.Additional, str)
-					}
-				}
+	if primary, ok := reposMap["primary"].(string); ok {
+		repos.Primary = primary
+	}
+	if additional, ok := reposMap["additional"].([]interface{}); ok {
+		for _, item := range additional {
+			if str, ok := item.(string); ok {
+				repos.Additional = append(repos.Additional, str)
 			}
 		}
 	}
-
-	return repos, nil
+	return repos
 }
 
 // SetReposInYAML writes the repos configuration to config.yaml
 // It preserves other config sections and comments where possible
 func SetReposInYAML(configPath string, repos *ReposConfig) error {
-	// Read existing config or create new
-	data, err := os.ReadFile(configPath) // #nosec G304 - config file path from caller
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to read config.yaml: %w", err)
+	data, err := readReposConfig(configPath)
+	if err != nil {
+		return err
 	}
+	root, err := parseReposYAMLDocument(data)
+	if err != nil {
+		return err
+	}
+	updateReposDocument(root, repos)
+	encoded, err := encodeReposDocument(root)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(configPath, encoded, 0600); err != nil {
+		return fmt.Errorf("failed to write config.yaml: %w", err)
+	}
+	reloadReposConfig()
+	return nil
+}
 
-	// Parse existing config into yaml.Node to preserve structure
-	var root yaml.Node
+func parseReposYAMLDocument(data []byte) (*yaml.Node, error) {
+	root := &yaml.Node{}
 	if len(data) > 0 {
-		if err := yaml.Unmarshal(data, &root); err != nil {
-			return fmt.Errorf("failed to parse config.yaml: %w", err)
+		if err := yaml.Unmarshal(data, root); err != nil {
+			return nil, fmt.Errorf("failed to parse config.yaml: %w", err)
 		}
 	}
-
-	// Handle empty or comment-only files by creating a valid document structure
 	if root.Kind != yaml.DocumentNode || len(root.Content) == 0 {
-		root = yaml.Node{
-			Kind: yaml.DocumentNode,
-			Content: []*yaml.Node{
-				{Kind: yaml.MappingNode},
-			},
-		}
+		root.Kind = yaml.DocumentNode
+		root.Content = []*yaml.Node{{Kind: yaml.MappingNode}}
 	}
-
-	// Get the mapping node (first content of document)
-	mapping := root.Content[0]
-	if mapping.Kind != yaml.MappingNode {
-		// If the document content isn't a mapping, replace it with one
+	if root.Content[0].Kind != yaml.MappingNode {
 		root.Content[0] = &yaml.Node{Kind: yaml.MappingNode}
-		mapping = root.Content[0]
 	}
+	return root, nil
+}
 
-	// Find or create repos section
-	reposIndex := -1
-	for i := 0; i < len(mapping.Content); i += 2 {
-		if mapping.Content[i].Value == "repos" {
-			reposIndex = i
-			break
-		}
-	}
-
-	// Build the repos node
+func updateReposDocument(root *yaml.Node, repos *ReposConfig) {
+	mapping := root.Content[0]
+	index := reposNodeIndex(mapping)
 	reposNode := buildReposNode(repos)
-
-	if reposIndex >= 0 {
-		// Update existing repos section
-		if reposNode == nil {
-			// Remove repos section entirely if empty
-			mapping.Content = append(mapping.Content[:reposIndex], mapping.Content[reposIndex+2:]...)
-		} else {
-			mapping.Content[reposIndex+1] = reposNode
-		}
-	} else if reposNode != nil {
-		// Add new repos section at the end
+	switch {
+	case index >= 0 && reposNode == nil:
+		mapping.Content = append(mapping.Content[:index], mapping.Content[index+2:]...)
+	case index >= 0:
+		mapping.Content[index+1] = reposNode
+	case reposNode != nil:
 		mapping.Content = append(mapping.Content,
-			&yaml.Node{Kind: yaml.ScalarNode, Value: "repos"},
-			reposNode,
-		)
+			&yaml.Node{Kind: yaml.ScalarNode, Value: "repos"}, reposNode)
 	}
+}
 
-	// Marshal back to YAML
+func reposNodeIndex(mapping *yaml.Node) int {
+	count := len(mapping.Content)
+	for i := 0; i < count; i += 2 {
+		if mapping.Content[i].Value == "repos" {
+			return i
+		}
+	}
+	return -1
+}
+
+func encodeReposDocument(root *yaml.Node) ([]byte, error) {
 	var buf strings.Builder
 	encoder := yaml.NewEncoder(&buf)
 	encoder.SetIndent(2)
-	if err := encoder.Encode(&root); err != nil {
-		return fmt.Errorf("failed to encode config.yaml: %w", err)
+	if err := encoder.Encode(root); err != nil {
+		return nil, fmt.Errorf("failed to encode config.yaml: %w", err)
 	}
 	if err := encoder.Close(); err != nil {
-		return fmt.Errorf("failed to close encoder: %w", err)
+		return nil, fmt.Errorf("failed to close encoder: %w", err)
 	}
+	return []byte(buf.String()), nil
+}
 
-	// Write back to file
-	if err := os.WriteFile(configPath, []byte(buf.String()), 0600); err != nil {
-		return fmt.Errorf("failed to write config.yaml: %w", err)
-	}
-
-	// Reload viper config so changes take effect immediately
+func reloadReposConfig() {
 	if v != nil {
-		if err := v.ReadInConfig(); err != nil {
-			// Not fatal - config is on disk, will be picked up on next command
-			_ = err // Best effort: viper reload failure is non-fatal since config was already written to disk
-		}
+		_ = v.ReadInConfig()
 	}
-
-	return nil
 }
 
 // buildReposNode creates a yaml.Node for the repos configuration

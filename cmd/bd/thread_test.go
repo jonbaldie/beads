@@ -20,22 +20,73 @@ func TestThreadTraversalSuite(t *testing.T) {
 
 	// === Linear chain data: original → reply1 → reply2 ===
 	original := &types.Issue{
-		ID: "tt-orig", Title: "Original Message", Description: "This is the original message",
-		Status: types.StatusOpen, Priority: 2, IssueType: "message",
-		Assignee: "worker", Sender: "manager", Ephemeral: true,
-		CreatedAt: now, UpdatedAt: now,
+		IssueID: types.IssueID{
+			ID: "tt-orig",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Original Message",
+			Description: "This is the original message",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: "message",
+			Assignee:  "worker",
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+		IssueWisp: types.IssueWisp{
+			Sender:    "manager",
+			Ephemeral: true,
+		},
 	}
 	reply1 := &types.Issue{
-		ID: "tt-reply1", Title: "Re: Original Message", Description: "This is reply 1",
-		Status: types.StatusOpen, Priority: 2, IssueType: "message",
-		Assignee: "manager", Sender: "worker", Ephemeral: true,
-		CreatedAt: now.Add(time.Minute), UpdatedAt: now.Add(time.Minute),
+		IssueID: types.IssueID{
+			ID: "tt-reply1",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Re: Original Message",
+			Description: "This is reply 1",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: "message",
+			Assignee:  "manager",
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now.Add(time.Minute),
+			UpdatedAt: now.Add(time.Minute),
+		},
+		IssueWisp: types.IssueWisp{
+			Sender:    "worker",
+			Ephemeral: true,
+		},
 	}
 	reply2 := &types.Issue{
-		ID: "tt-reply2", Title: "Re: Re: Original Message", Description: "This is reply 2",
-		Status: types.StatusOpen, Priority: 2, IssueType: "message",
-		Assignee: "worker", Sender: "manager", Ephemeral: true,
-		CreatedAt: now.Add(2 * time.Minute), UpdatedAt: now.Add(2 * time.Minute),
+		IssueID: types.IssueID{
+			ID: "tt-reply2",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Re: Re: Original Message",
+			Description: "This is reply 2",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: "message",
+			Assignee:  "worker",
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now.Add(2 * time.Minute),
+			UpdatedAt: now.Add(2 * time.Minute),
+		},
+		IssueWisp: types.IssueWisp{
+			Sender:    "manager",
+			Ephemeral: true,
+		},
 	}
 	for _, msg := range []*types.Issue{original, reply1, reply2} {
 		if err := testStore.CreateIssue(ctx, msg, "test"); err != nil {
@@ -53,10 +104,27 @@ func TestThreadTraversalSuite(t *testing.T) {
 
 	// === Standalone message data ===
 	standalone := &types.Issue{
-		ID: "tt-standalone", Title: "Standalone Message", Description: "No thread",
-		Status: types.StatusOpen, Priority: 2, IssueType: "message",
-		Assignee: "user", Sender: "sender", Ephemeral: true,
-		CreatedAt: now, UpdatedAt: now,
+		IssueID: types.IssueID{
+			ID: "tt-standalone",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Standalone Message",
+			Description: "No thread",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: "message",
+			Assignee:  "user",
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+		IssueWisp: types.IssueWisp{
+			Sender:    "sender",
+			Ephemeral: true,
+		},
 	}
 	if err := testStore.CreateIssue(ctx, standalone, "test"); err != nil {
 		t.Fatalf("CreateIssue(standalone): %v", err)
@@ -64,22 +132,73 @@ func TestThreadTraversalSuite(t *testing.T) {
 
 	// === Branching data: branchOrig → replyA, replyB ===
 	branchOrig := &types.Issue{
-		ID: "tt-branch-orig", Title: "Branch Original", Description: "Multiple replies",
-		Status: types.StatusOpen, Priority: 2, IssueType: "message",
-		Assignee: "user", Sender: "sender", Ephemeral: true,
-		CreatedAt: now, UpdatedAt: now,
+		IssueID: types.IssueID{
+			ID: "tt-branch-orig",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Branch Original",
+			Description: "Multiple replies",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: "message",
+			Assignee:  "user",
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+		IssueWisp: types.IssueWisp{
+			Sender:    "sender",
+			Ephemeral: true,
+		},
 	}
 	replyA := &types.Issue{
-		ID: "tt-reply-a", Title: "Reply A", Description: "First branch",
-		Status: types.StatusOpen, Priority: 2, IssueType: "message",
-		Assignee: "sender", Sender: "user", Ephemeral: true,
-		CreatedAt: now.Add(time.Minute), UpdatedAt: now.Add(time.Minute),
+		IssueID: types.IssueID{
+			ID: "tt-reply-a",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Reply A",
+			Description: "First branch",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: "message",
+			Assignee:  "sender",
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now.Add(time.Minute),
+			UpdatedAt: now.Add(time.Minute),
+		},
+		IssueWisp: types.IssueWisp{
+			Sender:    "user",
+			Ephemeral: true,
+		},
 	}
 	replyB := &types.Issue{
-		ID: "tt-reply-b", Title: "Reply B", Description: "Second branch",
-		Status: types.StatusOpen, Priority: 2, IssueType: "message",
-		Assignee: "sender", Sender: "another-user", Ephemeral: true,
-		CreatedAt: now.Add(2 * time.Minute), UpdatedAt: now.Add(2 * time.Minute),
+		IssueID: types.IssueID{
+			ID: "tt-reply-b",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Reply B",
+			Description: "Second branch",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: "message",
+			Assignee:  "sender",
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now.Add(2 * time.Minute),
+			UpdatedAt: now.Add(2 * time.Minute),
+		},
+		IssueWisp: types.IssueWisp{
+			Sender:    "another-user",
+			Ephemeral: true,
+		},
 	}
 	for _, msg := range []*types.Issue{branchOrig, replyA, replyB} {
 		if err := testStore.CreateIssue(ctx, msg, "test"); err != nil {
@@ -97,16 +216,50 @@ func TestThreadTraversalSuite(t *testing.T) {
 
 	// === OnlyRepliesTo data: blocks dep should be ignored ===
 	msg1 := &types.Issue{
-		ID: "tt-blocks-1", Title: "Message 1", Description: "Target of blocks dep",
-		Status: types.StatusOpen, Priority: 2, IssueType: "message",
-		Assignee: "user", Sender: "sender", Ephemeral: true,
-		CreatedAt: now, UpdatedAt: now,
+		IssueID: types.IssueID{
+			ID: "tt-blocks-1",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Message 1",
+			Description: "Target of blocks dep",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: "message",
+			Assignee:  "user",
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+		IssueWisp: types.IssueWisp{
+			Sender:    "sender",
+			Ephemeral: true,
+		},
 	}
 	msg2 := &types.Issue{
-		ID: "tt-blocks-2", Title: "Message 2", Description: "Has blocks dep to msg1",
-		Status: types.StatusOpen, Priority: 2, IssueType: "message",
-		Assignee: "user", Sender: "sender", Ephemeral: true,
-		CreatedAt: now.Add(time.Minute), UpdatedAt: now.Add(time.Minute),
+		IssueID: types.IssueID{
+			ID: "tt-blocks-2",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Message 2",
+			Description: "Has blocks dep to msg1",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: "message",
+			Assignee:  "user",
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now.Add(time.Minute),
+			UpdatedAt: now.Add(time.Minute),
+		},
+		IssueWisp: types.IssueWisp{
+			Sender:    "sender",
+			Ephemeral: true,
+		},
 	}
 	for _, msg := range []*types.Issue{msg1, msg2} {
 		if err := testStore.CreateIssue(ctx, msg, "test"); err != nil {

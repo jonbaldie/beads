@@ -46,24 +46,37 @@ type beadsDirHandle interface {
 }
 
 func fixBeadsDirPermissions(path string, openDir func(string) (beadsDirHandle, error)) (bool, error) {
+	info, exists, err := inspectBeadsDir(path)
+	if err != nil {
+		return false, err
+	}
+	if !exists {
+		return false, nil // directory doesn't exist yet
+	}
+	if info.Mode().Perm()&0077 == 0 {
+		return false, nil // no group or world-accessible bits
+	}
+	return repairBeadsDirPermissions(path, info, openDir)
+}
+
+func inspectBeadsDir(path string) (os.FileInfo, bool, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return false, nil // directory doesn't exist yet
+			return nil, false, nil
 		}
-		return false, fmt.Errorf("failed to inspect %s: %w", path, err)
+		return nil, false, fmt.Errorf("failed to inspect %s: %w", path, err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return false, fmt.Errorf("refusing to chmod %s: path is a symbolic link", path)
+		return nil, false, fmt.Errorf("refusing to chmod %s: path is a symbolic link", path)
 	}
 	if !info.IsDir() {
-		return false, fmt.Errorf("refusing to chmod %s: path is not a directory", path)
+		return nil, false, fmt.Errorf("refusing to chmod %s: path is not a directory", path)
 	}
-	perm := info.Mode().Perm()
-	if perm&0077 == 0 {
-		return false, nil // no group or world-accessible bits
-	}
+	return info, true, nil
+}
 
+func repairBeadsDirPermissions(path string, info os.FileInfo, openDir func(string) (beadsDirHandle, error)) (bool, error) {
 	dir, err := openDir(path)
 	if err != nil {
 		return false, fmt.Errorf("failed to open %s securely: %w", path, err)

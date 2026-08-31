@@ -343,11 +343,6 @@ func TestRunWorktreeCreateFailsWhenCreatedWorktreeIsDirty(t *testing.T) {
 		return fmt.Errorf("created worktree is dirty after checkout; refusing to continue: %s\n?? dirty.txt", worktreePath)
 	}
 
-	worktreeBranch = ""
-	t.Cleanup(func() {
-		worktreeBranch = ""
-	})
-
 	err := runWorktreeCreate(worktreeCreateCmd, []string{"dirty-created"})
 	if err == nil {
 		t.Fatal("runWorktreeCreate should fail when post-create cleanliness check fails")

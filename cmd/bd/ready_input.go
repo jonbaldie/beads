@@ -55,7 +55,26 @@ type readyInput struct {
 // when a later check aborts the command.
 func gatherReadyInput(cmd *cobra.Command, resolveCap func(*cobra.Command) (int, string, error)) (readyInput, error) {
 	in := readyInput{}
+	gatherReadyModeFlags(cmd, &in)
+	gatherReadyQueryFlags(cmd, &in)
+	if err := gatherReadyMolType(cmd, &in); err != nil {
+		return in, err
+	}
+	if err := validateReadyModeCombos(&in); err != nil {
+		return in, err
+	}
+	maxRows, maxRowsSource, err := resolveReadyCap(cmd, resolveCap)
+	if err != nil {
+		return in, err
+	}
+	gatherReadyPriority(cmd, &in)
+	if err := gatherReadyMetadataFilters(cmd, &in); err != nil {
+		return in, err
+	}
+	return finishReadyInput(&in, maxRows, maxRowsSource)
+}
 
+func gatherReadyModeFlags(cmd *cobra.Command, in *readyInput) {
 	in.claim, _ = cmd.Flags().GetBool("claim")
 	in.gated, _ = cmd.Flags().GetBool("gated")
 	in.molID, _ = cmd.Flags().GetString("mol")
@@ -63,8 +82,10 @@ func gatherReadyInput(cmd *cobra.Command, resolveCap func(*cobra.Command) (int, 
 	in.Brief, _ = cmd.Flags().GetBool("brief")
 	in.prettyFormat, _ = cmd.Flags().GetBool("pretty")
 	in.plainFormat, _ = cmd.Flags().GetBool("plain")
-	in.jsonOut = jsonOutput
+	in.jsonOut = isJSONOutput()
+}
 
+func gatherReadyQueryFlags(cmd *cobra.Command, in *readyInput) {
 	limit, _ := cmd.Flags().GetInt("limit")
 	in.Limit = &limit
 	// A negative --offset is not a page request, so it never reaches the
@@ -87,80 +108,116 @@ func gatherReadyInput(cmd *cobra.Command, resolveCap func(*cobra.Command) (int, 
 	in.IncludeDeferred, _ = cmd.Flags().GetBool("include-deferred")
 	in.IncludeEphemeral, _ = cmd.Flags().GetBool("include-ephemeral")
 	in.ExcludeTypes, _ = cmd.Flags().GetStringSlice("exclude-type")
+}
 
-	if molTypeStr, _ := cmd.Flags().GetString("mol-type"); molTypeStr != "" {
-		mt := types.MolType(molTypeStr)
-		if !mt.IsValid() {
-			return in, HandleErrorRespectJSON("invalid mol-type %q (must be %s)", molTypeStr, types.ValidMolTypeNames())
-		}
-		in.MolType = &mt
+func gatherReadyMolType(cmd *cobra.Command, in *readyInput) error {
+	molTypeStr, _ := cmd.Flags().GetString("mol-type")
+	if molTypeStr == "" {
+		return nil
 	}
+	mt := types.MolType(molTypeStr)
+	if !mt.IsValid() {
+		return HandleErrorRespectJSON("invalid mol-type %q (must be %s)", molTypeStr, types.ValidMolTypeNames())
+	}
+	in.MolType = &mt
+	return nil
+}
 
-	if in.claim && in.Assignee != "" {
-		return in, HandleErrorRespectJSON("--claim cannot be combined with --assignee")
-	}
-	if in.claim && in.gated {
-		return in, HandleErrorRespectJSON("--claim cannot be combined with --gated")
-	}
-	if in.claim && in.molID != "" {
-		return in, HandleErrorRespectJSON("--claim cannot be combined with --mol")
-	}
-	if in.claim && in.explain {
-		return in, HandleErrorRespectJSON("--claim cannot be combined with --explain")
+func validateReadyModeCombos(in *readyInput) error {
+	if err := validateReadyClaimCombos(in); err != nil {
+		return err
 	}
 	if err := briefModeConflict(in.Brief, in.claim, in.gated, in.explain, in.molID, in.jsonOut); err != nil {
-		return in, err
+		return err
 	}
-	if in.Offset > 0 && in.claim {
-		return in, HandleErrorRespectJSON("--offset cannot be combined with --claim")
-	}
-	if in.Offset > 0 && in.gated {
-		return in, HandleErrorRespectJSON("--offset cannot be combined with --gated")
-	}
-	if in.Offset > 0 && in.molID != "" {
-		return in, HandleErrorRespectJSON("--offset cannot be combined with --mol")
-	}
-	if in.Offset > 0 && in.explain {
-		return in, HandleErrorRespectJSON("--offset cannot be combined with --explain")
-	}
+	return validateReadyOffsetCombos(in)
+}
 
-	var maxRows int
-	var maxRowsSource string
-	if resolveCap != nil {
-		var err error
-		if maxRows, maxRowsSource, err = resolveCap(cmd); err != nil {
-			return in, err
-		}
+func validateReadyClaimCombos(in *readyInput) error {
+	if !in.claim {
+		return nil
 	}
+	switch {
+	case in.Assignee != "":
+		return HandleErrorRespectJSON("--claim cannot be combined with --assignee")
+	case in.gated:
+		return HandleErrorRespectJSON("--claim cannot be combined with --gated")
+	case in.molID != "":
+		return HandleErrorRespectJSON("--claim cannot be combined with --mol")
+	case in.explain:
+		return HandleErrorRespectJSON("--claim cannot be combined with --explain")
+	}
+	return nil
+}
 
+func validateReadyOffsetCombos(in *readyInput) error {
+	if in.Offset <= 0 {
+		return nil
+	}
+	switch {
+	case in.claim:
+		return HandleErrorRespectJSON("--offset cannot be combined with --claim")
+	case in.gated:
+		return HandleErrorRespectJSON("--offset cannot be combined with --gated")
+	case in.molID != "":
+		return HandleErrorRespectJSON("--offset cannot be combined with --mol")
+	case in.explain:
+		return HandleErrorRespectJSON("--offset cannot be combined with --explain")
+	}
+	return nil
+}
+
+func resolveReadyCap(cmd *cobra.Command, resolveCap func(*cobra.Command) (int, string, error)) (int, string, error) {
+	if resolveCap == nil {
+		return 0, "", nil
+	}
+	return resolveCap(cmd)
+}
+
+func gatherReadyPriority(cmd *cobra.Command, in *readyInput) {
 	// Use Changed() to properly handle P0 (priority=0)
-	if cmd.Flags().Changed("priority") {
-		priority, _ := cmd.Flags().GetInt("priority")
-		in.Priority = &priority
+	if !cmd.Flags().Changed("priority") {
+		return
 	}
+	priority, _ := cmd.Flags().GetInt("priority")
+	in.Priority = &priority
+}
 
-	// Metadata filters (GH#1406)
+func gatherReadyMetadataFilters(cmd *cobra.Command, in *readyInput) error {
 	metadataFieldFlags, _ := cmd.Flags().GetStringArray("metadata-field")
-	if len(metadataFieldFlags) > 0 {
-		in.MetadataFields = make(map[string]string, len(metadataFieldFlags))
-		for _, mf := range metadataFieldFlags {
-			k, v, ok := strings.Cut(mf, "=")
-			if !ok || k == "" {
-				return in, HandleErrorRespectJSON("invalid --metadata-field: expected key=value, got %q", mf)
-			}
-			if err := storage.ValidateMetadataKey(k); err != nil {
-				return in, HandleErrorRespectJSON("invalid --metadata-field key: %v", err)
-			}
-			in.MetadataFields[k] = v
-		}
+	if err := applyReadyMetadataFields(metadataFieldFlags, in); err != nil {
+		return err
 	}
-	if k, _ := cmd.Flags().GetString("has-metadata-key"); k != "" {
-		if err := storage.ValidateMetadataKey(k); err != nil {
-			return in, HandleErrorRespectJSON("invalid --has-metadata-key: %v", err)
-		}
-		in.HasMetadataKey = k
+	k, _ := cmd.Flags().GetString("has-metadata-key")
+	if k == "" {
+		return nil
 	}
+	if err := storage.ValidateMetadataKey(k); err != nil {
+		return HandleErrorRespectJSON("invalid --has-metadata-key: %v", err)
+	}
+	in.HasMetadataKey = k
+	return nil
+}
 
+func applyReadyMetadataFields(flags []string, in *readyInput) error {
+	if len(flags) == 0 {
+		return nil
+	}
+	in.MetadataFields = make(map[string]string, len(flags))
+	for _, mf := range flags {
+		k, v, ok := strings.Cut(mf, "=")
+		if !ok || k == "" {
+			return HandleErrorRespectJSON("invalid --metadata-field: expected key=value, got %q", mf)
+		}
+		if err := storage.ValidateMetadataKey(k); err != nil {
+			return HandleErrorRespectJSON("invalid --metadata-field key: %v", err)
+		}
+		in.MetadataFields[k] = v
+	}
+	return nil
+}
+
+func finishReadyInput(in *readyInput, maxRows int, maxRowsSource string) (readyInput, error) {
 	// `bd ready` builds the filter rather than calling IssueReader(): its
 	// routes hand this filter to --claim, --gated, --explain and --mol, none
 	// of which the Reader role expresses, and they stamp the --max-rows cap
@@ -182,14 +239,19 @@ func gatherReadyInput(cmd *cobra.Command, resolveCap func(*cobra.Command) (int, 
 	// See issueops.Reader's doc comment.
 	filter, err := workapi.BuildReadyFilter(in.ReadyRequest)
 	if err != nil {
-		return in, HandleErrorRespectJSON("%v", err)
+		return *in, HandleErrorRespectJSON("%v", err)
 	}
 	// The cap is deliberately NOT a field on ReadyRequest: it is a local
 	// defense against a runaway query on this machine, not a property of the
 	// question being asked, and a server has no business honoring a client's.
 	filter.MaxRows = maxRows
 	filter.MaxRowsSource = maxRowsSource
+	applyReadyDirectoryLabels(in, &filter)
+	in.filter = filter
+	return *in, nil
+}
 
+func applyReadyDirectoryLabels(in *readyInput, filter *types.WorkFilter) {
 	// Directory-aware label scoping (GH#541). It is applied to the built
 	// filter rather than passed in as a parameter for two reasons: it is
 	// derived from the client's cwd, which a server process does not share,
@@ -201,18 +263,18 @@ func gatherReadyInput(cmd *cobra.Command, resolveCap func(*cobra.Command) (int, 
 	// The emptiness test reads the filter's label sets, which BuildReadyFilter
 	// has already normalized: `--label "  "` is no label at all and must not
 	// suppress the default.
-	if len(filter.Labels) == 0 && len(filter.LabelsAny) == 0 {
-		if dirLabels := config.GetDirectoryLabels(); len(dirLabels) > 0 {
-			filter.LabelsAny = dirLabels
-			// Recorded rather than recomputed downstream: the line above has
-			// just made the filter's label sets non-empty, so re-running the
-			// emptiness test would read its own output.
-			in.dirLabels = dirLabels
-		}
+	if len(filter.Labels) != 0 || len(filter.LabelsAny) != 0 {
+		return
 	}
-	in.filter = filter
-
-	return in, nil
+	dirLabels := config.GetDirectoryLabels()
+	if len(dirLabels) == 0 {
+		return
+	}
+	filter.LabelsAny = dirLabels
+	// Recorded rather than recomputed downstream: the line above has
+	// just made the filter's label sets non-empty, so re-running the
+	// emptiness test would read its own output.
+	in.dirLabels = dirLabels
 }
 
 // readyRoleRequest is the request `bd ready` hands the two roles that take a
@@ -257,7 +319,7 @@ func readyRoleRequest(in readyInput) issueops.ReadyRequest {
 // claimNextRequest is `bd ready --claim`'s request to the ReadyClaimer role:
 // the shared ready question above, plus the claimant.
 func claimNextRequest(in readyInput) issueops.ClaimNextRequest {
-	return issueops.ClaimNextRequest{Actor: actor, Filter: readyRoleRequest(in)}
+	return issueops.ClaimNextRequest{Actor: getActor(), Filter: readyRoleRequest(in)}
 }
 
 // briefModeConflict reports the usage error for a --brief combination that no
@@ -311,5 +373,5 @@ func briefModeConflictFromFlags(cmd *cobra.Command) error {
 	gated, _ := cmd.Flags().GetBool("gated")
 	explain, _ := cmd.Flags().GetBool("explain")
 	molID, _ := cmd.Flags().GetString("mol")
-	return briefModeConflict(brief, claim, gated, explain, molID, jsonOutput)
+	return briefModeConflict(brief, claim, gated, explain, molID, isJSONOutput())
 }

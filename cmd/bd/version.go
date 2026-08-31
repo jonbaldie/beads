@@ -40,7 +40,7 @@ var versionCmd = &cobra.Command{
 		commit := resolveCommitHash()
 		branch := resolveBranch()
 
-		if jsonOutput {
+		if isJSONOutput() {
 			result := map[string]interface{}{
 				"version": Version,
 				"build":   Build,
@@ -107,29 +107,41 @@ func resolveBranch() string {
 	if Branch != "" {
 		return Branch
 	}
+	if branch := buildInfoSetting("vcs.branch"); branch != "" {
+		return branch
+	}
+	return runtimeBranch()
+}
 
-	// Try to get branch from build info (build-time VCS detection)
-	if info, ok := debug.ReadBuildInfo(); ok {
-		for _, setting := range info.Settings {
-			if setting.Key == "vcs.branch" && setting.Value != "" {
-				return setting.Value
-			}
+func buildInfoSetting(key string) string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	for _, setting := range info.Settings {
+		if setting.Key == key && setting.Value != "" {
+			return setting.Value
 		}
 	}
-
-	// Fallback: try to get branch from git at runtime
-	// Use symbolic-ref to work in fresh repos without commits
-	// Uses CWD repo context since this shows user's current branch
-	if rc, err := beads.GetRepoContext(); err == nil {
-		cmd := rc.GitCmdCWD(context.Background(), "symbolic-ref", "--short", "HEAD")
-		if output, err := cmd.Output(); err == nil {
-			if branch := strings.TrimSpace(string(output)); branch != "" && branch != "HEAD" {
-				return branch
-			}
-		}
-	}
-
 	return ""
+}
+
+func runtimeBranch() string {
+	// Use symbolic-ref to work in fresh repos without commits.
+	rc, err := beads.GetRepoContext()
+	if err != nil {
+		return ""
+	}
+	cmd := rc.GitCmdCWD(context.Background(), "symbolic-ref", "--short", "HEAD")
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	branch := strings.TrimSpace(string(output))
+	if branch == "" || branch == "HEAD" {
+		return ""
+	}
+	return branch
 }
 
 // findDuplicateBinaries searches PATH for all "bd" executables.

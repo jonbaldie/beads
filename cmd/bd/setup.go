@@ -14,17 +14,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	setupProject bool
-	setupGlobal  bool
-	setupCheck   bool
-	setupRemove  bool
-	setupStealth bool
-	setupPrint   bool
-	setupOutput  string
-	setupList    bool
-	setupAdd     string
-)
+type setupOptions struct {
+	project bool
+	global  bool
+	check   bool
+	remove  bool
+	stealth bool
+	print   bool
+	output  string
+	list    bool
+	add     string
+}
 
 var setupCmd = &cobra.Command{
 	Use:     "setup [recipe]",
@@ -66,28 +66,56 @@ func runSetup(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	if setupList {
+	return dispatchSetup(cmd, args, setupOptionsFromCommand(cmd))
+}
+
+func setupOptionsFromCommand(cmd *cobra.Command) setupOptions {
+	return setupOptions{
+		project: setupFlagBool(cmd, "project"),
+		global:  setupFlagBool(cmd, "global"),
+		check:   setupFlagBool(cmd, "check"),
+		remove:  setupFlagBool(cmd, "remove"),
+		stealth: setupFlagBool(cmd, "stealth"),
+		print:   setupFlagBool(cmd, "print"),
+		output:  setupFlagString(cmd, "output"),
+		list:    setupFlagBool(cmd, "list"),
+		add:     setupFlagString(cmd, "add"),
+	}
+}
+
+func setupFlagBool(cmd *cobra.Command, name string) bool {
+	value, _ := cmd.Flags().GetBool(name)
+	return value
+}
+
+func setupFlagString(cmd *cobra.Command, name string) string {
+	value, _ := cmd.Flags().GetString(name)
+	return value
+}
+
+func dispatchSetup(cmd *cobra.Command, args []string, opts setupOptions) error {
+	if opts.list {
 		return listRecipes()
 	}
 
-	if setupPrint {
+	if opts.print {
 		fmt.Print(recipes.Template)
 		return nil
 	}
 
-	if setupOutput != "" {
-		if err := writeToPath(setupOutput); err != nil {
+	if opts.output != "" {
+		if err := writeToPath(opts.output); err != nil {
 			return HandleError("%v", err)
 		}
-		fmt.Printf("✓ Wrote template to %s\n", setupOutput)
+		fmt.Printf("✓ Wrote template to %s\n", opts.output)
 		return nil
 	}
 
-	if setupAdd != "" {
+	if opts.add != "" {
 		if len(args) != 1 {
 			return HandleErrorWithHint("--add requires a path argument", "Usage: bd setup --add <name> <path>")
 		}
-		if err := addRecipe(setupAdd, args[0]); err != nil {
+		if err := addRecipe(opts.add, args[0]); err != nil {
 			return HandleError("%v", err)
 		}
 		return nil
@@ -99,7 +127,7 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	}
 
 	recipeName := strings.ToLower(args[0])
-	return runRecipe(recipeName)
+	return runRecipe(recipeName, opts)
 }
 
 func setupWorkspaceError() error {
@@ -207,26 +235,9 @@ func addRecipe(name, path string) error {
 	return nil
 }
 
-func runRecipe(name string) error {
-	switch name {
-	case "claude":
-		return runClaudeRecipe()
-	case "gemini":
-		return runGeminiRecipe()
-	case "factory":
-		return runFactoryRecipe()
-	case "codex":
-		return runCodexRecipe()
-	case "mux":
-		return runMuxRecipe()
-	case "opencode":
-		return runOpenCodeRecipe()
-	case "aider":
-		return runAiderRecipe()
-	case "cursor":
-		return runCursorRecipe()
-	case "junie":
-		return runJunieRecipe()
+func runRecipe(name string, opts setupOptions) error {
+	if handled, err := runSpecialSetupRecipe(name, opts); handled {
+		return err
 	}
 
 	recipe, err := lookupSetupRecipe(name)
@@ -237,56 +248,93 @@ func runRecipe(name string) error {
 	if recipe.Type != recipes.TypeFile && recipe.Type != recipes.TypeMultiFile {
 		return HandleError("recipe '%s' has type '%s' which requires special handling", name, recipe.Type)
 	}
+	return runFileSetupRecipe(name, *recipe, opts)
+}
 
+func runSpecialSetupRecipe(name string, opts setupOptions) (bool, error) {
+	handlers := map[string]func(setupOptions) error{
+		"claude":   runClaudeRecipe,
+		"gemini":   runGeminiRecipe,
+		"factory":  runFactoryRecipe,
+		"codex":    runCodexRecipe,
+		"mux":      runMuxRecipe,
+		"opencode": runOpenCodeRecipe,
+		"aider":    runAiderRecipe,
+		"cursor":   runCursorRecipe,
+		"junie":    runJunieRecipe,
+	}
+	handler, ok := handlers[name]
+	if !ok {
+		return false, nil
+	}
+	return true, handler(opts)
+}
+
+func runFileSetupRecipe(name string, recipe recipes.Recipe, opts setupOptions) error {
 	paths := recipe.Paths
 	if recipe.Type == recipes.TypeFile {
 		paths = []string{recipe.Path}
 	}
 
-	if setupCheck {
-		var missing []string
-		for _, path := range paths {
-			if _, err := os.Stat(path); os.IsNotExist(err) {
-				missing = append(missing, path)
+	switch {
+	case opts.check:
+		return checkFileSetupRecipe(name, recipe.Name, paths)
+	case opts.remove:
+		return removeFileSetupRecipe(recipe.Name, paths)
+	default:
+		return installFileSetupRecipe(recipe.Name, recipe, paths)
+	}
+}
+
+func checkFileSetupRecipe(name, recipeName string, paths []string) error {
+	missing := missingSetupPaths(paths)
+	if len(missing) > 0 {
+		fmt.Printf("✗ %s integration not installed\n", recipeName)
+		fmt.Printf("  Run: bd setup %s\n", name)
+		for _, path := range missing {
+			fmt.Printf("  Missing: %s\n", path)
+		}
+		return SilentExit()
+	}
+	fmt.Printf("✓ %s integration installed\n", recipeName)
+	for _, path := range paths {
+		fmt.Printf("  File: %s\n", path)
+	}
+	return nil
+}
+
+func missingSetupPaths(paths []string) []string {
+	var missing []string
+	for _, path := range paths {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			missing = append(missing, path)
+		}
+	}
+	return missing
+}
+
+func removeFileSetupRecipe(recipeName string, paths []string) error {
+	removed := false
+	for _, path := range paths {
+		if err := os.Remove(path); err != nil {
+			if os.IsNotExist(err) {
+				continue
 			}
+			return HandleError("%v", err)
 		}
-		if len(missing) > 0 {
-			fmt.Printf("✗ %s integration not installed\n", recipe.Name)
-			fmt.Printf("  Run: bd setup %s\n", name)
-			for _, path := range missing {
-				fmt.Printf("  Missing: %s\n", path)
-			}
-			return SilentExit()
-		}
-		fmt.Printf("✓ %s integration installed\n", recipe.Name)
-		for _, path := range paths {
-			fmt.Printf("  File: %s\n", path)
-		}
+		removed = true
+		_ = os.Remove(filepath.Dir(path))
+	}
+	if !removed {
+		fmt.Println("No integration files found")
 		return nil
 	}
+	fmt.Printf("✓ Removed %s integration\n", recipeName)
+	return nil
+}
 
-	if setupRemove {
-		removed := false
-		for _, path := range paths {
-			if err := os.Remove(path); err != nil {
-				if os.IsNotExist(err) {
-					continue
-				}
-				return HandleError("%v", err)
-			}
-			removed = true
-			_ = os.Remove(filepath.Dir(path))
-		}
-		if !removed {
-			fmt.Println("No integration files found")
-			return nil
-		}
-		fmt.Printf("✓ Removed %s integration\n", recipe.Name)
-		return nil
-	}
-
-	fmt.Printf("Installing %s integration...\n", recipe.Name)
-
+func installFileSetupRecipe(recipeName string, recipe recipes.Recipe, paths []string) error {
+	fmt.Printf("Installing %s integration...\n", recipeName)
 	for _, path := range paths {
 		dir := filepath.Dir(path)
 		if dir != "." && dir != "" {
@@ -295,7 +343,7 @@ func runRecipe(name string) error {
 			}
 		}
 
-		content, err := recipes.ContentForPath(*recipe, path)
+		content, err := recipes.ContentForPath(recipe, path)
 		if err != nil {
 			return HandleError("%v", err)
 		}
@@ -304,7 +352,7 @@ func runRecipe(name string) error {
 		}
 	}
 
-	fmt.Printf("\n✓ %s integration installed\n", recipe.Name)
+	fmt.Printf("\n✓ %s integration installed\n", recipeName)
 	for _, path := range paths {
 		fmt.Printf("  File: %s\n", path)
 	}
@@ -318,99 +366,99 @@ func translateSetupError(err error) error {
 	return SilentExit()
 }
 
-func runCursorRecipe() error {
+func runCursorRecipe(opts setupOptions) error {
 	switch {
-	case setupCheck:
-		return translateSetupError(setup.CheckCursor(setupGlobal))
-	case setupRemove:
-		return translateSetupError(setup.RemoveCursor(setupGlobal))
+	case opts.check:
+		return translateSetupError(setup.CheckCursor(opts.global))
+	case opts.remove:
+		return translateSetupError(setup.RemoveCursor(opts.global))
 	default:
-		return translateSetupError(setup.InstallCursor(setupGlobal))
+		return translateSetupError(setup.InstallCursor(opts.global))
 	}
 }
 
-func runClaudeRecipe() error {
+func runClaudeRecipe(opts setupOptions) error {
 	switch {
-	case setupCheck:
+	case opts.check:
 		return translateSetupError(setup.CheckClaude())
-	case setupRemove:
-		return translateSetupError(setup.RemoveClaude(setupGlobal))
+	case opts.remove:
+		return translateSetupError(setup.RemoveClaude(opts.global))
 	default:
-		return translateSetupError(setup.InstallClaude(setupGlobal, setupStealth))
+		return translateSetupError(setup.InstallClaude(opts.global, opts.stealth))
 	}
 }
 
-func runGeminiRecipe() error {
+func runGeminiRecipe(opts setupOptions) error {
 	switch {
-	case setupCheck:
+	case opts.check:
 		return translateSetupError(setup.CheckGemini())
-	case setupRemove:
-		return translateSetupError(setup.RemoveGemini(setupProject))
+	case opts.remove:
+		return translateSetupError(setup.RemoveGemini(opts.project))
 	default:
-		return translateSetupError(setup.InstallGemini(setupProject, setupStealth))
+		return translateSetupError(setup.InstallGemini(opts.project, opts.stealth))
 	}
 }
 
-func runFactoryRecipe() error {
+func runFactoryRecipe(opts setupOptions) error {
 	switch {
-	case setupCheck:
+	case opts.check:
 		return translateSetupError(setup.CheckFactory())
-	case setupRemove:
+	case opts.remove:
 		return translateSetupError(setup.RemoveFactory())
 	default:
 		return translateSetupError(setup.InstallFactory())
 	}
 }
 
-func runCodexRecipe() error {
+func runCodexRecipe(opts setupOptions) error {
 	switch {
-	case setupCheck:
-		return translateSetupError(setup.CheckCodex(setupGlobal))
-	case setupRemove:
-		return translateSetupError(setup.RemoveCodex(setupGlobal))
+	case opts.check:
+		return translateSetupError(setup.CheckCodex(opts.global))
+	case opts.remove:
+		return translateSetupError(setup.RemoveCodex(opts.global))
 	default:
-		return translateSetupError(setup.InstallCodex(setupGlobal))
+		return translateSetupError(setup.InstallCodex(opts.global))
 	}
 }
 
-func runOpenCodeRecipe() error {
+func runOpenCodeRecipe(opts setupOptions) error {
 	switch {
-	case setupCheck:
+	case opts.check:
 		return translateSetupError(setup.CheckOpenCode())
-	case setupRemove:
+	case opts.remove:
 		return translateSetupError(setup.RemoveOpenCode())
 	default:
 		return translateSetupError(setup.InstallOpenCode())
 	}
 }
 
-func runMuxRecipe() error {
+func runMuxRecipe(opts setupOptions) error {
 	switch {
-	case setupCheck:
-		return translateSetupError(setup.CheckMux(setupProject, setupGlobal))
-	case setupRemove:
-		return translateSetupError(setup.RemoveMux(setupProject, setupGlobal))
+	case opts.check:
+		return translateSetupError(setup.CheckMux(opts.project, opts.global))
+	case opts.remove:
+		return translateSetupError(setup.RemoveMux(opts.project, opts.global))
 	default:
-		return translateSetupError(setup.InstallMux(setupProject, setupGlobal))
+		return translateSetupError(setup.InstallMux(opts.project, opts.global))
 	}
 }
 
-func runAiderRecipe() error {
+func runAiderRecipe(opts setupOptions) error {
 	switch {
-	case setupCheck:
+	case opts.check:
 		return translateSetupError(setup.CheckAider())
-	case setupRemove:
+	case opts.remove:
 		return translateSetupError(setup.RemoveAider())
 	default:
 		return translateSetupError(setup.InstallAider())
 	}
 }
 
-func runJunieRecipe() error {
+func runJunieRecipe(opts setupOptions) error {
 	switch {
-	case setupCheck:
+	case opts.check:
 		return translateSetupError(setup.CheckJunie())
-	case setupRemove:
+	case opts.remove:
 		return translateSetupError(setup.RemoveJunie())
 	default:
 		return translateSetupError(setup.InstallJunie())
@@ -419,17 +467,17 @@ func runJunieRecipe() error {
 
 func init() {
 	// Global flags for the setup command
-	setupCmd.Flags().BoolVar(&setupList, "list", false, "List all available recipes")
-	setupCmd.Flags().BoolVar(&setupPrint, "print", false, "Print the template to stdout")
-	setupCmd.Flags().StringVarP(&setupOutput, "output", "o", "", "Write template to custom path")
-	setupCmd.Flags().StringVar(&setupAdd, "add", "", "Add a custom recipe with given name")
+	setupCmd.Flags().Bool("list", false, "List all available recipes")
+	setupCmd.Flags().Bool("print", false, "Print the template to stdout")
+	setupCmd.Flags().StringP("output", "o", "", "Write template to custom path")
+	setupCmd.Flags().String("add", "", "Add a custom recipe with given name")
 
 	// Per-recipe flags
-	setupCmd.Flags().BoolVar(&setupCheck, "check", false, "Check if integration is installed")
-	setupCmd.Flags().BoolVar(&setupRemove, "remove", false, "Remove the integration")
-	setupCmd.Flags().BoolVar(&setupProject, "project", false, "Install for this project only (gemini/mux)")
-	setupCmd.Flags().BoolVar(&setupGlobal, "global", false, "Install globally (claude/codex/cursor/mux; writes to ~/.claude/settings.json, $CODEX_HOME/AGENTS.md or ~/.codex/AGENTS.md, ~/.cursor/hooks.json, or ~/.mux/AGENTS.md)")
-	setupCmd.Flags().BoolVar(&setupStealth, "stealth", false, "Use stealth mode (claude/gemini)")
+	setupCmd.Flags().Bool("check", false, "Check if integration is installed")
+	setupCmd.Flags().Bool("remove", false, "Remove the integration")
+	setupCmd.Flags().Bool("project", false, "Install for this project only (gemini/mux)")
+	setupCmd.Flags().Bool("global", false, "Install globally (claude/codex/cursor/mux; writes to ~/.claude/settings.json, $CODEX_HOME/AGENTS.md or ~/.codex/AGENTS.md, ~/.cursor/hooks.json, or ~/.mux/AGENTS.md)")
+	setupCmd.Flags().Bool("stealth", false, "Use stealth mode (claude/gemini)")
 
 	rootCmd.AddCommand(setupCmd)
 }

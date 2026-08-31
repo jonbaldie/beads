@@ -26,8 +26,6 @@ Note: 'bd history', 'bd diff', and 'bd branch' also work for quick access.
 This subcommand provides additional operations like merge and commit.`,
 }
 
-var vcMergeStrategy string
-
 // blockedAfterMergeRecomputer is the narrow store surface that repairs the
 // denormalized is_blocked column for the rows a merge brought in
 // (bd-578h9.11). Only the concrete stores implement it
@@ -74,6 +72,7 @@ Examples:
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		vcMergeStrategy, _ := cmd.Flags().GetString("strategy")
 		if usesProxiedServer() {
 			return HandleErrorRespectJSON("vc merge is not supported in proxied-server mode")
 		}
@@ -84,7 +83,7 @@ Examples:
 			}
 		}()
 
-		ctx := rootCtx
+		ctx := getRootContext()
 		branchName := args[0]
 
 		if vcMergeStrategy != "" {
@@ -93,9 +92,9 @@ Examples:
 			// runs the whole merge/resolve/repair/commit sequence on a pinned
 			// session with Dolt's conflict-tolerant flags set, so the strategy
 			// actually reaches DOLT_CONFLICTS_RESOLVE.
-			merger, ok := storage.UnwrapStore(store).(storage.StrategicMerger)
+			merger, ok := storage.UnwrapStore(getStore()).(storage.StrategicMerger)
 			if !ok {
-				return HandleErrorRespectJSON("storage backend %T does not support --strategy merges", storage.UnwrapStore(store))
+				return HandleErrorRespectJSON("storage backend %T does not support --strategy merges", storage.UnwrapStore(getStore()))
 			}
 			conflicts, err := merger.MergeWithStrategy(ctx, branchName, vcMergeStrategy)
 			if err != nil {
@@ -103,7 +102,7 @@ Examples:
 			}
 
 			if len(conflicts) > 0 {
-				if jsonOutput {
+				if isJSONOutput() {
 					return outputJSON(map[string]interface{}{
 						"merged":        branchName,
 						"conflicts":     len(conflicts),
@@ -115,7 +114,7 @@ Examples:
 				return nil
 			}
 
-			if jsonOutput {
+			if isJSONOutput() {
 				return outputJSON(map[string]interface{}{
 					"merged":    branchName,
 					"conflicts": 0,
@@ -130,13 +129,13 @@ Examples:
 		// rejects on conflict (Error 1105), same as plain `dolt merge` with no
 		// further flags. versioncontrolops.Merge appends the --strategy escape
 		// hatch to that error's message.
-		conflicts, err := store.Merge(ctx, branchName)
+		conflicts, err := getStore().Merge(ctx, branchName)
 		if err != nil {
 			return HandleErrorRespectJSON("failed to merge branch: %v", err)
 		}
 
 		if len(conflicts) > 0 {
-			if jsonOutput {
+			if isJSONOutput() {
 				return outputJSON(map[string]interface{}{
 					"merged":    branchName,
 					"conflicts": conflicts,
@@ -151,7 +150,7 @@ Examples:
 			return nil
 		}
 
-		if jsonOutput {
+		if isJSONOutput() {
 			return outputJSON(map[string]interface{}{
 				"merged":    branchName,
 				"conflicts": 0,
@@ -162,9 +161,6 @@ Examples:
 		return nil
 	},
 }
-
-var vcCommitMessage string
-var vcCommitStdin bool
 
 var vcCommitCmd = &cobra.Command{
 	Use:   "commit",
@@ -178,6 +174,8 @@ Examples:
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		vcCommitMessage, _ := cmd.Flags().GetString("message")
+		vcCommitStdin, _ := cmd.Flags().GetBool("stdin")
 		if usesProxiedServer() {
 			return HandleErrorRespectJSON("vc commit is not supported in proxied-server mode")
 		}
@@ -188,7 +186,7 @@ Examples:
 			}
 		}()
 
-		ctx := rootCtx
+		ctx := getRootContext()
 
 		if vcCommitStdin {
 			if vcCommitMessage != "" {
@@ -205,12 +203,12 @@ Examples:
 			return HandleErrorRespectJSON("commit message is required (use -m, --message, or --stdin)")
 		}
 
-		beforeHash, beforeErr := store.GetCurrentCommit(ctx)
+		beforeHash, beforeErr := getStore().GetCurrentCommit(ctx)
 
-		commandDidExplicitDoltCommit = true
-		if err := store.Commit(ctx, vcCommitMessage); err != nil {
+		setCommandDidExplicitDoltCommit(true)
+		if err := getStore().Commit(ctx, vcCommitMessage); err != nil {
 			if isDoltNothingToCommit(err) {
-				if jsonOutput {
+				if isJSONOutput() {
 					return outputJSON(map[string]interface{}{"committed": false, "message": "nothing to commit"})
 				}
 				fmt.Println("Nothing to commit")
@@ -219,7 +217,7 @@ Examples:
 			return HandleErrorRespectJSON("failed to commit: %v", err)
 		}
 
-		hash, err := store.GetCurrentCommit(ctx)
+		hash, err := getStore().GetCurrentCommit(ctx)
 		if err != nil {
 			hash = "(unknown)"
 		}
@@ -233,14 +231,14 @@ Examples:
 		// an atomic committed-bool through the VersionControl interface
 		// (tracked as bd mybd-z9h7j; CommitPending already has the shape).
 		if beforeErr == nil && err == nil && hash == beforeHash {
-			if jsonOutput {
+			if isJSONOutput() {
 				return outputJSON(map[string]interface{}{"committed": false, "message": "nothing to commit"})
 			}
 			fmt.Println("Nothing to commit")
 			return nil
 		}
 
-		if jsonOutput {
+		if isJSONOutput() {
 			return outputJSON(map[string]interface{}{
 				"committed": true,
 				"hash":      hash,
@@ -273,19 +271,19 @@ Examples:
 			}
 		}()
 
-		ctx := rootCtx
+		ctx := getRootContext()
 
-		currentBranch, err := store.CurrentBranch(ctx)
+		currentBranch, err := getStore().CurrentBranch(ctx)
 		if err != nil {
 			return HandleErrorRespectJSON("failed to get current branch: %v", err)
 		}
 
-		currentCommit, err := store.GetCurrentCommit(ctx)
+		currentCommit, err := getStore().GetCurrentCommit(ctx)
 		if err != nil {
 			currentCommit = "(unknown)"
 		}
 
-		if jsonOutput {
+		if isJSONOutput() {
 			return outputJSON(map[string]interface{}{
 				"branch": currentBranch,
 				"commit": currentCommit,
@@ -293,7 +291,7 @@ Examples:
 		}
 
 		fmt.Printf("\n%s Version Control Status\n\n", ui.RenderAccent("📊"))
-		fmt.Printf("  Branch: %s\n", ui.StatusInProgressStyle.Render(currentBranch))
+		fmt.Printf("  Branch: %s\n", ui.StatusInProgressStyle().Render(currentBranch))
 		fmt.Printf("  Commit: %s\n", ui.RenderMuted(currentCommit[:8]))
 		fmt.Println()
 		return nil
@@ -301,9 +299,9 @@ Examples:
 }
 
 func init() {
-	vcMergeCmd.Flags().StringVar(&vcMergeStrategy, "strategy", "", "Conflict resolution strategy: 'ours' or 'theirs'")
-	vcCommitCmd.Flags().StringVarP(&vcCommitMessage, "message", "m", "", "Commit message")
-	vcCommitCmd.Flags().BoolVar(&vcCommitStdin, "stdin", false, "Read commit message from stdin")
+	vcMergeCmd.Flags().String("strategy", "", "Conflict resolution strategy: 'ours' or 'theirs'")
+	vcCommitCmd.Flags().StringP("message", "m", "", "Commit message")
+	vcCommitCmd.Flags().Bool("stdin", false, "Read commit message from stdin")
 
 	vcCmd.AddCommand(vcMergeCmd)
 	vcCmd.AddCommand(vcCommitCmd)

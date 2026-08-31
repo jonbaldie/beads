@@ -10,6 +10,13 @@ import (
 	"github.com/jonbaldie/beads/internal/worktreeremove"
 )
 
+type worktreeRemoveHooks struct {
+	afterTargetResolution func() error
+	beforeFinalCheck      func() error
+	beforeRemove          func() error
+	afterRemoval          func() error
+}
+
 // gitWorktreeRemovalAdapter confines worktree-removal Git and filesystem
 // observations to the command edge. The policy package receives only tags;
 // FileInfo values, paths, bytes, and fingerprints remain in its plan.
@@ -51,9 +58,20 @@ func (adapter *gitWorktreeRemovalAdapter) Revalidate(
 }
 
 func (adapter *gitWorktreeRemovalAdapter) Remove(ctx context.Context, mutation worktreeremove.Mutation) error {
-	if adapter.plan == nil || mutation.TargetPath != adapter.plan.target.path || mutation.Force != adapter.plan.force {
+	if err := adapter.validateRemovalMutation(mutation); err != nil {
+		return err
+	}
+	return adapter.executeRemoval(ctx, mutation)
+}
+
+func (adapter *gitWorktreeRemovalAdapter) validateRemovalMutation(mutation worktreeremove.Mutation) error {
+	if adapter.plan == nil || mutation.TargetPath != adapter.plan.target.identity.path || mutation.Force != adapter.plan.force {
 		return fmt.Errorf("cannot remove worktree with an unapproved mutation")
 	}
+	return nil
+}
+
+func (adapter *gitWorktreeRemovalAdapter) executeRemoval(ctx context.Context, mutation worktreeremove.Mutation) error {
 	if adapter.hooks.beforeRemove != nil {
 		if err := adapter.hooks.beforeRemove(); err != nil {
 			return &worktreeRemovalPreMutationError{
@@ -87,7 +105,7 @@ func (adapter *gitWorktreeRemovalAdapter) Remove(ctx context.Context, mutation w
 func (adapter *gitWorktreeRemovalAdapter) Failure(
 	ctx context.Context,
 	_ worktreeRemovalApproval,
-	removeErr error,
+	_ error,
 ) (worktreeRemovalFailure, error) {
 	observation := adapter.plan.observeRemovalFailure(ctx)
 	return worktreeRemovalFailure{
@@ -107,7 +125,7 @@ func (adapter *gitWorktreeRemovalAdapter) Cleanup(_ context.Context, cleanup wor
 	}
 	if err := adapter.plan.gitignoreCleanup.apply(); err != nil {
 		return &worktreeRemovalPartialError{
-			path:  adapter.plan.target.path,
+			path:  adapter.plan.target.identity.path,
 			stage: ".gitignore cleanup",
 			err:   err,
 		}
@@ -118,7 +136,7 @@ func (adapter *gitWorktreeRemovalAdapter) Cleanup(_ context.Context, cleanup wor
 type cliWorktreeRemovalPresenter struct{}
 
 func (cliWorktreeRemovalPresenter) Removed(mutation worktreeremove.Mutation) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		result := map[string]interface{}{"removed": mutation.TargetPath}
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetIndent("", "  ")

@@ -26,17 +26,21 @@ func TestIssueContentSize(t *testing.T) {
 		{
 			name: "issue with content",
 			issue: &types.Issue{
-				Description:        "hello",
-				Design:             "world",
-				AcceptanceCriteria: "foo",
-				Notes:              "bar",
+				IssueContent: types.IssueContent{
+					Description:        "hello",
+					Design:             "world",
+					AcceptanceCriteria: "foo",
+					Notes:              "bar",
+				},
 			},
 			want: 5 + 5 + 3 + 3,
 		},
 		{
 			name: "only description",
 			issue: &types.Issue{
-				Description: "some long description text",
+				IssueContent: types.IssueContent{
+					Description: "some long description text",
+				},
 			},
 			want: 26,
 		},

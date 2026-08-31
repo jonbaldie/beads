@@ -19,11 +19,7 @@ import (
 )
 
 func usesSQLServer() bool {
-	if shouldUseGlobals() {
-		if serverMode || proxiedServerMode {
-			return true
-		}
-	} else if cmdCtx != nil && (cmdCtx.ServerMode || cmdCtx.ProxiedServerMode) {
+	if isServerMode() || isProxiedServerMode() {
 		return true
 	}
 	if doltserver.IsSharedServerMode() {
@@ -38,10 +34,7 @@ func isEmbeddedMode() bool {
 }
 
 func usesProxiedServer() bool {
-	if shouldUseGlobals() {
-		return proxiedServerMode
-	}
-	return cmdCtx != nil && cmdCtx.ProxiedServerMode
+	return isProxiedServerMode()
 }
 
 // newDoltStore creates a storage backend from an explicit config.
@@ -141,8 +134,7 @@ func acquireEmbeddedLock(beadsDir string, serverMode bool) (util.Unlocker, error
 // This is the factory the CROSS-WORKSPACE opens use — routed creates,
 // remote-cache hydration — so activation is resolved from beadsDir's own
 // config, not the launching workspace's.
-func newDoltStoreFromConfig(ctx context.Context, beadsDir string) (s storage.DoltStorage, err error) {
-	defer func() { s, err = activateEventsJournalStore(beadsDir, s, err) }()
+func newDoltStoreFromConfig(ctx context.Context, beadsDir string) (storage.DoltStorage, error) {
 	cfg, err := configfile.Load(beadsDir)
 	if err != nil {
 		// A present-but-unloadable metadata.json must not degrade to the
@@ -156,32 +148,58 @@ func newDoltStoreFromConfig(ctx context.Context, beadsDir string) (s storage.Dol
 		return nil, err
 	}
 	cfg = normalizeLoadedConfig(cfg)
-	if backend, ok := backends.Lookup(cfg.GetBackend()); ok {
-		return backend.Open(ctx, beadsDir)
+	if configured, handled, err := openConfiguredStore(ctx, beadsDir, cfg, false); handled {
+		return configured, err
 	}
-	if cfg != nil && cfg.IsDoltProxiedServerMode() {
-		// TODO: this needs to be uow provider
-		return nil, fmt.Errorf("proxy server store should be uow provider")
-		// 	return newProxiedServerStore(ctx, &dolt.Config{
-		// 		BeadsDir:      beadsDir,
-		// 		Database:      cfg.GetDoltDatabase(),
-		// 		ProxiedServer: true,
-		// 	})
-	}
-	if cfg != nil && cfg.IsDoltServerMode() {
-		return dolt.NewFromConfig(ctx, beadsDir)
-	}
-	database := configfile.DefaultDoltDatabase
-	if cfg != nil {
-		database = cfg.GetDoltDatabase()
-	}
+	database := configuredDatabase(cfg)
 	if sanitized := sanitizeDBName(database); sanitized != database {
 		if err := migrateHyphenatedDB(beadsDir, cfg, database, sanitized); err != nil {
 			return nil, fmt.Errorf("auto-sanitize database name %q → %q: %w", database, sanitized, err)
 		}
 		database = sanitized
 	}
-	return embeddeddolt.Open(ctx, beadsDir, database, "main")
+	store, err := embeddeddolt.Open(ctx, beadsDir, database, "main")
+	return activateEventsJournalStore(beadsDir, store, err)
+}
+
+func openConfiguredStore(ctx context.Context, beadsDir string, cfg *configfile.Config, readOnly bool) (store storage.DoltStorage, handled bool, err error) {
+	if !readOnly {
+		defer func() { store, err = activateEventsJournalStore(beadsDir, store, err) }()
+	}
+	if backend, ok := backends.Lookup(cfg.GetBackend()); ok {
+		if readOnly {
+			store, err = backend.OpenReadOnly(ctx, beadsDir)
+			return store, true, err
+		}
+		store, err = backend.Open(ctx, beadsDir)
+		return store, true, err
+	}
+	if cfg != nil && cfg.IsDoltProxiedServerMode() {
+		return nil, true, proxyStoreError(readOnly)
+	}
+	if cfg == nil || !cfg.IsDoltServerMode() {
+		return nil, false, nil
+	}
+	if readOnly {
+		store, err = dolt.NewFromConfigWithOptions(ctx, beadsDir, &dolt.Config{ReadOnly: true})
+		return store, true, err
+	}
+	store, err = dolt.NewFromConfig(ctx, beadsDir)
+	return store, true, err
+}
+
+func proxyStoreError(readOnly bool) error {
+	if readOnly {
+		return fmt.Errorf("proxy server store needs to be uow provider")
+	}
+	return fmt.Errorf("proxy server store should be uow provider")
+}
+
+func configuredDatabase(cfg *configfile.Config) string {
+	if cfg == nil {
+		return configfile.DefaultDoltDatabase
+	}
+	return cfg.GetDoltDatabase()
 }
 
 // migrateHyphenatedDB renames a legacy hyphenated database directory and
@@ -199,18 +217,8 @@ func migrateHyphenatedDB(beadsDir string, cfg *configfile.Config, oldName, newNa
 	}
 
 	if oldExists {
-		_, newErr := os.Stat(newDir)
-		switch {
-		case newErr == nil:
-			return fmt.Errorf("cannot auto-migrate database: both %q and %q exist under %s; remove one manually and retry",
-				oldName, newName, dataDir)
-		case !os.IsNotExist(newErr):
-			return fmt.Errorf("checking target directory %q: %w", newDir, newErr)
-		default:
-			if err := os.Rename(oldDir, newDir); err != nil {
-				return fmt.Errorf("renaming database directory: %w", err)
-			}
-			fmt.Fprintf(os.Stderr, "bd: migrated database directory %q → %q (GH#3231)\n", oldName, newName)
+		if err := renameHyphenatedDB(dataDir, oldDir, newDir, oldName, newName); err != nil {
+			return err
 		}
 	}
 
@@ -221,6 +229,22 @@ func migrateHyphenatedDB(beadsDir string, cfg *configfile.Config, oldName, newNa
 		}
 		fmt.Fprintf(os.Stderr, "bd: updated metadata.json dolt_database %q → %q (GH#3231)\n", oldName, newName)
 	}
+	return nil
+}
+
+func renameHyphenatedDB(dataDir, oldDir, newDir, oldName, newName string) error {
+	_, err := os.Stat(newDir)
+	switch {
+	case err == nil:
+		return fmt.Errorf("cannot auto-migrate database: both %q and %q exist under %s; remove one manually and retry",
+			oldName, newName, dataDir)
+	case !os.IsNotExist(err):
+		return fmt.Errorf("checking target directory %q: %w", newDir, err)
+	}
+	if err := os.Rename(oldDir, newDir); err != nil {
+		return fmt.Errorf("renaming database directory: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "bd: migrated database directory %q → %q (GH#3231)\n", oldName, newName)
 	return nil
 }
 
@@ -264,26 +288,10 @@ func openNonMutatingStoreFromConfig(ctx context.Context, beadsDir string, previe
 		return nil, err
 	}
 	cfg = normalizeLoadedConfig(cfg)
-	if backend, ok := backends.Lookup(cfg.GetBackend()); ok {
-		return backend.OpenReadOnly(ctx, beadsDir)
+	if configured, handled, err := openConfiguredStore(ctx, beadsDir, cfg, true); handled {
+		return configured, err
 	}
-	if cfg != nil && cfg.IsDoltProxiedServerMode() {
-		// TODO: this needs to be uow provider
-		return nil, fmt.Errorf("proxy server store needs to be uow provider")
-		// return newProxiedServerStore(ctx, &dolt.Config{
-		// 	BeadsDir:      beadsDir,
-		// 	Database:      cfg.GetDoltDatabase(),
-		// 	ProxiedServer: true,
-		// 	ReadOnly:      true,
-		// })
-	}
-	if cfg != nil && cfg.IsDoltServerMode() {
-		return dolt.NewFromConfigWithOptions(ctx, beadsDir, &dolt.Config{ReadOnly: true})
-	}
-	database := configfile.DefaultDoltDatabase
-	if cfg != nil {
-		database = cfg.GetDoltDatabase()
-	}
+	database := configuredDatabase(cfg)
 	if sanitized := sanitizeDBName(database); sanitized != database {
 		database = sanitized
 	}

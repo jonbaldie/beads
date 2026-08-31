@@ -86,8 +86,8 @@ func claimRoleFixture(t *testing.T, before *types.Issue, result issueops.UpdateR
 }
 
 func TestProxiedClaimRunsOnTheLifecycleContract(t *testing.T) {
-	before := &types.Issue{ID: "bd-1", Status: types.StatusOpen}
-	claimed := &types.Issue{ID: "bd-1", Status: types.StatusInProgress, Assignee: "agent"}
+	before := &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}
+	claimed := &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress, Assignee: "agent"}}
 	p := claimRoleFixture(t, before, issueops.UpdateResult{Issue: claimed, Changed: true}, nil)
 
 	oldActor := actor
@@ -127,7 +127,7 @@ func TestProxiedClaimRunsOnTheLifecycleContract(t *testing.T) {
 // must not turn a refusal into a success, and a claim conflict is not a guard
 // mismatch (exit 1, never 13).
 func TestProxiedClaimConflictStaysAPerIDFailure(t *testing.T) {
-	before := &types.Issue{ID: "bd-1", Status: types.StatusInProgress, Assignee: "bob"}
+	before := &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress, Assignee: "bob"}}
 	conflict := &issueops.ClaimConflictError{
 		IssueID:  "bd-1",
 		Assignee: "bob",
@@ -168,7 +168,7 @@ func TestProxiedClaimConflictStaysAPerIDFailure(t *testing.T) {
 func TestProxiedClaimAbortsTheBatchOnCancellation(t *testing.T) {
 	for _, cancellation := range []error{context.Canceled, context.DeadlineExceeded} {
 		t.Run(cancellation.Error(), func(t *testing.T) {
-			before := &types.Issue{ID: "bd-1", Status: types.StatusOpen}
+			before := &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}
 			claimRoleFixture(t, before, issueops.UpdateResult{}, fmt.Errorf("update bd-1: %w", cancellation))
 
 			got, fail, err := applyUpdateProxiedOne(context.Background(), "bd-1", &updateInput{claim: true, fields: map[string]any{}})

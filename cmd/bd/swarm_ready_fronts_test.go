@@ -103,10 +103,10 @@ func TestComputeReadyFrontsClosedLeafNotInWave0(t *testing.T) {
 func TestAnalyzeEpicForSwarmClosedCycleDoesNotSuppressOpenFronts(t *testing.T) {
 	ctx := context.Background()
 
-	epic := &types.Issue{ID: "epic-1", Title: "Epic", Status: types.StatusOpen}
-	closedA := &types.Issue{ID: "closed-a", Title: "Closed A", Status: types.StatusClosed}
-	openB := &types.Issue{ID: "open-b", Title: "Open B", Status: types.StatusOpen}
-	openC := &types.Issue{ID: "open-c", Title: "Unrelated Open C", Status: types.StatusOpen}
+	epic := &types.Issue{IssueID: types.IssueID{ID: "epic-1"}, IssueContent: types.IssueContent{Title: "Epic"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}
+	closedA := &types.Issue{IssueID: types.IssueID{ID: "closed-a"}, IssueContent: types.IssueContent{Title: "Closed A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}}
+	openB := &types.Issue{IssueID: types.IssueID{ID: "open-b"}, IssueContent: types.IssueContent{Title: "Open B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}
+	openC := &types.Issue{IssueID: types.IssueID{ID: "open-c"}, IssueContent: types.IssueContent{Title: "Unrelated Open C"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}
 
 	store := &fakeSwarmStorage{
 		issues: map[string]*types.Issue{

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -86,7 +87,9 @@ func parseVarFlags(varFlags []string) (map[string]string, error) {
 }
 
 func runPour(cmd *cobra.Command, args []string) error {
-	CheckReadonly("pour")
+	if err := CheckReadonly("pour"); err != nil {
+		return err
+	}
 
 	evt := metrics.NewCommandEvent("pour")
 	defer func() {
@@ -96,89 +99,113 @@ func runPour(cmd *cobra.Command, args []string) error {
 	}()
 
 	in := gatherPourInput(cmd, args)
-
 	if usesProxiedServer() {
-		return runPourProxiedServer(rootCtx, in)
+		return runPourProxiedServer(getRootContext(), in)
 	}
+	return runPourDirect(getRootContext(), in)
+}
 
-	ctx := rootCtx
-
-	if store == nil {
+func runPourDirect(ctx context.Context, in pourInput) error {
+	if getStore() == nil {
 		return HandleError("no database connection")
 	}
-
 	vars, err := parseVarFlags(in.varFlags)
 	if err != nil {
 		return HandleError("%v", err)
 	}
+	subgraph, protoID, err := resolvePourTemplate(ctx, in, vars)
+	if err != nil {
+		return err
+	}
+	attachments, err := loadPourAttachments(ctx, in.attachArgs)
+	if err != nil {
+		return err
+	}
+	vars = applyVariableDefaults(vars, subgraph)
+	if err := validatePourVars(subgraph, attachments, vars); err != nil {
+		return err
+	}
+	if in.dryRun {
+		return renderPourDirectDryRun(protoID, subgraph, vars, in, attachments)
+	}
+	return executePourDirect(ctx, subgraph, vars, in, attachments)
+}
 
-	var subgraph *TemplateSubgraph
-	var protoID string
+type pourAttachment struct {
+	id       string
+	issue    *types.Issue
+	subgraph *TemplateSubgraph
+}
 
+func resolvePourTemplate(ctx context.Context, in pourInput, vars map[string]string) (*TemplateSubgraph, string, error) {
 	sg, err := resolveAndCookFormulaWithVars(in.protoArg, nil, vars)
 	if err == nil {
-		subgraph = sg
-		protoID = sg.Root.ID
-
 		if sg.Phase == "vapor" {
 			warnPourVaporFormula(in.protoArg, in.varFlags)
 		}
-	} else if errors.Is(err, formula.ErrVarValidation) {
+		return sg, sg.Root.ID, nil
+	}
+	if errors.Is(err, formula.ErrVarValidation) {
 		// in.protoArg IS a formula; the --var values it was given fail
 		// enum/pattern/required-empty constraints. Report that directly
 		// instead of falling through to the proto-ID lookup below, which
 		// would otherwise mask this as "not found as formula or proto ID".
-		return HandleError("%v", err)
+		return nil, "", HandleError("%v", err)
 	}
+	return loadPourProto(ctx, in.protoArg)
+}
 
-	if subgraph == nil {
-		resolvedID, err := utils.ResolvePartialID(ctx, store, in.protoArg)
-		if err != nil {
-			return HandleError("%s not found as formula or proto ID", in.protoArg)
-		}
-		protoID = resolvedID
-
-		protoIssue, err := store.GetIssue(ctx, protoID)
-		if err != nil {
-			return HandleError("loading proto %s: %v", protoID, err)
-		}
-		if !isProto(protoIssue) {
-			return HandleError("%s is not a proto (missing '%s' label)", protoID, MoleculeLabel)
-		}
-
-		subgraph, err = loadTemplateSubgraph(ctx, store, protoID)
-		if err != nil {
-			return HandleError("loading proto: %v", err)
-		}
+func loadPourProto(ctx context.Context, protoArg string) (*TemplateSubgraph, string, error) {
+	protoID, err := utils.ResolvePartialID(ctx, getStore(), protoArg)
+	if err != nil {
+		return nil, "", HandleError("%s not found as formula or proto ID", protoArg)
 	}
-
-	type attachmentInfo struct {
-		id       string
-		issue    *types.Issue
-		subgraph *TemplateSubgraph
+	protoIssue, err := getStore().GetIssue(ctx, protoID)
+	if err != nil {
+		return nil, "", HandleError("loading proto %s: %v", protoID, err)
 	}
-	var attachments []attachmentInfo
-	for _, attachArg := range in.attachArgs {
-		attachID, err := utils.ResolvePartialID(ctx, store, attachArg)
-		if err != nil {
-			return HandleError("resolving attachment ID %s: %v", attachArg, err)
-		}
-		attachIssue, err := store.GetIssue(ctx, attachID)
-		if err != nil {
-			return HandleError("loading attachment %s: %v", attachID, err)
-		}
-		if !isProto(attachIssue) {
-			return HandleError("%s is not a proto (missing '%s' label)", attachID, MoleculeLabel)
-		}
-		attachSubgraph, err := loadTemplateSubgraph(ctx, store, attachID)
-		if err != nil {
-			return HandleError("loading attachment subgraph %s: %v", attachID, err)
-		}
-		attachments = append(attachments, attachmentInfo{attachID, attachIssue, attachSubgraph})
+	if !isProto(protoIssue) {
+		return nil, "", HandleError("%s is not a proto (missing '%s' label)", protoID, MoleculeLabel)
 	}
+	subgraph, err := loadTemplateSubgraph(ctx, getStore(), protoID)
+	if err != nil {
+		return nil, "", HandleError("loading proto: %v", err)
+	}
+	return subgraph, protoID, nil
+}
 
-	vars = applyVariableDefaults(vars, subgraph)
+func loadPourAttachments(ctx context.Context, attachArgs []string) ([]pourAttachment, error) {
+	var attachments []pourAttachment
+	for _, attachArg := range attachArgs {
+		attach, err := loadPourAttachment(ctx, attachArg)
+		if err != nil {
+			return nil, err
+		}
+		attachments = append(attachments, attach)
+	}
+	return attachments, nil
+}
 
+func loadPourAttachment(ctx context.Context, attachArg string) (pourAttachment, error) {
+	attachID, err := utils.ResolvePartialID(ctx, getStore(), attachArg)
+	if err != nil {
+		return pourAttachment{}, HandleError("resolving attachment ID %s: %v", attachArg, err)
+	}
+	attachIssue, err := getStore().GetIssue(ctx, attachID)
+	if err != nil {
+		return pourAttachment{}, HandleError("loading attachment %s: %v", attachID, err)
+	}
+	if !isProto(attachIssue) {
+		return pourAttachment{}, HandleError("%s is not a proto (missing '%s' label)", attachID, MoleculeLabel)
+	}
+	attachSubgraph, err := loadTemplateSubgraph(ctx, getStore(), attachID)
+	if err != nil {
+		return pourAttachment{}, HandleError("loading attachment subgraph %s: %v", attachID, err)
+	}
+	return pourAttachment{attachID, attachIssue, attachSubgraph}, nil
+}
+
+func validatePourVars(subgraph *TemplateSubgraph, attachments []pourAttachment, vars map[string]string) error {
 	var attachSubgraphs []*TemplateSubgraph
 	for _, a := range attachments {
 		attachSubgraphs = append(attachSubgraphs, a.subgraph)
@@ -186,38 +213,47 @@ func runPour(cmd *cobra.Command, args []string) error {
 	if err := checkPourVars(subgraph, attachSubgraphs, vars); err != nil {
 		return HandleErrorWithHint(err.Error(), fmt.Sprintf("Provide them with: --var %s=<value>", missingVarHint(subgraph, attachSubgraphs, vars)))
 	}
+	return nil
+}
 
-	if in.dryRun {
-		var previews []pourAttachPreview
-		for _, a := range attachments {
-			previews = append(previews, pourAttachPreview{title: a.issue.Title, steps: len(a.subgraph.Issues)})
-		}
-		renderPourDryRun(protoID, subgraph, vars, in.assignee, in.attachType, previews)
-		return nil
+func renderPourDirectDryRun(protoID string, subgraph *TemplateSubgraph, vars map[string]string, in pourInput, attachments []pourAttachment) error {
+	var previews []pourAttachPreview
+	for _, a := range attachments {
+		previews = append(previews, pourAttachPreview{title: a.issue.Title, steps: len(a.subgraph.Issues)})
 	}
+	renderPourDryRun(protoID, subgraph, vars, in.assignee, in.attachType, previews)
+	return nil
+}
 
-	result, err := spawnMolecule(ctx, store, subgraph, vars, in.assignee, actor, false, types.IDPrefixMol)
+func executePourDirect(ctx context.Context, subgraph *TemplateSubgraph, vars map[string]string, in pourInput, attachments []pourAttachment) error {
+	result, err := spawnMolecule(ctx, getStore(), subgraph, vars, in.assignee, getActor(), false, types.IDPrefixMol)
 	if err != nil {
 		return HandleError("pouring proto: %v", err)
 	}
-
-	totalAttached := 0
-	if len(attachments) > 0 {
-		spawnedMol, err := store.GetIssue(ctx, result.NewEpicID)
-		if err != nil {
-			return HandleError("loading spawned mol: %v", err)
-		}
-
-		for _, attach := range attachments {
-			bondResult, err := bondProtoMol(ctx, store, attach.issue, spawnedMol, in.attachType, vars, "", actor, false, true)
-			if err != nil {
-				return HandleError("attaching %s: %v", attach.id, err)
-			}
-			totalAttached += bondResult.Spawned
-		}
+	totalAttached, err := attachPourMolecules(ctx, result.NewEpicID, vars, in, attachments)
+	if err != nil {
+		return err
 	}
-
 	return renderPourResult(result, totalAttached, len(attachments))
+}
+
+func attachPourMolecules(ctx context.Context, epicID string, vars map[string]string, in pourInput, attachments []pourAttachment) (int, error) {
+	if len(attachments) == 0 {
+		return 0, nil
+	}
+	spawnedMol, err := getStore().GetIssue(ctx, epicID)
+	if err != nil {
+		return 0, HandleError("loading spawned mol: %v", err)
+	}
+	totalAttached := 0
+	for _, attach := range attachments {
+		bondResult, err := bondProtoMol(ctx, getStore(), attach.issue, spawnedMol, newBondAttachmentOptions(in.attachType, vars, "", getActor(), false, true))
+		if err != nil {
+			return 0, HandleError("attaching %s: %v", attach.id, err)
+		}
+		totalAttached += bondResult.Spawned
+	}
+	return totalAttached, nil
 }
 
 func warnPourVaporFormula(protoArg string, varFlags []string) {
@@ -297,7 +333,7 @@ func renderPourDryRun(protoID string, subgraph *TemplateSubgraph, vars map[strin
 }
 
 func renderPourResult(result *InstantiateResult, totalAttached, attachCount int) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		type pourResult struct {
 			*InstantiateResult
 			Attached int    `json:"attached"`
