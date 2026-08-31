@@ -16,8 +16,12 @@ import (
 var showCmd *cobra.Command
 
 var (
-	actor string
-	store storage.DoltStorage
+	actor                        string
+	store                        storage.DoltStorage
+	versionUpgradeDetected       bool
+	previousVersion              string
+	upgradeAcknowledged          bool
+	commandDidExplicitDoltCommit bool
 )
 
 // The production context no longer writes the legacy package variables. Tests
@@ -45,6 +49,14 @@ func installLegacyGlobalCallbacks() {
 	callbacks.TipRand = func(value *rand.Rand) { tipRand = value }
 	callbacks.tipMetadata = func(value bool) { commandDidWriteTipMetadata = value }
 	callbacks.tipIDs = func(value map[string]struct{}) { commandTipIDsShown = value }
+	callbacks.versionState.upgradeDetectedValue = func() bool { return versionUpgradeDetected }
+	callbacks.versionState.setUpgradeDetected = func(value bool) { versionUpgradeDetected = value }
+	callbacks.versionState.previousValue = func() string { return previousVersion }
+	callbacks.versionState.setPrevious = func(value string) { previousVersion = value }
+	callbacks.versionState.acknowledgedValue = func() bool { return upgradeAcknowledged }
+	callbacks.versionState.setAcknowledged = func(value bool) { upgradeAcknowledged = value }
+	callbacks.versionState.explicitCommitValue = func() bool { return commandDidExplicitDoltCommit }
+	callbacks.versionState.setExplicitCommit = func(value bool) { commandDidExplicitDoltCommit = value }
 	callbacks.mode.commandContext = func(value *CommandContext) { cmdCtx = value }
 	callbacks.mode.changeDirEnv = func(value map[string]envSnapshotValue) { changeDirEnvSnapshot = value }
 	callbacks.mode.changeDirWD = func(value string) { changeDirOrigWD = value }

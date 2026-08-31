@@ -128,7 +128,22 @@ type legacyStateCallbacks struct {
 	TipRand       func(*rand.Rand)
 	tipMetadata   func(bool)
 	tipIDs        func(map[string]struct{})
+	versionState  legacyVersionCallbacks
 	mode          legacyModeCallbacks
+}
+
+// legacyVersionCallbacks let the test binary keep its historical package
+// variables in sync without requiring production code to define mutable
+// process-global version state.
+type legacyVersionCallbacks struct {
+	upgradeDetectedValue func() bool
+	setUpgradeDetected   func(bool)
+	previousValue        func() string
+	setPrevious          func(string)
+	acknowledgedValue    func() bool
+	setAcknowledged      func(bool)
+	explicitCommitValue  func() bool
+	setExplicitCommit    func(bool)
 }
 
 type legacyModeCallbacks struct {
@@ -540,7 +555,9 @@ func setSandboxMode(sm bool) {
 // isVersionUpgradeDetected returns true if a version upgrade was detected.
 func isVersionUpgradeDetected() bool {
 	if shouldUseGlobals() {
-		return versionUpgradeDetected
+		if callback := legacyCallbacks().versionState.upgradeDetectedValue; callback != nil {
+			return callback()
+		}
 	}
 	return commandContext().VersionUpgradeDetected
 }
@@ -549,14 +566,18 @@ func isVersionUpgradeDetected() bool {
 func setVersionUpgradeDetected(detected bool) {
 	commandContext().VersionUpgradeDetected = detected
 	if shouldUseGlobals() {
-		versionUpgradeDetected = detected
+		if callback := legacyCallbacks().versionState.setUpgradeDetected; callback != nil {
+			callback(detected)
+		}
 	}
 }
 
 // getPreviousVersion returns the previous bd version.
 func getPreviousVersion() string {
 	if shouldUseGlobals() {
-		return previousVersion
+		if callback := legacyCallbacks().versionState.previousValue; callback != nil {
+			return callback()
+		}
 	}
 	return commandContext().PreviousVersion
 }
@@ -565,14 +586,18 @@ func getPreviousVersion() string {
 func setPreviousVersion(v string) {
 	commandContext().PreviousVersion = v
 	if shouldUseGlobals() {
-		previousVersion = v
+		if callback := legacyCallbacks().versionState.setPrevious; callback != nil {
+			callback(v)
+		}
 	}
 }
 
 // isUpgradeAcknowledged returns true if the upgrade notification was shown.
 func isUpgradeAcknowledged() bool {
 	if shouldUseGlobals() {
-		return upgradeAcknowledged
+		if callback := legacyCallbacks().versionState.acknowledgedValue; callback != nil {
+			return callback()
+		}
 	}
 	return commandContext().UpgradeAcknowledged
 }
@@ -581,7 +606,9 @@ func isUpgradeAcknowledged() bool {
 func setUpgradeAcknowledged(ack bool) {
 	commandContext().UpgradeAcknowledged = ack
 	if shouldUseGlobals() {
-		upgradeAcknowledged = ack
+		if callback := legacyCallbacks().versionState.setAcknowledged; callback != nil {
+			callback(ack)
+		}
 	}
 }
 
@@ -640,7 +667,9 @@ func setDoltAutoCommit(value string) {
 
 func isCommandDidExplicitDoltCommit() bool {
 	if shouldUseGlobals() {
-		return commandDidExplicitDoltCommit
+		if callback := legacyCallbacks().versionState.explicitCommitValue; callback != nil {
+			return callback()
+		}
 	}
 	return commandContext().CommandDidExplicitCommit
 }
@@ -648,7 +677,9 @@ func isCommandDidExplicitDoltCommit() bool {
 func setCommandDidExplicitDoltCommit(value bool) {
 	commandContext().CommandDidExplicitCommit = value
 	if shouldUseGlobals() {
-		commandDidExplicitDoltCommit = value
+		if callback := legacyCallbacks().versionState.setExplicitCommit; callback != nil {
+			callback(value)
+		}
 	}
 }
 

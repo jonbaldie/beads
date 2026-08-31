@@ -44,10 +44,6 @@ var (
 	storeMutex  sync.Mutex // Protects store access from background goroutine
 	storeActive = false    // Tracks if store is available
 
-	// Version upgrade tracking
-	versionUpgradeDetected = false // Set to true if bd version changed since last run
-	previousVersion        = ""    // The last bd version user had (empty = first run or unknown)
-	upgradeAcknowledged    = false // Set to true after showing upgrade notification once per session
 )
 
 type envSnapshotValue struct {
@@ -87,11 +83,6 @@ var (
 	// after they actually delete rows, allowing post-run auto-export to record
 	// an intentional empty JSONL artifact instead of treating it as ambiguous.
 	commandMayEmptyJSONLExport atomic.Bool
-
-	// commandDidExplicitDoltCommit is set when a command already created a Dolt commit
-	// explicitly (e.g., bd sync in dolt-native mode, hook flows, bd vc commit).
-	// This prevents a redundant auto-commit attempt in PersistentPostRun.
-	commandDidExplicitDoltCommit bool
 
 	// commandDidWriteTipMetadata is set when a command records a tip as "shown" by writing
 	// metadata (tip_*_last_shown). This will be used to create a separate Dolt commit for

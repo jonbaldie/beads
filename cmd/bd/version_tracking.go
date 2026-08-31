@@ -24,7 +24,7 @@ const localVersionFile = ".local_version"
 
 // trackBdVersion checks if bd version has changed since last run and updates the local version file.
 // This function is best-effort - failures are silent to avoid disrupting commands.
-// Sets global variables versionUpgradeDetected and previousVersion if upgrade detected.
+// Updates the command context if an upgrade is detected.
 func trackBdVersion() {
 	trackBdVersionFile(true)
 }
