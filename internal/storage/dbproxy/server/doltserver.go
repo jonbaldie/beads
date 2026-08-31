@@ -61,56 +61,90 @@ type DoltServer struct {
 var _ DatabaseServer = (*DoltServer)(nil)
 
 func NewDoltServer(doltBinExec, rootDir, configPath, logFilePath string, keepAlivePeriod time.Duration, database string) (*DoltServer, error) {
-	if doltBinExec == "" {
-		return nil, errors.New("server: NewDoltServer: doltBinExec is required")
-	}
-	if rootDir == "" {
-		return nil, errors.New("server: NewDoltServer: rootDir is required")
-	}
-	if configPath == "" {
-		return nil, errors.New("server: NewDoltServer: configPath is required")
-	}
-	absDoltBinExec, err := filepath.Abs(doltBinExec)
+	paths, err := resolveDoltServerPaths(doltBinExec, rootDir, configPath)
 	if err != nil {
-		return nil, errors.New("server: NewDoltServer: failed to determine absolute path of doltBinExec")
+		return nil, err
 	}
-	absRootDir, err := filepath.Abs(rootDir)
+	cfg, err := loadDoltServerConfig(configPath)
 	if err != nil {
-		return nil, errors.New("server: NewDoltServer: failed to determine absolute path of rootDir")
+		return nil, err
 	}
-	absConfigPath, err := filepath.Abs(configPath)
+	logFile, err := openDoltServerLog(logFilePath)
 	if err != nil {
-		return nil, errors.New("server: NewDoltServer: failed to determine absolute path of configPath")
-	}
-	cfg, err := servercfg.YamlConfigFromFile(filesys.LocalFS, configPath)
-	if err != nil {
-		return nil, fmt.Errorf("server: NewDoltServer: parse config %q: %w", configPath, err)
-	}
-	var logFile *os.File
-	if logFilePath != "" {
-		absLogFilePath, err := filepath.Abs(logFilePath)
-		if err != nil {
-			return nil, errors.New("server: NewDoltServer: failed to determine absolute path of logFilePath")
-		}
-		logFile, err = os.OpenFile(absLogFilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // logFilePath is caller-derived, not user-request input
-		if err != nil {
-			return nil, fmt.Errorf("server: NewDoltServer: open log %q: %w", logFilePath, err)
-		}
+		return nil, err
 	}
 	if keepAlivePeriod == 0 {
 		keepAlivePeriod = defaultKeepAlivePeriod
 	}
-	sum := sha256.Sum256([]byte(absRootDir))
+	sum := sha256.Sum256([]byte(paths.rootDir))
 	return &DoltServer{
 		id:              hex.EncodeToString(sum[:]),
-		doltBinExec:     absDoltBinExec,
-		rootDir:         absRootDir,
-		configPath:      absConfigPath,
+		doltBinExec:     paths.doltBinExec,
+		rootDir:         paths.rootDir,
+		configPath:      paths.configPath,
 		database:        database,
 		config:          cfg,
 		keepAlivePeriod: keepAlivePeriod,
 		logFile:         logFile,
 	}, nil
+}
+
+type doltServerPaths struct {
+	doltBinExec string
+	rootDir     string
+	configPath  string
+}
+
+func resolveDoltServerPaths(doltBinExec, rootDir, configPath string) (doltServerPaths, error) {
+	if doltBinExec == "" {
+		return doltServerPaths{}, errors.New("server: NewDoltServer: doltBinExec is required")
+	}
+	if rootDir == "" {
+		return doltServerPaths{}, errors.New("server: NewDoltServer: rootDir is required")
+	}
+	if configPath == "" {
+		return doltServerPaths{}, errors.New("server: NewDoltServer: configPath is required")
+	}
+	absDoltBinExec, err := filepath.Abs(doltBinExec)
+	if err != nil {
+		return doltServerPaths{}, errors.New("server: NewDoltServer: failed to determine absolute path of doltBinExec")
+	}
+	absRootDir, err := filepath.Abs(rootDir)
+	if err != nil {
+		return doltServerPaths{}, errors.New("server: NewDoltServer: failed to determine absolute path of rootDir")
+	}
+	absConfigPath, err := filepath.Abs(configPath)
+	if err != nil {
+		return doltServerPaths{}, errors.New("server: NewDoltServer: failed to determine absolute path of configPath")
+	}
+	return doltServerPaths{
+		doltBinExec: absDoltBinExec,
+		rootDir:     absRootDir,
+		configPath:  absConfigPath,
+	}, nil
+}
+
+func loadDoltServerConfig(configPath string) (servercfg.ServerConfig, error) {
+	cfg, err := servercfg.YamlConfigFromFile(filesys.LocalFS, configPath)
+	if err != nil {
+		return nil, fmt.Errorf("server: NewDoltServer: parse config %q: %w", configPath, err)
+	}
+	return cfg, nil
+}
+
+func openDoltServerLog(logFilePath string) (*os.File, error) {
+	if logFilePath == "" {
+		return nil, nil
+	}
+	absLogFilePath, err := filepath.Abs(logFilePath)
+	if err != nil {
+		return nil, errors.New("server: NewDoltServer: failed to determine absolute path of logFilePath")
+	}
+	logFile, err := os.OpenFile(absLogFilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // logFilePath is caller-derived, not user-request input
+	if err != nil {
+		return nil, fmt.Errorf("server: NewDoltServer: open log %q: %w", logFilePath, err)
+	}
+	return logFile, nil
 }
 
 func (s *DoltServer) ID(_ context.Context) string {
@@ -225,66 +259,87 @@ func (s *DoltServer) Start(ctx context.Context) error {
 		return fmt.Errorf("server: DoltServer.Start: acquire %s: %w", LockFileName, err)
 	}
 
+	if err := prepareDoltServerStart(s, ctx); err != nil {
+		lock.Unlock()
+		return err
+	}
+
+	if err := startManagedDoltProcess(s, lock); err != nil {
+		return err
+	}
+
+	if err := s.waitReady(ctx); err != nil {
+		abortDoltReadinessWait(s)
+		return fmt.Errorf("server: DoltServer.Start: %w", err)
+	}
+	return nil
+}
+
+func prepareDoltServerStart(s *DoltServer, ctx context.Context) error {
 	if err := s.doltConfigure(ctx); err != nil {
-		lock.Unlock()
 		return err
 	}
+	return s.doltInitWithRetries(ctx)
+}
 
-	if err := s.doltInitWithRetries(ctx); err != nil {
-		lock.Unlock()
-		return err
-	}
-
-	args := []string{
-		"sql-server",
-		"--config", s.configPath,
-	}
-
+func startManagedDoltProcess(s *DoltServer, lock *util.Lock) error {
 	managedCtx, cancel := context.WithCancel(context.Background())
 	eg, egCtx := errgroup.WithContext(managedCtx)
 	s.eg = eg
 	s.egCtx = egCtx
 	s.cancel = cancel
 
-	cmd := exec.CommandContext(managedCtx, s.doltBinExec, args...)
+	cmd := newDoltServerCommand(s, managedCtx)
+	if err := cmd.Start(); err != nil {
+		clearDoltStartState(s, cancel, lock)
+		return fmt.Errorf("server: DoltServer.Start: spawn dolt: %w", err)
+	}
+
+	s.pid = cmd.Process.Pid
+	birth, rootID, err := captureDoltStartIdentity(s)
+	if err != nil {
+		abortDoltProcessStart(s, cmd, cancel, lock)
+		return err
+	}
+	if err := writeDoltStartPIDFile(s, birth, rootID); err != nil {
+		abortDoltProcessStart(s, cmd, cancel, lock)
+		return err
+	}
+
+	eg.Go(func() error {
+		defer lock.Unlock()
+		return cmd.Wait()
+	})
+	return nil
+}
+
+func newDoltServerCommand(s *DoltServer, ctx context.Context) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, s.doltBinExec, "sql-server", "--config", s.configPath)
 	cmd.Dir = s.rootDir
 	cmd.Stdin = nil
 	if s.logFile != nil {
 		cmd.Stdout = s.logFile
 		cmd.Stderr = s.logFile
 	}
-
 	// The proxied server runs CALL DOLT_PUSH/FETCH in-process; see
 	// doltserver.ServerSpawnEnv for the guards it needs (GH#4272).
 	cmd.Env = doltserver.ServerSpawnEnv()
+	return cmd
+}
 
-	if err := cmd.Start(); err != nil {
-		s.eg, s.egCtx, s.cancel = nil, nil, nil
-		cancel()
-		lock.Unlock()
-		return fmt.Errorf("server: DoltServer.Start: spawn dolt: %w", err)
-	}
-
-	s.pid = cmd.Process.Pid
+func captureDoltStartIdentity(s *DoltServer) (procid.Token, string, error) {
 	birth, err := procid.Capture(s.pid)
 	if err != nil {
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
-		s.eg, s.egCtx, s.cancel, s.pid = nil, nil, nil, 0
-		cancel()
-		lock.Unlock()
-		return fmt.Errorf("server: DoltServer.Start: capture child birth identity: %w", err)
+		return "", "", fmt.Errorf("server: DoltServer.Start: capture child birth identity: %w", err)
 	}
 	rootID, err := identity.RootID(s.rootDir)
 	if err != nil {
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
-		s.eg, s.egCtx, s.cancel, s.pid = nil, nil, nil, 0
-		cancel()
-		lock.Unlock()
-		return fmt.Errorf("server: DoltServer.Start: resolve proxy root identity: %w", err)
+		return "", "", fmt.Errorf("server: DoltServer.Start: resolve proxy root identity: %w", err)
 	}
+	return birth, rootID, nil
+}
 
+func writeDoltStartPIDFile(s *DoltServer, birth procid.Token, rootID string) error {
 	if err := pidfile.Write(s.rootDir, PIDFileName, pidfile.PidFile{
 		Pid:    s.pid,
 		Port:   s.config.Port(),
@@ -293,27 +348,30 @@ func (s *DoltServer) Start(ctx context.Context) error {
 		Birth:  string(birth),
 		RootID: rootID,
 	}); err != nil {
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
-		s.eg, s.egCtx, s.cancel, s.pid = nil, nil, nil, 0
-		cancel()
-		lock.Unlock()
 		return fmt.Errorf("server: DoltServer.Start: write pidfile: %w", err)
 	}
-
-	eg.Go(func() error {
-		defer lock.Unlock()
-		return cmd.Wait()
-	})
-
-	if err := s.waitReady(ctx); err != nil {
-		cancel()
-		_ = s.eg.Wait()
-		s.eg, s.egCtx, s.cancel, s.pid = nil, nil, nil, 0
-		_ = pidfile.Remove(s.rootDir, PIDFileName)
-		return fmt.Errorf("server: DoltServer.Start: %w", err)
-	}
 	return nil
+}
+
+func clearDoltStartState(s *DoltServer, cancel context.CancelFunc, lock *util.Lock) {
+	s.eg, s.egCtx, s.cancel = nil, nil, nil
+	cancel()
+	lock.Unlock()
+}
+
+func abortDoltProcessStart(s *DoltServer, cmd *exec.Cmd, cancel context.CancelFunc, lock *util.Lock) {
+	_ = cmd.Process.Kill()
+	_, _ = cmd.Process.Wait()
+	s.eg, s.egCtx, s.cancel, s.pid = nil, nil, nil, 0
+	cancel()
+	lock.Unlock()
+}
+
+func abortDoltReadinessWait(s *DoltServer) {
+	s.cancel()
+	_ = s.eg.Wait()
+	s.eg, s.egCtx, s.cancel, s.pid = nil, nil, nil, 0
+	_ = pidfile.Remove(s.rootDir, PIDFileName)
 }
 
 func (s *DoltServer) waitReady(ctx context.Context) error {
@@ -346,42 +404,61 @@ func (s *DoltServer) waitReady(ctx context.Context) error {
 }
 
 func (s *DoltServer) Stop(ctx context.Context) error {
-	gcErr := s.runShutdownGC(ctx)
-	if gcErr != nil {
-		gcErr = fmt.Errorf("server: DoltServer.Stop: %w", gcErr)
-	}
+	return errors.Join(
+		shutdownDoltGCError(s, ctx),
+		waitForDoltStop(s),
+		closeDoltLogFile(s),
+		removeDoltPIDFile(s),
+	)
+}
 
+func shutdownDoltGCError(s *DoltServer, ctx context.Context) error {
+	if err := s.runShutdownGC(ctx); err != nil {
+		return fmt.Errorf("server: DoltServer.Stop: %w", err)
+	}
+	return nil
+}
+
+func waitForDoltStop(s *DoltServer) error {
 	if s.cancel != nil {
 		s.cancel()
 	}
-	var waitErr error
-	if s.eg != nil {
-		waitErr = s.eg.Wait()
-		var exitErr *exec.ExitError
-		if errors.As(waitErr, &exitErr) || errors.Is(waitErr, context.Canceled) {
-			waitErr = nil
-		}
+	if s.eg == nil {
+		return nil
+	}
+	waitErr := s.eg.Wait()
+	var exitErr *exec.ExitError
+	if errors.As(waitErr, &exitErr) || errors.Is(waitErr, context.Canceled) {
+		return nil
 	}
 	if waitErr != nil {
-		waitErr = fmt.Errorf("server: DoltServer.Stop: %w", waitErr)
+		return fmt.Errorf("server: DoltServer.Stop: %w", waitErr)
 	}
-	var closeErr error
-	if s.logFile != nil {
-		closeErr = s.logFile.Close()
-		s.logFile = nil
+	return nil
+}
+
+func closeDoltLogFile(s *DoltServer) error {
+	if s.logFile == nil {
+		return nil
 	}
-	if closeErr != nil {
-		closeErr = fmt.Errorf("server: DoltServer.Stop: close log: %w", closeErr)
+	err := s.logFile.Close()
+	s.logFile = nil
+	if err != nil {
+		return fmt.Errorf("server: DoltServer.Stop: close log: %w", err)
 	}
-	var rmErr error
-	if s.pid != 0 {
-		rmErr = pidfile.Remove(s.rootDir, PIDFileName)
-		s.pid = 0
+	return nil
+}
+
+func removeDoltPIDFile(s *DoltServer) error {
+	if s.pid == 0 {
+		return nil
 	}
-	if rmErr != nil {
-		rmErr = fmt.Errorf("server: DoltServer.Stop: remove pidfile: %w", rmErr)
+	err := pidfile.Remove(s.rootDir, PIDFileName)
+	s.pid = 0
+	if err != nil {
+		return fmt.Errorf("server: DoltServer.Stop: remove pidfile: %w", err)
 	}
-	return errors.Join(gcErr, waitErr, closeErr, rmErr)
+	return nil
 }
 
 func (s *DoltServer) runShutdownGC(ctx context.Context) (retErr error) {

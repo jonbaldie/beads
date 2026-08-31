@@ -225,6 +225,15 @@ func TestSpecGovernance(t *testing.T) {
 // serves. The last step builds a real ServeMux from the table for the same
 // reason: a pattern ServeMux refuses (a conflict, a malformed wildcard) is a
 // panic on the first request, and it should be a test failure instead.
+// specPathOf is the document path for a route, defaulting to the router
+// pattern for the rows where they agree.
+func (r route) specPathOf() string {
+	if r.specPath != "" {
+		return r.specPath
+	}
+	return r.pattern
+}
+
 func TestSpecRouteParity(t *testing.T) {
 	type methodPath struct{ method, path string }
 
@@ -609,8 +618,8 @@ func TestDefaultsMatchCLIFlags(t *testing.T) {
 		file string
 		want string
 	}{
-		{"../../cmd/bd/list.go", "workapi.DefaultListLimit"},
-		{"../../cmd/bd/ready.go", "workapi.DefaultReadyLimit"},
+		{"../../cmd/bd/list_flags.go", "workapi.DefaultListLimit"},
+		{"../../cmd/bd/ready_explain.go", "workapi.DefaultReadyLimit"},
 	} {
 		src, err := os.ReadFile(tc.file)
 		if err != nil {
@@ -637,7 +646,7 @@ func TestDefaultsMatchCLIFlags(t *testing.T) {
 	// that forwards an absent `sort` as "" reintroduces the divergence with
 	// the spec still saying the right thing.
 	sortFlag := regexp.MustCompile(`StringP\("sort",\s*"s",\s*"([a-z]+)"`)
-	src, err := os.ReadFile("../../cmd/bd/ready.go")
+	src, err := os.ReadFile("../../cmd/bd/ready_explain.go")
 	if err != nil {
 		t.Fatalf("read cmd/bd/ready.go: %v", err)
 	}

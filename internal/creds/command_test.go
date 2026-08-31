@@ -3,6 +3,7 @@ package creds
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 )
@@ -57,9 +58,7 @@ func TestParseCredential(t *testing.T) {
 // resetCache isolates the process-level command cache and runner for a test.
 func resetCache(t *testing.T) {
 	t.Helper()
-	credCacheMu.Lock()
-	credCache = map[string]cachedCred{}
-	credCacheMu.Unlock()
+	credCache = sync.Map{}
 	orig := credRunner
 	t.Cleanup(func() { credRunner = orig })
 }

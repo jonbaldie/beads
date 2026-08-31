@@ -22,7 +22,7 @@ const batchApplyPath = "/v0/beads/issues:batchApply"
 
 func newApplyBatchServer(t *testing.T, applier *roleBatchApplier) *testServer {
 	t.Helper()
-	return newTestServer(t, rolesConfig(Config{BatchApplier: applier}))
+	return newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{BatchApplier: applier}}}))
 }
 
 // itemErr wraps a refusal the way the role does, so a case can drive the

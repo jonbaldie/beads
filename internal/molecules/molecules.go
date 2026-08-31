@@ -47,12 +47,18 @@ type LoadResult struct {
 
 // Loader handles loading molecule catalogs from hierarchical locations.
 type Loader struct {
-	store storage.DoltStorage
+	store    moleculeStore
+	builtins []*types.Issue
+}
+
+type moleculeStore interface {
+	GetIssue(context.Context, string) (*types.Issue, error)
+	CreateIssuesWithFullOptions(context.Context, []*types.Issue, string, storage.BatchCreateOptions) error
 }
 
 // NewLoader creates a new molecule loader for the given storage.
 func NewLoader(store storage.DoltStorage) *Loader {
-	return &Loader{store: store}
+	return &Loader{store: store, builtins: getBuiltinMolecules()}
 }
 
 // LoadAll loads molecules from all available catalog locations.
@@ -63,62 +69,55 @@ func (l *Loader) LoadAll(ctx context.Context, beadsDir string) (*LoadResult, err
 		Sources: make([]string, 0),
 	}
 
-	// 1. Load built-in molecules (embedded in binary)
-	builtinMolecules := getBuiltinMolecules()
-	if len(builtinMolecules) > 0 {
-		count, err := l.loadMolecules(ctx, builtinMolecules)
-		if err != nil {
-			debug.Logf("warning: failed to load built-in molecules: %v", err)
-		} else {
-			result.BuiltinCount = count
-			result.Loaded += count
-			result.Sources = append(result.Sources, "<built-in>")
-		}
-	}
+	l.loadBuiltin(ctx, result, l.builtins)
 
 	// 2. Load town-level molecules ($GT_ROOT/.beads/molecules.jsonl)
 	townPath := getTownMoleculesPath()
-	if townPath != "" {
-		if molecules, err := loadMoleculesFromFile(townPath); err == nil && len(molecules) > 0 {
-			count, err := l.loadMolecules(ctx, molecules)
-			if err != nil {
-				debug.Logf("warning: failed to load town molecules: %v", err)
-			} else {
-				result.Loaded += count
-				result.Sources = append(result.Sources, townPath)
-			}
-		}
-	}
+	l.loadSource(ctx, result, townPath, "town")
 
 	// 3. Load user-level molecules (~/.beads/molecules.jsonl)
 	userPath := getUserMoleculesPath()
-	if userPath != "" && userPath != townPath {
-		if molecules, err := loadMoleculesFromFile(userPath); err == nil && len(molecules) > 0 {
-			count, err := l.loadMolecules(ctx, molecules)
-			if err != nil {
-				debug.Logf("warning: failed to load user molecules: %v", err)
-			} else {
-				result.Loaded += count
-				result.Sources = append(result.Sources, userPath)
-			}
-		}
+	if userPath != townPath {
+		l.loadSource(ctx, result, userPath, "user")
 	}
 
 	// 4. Load project-level molecules (.beads/molecules.jsonl)
 	if beadsDir != "" {
-		projectPath := filepath.Join(beadsDir, MoleculeFileName)
-		if molecules, err := loadMoleculesFromFile(projectPath); err == nil && len(molecules) > 0 {
-			count, err := l.loadMolecules(ctx, molecules)
-			if err != nil {
-				debug.Logf("warning: failed to load project molecules: %v", err)
-			} else {
-				result.Loaded += count
-				result.Sources = append(result.Sources, projectPath)
-			}
-		}
+		l.loadSource(ctx, result, filepath.Join(beadsDir, MoleculeFileName), "project")
 	}
 
 	return result, nil
+}
+
+func (l *Loader) loadBuiltin(ctx context.Context, result *LoadResult, molecules []*types.Issue) {
+	if len(molecules) == 0 {
+		return
+	}
+	count, err := l.loadMolecules(ctx, molecules)
+	if err != nil {
+		debug.Logf("warning: failed to load built-in molecules: %v", err)
+		return
+	}
+	result.BuiltinCount = count
+	result.Loaded += count
+	result.Sources = append(result.Sources, "<built-in>")
+}
+
+func (l *Loader) loadSource(ctx context.Context, result *LoadResult, path, label string) {
+	if path == "" {
+		return
+	}
+	molecules, err := loadMoleculesFromFile(path)
+	if err != nil || len(molecules) == 0 {
+		return
+	}
+	count, err := l.loadMolecules(ctx, molecules)
+	if err != nil {
+		debug.Logf("warning: failed to load %s molecules: %v", label, err)
+		return
+	}
+	result.Loaded += count
+	result.Sources = append(result.Sources, path)
 }
 
 // loadMolecules loads a slice of molecules into the store.

@@ -18,6 +18,10 @@ import (
 
 const memoriesPath = "/v0/beads/memories"
 
+func memoriesConfig(memories memoryops.Memories) Config {
+	return Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Memories: memories}}}
+}
+
 func (ts *testServer) remember(t *testing.T, body string) *http.Response {
 	t.Helper()
 	return ts.postBody(t, memoriesPath, "application/json", body)
@@ -48,7 +52,7 @@ func TestRememberForwardsBothDocumentedMembers(t *testing.T) {
 	memories := &roleMemories{remembered: memoryops.RememberResult{
 		Key: "Has Spaces.✓", Value: "  keep\nme  ", Replaced: true,
 	}}
-	ts := newTestServer(t, rolesConfig(Config{Memories: memories}))
+	ts := newTestServer(t, rolesConfig(memoriesConfig(memories)))
 
 	resp := ts.remember(t, `{"content":"  keep\nme  ","key":"Has Spaces.✓"}`)
 	if resp.StatusCode != http.StatusOK {
@@ -87,7 +91,7 @@ func TestRememberWithoutAKeyLeavesTheDerivationToTheRole(t *testing.T) {
 	memories := &roleMemories{remembered: memoryops.RememberResult{
 		Key: "always-run-tests-with-race", Value: "always run tests with -race",
 	}}
-	ts := newTestServer(t, rolesConfig(Config{Memories: memories}))
+	ts := newTestServer(t, rolesConfig(memoriesConfig(memories)))
 
 	resp := ts.remember(t, `{"content":"always run tests with -race"}`)
 	if resp.StatusCode != http.StatusOK {
@@ -161,7 +165,7 @@ func TestRememberRefusesWhatTheDocumentRefuses(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			memories := &roleMemories{}
-			ts := newTestServer(t, rolesConfig(Config{Memories: memories}))
+			ts := newTestServer(t, rolesConfig(memoriesConfig(memories)))
 
 			resp := ts.remember(t, tc.body)
 			if resp.StatusCode != http.StatusBadRequest {
@@ -194,7 +198,7 @@ func TestRememberRefusesWhatTheDocumentRefuses(t *testing.T) {
 // every other operation returns for an error it has never produced.
 func TestRememberSurfacesTheRolesRefusalAsABadRequest(t *testing.T) {
 	memories := &roleMemories{err: memoryops.ErrValidation}
-	ts := newTestServer(t, rolesConfig(Config{Memories: memories}))
+	ts := newTestServer(t, rolesConfig(memoriesConfig(memories)))
 
 	resp := ts.remember(t, `{"content":"!!!"}`)
 	if resp.StatusCode != http.StatusBadRequest {
@@ -222,7 +226,7 @@ func TestRememberSurfacesTheRolesRefusalAsABadRequest(t *testing.T) {
 // operation takes no parameters at all.
 func TestRememberRefusesAQueryString(t *testing.T) {
 	memories := &roleMemories{}
-	ts := newTestServer(t, rolesConfig(Config{Memories: memories}))
+	ts := newTestServer(t, rolesConfig(memoriesConfig(memories)))
 
 	resp := ts.postBody(t, memoriesPath+"?key=k", "application/json", `{"content":"x"}`)
 	if resp.StatusCode != http.StatusBadRequest {
@@ -252,7 +256,7 @@ func TestGetMemoryAnswersTheStoredValue(t *testing.T) {
 	memories := &roleMemories{recalled: memoryops.RecallResult{
 		Key: "Has Spaces.✓", Value: "  the\nstored bytes  ", Found: true,
 	}}
-	ts := newTestServer(t, rolesConfig(Config{Memories: memories}))
+	ts := newTestServer(t, rolesConfig(memoriesConfig(memories)))
 
 	resp := ts.get(t, memoriesPath+"/Has%20Spaces.%E2%9C%93")
 	if resp.StatusCode != http.StatusOK {
@@ -295,7 +299,7 @@ func TestGetMemoryAnswersAMissWithA404(t *testing.T) {
 		{name: "stored as the empty string", result: memoryops.RecallResult{Key: "gone", Value: ""}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ts := newTestServer(t, rolesConfig(Config{Memories: &roleMemories{recalled: tc.result}}))
+			ts := newTestServer(t, rolesConfig(memoriesConfig(&roleMemories{recalled: tc.result})))
 
 			resp := ts.get(t, memoriesPath+"/gone")
 			if resp.StatusCode != http.StatusNotFound {
@@ -335,7 +339,7 @@ func TestGetMemoryRefusesAKeyItCannotAddress(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			memories := &roleMemories{recalled: memoryops.RecallResult{Found: true, Value: "v"}}
-			ts := newTestServer(t, rolesConfig(Config{Memories: memories}))
+			ts := newTestServer(t, rolesConfig(memoriesConfig(memories)))
 
 			resp := ts.get(t, tc.path)
 			if resp.StatusCode != http.StatusBadRequest {
@@ -359,7 +363,7 @@ func TestGetMemoryRefusesAKeyItCannotAddress(t *testing.T) {
 // ignored one is a client's silently unanswered question.
 func TestGetMemoryRefusesAQueryString(t *testing.T) {
 	memories := &roleMemories{recalled: memoryops.RecallResult{Found: true, Value: "v"}}
-	ts := newTestServer(t, rolesConfig(Config{Memories: memories}))
+	ts := newTestServer(t, rolesConfig(memoriesConfig(memories)))
 
 	resp := ts.get(t, memoriesPath+"/k?verbose=1")
 	if resp.StatusCode != http.StatusBadRequest {
@@ -390,7 +394,7 @@ func TestForgetMemoryRemovesTheNamedKeyAndReportsWhatItHeld(t *testing.T) {
 	memories := &roleMemories{forgotten: memoryops.ForgetResult{
 		Key: "Has Spaces.✓", Value: "  what it held  ", Found: true,
 	}}
-	ts := newTestServer(t, rolesConfig(Config{Memories: memories}))
+	ts := newTestServer(t, rolesConfig(memoriesConfig(memories)))
 
 	resp := ts.forget(t, memoriesPath+"/Has%20Spaces.%E2%9C%93")
 	if resp.StatusCode != http.StatusOK {
@@ -420,7 +424,7 @@ func TestForgetMemoryRemovesTheNamedKeyAndReportsWhatItHeld(t *testing.T) {
 // removed this" from "there was nothing to remove".
 func TestForgetMemoryOfAnAbsentKeyIs404AndRemovesNothing(t *testing.T) {
 	memories := &roleMemories{forgotten: memoryops.ForgetResult{Key: "gone"}}
-	ts := newTestServer(t, rolesConfig(Config{Memories: memories}))
+	ts := newTestServer(t, rolesConfig(memoriesConfig(memories)))
 
 	resp := ts.forget(t, memoriesPath+"/gone")
 	if resp.StatusCode != http.StatusNotFound {
@@ -455,7 +459,7 @@ func TestForgetMemoryRefusesAKeyItCannotAddress(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			memories := &roleMemories{forgotten: memoryops.ForgetResult{Found: true}}
-			ts := newTestServer(t, rolesConfig(Config{Memories: memories}))
+			ts := newTestServer(t, rolesConfig(memoriesConfig(memories)))
 
 			resp := ts.forget(t, tc.path)
 			if resp.StatusCode != http.StatusBadRequest {
@@ -477,7 +481,7 @@ func TestForgetMemoryRefusesAKeyItCannotAddress(t *testing.T) {
 // believes it narrowed what it erased.
 func TestForgetMemoryRefusesAQueryString(t *testing.T) {
 	memories := &roleMemories{forgotten: memoryops.ForgetResult{Found: true}}
-	ts := newTestServer(t, rolesConfig(Config{Memories: memories}))
+	ts := newTestServer(t, rolesConfig(memoriesConfig(memories)))
 
 	resp := ts.forget(t, memoriesPath+"/k?dry_run=true")
 	if resp.StatusCode != http.StatusBadRequest {
@@ -505,7 +509,7 @@ func TestForgetMemoryRefusesAQueryString(t *testing.T) {
 // what the router matches.
 func TestDeleteOnTheMemoryCollectionIsNotRouted(t *testing.T) {
 	memories := &roleMemories{forgotten: memoryops.ForgetResult{Found: true}}
-	ts := newTestServer(t, rolesConfig(Config{Memories: memories}))
+	ts := newTestServer(t, rolesConfig(memoriesConfig(memories)))
 
 	resp := ts.forget(t, memoriesPath)
 	if resp.StatusCode != http.StatusNotFound {
@@ -531,7 +535,7 @@ func TestListMemoriesAnswersThePlaneOrderedByKey(t *testing.T) {
 		// empty from a row that is not there.
 		"stored-empty": "",
 	}}}
-	ts := newTestServer(t, rolesConfig(Config{Memories: memories}))
+	ts := newTestServer(t, rolesConfig(memoriesConfig(memories)))
 
 	resp := ts.get(t, memoriesPath)
 	if resp.StatusCode != http.StatusOK {
@@ -575,7 +579,7 @@ func TestListMemoriesAnswersThePlaneOrderedByKey(t *testing.T) {
 // have to tell an absent array from an empty one to learn that nothing is
 // stored.
 func TestListMemoriesOfAnEmptyPlaneIsAnEmptyArray(t *testing.T) {
-	ts := newTestServer(t, rolesConfig(Config{Memories: &roleMemories{}}))
+	ts := newTestServer(t, rolesConfig(memoriesConfig(&roleMemories{})))
 
 	resp := ts.get(t, memoriesPath)
 	if resp.StatusCode != http.StatusOK {
@@ -597,7 +601,7 @@ func TestListMemoriesOfAnEmptyPlaneIsAnEmptyArray(t *testing.T) {
 // which term was searched for.
 func TestListMemoriesPassesTheSearchTermUnfolded(t *testing.T) {
 	memories := &roleMemories{}
-	ts := newTestServer(t, rolesConfig(Config{Memories: memories}))
+	ts := newTestServer(t, rolesConfig(memoriesConfig(memories)))
 
 	resp := ts.get(t, memoriesPath+"?search=Dolt%20PHANTOMS")
 	if resp.StatusCode != http.StatusOK {
@@ -618,7 +622,7 @@ func TestListMemoriesPassesTheSearchTermUnfolded(t *testing.T) {
 // only memories containing "".
 func TestListMemoriesTreatsAnAbsentTermAsEverything(t *testing.T) {
 	memories := &roleMemories{}
-	ts := newTestServer(t, rolesConfig(Config{Memories: memories}))
+	ts := newTestServer(t, rolesConfig(memoriesConfig(memories)))
 
 	if resp := ts.get(t, memoriesPath); resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, readAll(t, resp))
@@ -695,7 +699,7 @@ func TestListMemoriesRefusesAnUnknownQueryParameter(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			memories := &roleMemories{}
-			ts := newTestServer(t, rolesConfig(Config{Memories: memories}))
+			ts := newTestServer(t, rolesConfig(memoriesConfig(memories)))
 
 			resp := ts.get(t, memoriesPath+tc.query)
 			if resp.StatusCode != http.StatusBadRequest {
@@ -727,7 +731,7 @@ func TestListMemoriesRefusesAnUnknownQueryParameter(t *testing.T) {
 // OTHER names rather than about a decoder that refuses everything.
 func TestListMemoriesAcceptsSearchAndNothingElse(t *testing.T) {
 	memories := &roleMemories{}
-	ts := newTestServer(t, rolesConfig(Config{Memories: memories}))
+	ts := newTestServer(t, rolesConfig(memoriesConfig(memories)))
 
 	if resp := ts.get(t, memoriesPath+"?search=dolt"); resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d for the one parameter this operation takes, want 200: %s",

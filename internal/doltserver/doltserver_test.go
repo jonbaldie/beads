@@ -716,6 +716,9 @@ func TestCleanupStateFilesReturnsError(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod not effective on Windows")
 	}
+	if os.Geteuid() == 0 {
+		t.Skip("root can remove files from a read-only directory")
+	}
 	dir := t.TempDir()
 
 	// Create a PID file then make the directory read-only so removal fails.
@@ -764,6 +767,9 @@ func TestStopNoStateFiles(t *testing.T) {
 func TestStopNotRunningWithCleanupError(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod not effective on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root can remove files from a read-only directory")
 	}
 	dir := t.TempDir()
 

@@ -19,12 +19,12 @@ const treePath = "/v0/beads/dependencies/tree"
 // Listen requires a COMPLETE source, so rolesConfig fills in the rest.
 func treeServer(t *testing.T, walker *roleTreeWalker) *testServer {
 	t.Helper()
-	return newTestServer(t, rolesConfig(Config{TreeWalker: walker}))
+	return newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{GraphRoles: GraphRoles{TreeWalker: walker}}}))
 }
 
 func treeNode(id string, depth int, parentID string, edge types.DependencyType) *types.TreeNode {
 	return &types.TreeNode{
-		Issue:          types.Issue{ID: id, Title: strings.ToUpper(id), Status: types.StatusOpen, Priority: 2},
+		Issue:          types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: strings.ToUpper(id)}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2}},
 		Depth:          depth,
 		ParentID:       parentID,
 		EdgeFromParent: edge,

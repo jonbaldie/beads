@@ -88,15 +88,20 @@ func LinkFromBeadsDependency(issue *types.Issue, dep *types.IssueWithDependencyM
 	if issue == nil || dep == nil || issue.ExternalRef == nil || dep.ExternalRef == nil {
 		return DependencyLink{}, false
 	}
-	issueIID, ok := IssueIIDFromRef(*issue.ExternalRef)
+	issueIID, depIID, ok := dependencyIIDs(issue, dep)
 	if !ok {
 		return DependencyLink{}, false
 	}
-	depIID, ok := IssueIIDFromRef(*dep.ExternalRef)
-	if !ok || issueIID == depIID {
-		return DependencyLink{}, false
-	}
+	return dependencyLinkForIIDs(issue, dep, issueIID, depIID)
+}
 
+func dependencyIIDs(issue *types.Issue, dep *types.IssueWithDependencyMetadata) (int, int, bool) {
+	issueIID, issueOK := IssueIIDFromRef(*issue.ExternalRef)
+	depIID, depOK := IssueIIDFromRef(*dep.ExternalRef)
+	return issueIID, depIID, issueOK && depOK && issueIID != depIID
+}
+
+func dependencyLinkForIIDs(issue *types.Issue, dep *types.IssueWithDependencyMetadata, issueIID, depIID int) (DependencyLink, bool) {
 	link := DependencyLink{
 		FromBeadsID:    issue.ID,
 		ToBeadsID:      dep.ID,
@@ -163,45 +168,62 @@ func (r *LinkResolver) PushLinks(ctx context.Context, desired []DependencyLink, 
 	var result PushLinkResult
 
 	for _, link := range desired {
-		current, ok := currentBySource[link.SourceIID]
-		if !ok {
-			links, err := r.Client.GetIssueLinks(ctx, link.SourceIID)
-			if err != nil {
-				result.Errors = append(result.Errors, fmt.Errorf("fetch GitLab links for #%d: %w", link.SourceIID, err))
-				continue
-			}
-			current = currentLinkSet(link.SourceIID, links)
-			currentBySource[link.SourceIID] = current
-		}
-
-		if _, exists := current[link.key()]; exists {
+		outcome, err := r.pushLink(ctx, link, currentBySource, opts)
+		if err != nil {
+			result.Errors = append(result.Errors, err)
 			continue
 		}
-
-		if opts.DryRun {
-			if opts.OnPlan != nil {
-				opts.OnPlan(link)
-			}
+		switch outcome {
+		case linkPushCreated:
 			result.Created++
-			continue
+		case linkPushLicenseSkipped:
+			result.LicenseSkipped++
 		}
-
-		if _, err := r.Client.CreateIssueLink(ctx, link.SourceIID, link.TargetIID, link.LinkType); err != nil {
-			if isGitLabLicenseError(err) {
-				// blocks/is_blocked_by needs GitLab Premium/Ultimate; this
-				// instance's license lacks it. Expected, non-fatal: skip and
-				// let the caller emit one curated message.
-				result.LicenseSkipped++
-				continue
-			}
-			result.Errors = append(result.Errors, fmt.Errorf("create GitLab link #%d %s #%d: %w", link.SourceIID, link.LinkType, link.TargetIID, err))
-			continue
-		}
-		current[link.key()] = struct{}{}
-		result.Created++
 	}
 
 	return result
+}
+
+type linkPushOutcome uint8
+
+const (
+	linkPushUnchanged linkPushOutcome = iota
+	linkPushCreated
+	linkPushLicenseSkipped
+)
+
+func (r *LinkResolver) pushLink(ctx context.Context, link DependencyLink, currentBySource map[int]map[gitLabLinkKey]struct{}, opts PushLinkOptions) (linkPushOutcome, error) {
+	current, ok := currentBySource[link.SourceIID]
+	if !ok {
+		links, err := r.Client.GetIssueLinks(ctx, link.SourceIID)
+		if err != nil {
+			return linkPushUnchanged, fmt.Errorf("fetch GitLab links for #%d: %w", link.SourceIID, err)
+		}
+		current = currentLinkSet(link.SourceIID, links)
+		currentBySource[link.SourceIID] = current
+	}
+
+	if _, exists := current[link.key()]; exists {
+		return linkPushUnchanged, nil
+	}
+	if opts.DryRun {
+		if opts.OnPlan != nil {
+			opts.OnPlan(link)
+		}
+		return linkPushCreated, nil
+	}
+
+	if _, err := r.Client.CreateIssueLink(ctx, link.SourceIID, link.TargetIID, link.LinkType); err != nil {
+		if isGitLabLicenseError(err) {
+			// blocks/is_blocked_by needs GitLab Premium/Ultimate; this
+			// instance's license lacks it. Expected, non-fatal: skip and
+			// let the caller emit one curated message.
+			return linkPushLicenseSkipped, nil
+		}
+		return linkPushUnchanged, fmt.Errorf("create GitLab link #%d %s #%d: %w", link.SourceIID, link.LinkType, link.TargetIID, err)
+	}
+	current[link.key()] = struct{}{}
+	return linkPushCreated, nil
 }
 
 // isGitLabLicenseError reports whether err is GitLab's 403 rejection of a
@@ -235,50 +257,71 @@ func (t *Tracker) PushEpicMilestones(ctx context.Context, issues []*types.Issue,
 	updated := 0
 	var errs []error
 	for _, issue := range issues {
-		if issue == nil || issue.IssueType == types.TypeEpic {
+		if !markEpicMilestoneIssue(seen, issue) {
 			continue
 		}
-		if _, ok := seen[issue.ID]; ok {
-			continue
-		}
-		seen[issue.ID] = struct{}{}
-		if issue.ExternalRef == nil {
-			continue
-		}
-		iid, ok := IssueIIDFromRef(*issue.ExternalRef)
-		if !ok {
-			continue
-		}
-
-		milestoneID := t.findParentEpicMilestone(ctx, issue.ID)
-		if milestoneID == 0 {
-			continue
-		}
-
-		current, err := t.client.FetchIssueByIID(ctx, iid)
+		changed, err := t.pushEpicMilestone(ctx, issue, opts)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("fetch GitLab issue #%d for milestone sync: %w", iid, err))
+			errs = append(errs, err)
 			continue
 		}
-		if current != nil && current.Milestone != nil && current.Milestone.ID == milestoneID {
-			continue
-		}
-
-		if opts.DryRun {
-			if opts.OnPlan != nil {
-				opts.OnPlan(issue.ID, iid, milestoneID)
-			}
+		if changed {
 			updated++
-			continue
 		}
-
-		if _, err := t.client.UpdateIssue(ctx, iid, map[string]interface{}{"milestone_id": milestoneID}); err != nil {
-			errs = append(errs, fmt.Errorf("set GitLab milestone for %s (#%d): %w", issue.ID, iid, err))
-			continue
-		}
-		updated++
 	}
 	return updated, errs
+}
+
+func markEpicMilestoneIssue(seen map[string]struct{}, issue *types.Issue) bool {
+	if issue == nil || issue.IssueType == types.TypeEpic {
+		return false
+	}
+	if _, ok := seen[issue.ID]; ok {
+		return false
+	}
+	seen[issue.ID] = struct{}{}
+	return true
+}
+
+func (t *Tracker) pushEpicMilestone(ctx context.Context, issue *types.Issue, opts EpicMilestoneOptions) (bool, error) {
+	iid, milestoneID, ok := t.epicMilestoneTarget(ctx, issue)
+	if !ok {
+		return false, nil
+	}
+
+	current, err := t.client.FetchIssueByIID(ctx, iid)
+	if err != nil {
+		return false, fmt.Errorf("fetch GitLab issue #%d for milestone sync: %w", iid, err)
+	}
+	if current != nil && current.Milestone != nil && current.Milestone.ID == milestoneID {
+		return false, nil
+	}
+	return t.applyEpicMilestone(ctx, issue, iid, milestoneID, opts)
+}
+
+func (t *Tracker) epicMilestoneTarget(ctx context.Context, issue *types.Issue) (int, int, bool) {
+	if issue == nil || issue.ExternalRef == nil {
+		return 0, 0, false
+	}
+	iid, ok := IssueIIDFromRef(*issue.ExternalRef)
+	if !ok {
+		return 0, 0, false
+	}
+	milestoneID := t.findParentEpicMilestone(ctx, issue.ID)
+	return iid, milestoneID, milestoneID != 0
+}
+
+func (t *Tracker) applyEpicMilestone(ctx context.Context, issue *types.Issue, iid, milestoneID int, opts EpicMilestoneOptions) (bool, error) {
+	if opts.DryRun {
+		if opts.OnPlan != nil {
+			opts.OnPlan(issue.ID, iid, milestoneID)
+		}
+		return true, nil
+	}
+	if _, err := t.client.UpdateIssue(ctx, iid, map[string]interface{}{"milestone_id": milestoneID}); err != nil {
+		return false, fmt.Errorf("set GitLab milestone for %s (#%d): %w", issue.ID, iid, err)
+	}
+	return true, nil
 }
 
 // issueLinksToDependencies converts GitLab issue links to normalized beads

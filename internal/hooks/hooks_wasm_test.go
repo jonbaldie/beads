@@ -30,7 +30,7 @@ func TestRunHookReportsUnsupportedExecution(t *testing.T) {
 
 	runner := NewRunner(t.TempDir())
 	hookPath := "not-executable-on-wasm"
-	issue := &types.Issue{ID: "wasm-test"}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "wasm-test"}}
 	err := runner.runHook(
 		hookPath,
 		EventCreate,

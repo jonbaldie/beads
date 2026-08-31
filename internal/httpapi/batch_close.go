@@ -193,22 +193,31 @@ func (s *Server) batchCloseItems(w http.ResponseWriter, r *http.Request, members
 		s.fail(w, r, InvalidArgument("items", ReasonInvalidValue, "`items` is required"))
 		return nil, false
 	}
+	rawItems, res := decodeBatchCloseItems(raw)
+	if res != nil {
+		s.fail(w, r, *res)
+		return nil, false
+	}
+	return s.projectBatchCloseItems(w, r, rawItems)
+}
+
+func decodeBatchCloseItems(raw json.RawMessage) ([]map[string]json.RawMessage, *Result) {
 	var rawItems []map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &rawItems); err != nil || rawItems == nil {
-		s.fail(w, r, InvalidArgument("items", ReasonInvalidValue, "`items` must be an array of objects"))
-		return nil, false
+		return nil, batchCloseRefusal("items", "`items` must be an array of objects")
 	}
 	switch {
 	case len(rawItems) == 0:
-		s.fail(w, r, InvalidArgument("items", ReasonInvalidValue,
-			"`items` must carry at least one issue; a close that closes nothing is refused rather than answered"))
-		return nil, false
+		return nil, batchCloseRefusal("items",
+			"`items` must carry at least one issue; a close that closes nothing is refused rather than answered")
 	case len(rawItems) > maxBatchCloseItems:
-		s.fail(w, r, InvalidArgument("items", ReasonInvalidValue,
-			fmt.Sprintf("`items` carries %d issues; the limit is %d per request", len(rawItems), maxBatchCloseItems)))
-		return nil, false
+		return nil, batchCloseRefusal("items",
+			fmt.Sprintf("`items` carries %d issues; the limit is %d per request", len(rawItems), maxBatchCloseItems))
 	}
+	return rawItems, nil
+}
 
+func (s *Server) projectBatchCloseItems(w http.ResponseWriter, r *http.Request, rawItems []map[string]json.RawMessage) ([]issueops.BatchCloseItem, bool) {
 	items := make([]issueops.BatchCloseItem, 0, len(rawItems))
 	for i, rawItem := range rawItems {
 		if rawItem == nil {
@@ -227,6 +236,11 @@ func (s *Server) batchCloseItems(w http.ResponseWriter, r *http.Request, members
 		items = append(items, item)
 	}
 	return items, true
+}
+
+func batchCloseRefusal(param, detail string) *Result {
+	res := InvalidArgument(param, ReasonInvalidValue, detail)
+	return &res
 }
 
 // batchCloseItem projects one decoded item onto the role's item.

@@ -27,7 +27,7 @@ func (s *Server) handleContext(w http.ResponseWriter, r *http.Request) {
 	if !s.requireNoQuery(w, r) {
 		return
 	}
-	writeJSON(w, s.ctxBody)
+	writeJSON(w, s.identity.ctxBody)
 }
 
 // requireNoQuery enforces the document's unknown-parameter rule for the

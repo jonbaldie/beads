@@ -38,19 +38,51 @@ var (
 
 // ValidateV2 validates the fields required for a schema v2 pidfile.
 func (p *PidFile) ValidateV2(wantKind string) error {
-	if p.Schema < SchemaV2 {
+	checks := []func() error{
+		func() error { return validateSchema(p.Schema) },
+		func() error { return validatePID(p.Pid) },
+		func() error { return validatePorts(p.Port, p.ControlPort) },
+		func() error { return validateKind(p.Kind, wantKind) },
+		func() error { return validateBirth(p.Birth) },
+	}
+	for _, check := range checks {
+		if err := check(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateSchema(schema int) error {
+	if schema < SchemaV2 {
 		return ErrLegacySchema
 	}
-	if p.Pid <= 0 {
+	return nil
+}
+
+func validatePID(pid int) error {
+	if pid <= 0 {
 		return ErrBadPid
 	}
-	if p.Port < 1 || p.Port > 65535 || (p.ControlPort != 0 && (p.ControlPort < 1 || p.ControlPort > 65535)) {
+	return nil
+}
+
+func validatePorts(port, controlPort int) error {
+	if port < 1 || port > 65535 || (controlPort != 0 && (controlPort < 1 || controlPort > 65535)) {
 		return ErrBadPort
 	}
-	if p.Kind != wantKind {
+	return nil
+}
+
+func validateKind(kind, wantKind string) error {
+	if kind != wantKind {
 		return ErrKindMismatch
 	}
-	if p.Birth == "" {
+	return nil
+}
+
+func validateBirth(birth string) error {
+	if birth == "" {
 		return ErrMissingBirth
 	}
 	return nil

@@ -31,7 +31,7 @@ const removeDependencyPath = "/v0/beads/dependencies:remove"
 
 func newDependencyServer(t *testing.T, editor *roleDependencyEditor) *testServer {
 	t.Helper()
-	return newTestServer(t, rolesConfig(Config{DependencyEditor: editor}))
+	return newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{DependencyEditor: editor}}}))
 }
 
 // TestRemoveDependencyPathReachesItsHandler: the path is a LITERAL

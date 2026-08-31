@@ -29,9 +29,11 @@ import (
 // it is not a replacement for the behavioral pins.
 func TestEveryTimedProviderAccessorBindsToTheWrapper(t *testing.T) {
 	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "claim.go", nil, 0)
+	// Accessors live in their own companion file so the request handler file
+	// does not become a god file as the provider grows.
+	file, err := parser.ParseFile(fset, "timed_provider_methods.go", nil, 0)
 	if err != nil {
-		t.Fatalf("parse claim.go: %v", err)
+		t.Fatalf("parse timed_provider_methods.go: %v", err)
 	}
 
 	checked := 0

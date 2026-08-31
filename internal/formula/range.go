@@ -128,73 +128,105 @@ type token struct {
 func tokenize(expr string) ([]token, error) {
 	var tokens []token
 	i := 0
+	n := len(expr)
 
-	for i < len(expr) {
+	for i < n {
 		ch := expr[i]
 
-		// Skip whitespace
 		if unicode.IsSpace(rune(ch)) {
 			i++
 			continue
 		}
-
-		// Number
 		if unicode.IsDigit(rune(ch)) {
-			j := i
-			for j < len(expr) && (unicode.IsDigit(rune(expr[j])) || expr[j] == '.') {
-				j++
-			}
-			val, err := strconv.ParseFloat(expr[i:j], 64)
+			var err error
+			i, err = appendNumericToken(expr, i, &tokens)
 			if err != nil {
-				return nil, fmt.Errorf("invalid number %q", expr[i:j])
+				return nil, err
 			}
-			tokens = append(tokens, token{tokNumber, val})
-			i = j
 			continue
 		}
 
-		// Operators
-		switch ch {
-		case '+':
-			tokens = append(tokens, token{tokPlus, 0})
-		case '-':
-			// Could be unary minus or subtraction
-			// If previous token is not a number or right paren, it's unary
-			if len(tokens) == 0 || (tokens[len(tokens)-1].typ != tokNumber && tokens[len(tokens)-1].typ != tokRParen) {
-				// Unary minus: parse the number with the minus
-				j := i + 1
-				for j < len(expr) && (unicode.IsDigit(rune(expr[j])) || expr[j] == '.') {
-					j++
-				}
-				if j > i+1 {
-					val, err := strconv.ParseFloat(expr[i:j], 64)
-					if err != nil {
-						return nil, fmt.Errorf("invalid number %q", expr[i:j])
-					}
-					tokens = append(tokens, token{tokNumber, val})
-					i = j
-					continue
-				}
-			}
-			tokens = append(tokens, token{tokMinus, 0})
-		case '*':
-			tokens = append(tokens, token{tokMul, 0})
-		case '/':
-			tokens = append(tokens, token{tokDiv, 0})
-		case '^':
-			tokens = append(tokens, token{tokPow, 0})
-		case '(':
-			tokens = append(tokens, token{tokLParen, 0})
-		case ')':
-			tokens = append(tokens, token{tokRParen, 0})
-		default:
+		next, unary, err := appendUnaryNumericToken(expr, i, ch, &tokens)
+		if err != nil {
+			return nil, err
+		}
+		if unary {
+			i = next
+			continue
+		}
+		typ, ok := operatorToken(ch)
+		if !ok {
 			return nil, fmt.Errorf("unexpected character %q in expression", ch)
 		}
+		tokens = append(tokens, token{typ, 0})
 		i++
 	}
 
 	tokens = append(tokens, token{tokEOF, 0})
 	return tokens, nil
+}
+
+func appendNumericToken(expr string, start int, tokens *[]token) (int, error) {
+	end := start
+	n := len(expr)
+	for end < n && (unicode.IsDigit(rune(expr[end])) || expr[end] == '.') {
+		end++
+	}
+	value, err := strconv.ParseFloat(expr[start:end], 64)
+	if err != nil {
+		return start, fmt.Errorf("invalid number %q", expr[start:end])
+	}
+	*tokens = append(*tokens, token{tokNumber, value})
+	return end, nil
+}
+
+func appendUnaryNumericToken(expr string, start int, ch byte, tokens *[]token) (int, bool, error) {
+	if ch != '-' || !unaryMinusPosition(*tokens) {
+		return start, false, nil
+	}
+	end := start + 1
+	n := len(expr)
+	for end < n && (unicode.IsDigit(rune(expr[end])) || expr[end] == '.') {
+		end++
+	}
+	if end == start+1 {
+		return start, false, nil
+	}
+	value, err := strconv.ParseFloat(expr[start:end], 64)
+	if err != nil {
+		return start, true, fmt.Errorf("invalid number %q", expr[start:end])
+	}
+	*tokens = append(*tokens, token{tokNumber, value})
+	return end, true, nil
+}
+
+func unaryMinusPosition(tokens []token) bool {
+	if len(tokens) == 0 {
+		return true
+	}
+	last := tokens[len(tokens)-1].typ
+	return last != tokNumber && last != tokRParen
+}
+
+func operatorToken(ch byte) (tokenType, bool) {
+	switch ch {
+	case '+':
+		return tokPlus, true
+	case '-':
+		return tokMinus, true
+	case '*':
+		return tokMul, true
+	case '/':
+		return tokDiv, true
+	case '^':
+		return tokPow, true
+	case '(':
+		return tokLParen, true
+	case ')':
+		return tokRParen, true
+	default:
+		return tokEOF, false
+	}
 }
 
 // Parser state

@@ -1239,39 +1239,39 @@ func TestListenRequiresExactlyOneDatabaseSource(t *testing.T) {
 		},
 		{
 			name:    "a sweeper alone",
-			cfg:     Config{Sweeper: &roleSweeper{}},
+			cfg:     Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Sweeper: &roleSweeper{}}}},
 			wantErr: "no database source",
 		},
 		{
 			name:    "a provider and a sweeper",
-			cfg:     Config{Provider: &fakeProvider{}, Sweeper: &roleSweeper{}},
+			cfg:     Config{Provider: &fakeProvider{}, SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Sweeper: &roleSweeper{}}}},
 			wantErr: "exactly one database source",
 		},
 		{
 			name:    "a cycle detector alone",
-			cfg:     Config{CycleDetector: &roleCycleDetector{}},
+			cfg:     Config{SourceRoles: SourceRoles{GraphRoles: GraphRoles{CycleDetector: &roleCycleDetector{}}}},
 			wantErr: "no database source",
 		},
 		{
 			name:    "a querier alone",
-			cfg:     Config{Querier: &roleQuerier{}},
+			cfg:     Config{SourceRoles: SourceRoles{GraphRoles: GraphRoles{Querier: &roleQuerier{}}}},
 			wantErr: "no database source",
 		},
 		{
 			name:    "a provider and a querier",
-			cfg:     Config{Provider: &fakeProvider{}, Querier: &roleQuerier{}},
+			cfg:     Config{Provider: &fakeProvider{}, SourceRoles: SourceRoles{GraphRoles: GraphRoles{Querier: &roleQuerier{}}}},
 			wantErr: "exactly one database source",
 		},
 		{
 			// The exact Config the first release of this arm accepted: the pair
 			// ALONE used to be a complete source. A regression case.
 			name:    "a reader and a claimer without a ready counter",
-			cfg:     Config{Reader: &roleReader{}, Claimer: &roleClaimer{}},
+			cfg:     Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{Reader: &roleReader{}, Claimer: &roleClaimer{}}}},
 			wantErr: "no database source",
 		},
 		{
 			name:    "a ready counter alone",
-			cfg:     Config{ReadyCounter: &roleReadyCounter{}},
+			cfg:     Config{SourceRoles: SourceRoles{GraphRoles: GraphRoles{ReadyCounter: &roleReadyCounter{}}}},
 			wantErr: "no database source",
 		},
 		{
@@ -1281,12 +1281,12 @@ func TestListenRequiresExactlyOneDatabaseSource(t *testing.T) {
 		},
 		{
 			name:    "a batch creator alone",
-			cfg:     Config{BatchCreator: &roleBatchCreator{}},
+			cfg:     Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{BatchCreator: &roleBatchCreator{}}}},
 			wantErr: "no database source",
 		},
 		{
 			name:    "a provider and a batch creator",
-			cfg:     Config{Provider: &fakeProvider{}, BatchCreator: &roleBatchCreator{}},
+			cfg:     Config{Provider: &fakeProvider{}, SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{BatchCreator: &roleBatchCreator{}}}},
 			wantErr: "exactly one database source",
 		},
 		{
@@ -1296,12 +1296,12 @@ func TestListenRequiresExactlyOneDatabaseSource(t *testing.T) {
 		},
 		{
 			name:    "a metadata cas role alone",
-			cfg:     Config{MetadataCAS: &roleMetadataCAS{}},
+			cfg:     Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{MetadataCAS: &roleMetadataCAS{}}}},
 			wantErr: "no database source",
 		},
 		{
 			name:    "a provider and a metadata cas role",
-			cfg:     Config{Provider: &fakeProvider{}, MetadataCAS: &roleMetadataCAS{}},
+			cfg:     Config{Provider: &fakeProvider{}, SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{MetadataCAS: &roleMetadataCAS{}}}},
 			wantErr: "exactly one database source",
 		},
 		{
@@ -1311,12 +1311,12 @@ func TestListenRequiresExactlyOneDatabaseSource(t *testing.T) {
 		},
 		{
 			name:    "a batch applier alone",
-			cfg:     Config{BatchApplier: &roleBatchApplier{}},
+			cfg:     Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{BatchApplier: &roleBatchApplier{}}}},
 			wantErr: "no database source",
 		},
 		{
 			name:    "a provider and a batch applier",
-			cfg:     Config{Provider: &fakeProvider{}, BatchApplier: &roleBatchApplier{}},
+			cfg:     Config{Provider: &fakeProvider{}, SourceRoles: SourceRoles{IssueRoles: IssueRoles{BatchApplier: &roleBatchApplier{}}}},
 			wantErr: "exactly one database source",
 		},
 		{
@@ -1330,32 +1330,32 @@ func TestListenRequiresExactlyOneDatabaseSource(t *testing.T) {
 		},
 		{
 			name:    "a memories role alone",
-			cfg:     Config{Memories: &roleMemories{}},
+			cfg:     Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Memories: &roleMemories{}}}},
 			wantErr: "no database source",
 		},
 		{
 			name:    "a provider and a memories role",
-			cfg:     Config{Provider: &fakeProvider{}, Memories: &roleMemories{}},
+			cfg:     Config{Provider: &fakeProvider{}, SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Memories: &roleMemories{}}}},
 			wantErr: "exactly one database source",
 		},
 		{
 			name:    "a provider and a ready counter",
-			cfg:     Config{Provider: &fakeProvider{}, ReadyCounter: &roleReadyCounter{}},
+			cfg:     Config{Provider: &fakeProvider{}, SourceRoles: SourceRoles{GraphRoles: GraphRoles{ReadyCounter: &roleReadyCounter{}}}},
 			wantErr: "exactly one database source",
 		},
 		{
 			name:    "a provider and a reader",
-			cfg:     Config{Provider: &fakeProvider{}, Reader: &roleReader{}},
+			cfg:     Config{Provider: &fakeProvider{}, SourceRoles: SourceRoles{IssueRoles: IssueRoles{Reader: &roleReader{}}}},
 			wantErr: "exactly one database source",
 		},
 		{
 			name:    "a provider and a claimer",
-			cfg:     Config{Provider: &fakeProvider{}, Claimer: &roleClaimer{}},
+			cfg:     Config{Provider: &fakeProvider{}, SourceRoles: SourceRoles{IssueRoles: IssueRoles{Claimer: &roleClaimer{}}}},
 			wantErr: "exactly one database source",
 		},
 		{
 			name:    "a provider and a cycle detector",
-			cfg:     Config{Provider: &fakeProvider{}, CycleDetector: &roleCycleDetector{}},
+			cfg:     Config{Provider: &fakeProvider{}, SourceRoles: SourceRoles{GraphRoles: GraphRoles{CycleDetector: &roleCycleDetector{}}}},
 			wantErr: "exactly one database source",
 		},
 		{
@@ -1379,7 +1379,7 @@ func TestListenRequiresExactlyOneDatabaseSource(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Listen: %v, want a bound server", err)
 				}
-				t.Cleanup(func() { _ = srv.http.Close() })
+				t.Cleanup(func() { _ = srv.network.http.Close() })
 				return
 			}
 			if err == nil {
@@ -1404,7 +1404,9 @@ func TestConfiguredRolesServeTheSameReadyBytesAsAProvider(t *testing.T) {
 		readConfig: emptyConfig{},
 	}})
 	viaRoles := newTestServer(t, rolesConfig(Config{
-		Reader: &roleReader{page: issueops.IssuePage{Items: items}},
+		SourceRoles: SourceRoles{IssueRoles: IssueRoles{
+			Reader: &roleReader{page: issueops.IssuePage{Items: items}},
+		}},
 	}))
 
 	for _, path := range []string{"/v0/beads/ready", "/v0/beads/issues"} {
@@ -1464,8 +1466,11 @@ func TestConfiguredRolesAnswerEveryDatabaseRoute(t *testing.T) {
 	counter := &roleReadyCounter{total: 41}
 	querier := &roleQuerier{page: issueops.IssuePage{Items: countedPage()}}
 	ts := newTestServer(t, rolesConfig(Config{
-		Reader: reader, Claimer: claimer, Settings: settings, Stats: reporter,
-		EdgeReader: edges, ReadyCounter: counter, Querier: querier,
+		SourceRoles: SourceRoles{
+			IssueRoles:     IssueRoles{Reader: reader, Claimer: claimer},
+			GraphRoles:     GraphRoles{EdgeReader: edges, ReadyCounter: counter, Querier: querier},
+			WorkspaceRoles: WorkspaceRoles{Settings: settings, Stats: reporter},
+		},
 	}))
 
 	t.Run("ready", func(t *testing.T) {
@@ -1701,7 +1706,7 @@ func TestConfiguredRolesAnswerEveryDatabaseRoute(t *testing.T) {
 // package.
 func TestConfiguredRolesKeepTheDocumentedRefusals(t *testing.T) {
 	t.Run("a missing issue is 404", func(t *testing.T) {
-		ts := newTestServer(t, rolesConfig(Config{Reader: &roleReader{err: fmt.Errorf("get bd-404: %w", storage.ErrNotFound)}}))
+		ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{Reader: &roleReader{err: fmt.Errorf("get bd-404: %w", storage.ErrNotFound)}}}}))
 		resp := ts.get(t, "/v0/beads/issues/bd-404")
 		if resp.StatusCode != http.StatusNotFound {
 			t.Fatalf("status = %d, want 404: %s", resp.StatusCode, readAll(t, resp))
@@ -1715,7 +1720,7 @@ func TestConfiguredRolesKeepTheDocumentedRefusals(t *testing.T) {
 		// The builders run INSIDE the role on this path, so their refusal
 		// arrives at the handler exactly as it does from a unit-of-work reader —
 		// and must still be mapped to its parameter rather than to a 500.
-		ts := newTestServer(t, rolesConfig(Config{Reader: &roleReader{err: errors.New("invalid status bogus")}}))
+		ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{Reader: &roleReader{err: errors.New("invalid status bogus")}}}}))
 		resp := ts.get(t, "/v0/beads/issues?status=bogus")
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Fatalf("status = %d, want 400: %s", resp.StatusCode, readAll(t, resp))
@@ -1728,11 +1733,13 @@ func TestConfiguredRolesKeepTheDocumentedRefusals(t *testing.T) {
 
 	t.Run("a foreign holder is 409 with its state", func(t *testing.T) {
 		ts := newTestServer(t, rolesConfig(Config{
-			Claimer: &roleClaimer{err: &issueops.ClaimConflictError{
-				IssueID:  "bd-1",
-				Assignee: "bob",
-				Status:   types.StatusInProgress,
-				Err:      fmt.Errorf("claim bd-1: %w", storage.ErrAlreadyClaimed),
+			SourceRoles: SourceRoles{IssueRoles: IssueRoles{
+				Claimer: &roleClaimer{err: &issueops.ClaimConflictError{
+					IssueID:  "bd-1",
+					Assignee: "bob",
+					Status:   types.StatusInProgress,
+					Err:      fmt.Errorf("claim bd-1: %w", storage.ErrAlreadyClaimed),
+				}},
 			}},
 		}))
 		resp := ts.claim(t, claimPath, `{"actor":"alice"}`)
@@ -1749,7 +1756,7 @@ func TestConfiguredRolesKeepTheDocumentedRefusals(t *testing.T) {
 	})
 
 	t.Run("a role failure is the generic 500", func(t *testing.T) {
-		ts := newTestServer(t, rolesConfig(Config{Reader: &roleReader{err: errors.New("backend is unreachable")}}))
+		ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{Reader: &roleReader{err: errors.New("backend is unreachable")}}}}))
 		resp := ts.get(t, "/v0/beads/ready")
 		if resp.StatusCode != http.StatusInternalServerError {
 			t.Fatalf("status = %d, want 500: %s", resp.StatusCode, readAll(t, resp))
@@ -1846,7 +1853,7 @@ func TestARoleThatAnswersWithNothingIsNotDereferenced(t *testing.T) {
 	// tell a broken role from an absent issue.
 	t.Run("a reader with no detail view is the documented miss", func(t *testing.T) {
 		silent := newTestServer(t, rolesConfig(Config{}))
-		missed := newTestServer(t, rolesConfig(Config{Reader: &roleReader{err: fmt.Errorf("get bd-1: %w", storage.ErrNotFound)}}))
+		missed := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{Reader: &roleReader{err: fmt.Errorf("get bd-1: %w", storage.ErrNotFound)}}}}))
 
 		got := silent.get(t, "/v0/beads/issues/bd-1")
 		want := missed.get(t, "/v0/beads/issues/bd-1")
@@ -1870,7 +1877,9 @@ func TestARoleThatAnswersWithNothingIsNotDereferenced(t *testing.T) {
 	// panic path writes no request_error line for an operator to alert on.
 	t.Run("a claimer with no issue is the generic failure", func(t *testing.T) {
 		ts := newTestServer(t, rolesConfig(Config{
-			Claimer: &roleClaimer{result: issueops.ClaimResult{Changed: true}},
+			SourceRoles: SourceRoles{IssueRoles: IssueRoles{
+				Claimer: &roleClaimer{result: issueops.ClaimResult{Changed: true}},
+			}},
 		}))
 
 		resp := ts.claim(t, claimPath, `{"actor":"alice"}`)
@@ -1953,7 +1962,7 @@ func TestListenRefusesARoleThatFiresTheWorkspaceHooks(t *testing.T) {
 	}
 
 	listen := func(cl issueops.Claimer) (*Server, error) {
-		cfg := rolesConfig(Config{Claimer: cl})
+		cfg := rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{Claimer: cl}}})
 		cfg.Addr = "127.0.0.1:0"
 		cfg.Stdout = io.Discard
 		cfg.Stderr = io.Discard
@@ -1977,7 +1986,7 @@ func TestListenRefusesARoleThatFiresTheWorkspaceHooks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Listen: %v, want a bound server for the claimer beneath the hook layer", err)
 	}
-	t.Cleanup(func() { _ = srv.http.Close() })
+	t.Cleanup(func() { _ = srv.network.http.Close() })
 
 	// THE FOUR ROLES RoleFiresHooks DID NOT KNOW ABOUT, each driven through the
 	// same refusal. They were blind for as long as nobody happened to take one
@@ -2004,22 +2013,30 @@ func TestListenRefusesARoleThatFiresTheWorkspaceHooks(t *testing.T) {
 		{
 			name: "commenter",
 			from: func() (any, error) { return hooked.Commenter() },
-			bind: func(v any) Config { return rolesConfig(Config{Commenter: v.(issueops.Commenter)}) },
+			bind: func(v any) Config {
+				return rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{Commenter: v.(issueops.Commenter)}}})
+			},
 		},
 		{
 			name: "ready claimer",
 			from: func() (any, error) { return hooked.ReadyClaimer() },
-			bind: func(v any) Config { return rolesConfig(Config{ReadyClaimer: v.(issueops.ReadyClaimer)}) },
+			bind: func(v any) Config {
+				return rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{ReadyClaimer: v.(issueops.ReadyClaimer)}}})
+			},
 		},
 		{
 			name: "batch closer",
 			from: func() (any, error) { return hooked.BatchCloser() },
-			bind: func(v any) Config { return rolesConfig(Config{BatchCloser: v.(issueops.BatchCloser)}) },
+			bind: func(v any) Config {
+				return rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{BatchCloser: v.(issueops.BatchCloser)}}})
+			},
 		},
 		{
 			name: "batch creator",
 			from: func() (any, error) { return hooked.BatchCreator() },
-			bind: func(v any) Config { return rolesConfig(Config{BatchCreator: v.(issueops.BatchCreator)}) },
+			bind: func(v any) Config {
+				return rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{BatchCreator: v.(issueops.BatchCreator)}}})
+			},
 		},
 	} {
 		t.Run(role.name, func(t *testing.T) {
@@ -2081,5 +2098,5 @@ func TestListenRefusesAProviderThatFiresTheWorkspaceHooks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Listen: %v, want a bound server for the provider beneath the hook layer", err)
 	}
-	t.Cleanup(func() { _ = srv.http.Close() })
+	t.Cleanup(func() { _ = srv.network.http.Close() })
 }

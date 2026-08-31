@@ -6,25 +6,32 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/jonbaldie/beads/internal/formula/schemagen"
 )
 
 func main() {
-	var (
-		typesPath = flag.String("types", "types.go", "path to types.go")
-		outPath   = flag.String("out", "schema_gen.go", "output path")
-	)
-	flag.Parse()
+	if err := run(os.Args[1:]); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run(args []string) error {
+	flags := flag.NewFlagSet("schemagen", flag.ContinueOnError)
+	typesPath := flags.String("types", "types.go", "path to types.go")
+	outPath := flags.String("out", "schema_gen.go", "output path")
+	if err := flags.Parse(args); err != nil {
+		return fmt.Errorf("schemagen: %w", err)
+	}
 
 	src, err := schemagen.Generate(*typesPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "schemagen: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("schemagen: %w", err)
 	}
 	if err := os.WriteFile(*outPath, src, 0600); err != nil {
-		fmt.Fprintf(os.Stderr, "schemagen: write %s: %v\n", *outPath, err)
-		os.Exit(1)
+		return fmt.Errorf("schemagen: write %s: %w", *outPath, err)
 	}
+	return nil
 }

@@ -36,7 +36,7 @@ func (ts *testServer) releaseIssue(t *testing.T, path, body string) *http.Respon
 // partial source, and a release reaches none of them.
 func newReleaseServer(t *testing.T, releaser *roleReleaser) *testServer {
 	t.Helper()
-	return newTestServer(t, rolesConfig(Config{Releaser: releaser}))
+	return newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{Releaser: releaser}}}))
 }
 
 // releasedIssue is the ANONYMOUS post-state: assignee cleared, status open. It

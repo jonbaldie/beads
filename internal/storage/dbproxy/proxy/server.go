@@ -113,340 +113,160 @@ const (
 
 var errIdleTimeout = errors.New("idle timeout reached")
 
-func NewProxyServer(opts ProxyOpts) *proxyServer {
-	return &proxyServer{
-		rootDir:     opts.RootDir,
-		port:        opts.Port,
-		idleTimeout: opts.IdleTimeout,
-		server:      opts.Server,
-		stats:       opts.Stats,
-		stopEpoch:   opts.StopEpoch,
+type heldProxyLock struct {
+	lock *util.Lock
+	held bool
+}
+
+func (l *heldProxyLock) release() {
+	if l != nil && l.held {
+		l.held = false
+		l.lock.Unlock()
 	}
 }
 
-func (p *proxyServer) tracef(format string, args ...any) {
-	p.logger.Printf(format, args...)
+type proxyRun struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	logFile *os.File
+	signals proxySignals
+	epoch   proxyEpochWatch
+
+	listener net.Listener
+	control  *controlServer
+	identity proxyIdentity
+	backend  proxyBackend
 }
 
-func (p *proxyServer) ListenAndServe(parentCtx context.Context) error {
-	lock, err := util.TryLock(filepath.Join(p.rootDir, LockFileName))
-	if err != nil {
-		if lockfile.IsLocked(err) {
-			return ErrLockHeld
-		}
-		return fmt.Errorf("acquire %s: %w", LockFileName, err)
-	}
-	// proxy.lock is held for the proxy's whole lifetime, but a doomed start
-	// must be able to release it early (before its backend teardown) without
-	// the deferred release double-unlocking. Only the main goroutine touches
-	// this.
-	lockHeld := true
-	releaseLock := func() {
-		if lockHeld {
-			lockHeld = false
-			lock.Unlock()
-		}
-	}
-	defer releaseLock()
-	if err := clearSpawnMarkerAfterLock(p.rootDir); err != nil {
-		return fmt.Errorf("clear proxy spawn marker: %w", err)
-	}
+type proxySignals struct {
+	ch       chan os.Signal
+	received atomic.Bool
+}
 
-	// Fast-abort: a concurrent `bd dolt stop` advances the stop epoch before
-	// waiting (briefly) for proxy.lock, so an epoch that moved between the
-	// spawning parent's read and this child taking the lock dooms this start.
-	// Abort before opening any listener or booting the backend: the stopper
-	// then observes a free lock within milliseconds instead of after a full
-	// doomed boot-and-teardown cycle.
-	if changed, err := stopEpochChanged(p.rootDir, p.stopEpoch); err != nil {
-		return fmt.Errorf("check proxy stop epoch after acquiring %s: %w", LockFileName, err)
-	} else if changed {
-		return fmt.Errorf("%w for %s: stop epoch advanced before startup", errStartInterrupted, p.rootDir)
-	}
+type proxyEpochWatch struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+	once   sync.Once
+}
 
+type proxyIdentity struct {
+	mu        sync.RWMutex
+	reply     identity.IdentReply
+	dataPort  int
+	published bool
+}
+
+type proxyBackend struct {
+	started bool
+	stopped bool
+}
+
+func newProxyRun(parentCtx context.Context, p *proxyServer) (*proxyRun, error) {
 	logPath := filepath.Join(p.rootDir, LogFileName)
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G304 -- logPath is derived from operator-supplied config, not untrusted request input
 	if err != nil {
-		return fmt.Errorf("open proxy log %q: %w", logPath, err)
+		return nil, fmt.Errorf("open proxy log %q: %w", logPath, err)
 	}
 	p.logger = log.New(f, "[proxy] ", log.LstdFlags|log.Lmicroseconds)
-	defer func() { _ = f.Close() }()
-
 	ctx, cancel := context.WithCancel(parentCtx)
-	defer cancel()
+	run := &proxyRun{ctx: ctx, cancel: cancel, logFile: f}
 	p.shutdown = cancel
+	run.installSignals(p)
+	return run, nil
+}
 
-	// Install signal handlers BEFORE Listen. Without this, Go's default
-	// SIGTERM action terminates the process during the startup window
-	// (Listen, pidfile write, backend Start, readiness wait), bypassing all
-	// deferred cleanup including RemoveDatabaseProxyPidFile.
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
-	defer signal.Stop(sigCh)
-
-	var sigReceived atomic.Bool
+func (r *proxyRun) installSignals(p *proxyServer) {
+	r.signals.ch = make(chan os.Signal, 1)
+	signal.Notify(r.signals.ch, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		select {
-		case <-ctx.Done():
-		case <-sigCh:
-			sigReceived.Store(true)
+		case <-r.ctx.Done():
+		case <-r.signals.ch:
+			r.signals.received.Store(true)
 			p.stats.IncSignalReceived()
-			cancel()
+			r.cancel()
 		}
 	}()
+}
 
-	// Watch the stop epoch across the whole startup window (listen, backend
-	// Start, readiness wait). A stop that begins mid-boot advances the epoch
-	// first and then waits only shutdownConfirmDeadline for proxy.lock, which
-	// this child holds throughout the boot; without a watcher the child would
-	// notice the doomed start only at the pre-publish fence, potentially tens
-	// of seconds later. Canceling ctx aborts the backend Start / ready wait
-	// within about one poll interval. Transient epoch read errors are ignored
-	// here; the pre-publish fence remains the authoritative check.
-	epochWatchCtx, epochWatchCancel := context.WithCancel(context.Background())
-	epochWatchDone := make(chan struct{})
+func (r *proxyRun) startEpochWatch(p *proxyServer) {
+	watchCtx, watchCancel := context.WithCancel(context.Background())
+	r.epoch.cancel = watchCancel
+	r.epoch.done = make(chan struct{})
 	go func() {
-		defer close(epochWatchDone)
+		defer close(r.epoch.done)
 		ticker := time.NewTicker(openPollInterval)
 		defer ticker.Stop()
 		for {
 			select {
-			case <-epochWatchCtx.Done():
+			case <-watchCtx.Done():
 				return
 			case <-ticker.C:
 				changed, err := stopEpochChanged(p.rootDir, p.stopEpoch)
-				if err != nil {
-					continue
-				}
-				if changed {
-					cancel()
+				if err == nil && changed {
+					r.cancel()
 					return
 				}
 			}
 		}
 	}()
-	stopEpochWatch := func() {
-		epochWatchCancel()
-		<-epochWatchDone
-	}
-	defer stopEpochWatch()
+}
 
-	// abortInterruptedStart tears down a doomed start whose stop epoch
-	// advanced mid-boot. The interrupting stop is polling proxy.lock under a
-	// budget (shutdownConfirmDeadline) far smaller than a backend stop can
-	// take, and nothing has been published, so release the lock BEFORE the
-	// backend teardown instead of starving the stopper into its timeout.
-	abortInterruptedStart := func() error {
-		p.stats.IncBackendStop()
-		releaseLock()
-		_ = stopBackendBounded(p.server)
-		return fmt.Errorf("%w for %s: stop epoch advanced during startup", errStartInterrupted, p.rootDir)
-	}
-
-	addr := fmt.Sprintf("127.0.0.1:%d", p.port)
-
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return fmt.Errorf("listen on %s: %w", addr, err)
-	}
-
-	p.listener = ln
-	defer func() { _ = ln.Close() }()
-	p.stats.IncListenAndServe()
-	dataPort, ok := ln.Addr().(*net.TCPAddr)
-	if !ok {
-		return fmt.Errorf("proxy: unexpected data listener address %T", ln.Addr())
-	}
-
-	if _, err := identity.WriteSecret(p.rootDir); err != nil {
-		return fmt.Errorf("write proxy secret: %w", err)
-	}
-
-	var identMu sync.RWMutex
-	identReply := identity.IdentReply{
-		Schema:   pidfile.SchemaV2,
-		Role:     pidfile.KindProxy,
-		DataPort: dataPort.Port,
-	}
-	control, err := startControl(p.rootDir, func() identity.IdentReply {
-		identMu.RLock()
-		defer identMu.RUnlock()
-		return identReply
+func (r *proxyRun) stopEpochWatch() {
+	r.epoch.once.Do(func() {
+		if r.epoch.cancel == nil {
+			return
+		}
+		r.epoch.cancel()
+		<-r.epoch.done
 	})
-	if err != nil {
-		return fmt.Errorf("start control listener: %w", err)
-	}
-	defer func() { _ = control.Close() }()
+}
 
-	p.stats.IncBackendStart()
-	if err := p.server.Start(ctx); err != nil {
-		// Start failed with no backend left running (Start cleans up its own
-		// failure), so there is no teardown to move off the lock; classifying
-		// the epoch-watcher cancellation just keeps the child's exit reason
-		// precise for the spawning parent.
-		if changed, cerr := stopEpochChanged(p.rootDir, p.stopEpoch); cerr == nil && changed {
-			return fmt.Errorf("%w for %s: stop epoch advanced during backend start (%v)", errStartInterrupted, p.rootDir, err)
-		}
-		return fmt.Errorf("start database server: %w", err)
-	}
-
-	if err := waitForServerReady(ctx, p.server, serverReadyTimeout); err != nil {
-		if changed, cerr := stopEpochChanged(p.rootDir, p.stopEpoch); cerr == nil && changed {
-			return abortInterruptedStart()
-		}
-		p.stats.IncBackendStop()
-		_ = stopBackendBounded(p.server)
-		return fmt.Errorf("database server not ready: %w", err)
-	}
-	birth, err := procid.Capture(os.Getpid())
-	if err != nil {
-		p.stats.IncBackendStop()
-		_ = stopBackendBounded(p.server)
-		return fmt.Errorf("capture proxy birth identity: %w", err)
-	}
-	rootID, err := identity.RootID(p.rootDir)
-	if err != nil {
-		p.stats.IncBackendStop()
-		_ = stopBackendBounded(p.server)
-		return fmt.Errorf("resolve proxy root identity: %w", err)
-	}
-	upstreamID := p.server.ID(ctx)
-	identMu.Lock()
-	identReply.RootID = rootID
-	identReply.UpstreamID = upstreamID
-	identReply.PID = os.Getpid()
-	identReply.Birth = string(birth)
-	identReply.ControlPort = control.Port()
-	identMu.Unlock()
-
-	// Last fence before publishing: the spawn marker was cleared when this
-	// process took proxy.lock, so a `bd dolt stop` that began during a slow
-	// backend start has no record of this attempt. It did advance the stop
-	// epoch first, so re-check it here and abort instead of publishing a
-	// running proxy after that stop returned. The startup epoch watcher is
-	// stopped (synchronously) first: past this fence a stop finds the
-	// published proxy.pid and stops the proxy through it, so a watcher
-	// cancellation must not race the publish.
-	stopEpochWatch()
-	if changed, err := stopEpochChanged(p.rootDir, p.stopEpoch); err != nil {
-		p.stats.IncBackendStop()
-		_ = stopBackendBounded(p.server)
-		return fmt.Errorf("re-check proxy stop epoch before publish: %w", err)
-	} else if changed {
-		return abortInterruptedStart()
-	}
-
-	if err := pidfile.Write(p.rootDir, PIDFileName, pidfile.PidFile{
-		Pid:         os.Getpid(),
-		Port:        dataPort.Port,
-		UpstreamID:  upstreamID,
-		Schema:      pidfile.SchemaV2,
-		Kind:        pidfile.KindProxy,
-		Birth:       string(birth),
-		RootID:      rootID,
-		ControlPort: control.Port(),
-	}); err != nil {
-		p.stats.IncBackendStop()
-		_ = stopBackendBounded(p.server)
-		return fmt.Errorf("write pid file: %w", err)
-	}
-	defer func() { _ = pidfile.Remove(p.rootDir, PIDFileName) }()
-
-	g, gctx := errgroup.WithContext(ctx)
-	g.Go(func() error {
-		<-gctx.Done()
-		_ = p.listener.Close()
-		_ = control.Close()
+func (r *proxyRun) stopBackend(p *proxyServer) error {
+	if !r.backend.started || r.backend.stopped {
 		return nil
-	})
-	g.Go(func() error { return p.idleWatcher(gctx) })
-	g.Go(func() error { return p.acceptLoop(gctx) })
-
-	runErr := g.Wait()
-	_ = p.conns.Wait()
+	}
+	r.backend.stopped = true
 	p.stats.IncBackendStop()
-	stopErr := stopBackendBounded(p.server)
-	if stopErr != nil {
-		stopErr = fmt.Errorf("stop database server: %w", stopErr)
-	}
-	if errors.Is(runErr, errIdleTimeout) || sigReceived.Load() {
-		runErr = nil
-	}
-	return errors.Join(runErr, stopErr)
+	return stopBackendBounded(p.server)
 }
 
-func stopBackendBounded(s server.DatabaseServer) error {
-	ctx, cancel := context.WithTimeout(context.Background(), backendStopTimeout)
-	defer cancel()
-	return s.Stop(ctx)
-}
-
-func (p *proxyServer) idleWatcher(ctx context.Context) error {
-	if p.idleTimeout <= 0 {
-		<-ctx.Done()
-		return nil
+func (r *proxyRun) close(p *proxyServer) {
+	if r.backend.started && !r.backend.stopped {
+		_ = r.stopBackend(p)
 	}
-	interval := p.idleTimeout / 4
-	if interval < idleWatcherMinInterval {
-		interval = idleWatcherMinInterval
+	r.stopEpochWatch()
+	r.cancel()
+	if r.signals.ch != nil {
+		signal.Stop(r.signals.ch)
 	}
-	p.tracef("idleWatcher start (timeout=%s, tick=%s)", p.idleTimeout, interval)
-	tick := time.NewTicker(interval)
-	defer tick.Stop()
-	var idleSince time.Time
-	for {
-		select {
-		case <-ctx.Done():
-			p.tracef("idleWatcher exit (ctx done)")
-			return nil
-		case <-tick.C:
-			if n := p.activeConns.Load(); n > 0 {
-				if !idleSince.IsZero() {
-					p.tracef("idleWatcher cleared (active=%d)", n)
-					idleSince = time.Time{}
-				}
-				continue
-			}
-			if idleSince.IsZero() {
-				p.tracef("idleWatcher armed")
-				idleSince = time.Now()
-				continue
-			}
-			if time.Since(idleSince) >= p.idleTimeout {
-				p.tracef("idleWatcher expired after %s, shutting down", p.idleTimeout)
-				p.stats.IncIdleTimeout()
-				return errIdleTimeout
-			}
-		}
+	if r.listener != nil {
+		_ = r.listener.Close()
+	}
+	if r.control != nil {
+		_ = r.control.Close()
+	}
+	if r.identity.published {
+		_ = pidfile.Remove(filepath.Dir(r.logFile.Name()), PIDFileName)
+	}
+	if r.logFile != nil {
+		_ = r.logFile.Close()
 	}
 }
 
-func (p *proxyServer) acceptLoop(ctx context.Context) error {
-	p.tracef("acceptLoop start (addr=%s)", p.listener.Addr())
-	for {
-		conn, err := p.listener.Accept()
-		if err != nil {
-			if errors.Is(err, net.ErrClosed) || ctx.Err() != nil {
-				p.tracef("acceptLoop exit (ctx=%v)", ctx.Err())
-				return nil
-			}
-			// Surface non-shutdown accept errors to the errgroup so the
-			// proxy fails fast instead of busy-looping. Specific errors that
-			// warrant retry (e.g. transient EMFILE under load) can be added
-			// here as the need arises.
-			p.tracef("acceptLoop error: %v", err)
-			p.stats.IncAcceptError()
-			return fmt.Errorf("accept: %w", err)
-		}
-		if tc, ok := conn.(*net.TCPConn); ok {
-			_ = tc.SetKeepAlive(true)
-			_ = tc.SetKeepAlivePeriod(tcpKeepAlivePeriod)
-		}
-		p.tracef("acceptLoop accepted (remote=%s)", conn.RemoteAddr())
-		p.stats.IncAccept()
-		p.conns.Go(func() error {
-			return p.handleConn(ctx, conn)
-		})
+func NewProxyServer(opts ProxyOpts) *proxyServer {
+	stats := opts.Stats
+	if stats == nil {
+		stats = &Stats{}
+	}
+	return &proxyServer{
+		rootDir:     opts.RootDir,
+		port:        opts.Port,
+		idleTimeout: opts.IdleTimeout,
+		server:      opts.Server,
+		stats:       stats,
+		stopEpoch:   opts.StopEpoch,
 	}
 }
 
@@ -524,13 +344,35 @@ func (p *proxyServer) handleConn(ctx context.Context, client net.Conn) error {
 	return g.Wait()
 }
 
-// backendConfirmedDead re-polls Running() for up to backendDeathPollBudget
-// after a Dial failure before concluding the backend is actually dead. A
-// single Running()==true right after Dial fails is not conclusive: it can
-// be stale for up to the real backend's process-reap latency (see
-// backendDeathPollBudget's doc comment). Polling briefly here, rather than
-// trusting the first read, keeps a connection that lands in that gap from
-// being the proxy's only (missed) chance to notice the backend is gone.
+func (p *proxyServer) acceptLoop(ctx context.Context) error {
+	p.tracef("acceptLoop start (addr=%s)", p.listener.Addr())
+	for {
+		conn, err := p.listener.Accept()
+		if err != nil {
+			if errors.Is(err, net.ErrClosed) || ctx.Err() != nil {
+				p.tracef("acceptLoop exit (ctx=%v)", ctx.Err())
+				return nil
+			}
+			// Surface non-shutdown accept errors to the errgroup so the
+			// proxy fails fast instead of busy-looping. Specific errors that
+			// warrant retry (e.g. transient EMFILE under load) can be added
+			// here as the need arises.
+			p.tracef("acceptLoop error: %v", err)
+			p.stats.IncAcceptError()
+			return fmt.Errorf("accept: %w", err)
+		}
+		if tc, ok := conn.(*net.TCPConn); ok {
+			_ = tc.SetKeepAlive(true)
+			_ = tc.SetKeepAlivePeriod(tcpKeepAlivePeriod)
+		}
+		p.tracef("acceptLoop accepted (remote=%s)", conn.RemoteAddr())
+		p.stats.IncAccept()
+		p.conns.Go(func() error {
+			return p.handleConn(ctx, conn)
+		})
+	}
+}
+
 func (p *proxyServer) backendConfirmedDead(ctx context.Context) bool {
 	deadline := time.Now().Add(backendDeathPollBudget)
 	for {
@@ -547,6 +389,199 @@ func (p *proxyServer) backendConfirmedDead(ctx context.Context) bool {
 		}
 	}
 }
+
+func acquireProxyLock(rootDir string) (*heldProxyLock, error) {
+	lock, err := util.TryLock(filepath.Join(rootDir, LockFileName))
+	if err != nil {
+		if lockfile.IsLocked(err) {
+			return nil, ErrLockHeld
+		}
+		return nil, fmt.Errorf("acquire %s: %w", LockFileName, err)
+	}
+	return &heldProxyLock{lock: lock, held: true}, nil
+}
+
+func startProxyRun(p *proxyServer, parentCtx context.Context, held *heldProxyLock) (run *proxyRun, err error) {
+	run, err = newProxyRun(parentCtx, p)
+	if err != nil {
+		return nil, err
+	}
+	started := run
+	defer func() {
+		if err != nil {
+			_ = started.stopBackend(p)
+			started.close(p)
+		}
+	}()
+
+	run.startEpochWatch(p)
+	if err := startDataPath(p, run); err != nil {
+		return nil, err
+	}
+	if err := startBackend(p, run, held); err != nil {
+		return nil, err
+	}
+	if err := publishProxy(p, run, held); err != nil {
+		return nil, err
+	}
+	return run, nil
+}
+
+func startDataPath(p *proxyServer, run *proxyRun) error {
+	addr := fmt.Sprintf("127.0.0.1:%d", p.port)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", addr, err)
+	}
+	run.listener = ln
+	p.listener = ln
+	p.stats.IncListenAndServe()
+	dataPort, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		return fmt.Errorf("proxy: unexpected data listener address %T", ln.Addr())
+	}
+	run.identity.dataPort = dataPort.Port
+	if _, err := identity.WriteSecret(p.rootDir); err != nil {
+		return fmt.Errorf("write proxy secret: %w", err)
+	}
+	run.identity.reply = identity.IdentReply{Schema: pidfile.SchemaV2, Role: pidfile.KindProxy, DataPort: dataPort.Port}
+	control, err := startControl(p.rootDir, func() identity.IdentReply {
+		run.identity.mu.RLock()
+		defer run.identity.mu.RUnlock()
+		return run.identity.reply
+	})
+	if err != nil {
+		return fmt.Errorf("start control listener: %w", err)
+	}
+	run.control = control
+	return nil
+}
+
+func startBackend(p *proxyServer, run *proxyRun, held *heldProxyLock) error {
+	p.stats.IncBackendStart()
+	if err := p.server.Start(run.ctx); err != nil {
+		if changed, checkErr := stopEpochChanged(p.rootDir, p.stopEpoch); checkErr == nil && changed {
+			return fmt.Errorf("%w for %s: stop epoch advanced during backend start (%v)", errStartInterrupted, p.rootDir, err)
+		}
+		return fmt.Errorf("start database server: %w", err)
+	}
+	run.backend.started = true
+	if err := waitForServerReady(run.ctx, p.server, serverReadyTimeout); err != nil {
+		if changed, checkErr := stopEpochChanged(p.rootDir, p.stopEpoch); checkErr == nil && changed {
+			return abortInterruptedStart(p, run, held)
+		}
+		if stopErr := run.stopBackend(p); stopErr != nil {
+			return errors.Join(fmt.Errorf("database server not ready: %w", err), fmt.Errorf("stop backend: %w", stopErr))
+		}
+		return fmt.Errorf("database server not ready: %w", err)
+	}
+	return nil
+}
+
+func publishProxy(p *proxyServer, run *proxyRun, held *heldProxyLock) error {
+	birth, err := procid.Capture(os.Getpid())
+	if err != nil {
+		return fmt.Errorf("capture proxy birth identity: %w", err)
+	}
+	rootID, err := identity.RootID(p.rootDir)
+	if err != nil {
+		return fmt.Errorf("resolve proxy root identity: %w", err)
+	}
+	upstreamID := p.server.ID(run.ctx)
+	run.identity.mu.Lock()
+	run.identity.reply.RootID = rootID
+	run.identity.reply.UpstreamID = upstreamID
+	run.identity.reply.PID = os.Getpid()
+	run.identity.reply.Birth = string(birth)
+	run.identity.reply.ControlPort = run.control.Port()
+	run.identity.mu.Unlock()
+
+	run.stopEpochWatch()
+	if changed, err := stopEpochChanged(p.rootDir, p.stopEpoch); err != nil {
+		return fmt.Errorf("re-check proxy stop epoch before publish: %w", err)
+	} else if changed {
+		return abortInterruptedStart(p, run, held)
+	}
+
+	if err := pidfile.Write(p.rootDir, PIDFileName, pidfile.PidFile{
+		Pid: os.Getpid(), Port: run.identity.dataPort, UpstreamID: upstreamID,
+		Schema: pidfile.SchemaV2, Kind: pidfile.KindProxy, Birth: string(birth),
+		RootID: rootID, ControlPort: run.control.Port(),
+	}); err != nil {
+		return fmt.Errorf("write pid file: %w", err)
+	}
+	run.identity.published = true
+	return nil
+}
+
+func abortInterruptedStart(p *proxyServer, run *proxyRun, held *heldProxyLock) error {
+	if held != nil {
+		held.release()
+	}
+	_ = run.stopBackend(p)
+	return fmt.Errorf("%w for %s: stop epoch advanced during startup", errStartInterrupted, p.rootDir)
+}
+
+func runProxyLoops(p *proxyServer, run *proxyRun) error {
+	g, gctx := errgroup.WithContext(run.ctx)
+	g.Go(func() error {
+		<-gctx.Done()
+		_ = run.listener.Close()
+		_ = run.control.Close()
+		return nil
+	})
+	g.Go(func() error { return p.idleWatcher(gctx) })
+	g.Go(func() error { return p.acceptLoop(gctx) })
+	runErr := g.Wait()
+	_ = p.conns.Wait()
+	stopErr := run.stopBackend(p)
+	if stopErr != nil {
+		stopErr = fmt.Errorf("stop database server: %w", stopErr)
+	}
+	return errors.Join(normalizeProxyRunError(runErr, run.signals.received.Load()), stopErr)
+}
+
+func normalizeProxyRunError(runErr error, signalReceived bool) error {
+	if errors.Is(runErr, errIdleTimeout) || signalReceived {
+		runErr = nil
+	}
+	return runErr
+}
+
+func stopBackendBounded(s server.DatabaseServer) error {
+	ctx, cancel := context.WithTimeout(context.Background(), backendStopTimeout)
+	defer cancel()
+	return s.Stop(ctx)
+}
+
+func handleIdleTick(p *proxyServer, idleSince *time.Time) (bool, error) {
+	if n := p.activeConns.Load(); n > 0 {
+		if !idleSince.IsZero() {
+			p.tracef("idleWatcher cleared (active=%d)", n)
+			*idleSince = time.Time{}
+		}
+		return false, nil
+	}
+	if idleSince.IsZero() {
+		p.tracef("idleWatcher armed")
+		*idleSince = time.Now()
+		return false, nil
+	}
+	if time.Since(*idleSince) >= p.idleTimeout {
+		p.tracef("idleWatcher expired after %s, shutting down", p.idleTimeout)
+		p.stats.IncIdleTimeout()
+		return true, errIdleTimeout
+	}
+	return false, nil
+}
+
+// backendConfirmedDead re-polls Running() for up to backendDeathPollBudget
+// after a Dial failure before concluding the backend is actually dead. A
+// single Running()==true right after Dial fails is not conclusive: it can
+// be stale for up to the real backend's process-reap latency (see
+// backendDeathPollBudget's doc comment). Polling briefly here, rather than
+// trusting the first read, keeps a connection that lands in that gap from
+// being the proxy's only (missed) chance to notice the backend is gone.
 
 func waitForServerReady(ctx context.Context, s server.DatabaseServer, timeout time.Duration) error {
 	bo := backoff.NewExponentialBackOff()

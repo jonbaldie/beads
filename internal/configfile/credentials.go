@@ -67,36 +67,38 @@ func readPasswordFromFile(path string, sectionKey string) string {
 	inSection := false
 
 	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-
-		// Strip inline comments
-		if idx := strings.Index(line, "#"); idx >= 0 {
-			line = strings.TrimSpace(line[:idx])
+		password, nextInSection, done := parseCredentialLine(scanner.Text(), sectionKey, inSection)
+		if done {
+			return password
 		}
-		if line == "" {
-			continue
-		}
-
-		// Section header: [host:port]
-		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			section := line[1 : len(line)-1]
-			if section == sectionKey {
-				inSection = true
-			} else if inSection {
-				// We've left our section without finding a password
-				break
-			}
-			continue
-		}
-
-		// Key=value within our section
-		if inSection {
-			key, value, found := strings.Cut(line, "=")
-			if found && strings.TrimSpace(key) == "password" {
-				return strings.TrimSpace(value)
-			}
-		}
+		inSection = nextInSection
 	}
 
 	return ""
+}
+
+func parseCredentialLine(rawLine, sectionKey string, inSection bool) (password string, nextInSection, done bool) {
+	line := strings.TrimSpace(rawLine)
+	if idx := strings.Index(line, "#"); idx >= 0 {
+		line = strings.TrimSpace(line[:idx])
+	}
+	if line == "" {
+		return "", inSection, false
+	}
+
+	if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+		section := line[1 : len(line)-1]
+		if section == sectionKey {
+			return "", true, false
+		}
+		return "", false, inSection
+	}
+	if !inSection {
+		return "", false, false
+	}
+	key, value, found := strings.Cut(line, "=")
+	if found && strings.TrimSpace(key) == "password" {
+		return strings.TrimSpace(value), true, true
+	}
+	return "", true, false
 }

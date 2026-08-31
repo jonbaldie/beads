@@ -25,7 +25,7 @@ const createPath = "/v0/beads/issues"
 
 func newCreateServer(t *testing.T, lifecycle *roleLifecycle) *testServer {
 	t.Helper()
-	return newTestServer(t, rolesConfig(Config{Lifecycle: lifecycle}))
+	return newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{Lifecycle: lifecycle}}}))
 }
 
 // createdIssue is the row a fake role answers with: deliberately unlike the
@@ -33,13 +33,21 @@ func newCreateServer(t *testing.T, lifecycle *roleLifecycle) *testServer {
 // the body back.
 func createdIssue(id string) *types.Issue {
 	return &types.Issue{
-		ID:        id,
-		Title:     "as stored",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		CreatedAt: time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC),
-		UpdatedAt: time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC),
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: "as stored",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC),
+			UpdatedAt: time.Date(2026, 8, 1, 9, 0, 0, 0, time.UTC),
+		},
 	}
 }
 

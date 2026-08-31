@@ -244,11 +244,17 @@ func TestFieldMapperIssueToTracker(t *testing.T) {
 	mapper := &jiraFieldMapper{}
 
 	issue := &types.Issue{
-		Title:       "New feature",
-		Description: "Feature description",
-		Priority:    0,
-		IssueType:   types.TypeBug,
-		Labels:      []string{"critical"},
+		IssueContent: types.IssueContent{
+			Title:       "New feature",
+			Description: "Feature description",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  0,
+			IssueType: types.TypeBug,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"critical"},
+		},
 	}
 
 	fields := mapper.IssueToTracker(issue)
@@ -277,9 +283,13 @@ func TestFieldMapperIssueToTrackerIncludesGlobalCustomFields(t *testing.T) {
 	}
 
 	fields := mapper.IssueToTracker(&types.Issue{
-		Title:     "New feature",
-		Priority:  2,
-		IssueType: types.TypeFeature,
+		IssueContent: types.IssueContent{
+			Title: "New feature",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeFeature,
+		},
 	})
 
 	if fields["customfield_10042"] != "AI Platform" {
@@ -295,9 +305,13 @@ func TestFieldMapperIssueToTrackerIncludesJSONObjectCustomField(t *testing.T) {
 	}
 
 	fields := mapper.IssueToTracker(&types.Issue{
-		Title:     "New feature",
-		Priority:  2,
-		IssueType: types.TypeFeature,
+		IssueContent: types.IssueContent{
+			Title: "New feature",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeFeature,
+		},
 	})
 
 	field, ok := fields["customfield_10042"].(map[string]interface{})
@@ -319,9 +333,13 @@ func TestFieldMapperIssueToTrackerAppliesPerTypeCustomFields(t *testing.T) {
 	}
 
 	fields := mapper.IssueToTracker(&types.Issue{
-		Title:     "New feature",
-		Priority:  2,
-		IssueType: types.TypeFeature,
+		IssueContent: types.IssueContent{
+			Title: "New feature",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeFeature,
+		},
 	})
 
 	if fields["Team"] != "AI Platform" {
@@ -342,9 +360,13 @@ func TestFieldMapperIssueToTrackerPerTypeCustomFieldsOverrideGlobal(t *testing.T
 	}
 
 	fields := mapper.IssueToTracker(&types.Issue{
-		Title:     "New feature",
-		Priority:  2,
-		IssueType: types.TypeFeature,
+		IssueContent: types.IssueContent{
+			Title: "New feature",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeFeature,
+		},
 	})
 
 	if fields["Team"] != "Story Team" {
@@ -362,9 +384,13 @@ func TestFieldMapperIssueToTrackerIgnoresNonMatchingPerTypeCustomFields(t *testi
 	}
 
 	fields := mapper.IssueToTracker(&types.Issue{
-		Title:     "New feature",
-		Priority:  2,
-		IssueType: types.TypeFeature,
+		IssueContent: types.IssueContent{
+			Title: "New feature",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeFeature,
+		},
 	})
 
 	if _, ok := fields["Team"]; ok {
@@ -374,7 +400,7 @@ func TestFieldMapperIssueToTrackerIgnoresNonMatchingPerTypeCustomFields(t *testi
 
 func TestFieldMapperDescriptionV3UsesADF(t *testing.T) {
 	mapper := &jiraFieldMapper{apiVersion: "3"}
-	issue := &types.Issue{Title: "T", Description: "Hello world"}
+	issue := &types.Issue{IssueContent: types.IssueContent{Title: "T", Description: "Hello world"}}
 	fields := mapper.IssueToTracker(issue)
 
 	// v3: description must be ADF JSON (json.RawMessage), not a plain string.
@@ -395,7 +421,7 @@ func TestFieldMapperDescriptionV3UsesADF(t *testing.T) {
 
 func TestFieldMapperDescriptionV2UsesPlainString(t *testing.T) {
 	mapper := &jiraFieldMapper{apiVersion: "2"}
-	issue := &types.Issue{Title: "T", Description: "Hello world"}
+	issue := &types.Issue{IssueContent: types.IssueContent{Title: "T", Description: "Hello world"}}
 	fields := mapper.IssueToTracker(issue)
 
 	// v2: description must be a plain string.
@@ -411,7 +437,7 @@ func TestFieldMapperDescriptionV2UsesPlainString(t *testing.T) {
 func TestFieldMapperDescriptionEmptyAPIVersionDefaultsToADF(t *testing.T) {
 	// Empty apiVersion should behave like v3 (ADF).
 	mapper := &jiraFieldMapper{apiVersion: ""}
-	issue := &types.Issue{Title: "T", Description: "text"}
+	issue := &types.Issue{IssueContent: types.IssueContent{Title: "T", Description: "text"}}
 	fields := mapper.IssueToTracker(issue)
 
 	if _, ok := fields["description"].(json.RawMessage); !ok {
@@ -430,7 +456,7 @@ func TestTrackerFieldMapperPropagatesVersion(t *testing.T) {
 func TestTrackerFieldMapperDefaultVersion(t *testing.T) {
 	// A tracker with no apiVersion set should produce a mapper that uses ADF (v3 behavior).
 	tr := &Tracker{}
-	issue := &types.Issue{Title: "T", Description: "desc"}
+	issue := &types.Issue{IssueContent: types.IssueContent{Title: "T", Description: "desc"}}
 	fields := tr.FieldMapper().IssueToTracker(issue)
 	if _, ok := fields["description"].(json.RawMessage); !ok {
 		t.Errorf("default tracker description type = %T, want json.RawMessage (ADF)", fields["description"])
@@ -496,8 +522,12 @@ func TestUpdateIssueAppliesTransitionWhenStatusChanges(t *testing.T) {
 
 	tr := newTrackerWithServer(srv.URL, "3")
 	_, err := tr.UpdateIssue(context.Background(), key, &types.Issue{
-		Title:  "Test",
-		Status: types.StatusInProgress,
+		IssueContent: types.IssueContent{
+			Title: "Test",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status: types.StatusInProgress,
+		},
 	})
 	if err != nil {
 		t.Fatalf("UpdateIssue error: %v", err)
@@ -532,8 +562,13 @@ func TestUpdateIssueSkipsTransitionWhenStatusUnchanged(t *testing.T) {
 
 	tr := newTrackerWithServer(srv.URL, "3")
 	_, err := tr.UpdateIssue(context.Background(), key, &types.Issue{
-		Title:  "Updated title",
-		Status: types.StatusInProgress, // matches current Jira status
+		IssueContent: types.IssueContent{
+			Title: "Updated title",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status: types.StatusInProgress,
+		},
+		// matches current Jira status,
 	})
 	if err != nil {
 		t.Fatalf("UpdateIssue error: %v", err)
@@ -1178,9 +1213,13 @@ func TestInitLoadsCustomFieldsFromAllConfig(t *testing.T) {
 
 	mapper := tr.FieldMapper()
 	fields := mapper.IssueToTracker(&types.Issue{
-		Title:     "New feature",
-		Priority:  2,
-		IssueType: types.TypeFeature,
+		IssueContent: types.IssueContent{
+			Title: "New feature",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeFeature,
+		},
 	})
 	if fields["Team"] != "Story Team" {
 		t.Errorf("FieldMapper Team = %v, want per-type override %q", fields["Team"], "Story Team")
@@ -1377,10 +1416,7 @@ func TestGetConfig_YamlOnlyKeyBypassesStore(t *testing.T) {
 
 	t.Run("falls back to env var", func(t *testing.T) {
 		t.Setenv("JIRA_API_TOKEN", "env-token-value")
-		got, err := tr.getConfig(ctx, "jira.api_token", "JIRA_API_TOKEN")
-		if err != nil {
-			t.Fatalf("getConfig returned error: %v", err)
-		}
+		got := tr.getConfig(ctx, "jira.api_token", "JIRA_API_TOKEN")
 		if got != "env-token-value" {
 			t.Errorf("getConfig(jira.api_token) = %q, want %q", got, "env-token-value")
 		}
@@ -1388,10 +1424,7 @@ func TestGetConfig_YamlOnlyKeyBypassesStore(t *testing.T) {
 
 	t.Run("returns empty when no value is set", func(t *testing.T) {
 		t.Setenv("JIRA_API_TOKEN", "")
-		got, err := tr.getConfig(ctx, "jira.api_token", "JIRA_API_TOKEN")
-		if err != nil {
-			t.Fatalf("getConfig returned error: %v", err)
-		}
+		got := tr.getConfig(ctx, "jira.api_token", "JIRA_API_TOKEN")
 		if got != "" {
 			t.Errorf("getConfig(jira.api_token) = %q, want empty", got)
 		}
@@ -1432,10 +1465,7 @@ func TestGetConfig_YamlOnlyKeyReadsFromYaml(t *testing.T) {
 	}
 
 	tr := &Tracker{store: nil}
-	got, err := tr.getConfig(context.Background(), "jira.api_token", "JIRA_API_TOKEN")
-	if err != nil {
-		t.Fatalf("getConfig returned error: %v", err)
-	}
+	got := tr.getConfig(context.Background(), "jira.api_token", "JIRA_API_TOKEN")
 	if got != wantToken {
 		t.Errorf("getConfig(jira.api_token) = %q, want %q (yaml value)", got, wantToken)
 	}

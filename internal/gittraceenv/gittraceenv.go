@@ -113,11 +113,13 @@ func envNameEquals(a, b string) bool {
 // mutex held across fn, for the same reason as githooksenv: remote operations
 // are network-bound and can take minutes, overlapping operations all want the
 // same environment, and the last one out restores.
-var (
+var processState = &environmentState{}
+
+type environmentState struct {
 	mu    sync.Mutex
 	depth int
 	saved map[string]string
-)
+}
 
 // WithScrubbed runs fn with stderr-directed git tracing variables removed from
 // the process environment, restoring the previous values afterwards.
@@ -128,16 +130,20 @@ func WithScrubbed(fn func() error) error {
 }
 
 func acquire() {
-	mu.Lock()
-	defer mu.Unlock()
-	depth++
-	if depth > 1 {
+	processState.acquire()
+}
+
+func (s *environmentState) acquire() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.depth++
+	if s.depth > 1 {
 		return
 	}
-	saved = map[string]string{}
+	s.saved = map[string]string{}
 	for _, name := range pathCapableVars {
 		if v, ok := os.LookupEnv(name); ok && stderrDirected(name, v) {
-			saved[name] = v
+			s.saved[name] = v
 			// Best effort, matching githooksenv: an unscrubbed push that
 			// may still succeed beats no push at all.
 			_ = os.Unsetenv(name)
@@ -145,23 +151,27 @@ func acquire() {
 	}
 	for _, name := range alwaysStderrVars {
 		if v, ok := os.LookupEnv(name); ok {
-			saved[name] = v
+			s.saved[name] = v
 			_ = os.Unsetenv(name)
 		}
 	}
 }
 
 func release() {
-	mu.Lock()
-	defer mu.Unlock()
-	depth--
-	if depth > 0 {
+	processState.release()
+}
+
+func (s *environmentState) release() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.depth--
+	if s.depth > 0 {
 		return
 	}
-	for name, v := range saved {
+	for name, v := range s.saved {
 		_ = os.Setenv(name, v)
 	}
-	saved = nil
+	s.saved = nil
 }
 
 // ScrubEnv returns env with stderr-directed git tracing entries removed, for

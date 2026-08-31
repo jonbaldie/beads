@@ -302,7 +302,7 @@ func TestGetIssueRefusesAnImpossibleIDFromTheEdge(t *testing.T) {
 // nothing, encodeCursor broken outright included.
 func TestCursorRoundTrips(t *testing.T) {
 	created := time.Now().UTC().Truncate(time.Second)
-	items := []*types.IssueWithCounts{{Issue: &types.Issue{ID: "bd-7", CreatedAt: created}}}
+	items := []*types.IssueWithCounts{{Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-7"}, IssueTimes: types.IssueTimes{CreatedAt: created}}}}
 
 	token := cursorFor(items)
 	if token == "" {

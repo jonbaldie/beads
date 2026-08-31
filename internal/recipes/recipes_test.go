@@ -3,6 +3,8 @@ package recipes
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"testing"
 
 	beadsplugin "github.com/jonbaldie/beads/plugins/beads"
@@ -62,23 +64,13 @@ func TestListRecipeNames(t *testing.T) {
 		t.Fatalf("ListRecipeNames: %v", err)
 	}
 
-	// Check that it's sorted
-	for i := 1; i < len(names); i++ {
-		if names[i-1] > names[i] {
-			t.Errorf("names not sorted: %v", names)
-			break
-		}
+	expected := make([]string, 0, len(BuiltinRecipes))
+	for name := range BuiltinRecipes {
+		expected = append(expected, name)
 	}
-
-	// Check expected recipes present
-	found := make(map[string]bool)
-	for _, name := range names {
-		found[name] = true
-	}
-	for _, expected := range []string{"cursor", "claude", "aider", "mux"} {
-		if !found[expected] {
-			t.Errorf("expected recipe %s not in list", expected)
-		}
+	sort.Strings(expected)
+	if !slices.Equal(names, expected) {
+		t.Errorf("ListRecipeNames() = %v, want %v", names, expected)
 	}
 }
 

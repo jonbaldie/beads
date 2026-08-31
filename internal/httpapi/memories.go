@@ -261,57 +261,68 @@ func (s *Server) rememberRequest(w http.ResponseWriter, r *http.Request) (memory
 		return memoryops.RememberRequest{}, false
 	}
 
-	var unknown []string
-	for name := range members {
-		if !slices.Contains(rememberMembers, name) {
-			unknown = append(unknown, name)
-		}
-	}
-	if len(unknown) > 0 {
+	if offender, unknown := unknownMember(members, rememberMembers); unknown {
 		// One offender, chosen deterministically so a client dispatching on
 		// `param` never sees it depend on map order.
-		offender := slices.Min(unknown)
 		requestInfo(r.Context()).refuse(offender)
 		s.fail(w, r, InvalidArgument(offender, ReasonUnknownParameter,
 			"this operation's request body carries "+rememberMemberList()+" and nothing else"))
 		return memoryops.RememberRequest{}, false
 	}
 
-	var request memoryops.RememberRequest
+	request, res := parseRememberRequest(members)
+	if res != nil {
+		s.fail(w, r, *res)
+		return memoryops.RememberRequest{}, false
+	}
+	return request, true
+}
 
+func parseRememberRequest(members map[string]json.RawMessage) (memoryops.RememberRequest, *Result) {
+	content, res := decodeRememberContent(members)
+	if res != nil {
+		return memoryops.RememberRequest{}, res
+	}
+	key, res := decodeRememberKey(members)
+	if res != nil {
+		return memoryops.RememberRequest{}, res
+	}
+	return memoryops.RememberRequest{Content: content, Key: key}, nil
+}
+
+func decodeRememberContent(members map[string]json.RawMessage) (string, *Result) {
 	raw, ok := members[rememberContentMember]
 	if !ok {
-		s.fail(w, r, InvalidArgument(rememberContentMember, ReasonInvalidValue,
-			"`"+rememberContentMember+"` is required"))
-		return memoryops.RememberRequest{}, false
+		return "", rememberRefusal(rememberContentMember, "`"+rememberContentMember+"` is required")
 	}
 	// Through a POINTER, so that `null` reaches the type-mismatch branch rather
 	// than unmarshaling as a no-op and being reported downstream as empty
-	// content — the right refusal attached to prose that misdescribes what the
-	// client sent.
+	// content — the right refusal attached to prose that misdescribes the input.
 	var content *string
 	if err := json.Unmarshal(raw, &content); err != nil || content == nil {
-		s.fail(w, r, InvalidArgument(rememberContentMember, ReasonInvalidValue,
-			"`"+rememberContentMember+"` must be a string"))
-		return memoryops.RememberRequest{}, false
+		return "", rememberRefusal(rememberContentMember, "`"+rememberContentMember+"` must be a string")
 	}
-	request.Content = *content
+	return *content, nil
+}
 
-	if raw, ok := members[rememberKeyMember]; ok {
-		var key *string
-		if err := json.Unmarshal(raw, &key); err != nil || key == nil {
-			s.fail(w, r, InvalidArgument(rememberKeyMember, ReasonInvalidValue,
-				"`"+rememberKeyMember+"` must be a string"))
-			return memoryops.RememberRequest{}, false
-		}
-		// VERBATIM, deliberately: the role stores the bytes it is given, and a
-		// trim here would put a memory under a key the client cannot name. An
-		// absent member is the empty string, which is what tells the role to
-		// derive one.
-		request.Key = *key
+func decodeRememberKey(members map[string]json.RawMessage) (string, *Result) {
+	raw, ok := members[rememberKeyMember]
+	if !ok {
+		return "", nil
 	}
+	var key *string
+	if err := json.Unmarshal(raw, &key); err != nil || key == nil {
+		return "", rememberRefusal(rememberKeyMember, "`"+rememberKeyMember+"` must be a string")
+	}
+	// VERBATIM, deliberately: the role stores the bytes it is given, and a
+	// trim here would put a memory under a key the client cannot name. An absent
+	// member is the empty string, which tells the role to derive one.
+	return *key, nil
+}
 
-	return request, true
+func rememberRefusal(param, detail string) *Result {
+	res := InvalidArgument(param, ReasonInvalidValue, detail)
+	return &res
 }
 
 func rememberMemberList() string {

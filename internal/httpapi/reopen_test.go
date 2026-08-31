@@ -25,7 +25,7 @@ func (ts *testServer) reopenIssue(t *testing.T, path, body string) *http.Respons
 
 func newReopenServer(t *testing.T, lifecycle *roleLifecycle) *testServer {
 	t.Helper()
-	return newTestServer(t, rolesConfig(Config{Lifecycle: lifecycle}))
+	return newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{Lifecycle: lifecycle}}}))
 }
 
 func reopenedIssue(id string) *types.Issue {

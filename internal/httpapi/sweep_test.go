@@ -17,6 +17,10 @@ import (
 
 const sweepPath = "/v0/beads/issues:sweep"
 
+func sweepConfig(sweeper issueops.Sweeper) Config {
+	return Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Sweeper: sweeper}}}
+}
+
 func (ts *testServer) sweep(t *testing.T, body string) *http.Response {
 	t.Helper()
 	return ts.postBody(t, sweepPath, "application/json", body)
@@ -29,7 +33,7 @@ func (ts *testServer) sweep(t *testing.T, body string) *http.Response {
 // an issue named ":sweep".
 func TestSweepPathReachesItsHandler(t *testing.T) {
 	sweeper := &roleSweeper{result: issueops.SweepResult{Swept: 3}}
-	ts := newTestServer(t, rolesConfig(Config{Sweeper: sweeper}))
+	ts := newTestServer(t, rolesConfig(sweepConfig(sweeper)))
 
 	resp := ts.sweep(t, `{"tier":"ephemeral"}`)
 	if resp.StatusCode != http.StatusOK {
@@ -49,7 +53,7 @@ func TestSweepPathReachesItsHandler(t *testing.T) {
 // a handler dropping a narrowing member widens what is erased.
 func TestSweepForwardsEveryDocumentedMember(t *testing.T) {
 	sweeper := &roleSweeper{}
-	ts := newTestServer(t, rolesConfig(Config{Sweeper: sweeper}))
+	ts := newTestServer(t, rolesConfig(sweepConfig(sweeper)))
 
 	resp := ts.sweep(t, `{
 		"tier": "durable",
@@ -97,7 +101,7 @@ func TestSweepForwardsEveryDocumentedMember(t *testing.T) {
 // anything.
 func TestSweepDefaultsTheOptionalMembers(t *testing.T) {
 	sweeper := &roleSweeper{}
-	ts := newTestServer(t, rolesConfig(Config{Sweeper: sweeper}))
+	ts := newTestServer(t, rolesConfig(sweepConfig(sweeper)))
 
 	if resp := ts.sweep(t, `{"tier":"ephemeral"}`); resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, readAll(t, resp))
@@ -122,7 +126,7 @@ func TestSweepDefaultsTheOptionalMembers(t *testing.T) {
 // satisfied by a handler that hard-coded protection on.
 func TestSweepHonorsAnExplicitProtectReferencedFalse(t *testing.T) {
 	sweeper := &roleSweeper{}
-	ts := newTestServer(t, rolesConfig(Config{Sweeper: sweeper}))
+	ts := newTestServer(t, rolesConfig(sweepConfig(sweeper)))
 
 	if resp := ts.sweep(t, `{"tier":"ephemeral","protect_referenced":false}`); resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, readAll(t, resp))
@@ -152,7 +156,7 @@ func TestSweepPublishesTheWholeResult(t *testing.T) {
 		},
 		ReferencedIDs: []string{"bd-1", "bd-2"},
 	}}
-	ts := newTestServer(t, rolesConfig(Config{Sweeper: sweeper}))
+	ts := newTestServer(t, rolesConfig(sweepConfig(sweeper)))
 
 	resp := ts.sweep(t, `{"tier":"durable","pattern":"*","dry_run":true}`)
 	if resp.StatusCode != http.StatusOK {
@@ -198,7 +202,7 @@ func TestSweepPublishesTheWholeResult(t *testing.T) {
 // nothing was protected, so a client can tell "nothing cited" from "the
 // protection was not asked for" without a second field.
 func TestSweepOmitsAnEmptyReferencedSample(t *testing.T) {
-	ts := newTestServer(t, rolesConfig(Config{Sweeper: &roleSweeper{}}))
+	ts := newTestServer(t, rolesConfig(sweepConfig(&roleSweeper{})))
 
 	resp := ts.sweep(t, `{"tier":"ephemeral"}`)
 	if resp.StatusCode != http.StatusOK {
@@ -232,7 +236,7 @@ func TestSweepRefusesTheDocumentedBodies(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			sweeper := &roleSweeper{}
-			ts := newTestServer(t, rolesConfig(Config{Sweeper: sweeper}))
+			ts := newTestServer(t, rolesConfig(sweepConfig(sweeper)))
 
 			resp := ts.sweep(t, test.body)
 			if resp.StatusCode != http.StatusBadRequest {
@@ -263,7 +267,7 @@ func TestSweepRefusesTheDocumentedBodies(t *testing.T) {
 func TestSweepPublishesTheRolesRefusalAsA400(t *testing.T) {
 	// The sentinel has to MATCH, not merely be mentioned in the text.
 	sweeper := &roleSweeper{err: wrapValidation("a durable sweep requires a closed-before cutoff or an id pattern")}
-	ts := newTestServer(t, rolesConfig(Config{Sweeper: sweeper}))
+	ts := newTestServer(t, rolesConfig(sweepConfig(sweeper)))
 
 	// A body the HANDLER accepts and the ROLE refuses: the durable tier with no
 	// narrowing member is exactly that request, which is the point.
@@ -291,7 +295,7 @@ func TestSweepPublishesTheRolesRefusalAsA400(t *testing.T) {
 // delete from any browser on the host.
 func TestSweepRefusesAForeignMediaType(t *testing.T) {
 	sweeper := &roleSweeper{}
-	ts := newTestServer(t, rolesConfig(Config{Sweeper: sweeper}))
+	ts := newTestServer(t, rolesConfig(sweepConfig(sweeper)))
 
 	resp := ts.postBody(t, sweepPath, "text/plain", `{"tier":"ephemeral"}`)
 	if resp.StatusCode != http.StatusBadRequest {
@@ -308,7 +312,7 @@ func TestSweepRefusesAForeignMediaType(t *testing.T) {
 // TestSweepPublishesNoQueryParameters: this operation's whole vocabulary is its
 // body, so a query key is version skew rather than a bad value.
 func TestSweepPublishesNoQueryParameters(t *testing.T) {
-	ts := newTestServer(t, rolesConfig(Config{Sweeper: &roleSweeper{}}))
+	ts := newTestServer(t, rolesConfig(sweepConfig(&roleSweeper{})))
 
 	resp := ts.postBody(t, sweepPath+"?tier=durable", "application/json", `{"tier":"durable","pattern":"*"}`)
 	if resp.StatusCode != http.StatusBadRequest {

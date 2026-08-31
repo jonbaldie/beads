@@ -89,14 +89,22 @@ func (f *fakeIssues) wispClaims() []claimCall {
 
 func seededIssue(id, assignee string, status types.Status) *types.Issue {
 	return &types.Issue{
-		ID:        id,
-		Title:     "claim me",
-		Status:    status,
-		Priority:  1,
-		Assignee:  assignee,
-		IssueType: types.TypeTask,
-		CreatedAt: time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC),
-		UpdatedAt: time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC),
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: "claim me",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    status,
+			Priority:  1,
+			Assignee:  assignee,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC),
+			UpdatedAt: time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC),
+		},
 	}
 }
 

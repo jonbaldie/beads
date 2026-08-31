@@ -103,7 +103,7 @@ func (r *includeAwareReader) Get(ctx context.Context, req issueops.GetRequest) (
 func newGetIssueServer(t *testing.T) (*testServer, *includeAwareReader) {
 	t.Helper()
 	rd := &includeAwareReader{}
-	return newTestServer(t, rolesConfig(Config{Reader: rd})), rd
+	return newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{Reader: rd}}})), rd
 }
 
 // TestGetIssueWithoutTheIncludeParametersIsUnchanged is the no-regression half
@@ -447,7 +447,7 @@ func TestGetIssuePublishesTheRevisionToken(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rd := &revisionReader{token: tc.token}
-			ts := newTestServer(t, rolesConfig(Config{Reader: rd}))
+			ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{Reader: rd}}}))
 
 			resp := ts.get(t, "/v0/beads/issues/bd-1")
 			if resp.StatusCode != http.StatusOK {
@@ -501,7 +501,7 @@ func TestListIssuesRowsCarryNoRevision(t *testing.T) {
 	rd := &roleReader{page: issueops.IssuePage{
 		Items: []*types.IssueWithCounts{{Issue: issue}},
 	}}
-	ts := newTestServer(t, rolesConfig(Config{Reader: rd}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{Reader: rd}}}))
 
 	resp := ts.get(t, "/v0/beads/issues?limit=10")
 	if resp.StatusCode != http.StatusOK {

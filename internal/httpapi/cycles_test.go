@@ -18,7 +18,7 @@ const cyclesPath = "/v0/beads/dependencies/cycles"
 // but Listen requires a COMPLETE source, so rolesConfig fills them in.
 func cyclesServer(t *testing.T, detector *roleCycleDetector) *testServer {
 	t.Helper()
-	return newTestServer(t, rolesConfig(Config{CycleDetector: detector}))
+	return newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{GraphRoles: GraphRoles{CycleDetector: detector}}}))
 }
 
 // TestCyclesCarriesTheRolesAnswerToTheWire is the whole point of the operation:
@@ -32,8 +32,8 @@ func TestCyclesCarriesTheRolesAnswerToTheWire(t *testing.T) {
 	ts := cyclesServer(t, &roleCycleDetector{report: issueops.CycleReport{
 		Cycles: []issueops.Cycle{{
 			Members: []issueops.CycleMember{
-				{ID: "bd-a", Issue: &types.Issue{ID: "bd-a", Title: "A"}},
-				{ID: "bd-b", Issue: &types.Issue{ID: "bd-b", Title: "B"}},
+				{ID: "bd-a", Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-a"}, IssueContent: types.IssueContent{Title: "A"}}},
+				{ID: "bd-b", Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-b"}, IssueContent: types.IssueContent{Title: "B"}}},
 			},
 		}},
 	}})
@@ -78,7 +78,7 @@ func TestCyclesOmitsAnUndescribableMemberIssueAndMarksThePath(t *testing.T) {
 		Cycles: []issueops.Cycle{{
 			Partial: true,
 			Members: []issueops.CycleMember{
-				{ID: "bd-a", Issue: &types.Issue{ID: "bd-a", Title: "A"}},
+				{ID: "bd-a", Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-a"}, IssueContent: types.IssueContent{Title: "A"}}},
 				{ID: "bd-ghost"},
 			},
 		}},

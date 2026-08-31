@@ -37,30 +37,35 @@ func MeasureDirectorySize(ctx context.Context, root string) (int64, error) {
 
 func measureDirectorySizeWithWalk(ctx context.Context, root string, walk directoryWalkFunc) (int64, error) {
 	var size int64
-	err := walk(root, func(path string, info os.FileInfo, walkErr error) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if walkErr != nil {
-			if path != root && errors.Is(walkErr, fs.ErrNotExist) {
-				return nil
-			}
-			return walkErr
-		}
-		if info == nil {
-			return fmt.Errorf("walk returned no file information for %s", path)
-		}
-		if info.IsDir() {
-			return nil
-		}
-		if info.Size() < 0 || info.Size() > math.MaxInt64-size {
-			return fmt.Errorf("directory size overflows int64 at %s", path)
-		}
-		size += info.Size()
-		return nil
-	})
+	visit := func(path string, info os.FileInfo, walkErr error) error {
+		return accumulateDirectoryEntry(ctx, root, path, info, walkErr, &size)
+	}
+	err := walk(root, visit)
 	if err != nil {
 		return 0, err
 	}
 	return size, nil
+}
+
+func accumulateDirectoryEntry(ctx context.Context, root, path string, info os.FileInfo, walkErr error, size *int64) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if walkErr != nil {
+		if path != root && errors.Is(walkErr, fs.ErrNotExist) {
+			return nil
+		}
+		return walkErr
+	}
+	if info == nil {
+		return fmt.Errorf("walk returned no file information for %s", path)
+	}
+	if info.IsDir() {
+		return nil
+	}
+	if info.Size() < 0 || info.Size() > math.MaxInt64-*size {
+		return fmt.Errorf("directory size overflows int64 at %s", path)
+	}
+	*size += info.Size()
+	return nil
 }

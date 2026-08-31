@@ -99,15 +99,6 @@ type SearchResult struct {
 	Issues        []Issue `json:"issues"`
 }
 
-// Client provides HTTP access to a Jira instance.
-type Client struct {
-	URL        string
-	Username   string
-	APIToken   string
-	APIVersion string // "2" or "3" (default: "3")
-	HTTPClient *http.Client
-}
-
 // NewClient creates a new Jira client.
 func NewClient(url, username, apiToken string) *Client {
 	return &Client{
@@ -172,10 +163,8 @@ func (c *Client) SearchIssues(ctx context.Context, jql string) ([]Issue, error) 
 	useV2Pagination := c.APIVersion == "2"
 
 	for {
-		select {
-		case <-ctx.Done():
-			return allIssues, ctx.Err()
-		default:
+		if err := ctx.Err(); err != nil {
+			return allIssues, err
 		}
 
 		page++
@@ -183,23 +172,7 @@ func (c *Client) SearchIssues(ctx context.Context, jql string) ([]Issue, error) 
 			return nil, fmt.Errorf("pagination limit exceeded: stopped after %d pages", MaxPages)
 		}
 
-		params := url.Values{
-			"jql":        {jql},
-			"fields":     {searchFields},
-			"maxResults": {fmt.Sprintf("%d", maxResults)},
-		}
-		if useV2Pagination {
-			params.Set("startAt", fmt.Sprintf("%d", startAt))
-		} else if nextPageToken != "" {
-			params.Set("nextPageToken", nextPageToken)
-		}
-
-		// v3 uses /search/jql; v2 uses /search (both accept jql as a query param)
-		searchPath := "search/jql"
-		if useV2Pagination {
-			searchPath = "search"
-		}
-		apiURL := fmt.Sprintf("%s/%s?%s", c.apiBase(), searchPath, params.Encode())
+		apiURL := c.searchURL(jql, useV2Pagination, startAt, nextPageToken, maxResults)
 
 		body, err := c.doRequest(ctx, "GET", apiURL, nil)
 		if err != nil {
@@ -213,23 +186,46 @@ func (c *Client) SearchIssues(ctx context.Context, jql string) ([]Issue, error) 
 
 		allIssues = append(allIssues, result.Issues...)
 
-		if len(result.Issues) == 0 {
+		if searchPageDone(result, useV2Pagination, startAt) {
 			break
 		}
-		if useV2Pagination {
-			if startAt+len(result.Issues) >= result.Total {
-				break
-			}
-			startAt += len(result.Issues)
-			continue
-		}
-		if result.IsLast || result.NextPageToken == "" {
-			break
-		}
-		nextPageToken = result.NextPageToken
+		startAt, nextPageToken = advanceSearchCursor(result, useV2Pagination, startAt)
 	}
 
 	return allIssues, nil
+}
+
+func (c *Client) searchURL(jql string, useV2Pagination bool, startAt int, nextPageToken string, maxResults int) string {
+	params := url.Values{
+		"jql":        {jql},
+		"fields":     {searchFields},
+		"maxResults": {fmt.Sprintf("%d", maxResults)},
+	}
+	searchPath := "search/jql"
+	if useV2Pagination {
+		params.Set("startAt", fmt.Sprintf("%d", startAt))
+		searchPath = "search"
+	} else if nextPageToken != "" {
+		params.Set("nextPageToken", nextPageToken)
+	}
+	return fmt.Sprintf("%s/%s?%s", c.apiBase(), searchPath, params.Encode())
+}
+
+func searchPageDone(result SearchResult, useV2Pagination bool, startAt int) bool {
+	if len(result.Issues) == 0 {
+		return true
+	}
+	if useV2Pagination {
+		return startAt+len(result.Issues) >= result.Total
+	}
+	return result.IsLast || result.NextPageToken == ""
+}
+
+func advanceSearchCursor(result SearchResult, useV2Pagination bool, startAt int) (int, string) {
+	if useV2Pagination {
+		return startAt + len(result.Issues), ""
+	}
+	return startAt, result.NextPageToken
 }
 
 // GetIssue fetches a single Jira issue by key (e.g., "PROJ-123").
@@ -344,98 +340,126 @@ func (c *Client) doRequest(ctx context.Context, method, apiURL string, body []by
 		return nil, fmt.Errorf("jira API token not configured")
 	}
 
+	var lastErr error
+	for attempt := 0; attempt <= MaxRetries; attempt++ {
+		attemptResult := c.executeRequest(ctx, method, apiURL, body)
+		if attemptResult.err != nil {
+			if attemptResult.terminal {
+				return nil, attemptResult.err
+			}
+			lastErr = formatJiraAttemptError(attemptResult.response, attemptResult.err, attempt)
+			continue
+		}
+
+		result, resultErr, retry := evaluateJiraResponse(attemptResult.response, attemptResult.body, attempt)
+		if !retry {
+			return result, resultErr
+		}
+		lastErr = resultErr
+		if err := waitJiraResponseRetry(ctx, attemptResult.response, attempt); err != nil {
+			return nil, err
+		}
+	}
+
+	return nil, fmt.Errorf("max retries (%d) exceeded: %w", MaxRetries+1, lastErr)
+}
+
+type jiraAttemptResult struct {
+	body     []byte
+	response *http.Response
+	err      error
+	terminal bool
+}
+
+func (c *Client) executeRequest(ctx context.Context, method, apiURL string, body []byte) jiraAttemptResult {
 	var bodyReader io.Reader
 	if body != nil {
 		bodyReader = bytes.NewReader(body)
 	}
-
-	var lastErr error
-	for attempt := 0; attempt <= MaxRetries; attempt++ {
-		// Reset body reader at top of loop so retries after network errors
-		// don't send empty bodies (the reader may be at EOF).
-		if body != nil {
-			bodyReader = bytes.NewReader(body)
-		}
-
-		req, err := http.NewRequestWithContext(ctx, method, apiURL, bodyReader)
-		if err != nil {
-			return nil, fmt.Errorf("create request: %w", err)
-		}
-
-		c.setAuth(req)
-		req.Header.Set("Accept", "application/json")
-		req.Header.Set("User-Agent", "bd-jira-sync/1.0")
-		if body != nil {
-			req.Header.Set("Content-Type", "application/json")
-		}
-
-		resp, err := c.HTTPClient.Do(req)
-		if err != nil {
-			lastErr = fmt.Errorf("request failed (attempt %d/%d): %w", attempt+1, MaxRetries+1, err)
-			continue
-		}
-
-		respBody, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseSize))
-		_ = resp.Body.Close()
-		if err != nil {
-			lastErr = fmt.Errorf("failed to read response (attempt %d/%d): %w", attempt+1, MaxRetries+1, err)
-			continue
-		}
-
-		// PUT returns 204 No Content on success
-		if resp.StatusCode == http.StatusNoContent {
-			return nil, nil
-		}
-
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			return respBody, nil
-		}
-
-		// Permanent failures — no retry.
-		switch resp.StatusCode {
-		case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
-			return nil, fmt.Errorf("jira API returned %d: %s", resp.StatusCode, string(respBody))
-		}
-
-		// Retry on rate-limiting and server errors with exponential backoff.
-		retriable := resp.StatusCode == http.StatusTooManyRequests ||
-			resp.StatusCode == http.StatusInternalServerError ||
-			resp.StatusCode == http.StatusBadGateway ||
-			resp.StatusCode == http.StatusServiceUnavailable ||
-			resp.StatusCode == http.StatusGatewayTimeout
-
-		if retriable {
-			delay := RetryDelay * time.Duration(1<<uint(attempt))
-			useServerDelay := false
-
-			// Use Retry-After header if present (no jitter — respect server-mandated delay)
-			if retryAfter := resp.Header.Get("Retry-After"); retryAfter != "" {
-				if seconds, parseErr := strconv.Atoi(retryAfter); parseErr == nil {
-					delay = time.Duration(seconds) * time.Second
-					useServerDelay = true
-				}
-			}
-
-			// Only add jitter to our own exponential backoff, not server-mandated delays
-			if !useServerDelay {
-				if half := int64(delay / 2); half > 0 {
-					delay += time.Duration(rand.Int64N(half)) //nolint:gosec // G404: jitter for retry backoff does not need crypto rand
-				}
-			}
-
-			lastErr = fmt.Errorf("transient error %d (attempt %d/%d)", resp.StatusCode, attempt+1, MaxRetries+1)
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(delay):
-				continue
-			}
-		}
-
-		return nil, fmt.Errorf("jira API returned %d: %s", resp.StatusCode, string(respBody))
+	req, err := http.NewRequestWithContext(ctx, method, apiURL, bodyReader)
+	if err != nil {
+		return jiraAttemptResult{err: fmt.Errorf("create request: %w", err), terminal: true}
+	}
+	c.setAuth(req)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "bd-jira-sync/1.0")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
 
-	return nil, fmt.Errorf("max retries (%d) exceeded: %w", MaxRetries+1, lastErr)
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return jiraAttemptResult{err: err}
+	}
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseSize))
+	_ = resp.Body.Close()
+	if err != nil {
+		return jiraAttemptResult{response: resp, err: err}
+	}
+	return jiraAttemptResult{body: respBody, response: resp}
+}
+
+func formatJiraAttemptError(resp *http.Response, err error, attempt int) error {
+	if resp == nil {
+		return fmt.Errorf("request failed (attempt %d/%d): %w", attempt+1, MaxRetries+1, err)
+	}
+	return fmt.Errorf("failed to read response (attempt %d/%d): %w", attempt+1, MaxRetries+1, err)
+}
+
+func evaluateJiraResponse(resp *http.Response, body []byte, attempt int) ([]byte, error, bool) {
+	if resp.StatusCode == http.StatusNoContent {
+		return nil, nil, false
+	}
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return body, nil, false
+	}
+	if isPermanentJiraStatus(resp.StatusCode) {
+		return nil, fmt.Errorf("jira API returned %d: %s", resp.StatusCode, string(body)), false
+	}
+	if isRetriableJiraStatus(resp.StatusCode) {
+		return nil, fmt.Errorf("transient error %d (attempt %d/%d)", resp.StatusCode, attempt+1, MaxRetries+1), true
+	}
+	return nil, fmt.Errorf("jira API returned %d: %s", resp.StatusCode, string(body)), false
+}
+
+func isPermanentJiraStatus(status int) bool {
+	switch status {
+	case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+		return true
+	default:
+		return false
+	}
+}
+
+func isRetriableJiraStatus(status int) bool {
+	switch status {
+	case http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+func waitJiraResponseRetry(ctx context.Context, resp *http.Response, attempt int) error {
+	delay := RetryDelay * time.Duration(1<<uint(attempt))
+	useServerDelay := false
+	if retryAfter := resp.Header.Get("Retry-After"); retryAfter != "" {
+		if seconds, parseErr := strconv.Atoi(retryAfter); parseErr == nil {
+			delay = time.Duration(seconds) * time.Second
+			useServerDelay = true
+		}
+	}
+	if !useServerDelay {
+		if half := int64(delay / 2); half > 0 {
+			delay += time.Duration(rand.Int64N(half)) //nolint:gosec // G404: jitter for retry backoff does not need crypto rand
+		}
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(delay):
+		return nil
+	}
 }
 
 // setAuth sets the appropriate authentication header on the request.
@@ -456,37 +480,45 @@ func DescriptionToPlainText(raw json.RawMessage) string {
 		return ""
 	}
 
-	// Try to parse as ADF document
-	var doc struct {
-		Type    string `json:"type"`
-		Content []struct {
-			Type    string `json:"type"`
-			Content []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"content"`
-		} `json:"content"`
+	doc, err := parseDescriptionDocument(raw)
+	if err != nil || doc.Type != "doc" {
+		return descriptionFallback(raw)
 	}
+	return adfToPlainText(doc)
+}
 
+type jiraDescriptionDocument struct {
+	Type    string                 `json:"type"`
+	Content []jiraDescriptionBlock `json:"content"`
+}
+
+type jiraDescriptionBlock struct {
+	Type    string                  `json:"type"`
+	Content []jiraDescriptionInline `json:"content"`
+}
+
+type jiraDescriptionInline struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+func parseDescriptionDocument(raw json.RawMessage) (jiraDescriptionDocument, error) {
+	var doc jiraDescriptionDocument
 	if err := json.Unmarshal(raw, &doc); err != nil {
-		// Not JSON - treat as plain text string
-		var s string
-		if err := json.Unmarshal(raw, &s); err == nil {
-			return s
-		}
-		return string(raw)
+		return jiraDescriptionDocument{}, err
 	}
+	return doc, nil
+}
 
-	if doc.Type != "doc" {
-		// Not ADF - try plain string
-		var s string
-		if err := json.Unmarshal(raw, &s); err == nil {
-			return s
-		}
-		return string(raw)
+func descriptionFallback(raw json.RawMessage) string {
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
 	}
+	return string(raw)
+}
 
-	// Extract text from ADF nodes
+func adfToPlainText(doc jiraDescriptionDocument) string {
 	var parts []string
 	for _, block := range doc.Content {
 		var line []string

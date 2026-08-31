@@ -22,13 +22,13 @@ var ErrUnsupported = fmt.Errorf("procid: process-birth identity is not implement
 // constructed because Open always fails.
 type Handle struct{}
 
-func Capture(pid int) (Token, error) { return "", ErrUnsupported }
+func Capture(_ int) (Token, error) { return "", ErrUnsupported }
 
-func Verify(pid int, tok Token) (bool, error) { return false, ErrUnsupported }
+func Verify(_ int, _ Token) (bool, error) { return false, ErrUnsupported }
 
-func Open(pid int, tok Token) (*Handle, error) { return nil, ErrUnsupported }
+func Open(_ int, _ Token) (*Handle, error) { return nil, ErrUnsupported }
 
-func (h *Handle) Signal(sig os.Signal) error { return ErrUnsupported }
+func (h *Handle) Signal(_ os.Signal) error { return ErrUnsupported }
 
 func (h *Handle) Kill() error { return ErrUnsupported }
 
@@ -36,4 +36,4 @@ func (h *Handle) Close() error { return nil }
 
 // IsProcessGone reports false: ErrUnsupported is a capability statement, not
 // evidence about any process, and this platform can produce no other error.
-func IsProcessGone(err error) bool { return false }
+func IsProcessGone(_ error) bool { return false }

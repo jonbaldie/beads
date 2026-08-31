@@ -166,10 +166,10 @@ func (d *discardWriter) Flush()                      {}
 func watchServer(t *testing.T, journal storage.EventsJournalCursor, tune ...func(*Server)) *testServer {
 	t.Helper()
 	tune = append([]func(*Server){func(s *Server) {
-		s.watchPoll = 5 * time.Millisecond
-		s.watchBeat = 40 * time.Millisecond
+		s.streams.watchPoll = 5 * time.Millisecond
+		s.streams.watchBeat = 40 * time.Millisecond
 	}}, tune...)
-	return newTestServer(t, rolesConfig(Config{EventsJournal: journal, EventsJournalEnabled: true}), tune...)
+	return newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{JournalRoles: JournalRoles{EventsJournal: journal, EventsJournalEnabled: true}}}), tune...)
 }
 
 // watchStream is one open stream plus the handle a case uses to hang up.
@@ -533,7 +533,7 @@ func TestEventsWatchRefusesABadCheckpoint(t *testing.T) {
 // mistake rather than better.
 func TestEventsWatchRefusesWhenTheJournalIsDisabled(t *testing.T) {
 	journal := &liveEventsJournal{}
-	ts := newTestServer(t, rolesConfig(Config{EventsJournal: journal, EventsJournalEnabled: false}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{JournalRoles: JournalRoles{EventsJournal: journal, EventsJournalEnabled: false}}}))
 
 	ws := rawWatch(t, ts, "/v0/beads/events:watch?since=0", nil)
 	if ws.resp.StatusCode != http.StatusConflict {
@@ -679,7 +679,7 @@ func TestEventsWatchReleasesItsSlotOnEveryExit(t *testing.T) {
 	journal := &liveEventsJournal{}
 	ts := watchServer(t, journal)
 
-	live := func() int64 { return ts.Server.watchStreams.Load() }
+	live := func() int64 { return ts.Server.streams.watchStreams.Load() }
 
 	// A stream the CLIENT ends.
 	ws := openWatch(t, ts, "/v0/beads/events:watch?since=0", nil)
@@ -712,7 +712,7 @@ func TestEventsWatchReleasesItsSlotOnEveryExit(t *testing.T) {
 // timescale.
 func TestEventsWatchRefusesBeyondTheStreamCap(t *testing.T) {
 	journal := &liveEventsJournal{}
-	ts := watchServer(t, journal, func(s *Server) { s.maxWatchStreams = 2 })
+	ts := watchServer(t, journal, func(s *Server) { s.streams.maxWatchStreams = 2 })
 
 	for i := range 2 {
 		ws := openWatch(t, ts, "/v0/beads/events:watch?since=0", nil)
@@ -753,8 +753,8 @@ func TestEventsWatchRefusesBeyondTheStreamCap(t *testing.T) {
 func TestEventsWatchHoldsNoDatabaseSlotBetweenReads(t *testing.T) {
 	journal := &liveEventsJournal{}
 	ts := watchServer(t, journal, func(s *Server) {
-		s.sem = make(chan struct{}, 1)
-		s.watchPoll = 20 * time.Millisecond
+		s.limits.sem = make(chan struct{}, 1)
+		s.streams.watchPoll = 20 * time.Millisecond
 	})
 
 	ws := openWatch(t, ts, "/v0/beads/events:watch?since=0", nil)
@@ -822,10 +822,9 @@ func TestEventsWatchStopsDrainingABacklogWhenAskedTo(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			journal := &endlessEventsJournal{}
 			s := &Server{
-				sem:        make(chan struct{}, 1),
-				semTimeout: 5 * time.Second,
-				closing:    make(chan struct{}),
-				log:        newTestLogger(&lockedBuffer{}),
+				limits:  serverLimits{sem: make(chan struct{}, 1), semTimeout: 5 * time.Second},
+				streams: serverStreams{closing: make(chan struct{})},
+				output:  serverOutput{log: newTestLogger(&lockedBuffer{})},
 			}
 
 			ctx, hangUp := context.WithCancel(context.Background())
@@ -898,14 +897,15 @@ func TestEventsWatchClosesOnServerShutdown(t *testing.T) {
 	stdout := &lockedBuffer{}
 	stderr := &lockedBuffer{}
 	srv, err := Listen(rolesConfig(Config{
-		Addr: "127.0.0.1:0", EventsJournal: journal, EventsJournalEnabled: true,
-		Stdout: stdout, Stderr: stderr,
+		Addr:        "127.0.0.1:0",
+		SourceRoles: SourceRoles{JournalRoles: JournalRoles{EventsJournal: journal, EventsJournalEnabled: true}},
+		Stdout:      stdout, Stderr: stderr,
 	}))
 	if err != nil {
 		t.Fatalf("Listen: %v", err)
 	}
-	srv.watchPoll = 5 * time.Millisecond
-	srv.watchBeat = time.Hour
+	srv.streams.watchPoll = 5 * time.Millisecond
+	srv.streams.watchBeat = time.Hour
 
 	ctx, cancel := context.WithCancel(context.Background())
 	served := make(chan error, 1)
@@ -976,7 +976,7 @@ func TestEventsWatchRefusesAWriterItCannotFlush(t *testing.T) {
 	if n := journal.readCount(); n != 0 {
 		t.Errorf("the journal was read %d times for a stream that could not be written, want 0", n)
 	}
-	if got := ts.Server.watchStreams.Load(); got != 0 {
+	if got := ts.Server.streams.watchStreams.Load(); got != 0 {
 		t.Errorf("open streams = %d after an unwritable connect, want 0", got)
 	}
 	// httptest.ResponseRecorder DOES flush, so the check has to be able to see
@@ -1101,7 +1101,10 @@ func TestEventsWatchClearsTheRequestReadDeadline(t *testing.T) {
 // It drives the lifecycle wrapper directly, with both polarities, because the
 // absence of a deadline is only meaningful against a row that has one.
 func TestStreamingRoutesCarryNoRequestDeadline(t *testing.T) {
-	s := &Server{sem: make(chan struct{}, 1), log: newTestLogger(&lockedBuffer{})}
+	s := &Server{
+		limits: serverLimits{sem: make(chan struct{}, 1)},
+		output: serverOutput{log: newTestLogger(&lockedBuffer{})},
+	}
 
 	deadlineFor := func(rt route) bool {
 		var seen bool

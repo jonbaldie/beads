@@ -123,14 +123,22 @@ func GitHubIssueToBeads(gh *Issue, config *MappingConfig) *IssueConversion {
 	labelNames := gh.LabelNames()
 
 	issue := &types.Issue{
-		Title:        gh.Title,
-		Description:  gh.Body,
-		ExternalRef:  &htmlURL,
-		SourceSystem: sourceSystem,
-		IssueType:    types.IssueType(typeFromLabels(labelNames, config)),
-		Priority:     priorityFromLabels(labelNames, config),
-		Status:       types.Status(statusFromLabelsAndState(labelNames, gh.State, config)),
-		Labels:       filterNonScopedLabels(labelNames),
+		IssueContent: types.IssueContent{
+			Title:       gh.Title,
+			Description: gh.Body,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.IssueType(typeFromLabels(labelNames, config)),
+			Priority:  priorityFromLabels(labelNames, config),
+			Status:    types.Status(statusFromLabelsAndState(labelNames, gh.State, config)),
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef:  &htmlURL,
+			SourceSystem: sourceSystem,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: filterNonScopedLabels(labelNames),
+		},
 	}
 
 	// Set assignee from GitHub user
@@ -153,7 +161,7 @@ func GitHubIssueToBeads(gh *Issue, config *MappingConfig) *IssueConversion {
 }
 
 // BeadsIssueToGitHubFields converts a beads Issue to GitHub API update fields.
-func BeadsIssueToGitHubFields(issue *types.Issue, config *MappingConfig) map[string]interface{} {
+func BeadsIssueToGitHubFields(issue *types.Issue, _ *MappingConfig) map[string]interface{} {
 	fields := map[string]interface{}{
 		"title": issue.Title,
 		"body":  issue.Description,

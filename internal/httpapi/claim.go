@@ -14,11 +14,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/jonbaldie/beads/internal/httpapi/apigen"
-	"github.com/jonbaldie/beads/internal/storage"
 	"github.com/jonbaldie/beads/internal/storage/uow"
 	"github.com/jonbaldie/beads/internal/types"
 	"github.com/jonbaldie/beads/issueops"
-	"github.com/jonbaldie/beads/memoryops"
 )
 
 const (
@@ -226,6 +224,24 @@ func validateActor(actor string) (string, *Result) {
 	return validateNameMember(claimActorMember, actor)
 }
 
+// optionalActorMember reads the actor shared by destructive operations. Those
+// operations deliberately permit an omitted actor because the deleted row has
+// no durable owner to attribute, while still applying the same bounds and
+// control-character checks when one is supplied.
+func optionalActorMember(members map[string]json.RawMessage) (string, *Result) {
+	raw, ok := members[claimActorMember]
+	if !ok {
+		return "", nil
+	}
+	var value *string
+	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
+		res := InvalidArgument(claimActorMember, ReasonInvalidValue,
+			"`"+claimActorMember+"` must be a string")
+		return "", &res
+	}
+	return validateActor(*value)
+}
+
 // validateNameMember applies the actor rules to any member that NAMES SOMEONE
 // and lands in a 255-character column: `actor` on the mutations, `author` on a
 // comment. The rules are one statement parameterized by the member's spelling,
@@ -323,6 +339,15 @@ type timedProvider struct {
 	rec   *reqInfo
 }
 
+func (p timedProvider) NewUOW(ctx context.Context) (uow.UnitOfWork, error) {
+	start := time.Now()
+	uw, err := p.inner.NewUOW(ctx)
+	if p.rec != nil {
+		p.rec.uowWait += time.Since(start)
+	}
+	return uw, err
+}
+
 // timedProvider carries the capability accessors, so a handler asks the
 // provider it holds for the role — the same two-step a CLI command performs on
 // a store — instead of reaching past it to a constructor.
@@ -379,188 +404,99 @@ var (
 // bypassed here. There is one provider (doltSQLProvider) and its accessor is
 // this same construction, so nothing is bypassed today — but if a decorating
 // provider ever appears, this is the line that has to grow a wrap.
-func (p timedProvider) IssueReader() (issueops.Reader, error) {
-	return uow.NewIssueReader(p)
-}
 
 // IssueClaimer builds the claimer OVER THIS WRAPPER, for the same reason and
 // with the same hazard as IssueReader above: the role's units of work must go
 // through NewUOW below or every claim reports uow_ms=0.000.
 // TestAClaimTimesTheUnitsOfWorkItsClaimerOpens is the assertion that fails
 // instead of the recursion looking correct.
-func (p timedProvider) IssueClaimer() (issueops.Claimer, error) {
-	return uow.NewIssueClaimer(p)
-}
 
 // BatchCloser builds the many-issue close role OVER THIS WRAPPER, for the same
 // reason as the roles above. Like BatchApplier it opens one of the longest
 // write units of work on this surface — up to a hundred closes plus their
 // blocked-state maintenance in one transaction — so a recursion here would
 // report uow_ms=0.000 for exactly the requests whose timing matters most.
-func (p timedProvider) BatchCloser() (issueops.BatchCloser, error) {
-	return uow.NewBatchCloser(p)
-}
 
 // ReadyClaimer builds the take-ready-work role OVER THIS WRAPPER, for the same
 // reason and with the same hazard as IssueClaimer: it opens a write unit of
 // work per call, and its scan is the longest read on this surface — it walks
 // the whole ready order past rows other agents took — so a recursion here would
 // report uow_ms=0.000 for exactly the requests whose timing matters most.
-func (p timedProvider) ReadyClaimer() (issueops.ReadyClaimer, error) {
-	return uow.NewReadyClaimer(p)
-}
 
 // Releaser builds the claim-release role OVER THIS WRAPPER, for the same reason
 // and with the same hazard as IssueClaimer: a release opens a write transaction
 // per call, so a recursion here would report uow_ms=0.000 for every one of
 // them.
-func (p timedProvider) Releaser() (issueops.Releaser, error) {
-	return uow.NewReleaser(p)
-}
 
 // IssueLifecycle builds the guarded-mutation role OVER THIS WRAPPER, for the
 // same reason and with the same hazard as IssueClaimer: this role opens the
 // longest write transactions on the surface, so a claimer-style recursion here
 // would report uow_ms=0.000 for exactly the requests whose timing matters most.
-func (p timedProvider) IssueLifecycle() (issueops.Lifecycle, error) {
-	return uow.NewIssueOperations(p)
-}
 
 // WorkspaceConfig builds the settings role OVER THIS WRAPPER, for the same
 // reason and with the same hazard as the two above.
-func (p timedProvider) WorkspaceConfig() (issueops.WorkspaceConfig, error) {
-	return uow.NewWorkspaceConfig(p)
-}
 
 // StatsReporter builds the summary role OVER THIS WRAPPER, for the same reason
 // and with the same hazard as IssueReader.
-func (p timedProvider) StatsReporter() (issueops.StatsReporter, error) {
-	return uow.NewStatsReporter(p)
-}
 
 // CycleDetector builds the detector OVER THIS WRAPPER, for the same reason and
 // with the same hazard as IssueReader.
-func (p timedProvider) CycleDetector() (issueops.CycleDetector, error) {
-	return uow.NewCycleDetector(p)
-}
 
 // EdgeReader builds the stored-edge reader OVER THIS WRAPPER, for the same
 // reason and with the same hazard as IssueReader.
-func (p timedProvider) EdgeReader() (issueops.EdgeReader, error) {
-	return uow.NewEdgeReader(p)
-}
 
 // GraphCounter builds the edge-count role OVER THIS WRAPPER, for the same
 // reason and with the same hazard as IssueReader.
-func (p timedProvider) GraphCounter() (issueops.GraphCounter, error) {
-	return uow.NewGraphCounter(p)
-}
 
 // IssueRelations builds the single-anchor neighbor role OVER THIS WRAPPER, for
 // the same reason and with the same hazard as IssueReader. It is the one
 // accessor here whose name is not the role's: the seam spells it IssueRelations
 // on both the store and the provider, and this type implements the seam.
-func (p timedProvider) IssueRelations() (issueops.Relations, error) {
-	return uow.NewIssueRelations(p)
-}
 
 // Commenter builds the add-comment role OVER THIS WRAPPER, for the same reason
 // and with the same hazard as IssueReader.
-func (p timedProvider) Commenter() (issueops.Commenter, error) {
-	return uow.NewCommenter(p)
-}
 
 // BlockingAnnotator builds the blocking-decoration role OVER THIS WRAPPER, for
 // the same reason and with the same hazard as IssueReader.
-func (p timedProvider) BlockingAnnotator() (issueops.BlockingAnnotator, error) {
-	return uow.NewBlockingAnnotator(p)
-}
 
 // TreeWalker builds the dependency-tree walker OVER THIS WRAPPER, for the same
 // reason and with the same hazard as IssueReader.
-func (p timedProvider) TreeWalker() (issueops.TreeWalker, error) {
-	return uow.NewTreeWalker(p)
-}
 
 // ReadyCounter builds the ready counter OVER THIS WRAPPER, for the same reason
 // and with the same hazard as IssueReader.
-func (p timedProvider) ReadyCounter() (issueops.ReadyCounter, error) {
-	return uow.NewReadyCounter(p)
-}
 
 // Counter builds the issue counter OVER THIS WRAPPER, for ReadyCounter's reason.
-func (p timedProvider) Counter() (issueops.Counter, error) {
-	return uow.NewCounter(p)
-}
 
 // Querier builds the boolean-query role OVER THIS WRAPPER, for the same reason
 // and with the same hazard as IssueReader.
-func (p timedProvider) Querier() (issueops.Querier, error) {
-	return uow.NewQuerier(p)
-}
 
 // Sweeper builds the sweeper OVER THIS WRAPPER, for the same reason and with
 // the same hazard as IssueReader.
-func (p timedProvider) Sweeper() (issueops.Sweeper, error) {
-	return uow.NewSweeper(p)
-}
 
 // Deleter builds the deleter OVER THIS WRAPPER, for the same reason and with
 // the same hazard as IssueReader.
-func (p timedProvider) Deleter() (issueops.Deleter, error) {
-	return uow.NewDeleter(p)
-}
 
 // BatchCreator builds the batch creator OVER THIS WRAPPER, for the same reason
 // as the roles above. It is the one role here that opens a WRITE unit of work
 // per call.
-func (p timedProvider) BatchCreator() (issueops.BatchCreator, error) {
-	return uow.NewBatchCreator(p)
-}
 
 // DependencyEditor builds the graph's write role OVER THIS WRAPPER, for the
 // same reason as the roles above. Like BatchCreator and the lifecycle it opens
 // a WRITE unit of work per call.
-func (p timedProvider) DependencyEditor() (issueops.DependencyEditor, error) {
-	return uow.NewDependencyEditor(p)
-}
 
 // MetadataCAS builds the conditional metadata write OVER THIS WRAPPER, for the
 // same reason and with the same hazard as IssueReader.
-func (p timedProvider) MetadataCAS() (issueops.MetadataCAS, error) {
-	return uow.NewMetadataCAS(p)
-}
 
 // BatchApplier builds the ordered-plan write role OVER THIS WRAPPER, for the
 // same reason as the roles above. It opens the LONGEST write unit of work on
 // this surface — up to a hundred items in one transaction — so a recursion here
 // would report uow_ms=0.000 for exactly the requests whose timing matters most.
-func (p timedProvider) BatchApplier() (issueops.BatchApplier, error) {
-	return uow.NewBatchApplier(p)
-}
 
 // Memories builds the persistent-memory role OVER THIS WRAPPER, for the same
 // reason and with the same hazard as IssueReader. It is the one accessor here
 // whose role is not an issueops role; the binding rule is the same.
-func (p timedProvider) Memories() (memoryops.Memories, error) {
-	return uow.NewMemories(p)
-}
-
-func (p timedProvider) EventsJournalCursor() (storage.EventsJournalCursor, error) {
-	return uow.NewEventsJournalCursor(p)
-}
-
-func (p timedProvider) NewUOW(ctx context.Context) (uow.UnitOfWork, error) {
-	start := time.Now()
-	uw, err := p.inner.NewUOW(ctx)
-	if p.rec != nil {
-		p.rec.uowWait += time.Since(start)
-	}
-	return uw, err
-}
 
 // Close satisfies the provider interface and is never called: RunTxResult
 // closes units of work, not providers. It deliberately does NOT reach the
 // wrapped provider — closing the process-wide pool from inside one request
 // would take the server down with it.
-func (p timedProvider) Close(context.Context) error { return nil }

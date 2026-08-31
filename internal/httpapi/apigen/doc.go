@@ -11,5 +11,6 @@
 // must reject unknown parameters explicitly (spec, "Unknown query parameters
 // are rejected") — a types-only decoder ignores them by default.
 //
-//go:generate go tool oapi-codegen -generate types,skip-prune -package apigen -o types.gen.go ../spec/openapi.v0.yaml
+//go:generate go tool oapi-codegen -templates templates -generate types,skip-prune -package apigen -o types.gen.go ../spec/openapi.v0.yaml
+//go:generate go run ./cmd/groupfields -file types.gen.go
 package apigen

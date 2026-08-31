@@ -71,9 +71,13 @@ func TestCreateIssue_ClosedCarriesState(t *testing.T) {
 	})
 
 	ti, err := tr.CreateIssue(context.Background(), &types.Issue{
-		Title:     "done",
-		IssueType: types.TypeBug,
-		Status:    types.StatusClosed,
+		IssueContent: types.IssueContent{
+			Title: "done",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeBug,
+			Status:    types.StatusClosed,
+		},
 	})
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -102,9 +106,13 @@ func TestCreateIssue_NonClosedSkipsClose(t *testing.T) {
 			})
 
 			if _, err := tr.CreateIssue(context.Background(), &types.Issue{
-				Title:     "todo",
-				IssueType: types.TypeTask,
-				Status:    status,
+				IssueContent: types.IssueContent{
+					Title: "todo",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: types.TypeTask,
+					Status:    status,
+				},
 			}); err != nil {
 				t.Fatalf("CreateIssue: %v", err)
 			}
@@ -138,7 +146,13 @@ func TestCreateIssue_FailedCloseSurfacesWarning(t *testing.T) {
 	tr := &Tracker{client: NewClient("token", srv.URL, "123"), config: DefaultMappingConfig()}
 
 	ti, err := tr.CreateIssue(context.Background(), &types.Issue{
-		Title: "done", IssueType: types.TypeBug, Status: types.StatusClosed,
+		IssueContent: types.IssueContent{
+			Title: "done",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeBug,
+			Status:    types.StatusClosed,
+		},
 	})
 	if err != nil {
 		t.Fatalf("CreateIssue should not error on a failed best-effort close: %v", err)
@@ -172,9 +186,13 @@ func TestUpdateIssue_StateCarries(t *testing.T) {
 			})
 
 			if _, err := tr.UpdateIssue(context.Background(), "42", &types.Issue{
-				Title:     "t",
-				IssueType: types.TypeTask,
-				Status:    tt.status,
+				IssueContent: types.IssueContent{
+					Title: "t",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: types.TypeTask,
+					Status:    tt.status,
+				},
 			}); err != nil {
 				t.Fatalf("UpdateIssue: %v", err)
 			}
@@ -199,9 +217,13 @@ func TestCreateMilestone_ClosedCarriesState(t *testing.T) {
 	})
 
 	if _, err := tr.CreateIssue(context.Background(), &types.Issue{
-		Title:     "Epic",
-		IssueType: types.TypeEpic,
-		Status:    types.StatusClosed,
+		IssueContent: types.IssueContent{
+			Title: "Epic",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeEpic,
+			Status:    types.StatusClosed,
+		},
 	}); err != nil {
 		t.Fatalf("CreateIssue(epic): %v", err)
 	}

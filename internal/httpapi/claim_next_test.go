@@ -30,7 +30,7 @@ func (ts *testServer) claimNext(t *testing.T, path, body string) *http.Response 
 
 func newClaimNextServer(t *testing.T, claimer *roleReadyClaimer) *testServer {
 	t.Helper()
-	return newTestServer(t, rolesConfig(Config{ReadyClaimer: claimer}))
+	return newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{ReadyClaimer: claimer}}}))
 }
 
 func readyRow(id string) *issueops.IssueWithCounts {

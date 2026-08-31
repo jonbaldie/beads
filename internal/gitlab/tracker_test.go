@@ -165,10 +165,7 @@ func TestGetConfig_YamlOnlyKeyBypassesStore(t *testing.T) {
 
 	t.Run("falls back to env var", func(t *testing.T) {
 		t.Setenv("GITLAB_TOKEN", "env-token-value")
-		got, err := tr.getConfig(ctx, "gitlab.token", "GITLAB_TOKEN")
-		if err != nil {
-			t.Fatalf("getConfig returned error: %v", err)
-		}
+		got := tr.getConfig(ctx, "gitlab.token", "GITLAB_TOKEN")
 		if got != "env-token-value" {
 			t.Errorf("getConfig(gitlab.token) = %q, want %q", got, "env-token-value")
 		}
@@ -176,10 +173,7 @@ func TestGetConfig_YamlOnlyKeyBypassesStore(t *testing.T) {
 
 	t.Run("returns empty when no value is set", func(t *testing.T) {
 		t.Setenv("GITLAB_TOKEN", "")
-		got, err := tr.getConfig(ctx, "gitlab.token", "GITLAB_TOKEN")
-		if err != nil {
-			t.Fatalf("getConfig returned error: %v", err)
-		}
+		got := tr.getConfig(ctx, "gitlab.token", "GITLAB_TOKEN")
 		if got != "" {
 			t.Errorf("getConfig(gitlab.token) = %q, want empty", got)
 		}
@@ -220,10 +214,7 @@ func TestGetConfig_YamlOnlyKeyReadsFromYaml(t *testing.T) {
 	}
 
 	tr := &Tracker{store: nil}
-	got, err := tr.getConfig(context.Background(), "gitlab.token", "GITLAB_TOKEN")
-	if err != nil {
-		t.Fatalf("getConfig returned error: %v", err)
-	}
+	got := tr.getConfig(context.Background(), "gitlab.token", "GITLAB_TOKEN")
 	if got != wantToken {
 		t.Errorf("getConfig(gitlab.token) = %q, want %q (yaml value)", got, wantToken)
 	}

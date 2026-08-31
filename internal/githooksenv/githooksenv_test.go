@@ -4,7 +4,37 @@ import (
 	"os"
 	"slices"
 	"testing"
+	"time"
 )
+
+func TestEnvironmentStateReleaseClearsSnapshotAndUnlocks(t *testing.T) {
+	const previous = "'user.email=ci@example.com'"
+	t.Setenv(ParametersEnv, previous)
+
+	state := &environmentState{}
+	state.acquire()
+	state.release()
+
+	if state.depth != 0 {
+		t.Fatalf("depth after release = %d, want 0", state.depth)
+	}
+	if state.saved != "" || state.hadSaved {
+		t.Fatalf("saved state after release = (%q, %t), want cleared", state.saved, state.hadSaved)
+	}
+
+	acquired := make(chan struct{})
+	go func() {
+		state.acquire()
+		close(acquired)
+	}()
+
+	select {
+	case <-acquired:
+		state.release()
+	case <-time.After(time.Second):
+		t.Fatal("environment state mutex remained locked after release")
+	}
+}
 
 func TestDisabledEnv(t *testing.T) {
 	tests := []struct {

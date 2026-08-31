@@ -132,3 +132,59 @@ func TestGetGitHooksDirTildeExpansion(t *testing.T) {
 		})
 	}
 }
+
+func TestExpandHooksHome(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("USERPROFILE", fakeHome)
+
+	for name, test := range map[string]struct {
+		input string
+		want  string
+	}{
+		"forward slash": {input: "~/.githooks", want: filepath.Join(fakeHome, ".githooks")},
+		"backslash":     {input: `~\.githooks`, want: filepath.Join(fakeHome, ".githooks")},
+		"bare tilde":    {input: "~", want: fakeHome},
+		"unchanged":     {input: ".githooks", want: ".githooks"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := expandHooksHome(test.input); got != test.want {
+				t.Fatalf("expandHooksHome(%q) = %q, want %q", test.input, got, test.want)
+			}
+		})
+	}
+}
+
+func TestGitContextCacheInitRecordsRepositoryContext(t *testing.T) {
+	repoPath, _ := setupTestRepo(t)
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir(repoPath); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(originalDir) })
+
+	cache := &gitContextCache{}
+	cache.init()
+	if cache.ctx.err != nil {
+		t.Fatalf("init() error = %v", cache.ctx.err)
+	}
+	if cache.ctx.gitDir != ".git" {
+		t.Errorf("gitDir = %q, want .git", cache.ctx.gitDir)
+	}
+	if !filepath.IsAbs(cache.ctx.commonDir) {
+		t.Errorf("commonDir = %q, want absolute path", cache.ctx.commonDir)
+	}
+	wantRoot, err := filepath.EvalSymlinks(repoPath)
+	if err != nil {
+		t.Fatalf("resolve repo path: %v", err)
+	}
+	if cache.ctx.repoRoot != wantRoot {
+		t.Errorf("repoRoot = %q, want %q", cache.ctx.repoRoot, wantRoot)
+	}
+	if cache.ctx.isWorktree {
+		t.Error("isWorktree = true, want false for ordinary repository")
+	}
+}

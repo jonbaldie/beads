@@ -45,7 +45,7 @@ type Backend struct {
 
 var (
 	mu       sync.RWMutex
-	registry = make(map[string]Backend)
+	registry sync.Map
 )
 
 // Register adds a backend. Invalid or duplicate registrations panic because
@@ -62,10 +62,10 @@ func Register(name string, backend Backend) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if _, exists := registry[name]; exists {
+	if _, exists := registry.Load(name); exists {
 		panic(fmt.Sprintf("backends: backend %q registered twice", name))
 	}
-	registry[name] = backend
+	registry.Store(name, backend)
 	backendnames.Add(name)
 }
 
@@ -74,10 +74,10 @@ func Register(name string, backend Backend) {
 func Deregister(name string) bool {
 	mu.Lock()
 	defer mu.Unlock()
-	if _, exists := registry[name]; !exists {
+	if _, exists := registry.Load(name); !exists {
 		return false
 	}
-	delete(registry, name)
+	registry.Delete(name)
 	backendnames.Remove(name)
 	return true
 }
@@ -86,15 +86,18 @@ func Deregister(name string) bool {
 func Lookup(name string) (Backend, bool) {
 	mu.RLock()
 	defer mu.RUnlock()
-	backend, ok := registry[name]
-	return backend, ok
+	value, ok := registry.Load(name)
+	if !ok {
+		return Backend{}, false
+	}
+	return value.(Backend), true
 }
 
 // Registered reports whether name has a backend implementation.
 func Registered(name string) bool {
 	mu.RLock()
 	defer mu.RUnlock()
-	_, ok := registry[name]
+	_, ok := registry.Load(name)
 	return ok
 }
 
@@ -106,6 +109,6 @@ func Registered(name string) bool {
 func WorkspaceIsBeadsDir(name string) bool {
 	mu.RLock()
 	defer mu.RUnlock()
-	backend, ok := registry[name]
-	return ok && backend.WorkspaceIsBeadsDir
+	value, ok := registry.Load(name)
+	return ok && value.(Backend).WorkspaceIsBeadsDir
 }

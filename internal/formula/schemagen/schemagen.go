@@ -55,33 +55,12 @@ func Parse(typesPath string) ([]Primitive, error) {
 		return nil, fmt.Errorf("parse %s: %w", typesPath, err)
 	}
 
-	var prims []Primitive
-	for _, decl := range file.Decls {
-		gen, ok := decl.(*ast.GenDecl)
-		if !ok || gen.Tok != token.TYPE {
-			continue
-		}
-		for _, spec := range gen.Specs {
-			ts, ok := spec.(*ast.TypeSpec)
-			if !ok {
-				continue
-			}
-			if !ts.Name.IsExported() {
-				continue
-			}
-			st, ok := ts.Type.(*ast.StructType)
-			if !ok {
-				continue
-			}
-			doc := extractDoc(ts.Doc, gen.Doc)
-			fields := collectFields(fset, st)
-			prims = append(prims, Primitive{
-				Name:   ts.Name.Name,
-				Doc:    doc,
-				Fields: fields,
-			})
-		}
-	}
+	// Keep the struct declarations available while walking fields so anonymous
+	// embedded structs can be flattened just as encoding/json flattens them.
+	// The generated schema is a description of the wire shape, not of the
+	// implementation's grouping seams.
+	structs := collectStructs(file)
+	prims := collectPrimitives(fset, file, structs)
 
 	sort.Slice(prims, func(i, j int) bool {
 		return prims[i].Name < prims[j].Name
@@ -89,44 +68,163 @@ func Parse(typesPath string) ([]Primitive, error) {
 	return prims, nil
 }
 
-func collectFields(fset *token.FileSet, st *ast.StructType) []Field {
+func collectStructs(file *ast.File) map[string]*ast.StructType {
+	structs := make(map[string]*ast.StructType)
+	for _, decl := range file.Decls {
+		gen, ok := typeDecl(decl)
+		if !ok {
+			continue
+		}
+		addStructs(structs, gen)
+	}
+	return structs
+}
+
+func addStructs(structs map[string]*ast.StructType, gen *ast.GenDecl) {
+	for _, spec := range gen.Specs {
+		ts, st, ok := structSpec(spec)
+		if ok {
+			structs[ts.Name.Name] = st
+		}
+	}
+}
+
+func collectPrimitives(fset *token.FileSet, file *ast.File, structs map[string]*ast.StructType) []Primitive {
+	var prims []Primitive
+	for _, decl := range file.Decls {
+		gen, ok := typeDecl(decl)
+		if !ok {
+			continue
+		}
+		prims = append(prims, primitivesFromDecl(fset, gen, structs)...)
+	}
+	return prims
+}
+
+func primitivesFromDecl(fset *token.FileSet, gen *ast.GenDecl, structs map[string]*ast.StructType) []Primitive {
+	var prims []Primitive
+	for _, spec := range gen.Specs {
+		primitive, ok := primitiveFromSpec(fset, gen, spec, structs)
+		if ok {
+			prims = append(prims, primitive)
+		}
+	}
+	return prims
+}
+
+func primitiveFromSpec(fset *token.FileSet, gen *ast.GenDecl, spec ast.Spec, structs map[string]*ast.StructType) (Primitive, bool) {
+	ts, st, ok := structSpec(spec)
+	if !ok || !ts.Name.IsExported() {
+		return Primitive{}, false
+	}
+	return Primitive{
+		Name:   ts.Name.Name,
+		Doc:    extractDoc(ts.Doc, gen.Doc),
+		Fields: collectFields(fset, st, structs, nil),
+	}, true
+}
+
+func typeDecl(decl ast.Decl) (*ast.GenDecl, bool) {
+	gen, ok := decl.(*ast.GenDecl)
+	return gen, ok && gen.Tok == token.TYPE
+}
+
+func structSpec(spec ast.Spec) (*ast.TypeSpec, *ast.StructType, bool) {
+	ts, ok := spec.(*ast.TypeSpec)
+	if !ok {
+		return nil, nil, false
+	}
+	st, ok := ts.Type.(*ast.StructType)
+	return ts, st, ok
+}
+
+func collectFields(fset *token.FileSet, st *ast.StructType, structs map[string]*ast.StructType, seen map[string]bool) []Field {
 	if st.Fields == nil {
 		return nil
 	}
 	var fields []Field
 	for _, f := range st.Fields.List {
-		jsonTag, tomlTag := extractTags(f.Tag)
-		// Skip fields explicitly excluded from JSON serialization — these
-		// are internal implementation details (e.g. Step.SourceFormula).
-		if jsonTag.name == "-" {
-			continue
-		}
-		typeStr := renderType(fset, f.Type)
-		doc := extractDoc(f.Doc, nil)
-		for _, name := range f.Names {
-			if !name.IsExported() {
-				continue
-			}
-			jsonName := jsonTag.name
-			if jsonName == "" {
-				jsonName = name.Name
-			}
-			tomlName := tomlTag.name
-			if tomlName == "" {
-				tomlName = jsonName
-			}
-			required := !jsonTag.omitempty && jsonTag.name != "-"
-			fields = append(fields, Field{
-				Name:     name.Name,
-				Type:     typeStr,
-				JSONName: jsonName,
-				TOMLName: tomlName,
-				Required: required,
-				Doc:      doc,
-			})
+		fields = append(fields, fieldsForField(fset, f, structs, seen)...)
+	}
+	return fields
+}
+
+func fieldsForField(fset *token.FileSet, field *ast.Field, structs map[string]*ast.StructType, seen map[string]bool) []Field {
+	if len(field.Names) == 0 {
+		return fieldsForEmbedded(fset, field.Type, structs, seen)
+	}
+	return fieldsForNamed(fset, field)
+}
+
+func fieldsForEmbedded(fset *token.FileSet, expr ast.Expr, structs map[string]*ast.StructType, seen map[string]bool) []Field {
+	name, ok := embeddedStructName(expr)
+	if !ok || seen[name] {
+		return nil
+	}
+	nested, ok := structs[name]
+	if !ok {
+		return nil
+	}
+	if seen == nil {
+		seen = make(map[string]bool)
+	}
+	seen[name] = true
+	fields := collectFields(fset, nested, structs, seen)
+	delete(seen, name)
+	return fields
+}
+
+func fieldsForNamed(fset *token.FileSet, field *ast.Field) []Field {
+	jsonTag, tomlTag := extractTags(field.Tag)
+	// Skip fields explicitly excluded from JSON serialization — these
+	// are internal implementation details (e.g. Step.SourceFormula).
+	if jsonTag.name == "-" {
+		return nil
+	}
+	typeStr := renderType(fset, field.Type)
+	doc := extractDoc(field.Doc, nil)
+	var fields []Field
+	for _, name := range field.Names {
+		if parsed, ok := fieldDoc(name, typeStr, jsonTag, tomlTag, doc); ok {
+			fields = append(fields, parsed)
 		}
 	}
 	return fields
+}
+
+func fieldDoc(name *ast.Ident, typeStr string, jsonTag, tomlTag structTag, doc string) (Field, bool) {
+	if !name.IsExported() {
+		return Field{}, false
+	}
+	jsonName := jsonTag.name
+	if jsonName == "" {
+		jsonName = name.Name
+	}
+	tomlName := tomlTag.name
+	if tomlName == "" {
+		tomlName = jsonName
+	}
+	return Field{
+		Name:     name.Name,
+		Type:     typeStr,
+		JSONName: jsonName,
+		TOMLName: tomlName,
+		Required: !jsonTag.omitempty && jsonTag.name != "-",
+		Doc:      doc,
+	}, true
+}
+
+func embeddedStructName(expr ast.Expr) (string, bool) {
+	if ident, ok := expr.(*ast.Ident); ok {
+		return ident.Name, true
+	}
+	if star, ok := expr.(*ast.StarExpr); ok {
+		ident, ok := star.X.(*ast.Ident)
+		if ok {
+			return ident.Name, true
+		}
+	}
+	return "", false
 }
 
 type structTag struct {
@@ -173,35 +271,10 @@ func newReflectStructTag(s string) reflectStructTag { return reflectStructTag(s)
 func (t reflectStructTag) lookup(key string) (string, bool) {
 	tag := string(t)
 	for tag != "" {
-		i := 0
-		for i < len(tag) && tag[i] == ' ' {
-			i++
+		name, quoted, rest, ok := nextStructTag(tag)
+		if !ok {
+			return "", false
 		}
-		tag = tag[i:]
-		if tag == "" {
-			break
-		}
-		i = 0
-		for i < len(tag) && tag[i] > ' ' && tag[i] != ':' && tag[i] != '"' {
-			i++
-		}
-		if i == 0 || i+1 >= len(tag) || tag[i] != ':' || tag[i+1] != '"' {
-			break
-		}
-		name := tag[:i]
-		tag = tag[i+1:]
-		i = 1
-		for i < len(tag) && tag[i] != '"' {
-			if tag[i] == '\\' {
-				i++
-			}
-			i++
-		}
-		if i >= len(tag) {
-			break
-		}
-		quoted := tag[:i+1]
-		tag = tag[i+1:]
 		if name == key {
 			value, err := strconv.Unquote(quoted)
 			if err != nil {
@@ -209,8 +282,40 @@ func (t reflectStructTag) lookup(key string) (string, bool) {
 			}
 			return value, true
 		}
+		tag = rest
 	}
 	return "", false
+}
+
+func nextStructTag(tag string) (name, quoted, rest string, ok bool) {
+	tag = strings.TrimLeft(tag, " ")
+	if tag == "" {
+		return "", "", "", false
+	}
+	separator := strings.IndexAny(tag, ":\"")
+	if separator <= 0 || separator+1 >= len(tag) || tag[separator] != ':' || tag[separator+1] != '"' {
+		return "", "", "", false
+	}
+	value := tag[separator+1:]
+	end := quotedValueEnd(value)
+	if end < 0 {
+		return "", "", "", false
+	}
+	return tag[:separator], value[:end+1], value[end+1:], true
+}
+
+func quotedValueEnd(value string) int {
+	n := len(value)
+	for i := 1; i < n; i++ {
+		if value[i] == '\\' {
+			i++
+			continue
+		}
+		if value[i] == '"' {
+			return i
+		}
+	}
+	return -1
 }
 
 func renderType(fset *token.FileSet, expr ast.Expr) string {

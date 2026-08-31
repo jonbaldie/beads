@@ -111,22 +111,11 @@ func (s *Server) batchCreateItems(w http.ResponseWriter, r *http.Request, member
 		s.fail(w, r, InvalidArgument("items", ReasonInvalidValue, "`items` is required"))
 		return nil, false
 	}
-	var rawItems []map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &rawItems); err != nil || rawItems == nil {
-		s.fail(w, r, InvalidArgument("items", ReasonInvalidValue, "`items` must be an array of objects"))
+	rawItems, res := decodeBatchCreateItems(raw)
+	if res != nil {
+		s.fail(w, r, *res)
 		return nil, false
 	}
-	switch {
-	case len(rawItems) == 0:
-		s.fail(w, r, InvalidArgument("items", ReasonInvalidValue,
-			"`items` must carry at least one issue; a create that creates nothing is refused rather than answered"))
-		return nil, false
-	case len(rawItems) > maxBatchCreateItems:
-		s.fail(w, r, InvalidArgument("items", ReasonInvalidValue,
-			fmt.Sprintf("`items` carries %d issues; the limit is %d per request", len(rawItems), maxBatchCreateItems)))
-		return nil, false
-	}
-
 	items := make([]issueops.BatchCreateItem, 0, len(rawItems))
 	for i, rawItem := range rawItems {
 		if rawItem == nil {
@@ -147,56 +136,102 @@ func (s *Server) batchCreateItems(w http.ResponseWriter, r *http.Request, member
 	return items, true
 }
 
+func decodeBatchCreateItems(raw json.RawMessage) ([]map[string]json.RawMessage, *Result) {
+	var rawItems []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &rawItems); err != nil || rawItems == nil {
+		return nil, batchCreateRefusal("items", "`items` must be an array of objects")
+	}
+	switch {
+	case len(rawItems) == 0:
+		return nil, batchCreateRefusal("items",
+			"`items` must carry at least one issue; a create that creates nothing is refused rather than answered")
+	case len(rawItems) > maxBatchCreateItems:
+		return nil, batchCreateRefusal("items",
+			fmt.Sprintf("`items` carries %d issues; the limit is %d per request", len(rawItems), maxBatchCreateItems))
+	}
+	return rawItems, nil
+}
+
+func batchCreateRefusal(param, detail string) *Result {
+	res := InvalidArgument(param, ReasonInvalidValue, detail)
+	return &res
+}
+
 // batchCreateItem projects one decoded item onto the role's item, or reports the
 // refusal it earned. It decodes into the GENERATED struct, which is what makes a
 // member's type the document's type: `priority: "high"` is refused here rather
 // than reaching a role that would have to guess what the caller meant.
 func batchCreateItem(index int, raw map[string]json.RawMessage) (issueops.BatchCreateItem, *Result) {
-	refuse := func(member, detail string) *Result {
-		res := InvalidArgument(batchCreateItemParam(index, member), ReasonInvalidValue, detail)
-		return &res
-	}
 	encoded, err := json.Marshal(raw)
 	if err != nil {
-		return issueops.BatchCreateItem{}, refuse("", "an item must be a JSON object")
+		return issueops.BatchCreateItem{}, batchCreateItemRefusal(index, "", "an item must be a JSON object")
 	}
 	var wire apigen.BatchCreateItem
 	if err := json.Unmarshal(encoded, &wire); err != nil {
-		return issueops.BatchCreateItem{}, refuse("", "an item member carries the wrong JSON type")
+		return issueops.BatchCreateItem{}, batchCreateItemRefusal(index, "", "an item member carries the wrong JSON type")
 	}
+	if res := validateBatchCreateItemWire(&wire, index); res != nil {
+		return issueops.BatchCreateItem{}, res
+	}
+	issue, res := batchCreateIssue(&wire, index)
+	if res != nil {
+		return issueops.BatchCreateItem{}, res
+	}
+	item := issueops.BatchCreateItem{Issue: issue}
+	dependencies, res := batchCreateDependencies(index, raw, wire.Dependencies)
+	if res != nil {
+		return issueops.BatchCreateItem{}, res
+	}
+	item.Dependencies = dependencies
+	return item, nil
+}
+
+func batchCreateItemRefusal(index int, member, detail string) *Result {
+	res := InvalidArgument(batchCreateItemParam(index, member), ReasonInvalidValue, detail)
+	return &res
+}
+
+func validateBatchCreateItemWire(wire *apigen.BatchCreateItem, index int) *Result {
 	if strings.TrimSpace(wire.Title) == "" {
-		return issueops.BatchCreateItem{}, refuse("title", "`title` is required and must not be blank")
+		return batchCreateItemRefusal(index, "title", "`title` is required and must not be blank")
 	}
 	if types.CheckFieldLen("title", wire.Title) != nil {
-		return issueops.BatchCreateItem{}, refuse("title",
+		return batchCreateItemRefusal(index, "title",
 			fmt.Sprintf("`title` is longer than the %d characters storage holds", types.MaxFieldLen))
 	}
 	// The role validates the type against the workspace's configured vocabulary,
 	// which this server cannot read without a transaction; what is checked here
 	// is only what the schema declares. A SLICE and not a map, so that an item
-	// breaking both rules always names the same offender: `param` is what a
-	// client dispatches on, and it must not depend on map order.
+	// breaking both rules always names the same offender.
 	for _, bounded := range []struct {
 		member string
 		value  *string
 	}{{"assignee", wire.Assignee}, {"issue_type", wire.IssueType}} {
 		if bounded.value != nil && types.CheckFieldLen(bounded.member, *bounded.value) != nil {
-			return issueops.BatchCreateItem{}, refuse(bounded.member,
+			return batchCreateItemRefusal(index, bounded.member,
 				fmt.Sprintf("`%s` is longer than the %d characters storage holds", bounded.member, types.MaxFieldLen))
 		}
 	}
+	return nil
+}
+
+func batchCreateIssue(wire *apigen.BatchCreateItem, index int) (*types.Issue, *Result) {
 	issue := &types.Issue{
-		Title:              wire.Title,
-		Description:        derefString(wire.Description),
-		Design:             derefString(wire.Design),
-		AcceptanceCriteria: derefString(wire.AcceptanceCriteria),
-		Status:             types.StatusOpen,
-		Assignee:           derefString(wire.Assignee),
-		IssueType:          types.IssueType(derefString(wire.IssueType)),
+		IssueContent: types.IssueContent{
+			Title:              wire.Title,
+			Description:        derefString(wire.Description),
+			Design:             derefString(wire.Design),
+			AcceptanceCriteria: derefString(wire.AcceptanceCriteria),
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Assignee:  derefString(wire.Assignee),
+			IssueType: types.IssueType(derefString(wire.IssueType)),
+		},
 	}
 	if wire.Priority != nil {
 		if *wire.Priority < 0 || *wire.Priority > 4 {
-			return issueops.BatchCreateItem{}, refuse("priority",
+			return nil, batchCreateItemRefusal(index, "priority",
 				fmt.Sprintf("`priority` is %d; the range is 0 to 4", *wire.Priority))
 		}
 		issue.Priority = *wire.Priority
@@ -204,41 +239,41 @@ func batchCreateItem(index int, raw map[string]json.RawMessage) (issueops.BatchC
 	if wire.Labels != nil {
 		for _, label := range *wire.Labels {
 			if types.CheckFieldLen("label", label) != nil {
-				return issueops.BatchCreateItem{}, refuse("labels",
+				return nil, batchCreateItemRefusal(index, "labels",
 					fmt.Sprintf("a label is longer than the %d characters storage holds", types.MaxFieldLen))
 			}
 		}
 		issue.Labels = *wire.Labels
 	}
-	item := issueops.BatchCreateItem{Issue: issue}
-	if wire.Dependencies == nil {
-		return item, nil
+	return issue, nil
+}
+
+func batchCreateDependencies(index int, raw map[string]json.RawMessage, dependencies *[]apigen.BatchCreateDependency) ([]issueops.CreateDependency, *Result) {
+	if dependencies == nil {
+		return nil, nil
 	}
 	rawEdges := rawDependencyMembers(raw)
-	for j, dependency := range *wire.Dependencies {
+	created := make([]issueops.CreateDependency, 0, len(*dependencies))
+	for j, dependency := range *dependencies {
 		if offender, unknown := unknownMember(rawEdgeAt(rawEdges, j), batchCreateDependencyMembers); unknown {
 			res := InvalidArgument(batchCreateItemParam(index, "dependencies."+offender), ReasonUnknownParameter,
 				"an edge carries "+strings.Join(batchCreateDependencyMembers, ", ")+" and nothing else")
-			return issueops.BatchCreateItem{}, &res
+			return nil, &res
 		}
 		if dependency.TargetId == "" || types.CheckFieldLen("target_id", dependency.TargetId) != nil {
-			return issueops.BatchCreateItem{}, refuse("dependencies.target_id",
+			return nil, batchCreateItemRefusal(index, "dependencies.target_id",
 				"`target_id` is required and must be at most "+fmt.Sprint(types.MaxFieldLen)+" characters")
 		}
 		// A value at all, and one the column holds — never membership of a
-		// known-types list. The edge vocabulary is OPEN, as EdgeReadRequest.Types
-		// says, so a workspace's own type passes and only an unstorable one is
-		// refused.
+		// known-types list. The edge vocabulary is OPEN, so only an unstorable
+		// value is refused.
 		if !types.DependencyType(dependency.Type).IsValid() {
-			return issueops.BatchCreateItem{}, refuse("dependencies.type",
+			return nil, batchCreateItemRefusal(index, "dependencies.type",
 				fmt.Sprintf("`type` must be 1 to %d characters", types.MaxDependencyTypeLen))
 		}
-		item.Dependencies = append(item.Dependencies, issueops.CreateDependency{
-			TargetID: dependency.TargetId,
-			Type:     types.DependencyType(dependency.Type),
-		})
+		created = append(created, issueops.CreateDependency{TargetID: dependency.TargetId, Type: types.DependencyType(dependency.Type)})
 	}
-	return item, nil
+	return created, nil
 }
 
 // rawDependencyMembers decodes an item's edges as raw members, so an unknown

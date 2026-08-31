@@ -22,30 +22,45 @@ func EnsureUserConfigDefaults() error {
 		return fmt.Errorf("ensure user config: %w", err)
 	}
 
-	data, err := os.ReadFile(path) //nolint:gosec // path is a validated absolute user config path
-	if errors.Is(err, fs.ErrNotExist) {
-		return writeUserConfigBootstrap(path)
-	}
+	data, err := readUserConfig(path)
 	if err != nil {
-		return fmt.Errorf("ensure user config: read %s: %w", path, err)
+		if errors.Is(err, fs.ErrNotExist) {
+			return writeUserConfigBootstrap(path)
+		}
+		return err
 	}
-
 	if commentedMetricsRe.Match(data) {
 		return nil
 	}
+	root, err := parseUserConfig(path, data)
+	if err != nil {
+		return err
+	}
+	return applyUserConfigDefaults(root)
+}
 
+func readUserConfig(path string) ([]byte, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // path is a validated absolute user config path
+	if err != nil {
+		return nil, fmt.Errorf("ensure user config: read %s: %w", path, err)
+	}
+	return data, nil
+}
+
+func parseUserConfig(path string, data []byte) (*yaml.Node, error) {
 	var root yaml.Node
 	if err := yaml.Unmarshal(data, &root); err != nil {
-		return fmt.Errorf("ensure user config: parse %s: %w", path, err)
+		return nil, fmt.Errorf("ensure user config: parse %s: %w", path, err)
 	}
+	return &root, nil
+}
 
-	needDisabled := !userConfigHasLeaf(&root, "metrics", "disabled")
-	needEndpoint := !userConfigHasLeaf(&root, "metrics", "endpoint")
-
+func applyUserConfigDefaults(root *yaml.Node) error {
+	needDisabled := !userConfigHasLeaf(root, "metrics", "disabled")
+	needEndpoint := !userConfigHasLeaf(root, "metrics", "endpoint")
 	if !needDisabled && !needEndpoint {
 		return nil
 	}
-
 	if needDisabled {
 		if err := config.SetUserYamlConfig("metrics.disabled", "false"); err != nil {
 			return fmt.Errorf("ensure user config: set metrics.disabled: %w", err)
@@ -87,32 +102,42 @@ func userConfigHasLeaf(root *yaml.Node, parts ...string) bool {
 		return false
 	}
 
-	flatKey := strings.Join(parts, ".")
-	for i := 0; i < len(mapping.Content); i += 2 {
-		k := mapping.Content[i]
-		if k.Kind == yaml.ScalarNode && k.Value == flatKey {
-			v := mapping.Content[i+1]
-			return v.Kind == yaml.ScalarNode && v.Value != ""
-		}
+	if found, ok := userConfigFlatLeaf(mapping, strings.Join(parts, ".")); ok {
+		return found
 	}
 
 	current := mapping
 	for _, part := range parts {
-		if current.Kind != yaml.MappingNode {
+		var ok bool
+		current, ok = userConfigChild(current, part)
+		if !ok {
 			return false
 		}
-		idx := -1
-		for i := 0; i < len(current.Content); i += 2 {
-			k := current.Content[i]
-			if k.Kind == yaml.ScalarNode && k.Value == part {
-				idx = i
-				break
-			}
-		}
-		if idx == -1 {
-			return false
-		}
-		current = current.Content[idx+1]
 	}
 	return current.Kind == yaml.ScalarNode && current.Value != ""
+}
+
+func userConfigFlatLeaf(mapping *yaml.Node, key string) (bool, bool) {
+	n := len(mapping.Content)
+	for i := 0; i+1 < n; i += 2 {
+		k, v := mapping.Content[i], mapping.Content[i+1]
+		if k.Kind == yaml.ScalarNode && k.Value == key {
+			return v.Kind == yaml.ScalarNode && v.Value != "", true
+		}
+	}
+	return false, false
+}
+
+func userConfigChild(mapping *yaml.Node, key string) (*yaml.Node, bool) {
+	if mapping.Kind != yaml.MappingNode {
+		return nil, false
+	}
+	n := len(mapping.Content)
+	for i := 0; i+1 < n; i += 2 {
+		k, v := mapping.Content[i], mapping.Content[i+1]
+		if k.Kind == yaml.ScalarNode && k.Value == key {
+			return v, true
+		}
+	}
+	return nil, false
 }

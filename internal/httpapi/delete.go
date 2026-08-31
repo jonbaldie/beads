@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 
 	"github.com/jonbaldie/beads/internal/httpapi/apigen"
@@ -90,133 +89,112 @@ func (s *Server) deleteRequest(w http.ResponseWriter, r *http.Request) (issueops
 		return issueops.DeleteRequest{}, false
 	}
 
-	var unknown []string
-	for name := range members {
-		if !slices.Contains(deleteMembers, name) {
-			unknown = append(unknown, name)
-		}
-	}
-	if len(unknown) > 0 {
+	if offender, unknown := unknownMember(members, deleteMembers); unknown {
 		// One offender, chosen deterministically so a client dispatching on
 		// `param` never sees it depend on map order.
-		offender := slices.Min(unknown)
 		requestInfo(r.Context()).refuse(offender)
 		s.fail(w, r, InvalidArgument(offender, ReasonUnknownParameter,
 			"this operation's request body carries "+deleteMemberList()+" and nothing else"))
 		return issueops.DeleteRequest{}, false
 	}
 
-	// cascade, force and dry_run all default to their ZERO values here, unlike
-	// the sweep's protect_referenced: false is already the guarded answer for
-	// all three, so an omitted member cannot buy weaker protection than the
-	// operator typing `bd delete` gets.
-	var request issueops.DeleteRequest
-
-	raw, ok := members[deleteIDsMember]
-	if !ok {
-		s.fail(w, r, InvalidArgument(deleteIDsMember, ReasonInvalidValue,
-			"`"+deleteIDsMember+"` is required"))
-		return issueops.DeleteRequest{}, false
-	}
-	var ids *[]string
-	if err := json.Unmarshal(raw, &ids); err != nil || ids == nil {
-		s.fail(w, r, InvalidArgument(deleteIDsMember, ReasonInvalidValue,
-			"`"+deleteIDsMember+"` must be an array of strings"))
-		return issueops.DeleteRequest{}, false
-	}
-	if len(*ids) == 0 {
-		// The ROLE refuses this too. It is refused here as well so the client
-		// gets the member name.
-		s.fail(w, r, InvalidArgument(deleteIDsMember, ReasonInvalidValue,
-			"`"+deleteIDsMember+"` must name at least one bead"))
-		return issueops.DeleteRequest{}, false
-	}
-	if len(*ids) > maxDeleteIDs {
-		s.fail(w, r, InvalidArgument(deleteIDsMember, ReasonInvalidValue,
-			"`"+deleteIDsMember+"` carries more ids than this operation accepts in one request"))
-		return issueops.DeleteRequest{}, false
-	}
-	// A blank entry. The ROLE refuses it too, and it is refused here for the
-	// empty-array refusal's reason — the client gets the member name — plus one
-	// the guard below adds: the arity rule counts DISTINCT TRIMMED ids, so a
-	// blank entry would otherwise count as an id and could earn the guard's
-	// refusal for a request whose actual fault is a broken id list.
-	// ValidateDeleteRequest puts the blank refusal ahead of the arity one; this
-	// keeps the wire's order the same as the library's.
-	for i, id := range *ids {
-		if strings.TrimSpace(id) == "" {
-			s.fail(w, r, InvalidArgument(deleteIDsMember, ReasonInvalidValue,
-				fmt.Sprintf("`%s[%d]` is blank; every id must name a bead", deleteIDsMember, i)))
-			return issueops.DeleteRequest{}, false
-		}
-	}
-	request.IDs = *ids
-
-	// The guard, and the arity rule that comes with it. Both are decided here,
-	// before any database work, because both are statements about the REQUEST:
-	// the role refuses the same pair as ErrValidation, and reaching the wire
-	// through that route would cost the member name a client dispatches on.
-	//
-	// DISTINCT, TRIMMED ids — the role's own counting rule
-	// (workapi.NormalizeDeleteIDs), respelled here because the transport
-	// boundary keeps internal/workapi out of this package. That respelling is
-	// the drift risk this slice carries, and the case that pins it is the one
-	// asserting `["be-1", " be-1"]` beside a guard is ACCEPTED: an edge that
-	// counted mentions, or counted untrimmed, would refuse a request the role
-	// calls legal.
-	expectedVersion, res := applyVersionGuardMember(members, "")
+	request, res := parseDeleteRequest(members)
 	if res != nil {
 		s.fail(w, r, *res)
 		return issueops.DeleteRequest{}, false
 	}
-	if expectedVersion != nil {
-		if distinct := distinctDeleteIDs(request.IDs); distinct > 1 {
-			s.fail(w, r, InvalidArgument(expectedVersionMember, ReasonInvalidValue,
-				fmt.Sprintf("`%s` guards ONE bead and this request names %d distinct ids; a row version describes one row. Send one guarded request per bead",
-					expectedVersionMember, distinct)))
-			return issueops.DeleteRequest{}, false
-		}
-		request.ExpectedVersion = expectedVersion
-	}
-
-	if raw, ok := members[deleteActorMember]; ok {
-		var value *string
-		if err := json.Unmarshal(raw, &value); err != nil || value == nil {
-			s.fail(w, r, InvalidArgument(deleteActorMember, ReasonInvalidValue,
-				"`"+deleteActorMember+"` must be a string"))
-			return issueops.DeleteRequest{}, false
-		}
-		// The claim's rules, unchanged.
-		trimmed, res := validateActor(*value)
-		if res != nil {
-			s.fail(w, r, *res)
-			return issueops.DeleteRequest{}, false
-		}
-		request.Actor = trimmed
-	}
-
-	for _, flag := range []struct {
-		member string
-		dest   *bool
-	}{
-		{deleteCascadeMember, &request.Cascade},
-		{deleteForceMember, &request.Force},
-		{deleteDryRunMember, &request.DryRun},
-	} {
-		raw, ok := members[flag.member]
-		if !ok {
-			continue
-		}
-		var value *bool
-		if err := json.Unmarshal(raw, &value); err != nil || value == nil {
-			s.fail(w, r, InvalidArgument(flag.member, ReasonInvalidValue,
-				"`"+flag.member+"` must be a boolean"))
-			return issueops.DeleteRequest{}, false
-		}
-		*flag.dest = *value
-	}
-
 	return request, true
+}
+
+func parseDeleteRequest(members map[string]json.RawMessage) (issueops.DeleteRequest, *Result) {
+	ids, res := decodeDeleteIDs(members)
+	if res != nil {
+		return issueops.DeleteRequest{}, res
+	}
+	expectedVersion, res := deleteVersionGuard(members, ids)
+	if res != nil {
+		return issueops.DeleteRequest{}, res
+	}
+	actor, res := optionalActorMember(members)
+	if res != nil {
+		return issueops.DeleteRequest{}, res
+	}
+	flags, res := decodeDeleteFlags(members)
+	if res != nil {
+		return issueops.DeleteRequest{}, res
+	}
+	return issueops.DeleteRequest{
+		IDs:             ids,
+		ExpectedVersion: expectedVersion,
+		Actor:           actor,
+		Cascade:         flags.cascade,
+		Force:           flags.force,
+		DryRun:          flags.dryRun,
+	}, nil
+}
+
+func decodeDeleteIDs(members map[string]json.RawMessage) ([]string, *Result) {
+	raw, ok := members[deleteIDsMember]
+	if !ok {
+		return nil, deleteRefusal(deleteIDsMember, "`"+deleteIDsMember+"` is required")
+	}
+	var ids *[]string
+	if err := json.Unmarshal(raw, &ids); err != nil || ids == nil {
+		return nil, deleteRefusal(deleteIDsMember, "`"+deleteIDsMember+"` must be an array of strings")
+	}
+	if len(*ids) == 0 {
+		return nil, deleteRefusal(deleteIDsMember, "`"+deleteIDsMember+"` must name at least one bead")
+	}
+	if len(*ids) > maxDeleteIDs {
+		return nil, deleteRefusal(deleteIDsMember, "`"+deleteIDsMember+"` carries more ids than this operation accepts in one request")
+	}
+	for i, id := range *ids {
+		if strings.TrimSpace(id) == "" {
+			return nil, deleteRefusal(deleteIDsMember,
+				fmt.Sprintf("`%s[%d]` is blank; every id must name a bead", deleteIDsMember, i))
+		}
+	}
+	return *ids, nil
+}
+
+func deleteVersionGuard(members map[string]json.RawMessage, ids []string) (*int64, *Result) {
+	expectedVersion, res := applyVersionGuardMember(members, "")
+	if res != nil || expectedVersion == nil {
+		return expectedVersion, res
+	}
+	if distinct := distinctDeleteIDs(ids); distinct > 1 {
+		return nil, deleteRefusal(expectedVersionMember, fmt.Sprintf(
+			"`%s` guards ONE bead and this request names %d distinct ids; a row version describes one row. Send one guarded request per bead",
+			expectedVersionMember, distinct))
+	}
+	return expectedVersion, nil
+}
+
+type deleteFlags struct {
+	cascade bool
+	force   bool
+	dryRun  bool
+}
+
+func decodeDeleteFlags(members map[string]json.RawMessage) (deleteFlags, *Result) {
+	cascade, res := applyBoolMember(members, "", deleteCascadeMember)
+	if res != nil {
+		return deleteFlags{}, res
+	}
+	force, res := applyBoolMember(members, "", deleteForceMember)
+	if res != nil {
+		return deleteFlags{}, res
+	}
+	dryRun, res := applyBoolMember(members, "", deleteDryRunMember)
+	if res != nil {
+		return deleteFlags{}, res
+	}
+	return deleteFlags{cascade: cascade, force: force, dryRun: dryRun}, nil
+}
+
+func deleteRefusal(param, detail string) *Result {
+	res := InvalidArgument(param, ReasonInvalidValue, detail)
+	return &res
 }
 
 // distinctDeleteIDs counts the ids a request really names, collapsing

@@ -75,83 +75,74 @@ func ApplyAdvice(steps []*Step, advice []*AdviceRule) []*Step {
 // steps they themselves inserted.
 func applyAdviceWithGuard(steps []*Step, advice []*AdviceRule, originalIDs map[string]bool) []*Step {
 	result := make([]*Step, 0, len(steps)*2) // Pre-allocate for insertions
-
 	for _, step := range steps {
-		// Skip steps not in original set
 		if !originalIDs[step.ID] {
 			result = append(result, step)
 			continue
 		}
-		// Find matching advice rules for this step
-		var beforeSteps []*Step
-		var afterSteps []*Step
+		result = append(result, applyAdviceAroundStep(step, advice)...)
+	}
+	return result
+}
 
-		for _, rule := range advice {
-			if !MatchGlob(rule.Target, step.ID) {
-				continue
-			}
-
-			// Collect before steps
-			if rule.Before != nil {
-				beforeSteps = append(beforeSteps, adviceStepToStep(rule.Before, step))
-			}
-			if rule.Around != nil {
-				for _, as := range rule.Around.Before {
-					beforeSteps = append(beforeSteps, adviceStepToStep(as, step))
-				}
-			}
-
-			// Collect after steps
-			if rule.After != nil {
-				afterSteps = append(afterSteps, adviceStepToStep(rule.After, step))
-			}
-			if rule.Around != nil {
-				for _, as := range rule.Around.After {
-					afterSteps = append(afterSteps, adviceStepToStep(as, step))
-				}
+func collectAdviceAround(step *Step, advice []*AdviceRule) (beforeSteps, afterSteps []*Step) {
+	for _, rule := range advice {
+		if !MatchGlob(rule.Target, step.ID) {
+			continue
+		}
+		if rule.Before != nil {
+			beforeSteps = append(beforeSteps, adviceStepToStep(rule.Before, step))
+		}
+		if rule.Around != nil {
+			for _, as := range rule.Around.Before {
+				beforeSteps = append(beforeSteps, adviceStepToStep(as, step))
 			}
 		}
-
-		// Insert before steps
-		for _, bs := range beforeSteps {
-			result = append(result, bs)
+		if rule.After != nil {
+			afterSteps = append(afterSteps, adviceStepToStep(rule.After, step))
 		}
-
-		// Clone the original step and update its dependencies
-		clonedStep := cloneStep(step)
-
-		// If there are before steps, the original step needs to depend on the last before step
-		if len(beforeSteps) > 0 {
-			lastBefore := beforeSteps[len(beforeSteps)-1]
-			clonedStep.Needs = appendUnique(clonedStep.Needs, lastBefore.ID)
-		}
-
-		// Chain before steps together
-		for i := 1; i < len(beforeSteps); i++ {
-			beforeSteps[i].Needs = appendUnique(beforeSteps[i].Needs, beforeSteps[i-1].ID)
-		}
-
-		result = append(result, clonedStep)
-
-		// Insert after steps and chain them
-		for i, as := range afterSteps {
-			if i == 0 {
-				// First after step depends on the original step
-				as.Needs = appendUnique(as.Needs, step.ID)
-			} else {
-				// Subsequent after steps chain to previous
-				as.Needs = appendUnique(as.Needs, afterSteps[i-1].ID)
+		if rule.Around != nil {
+			for _, as := range rule.Around.After {
+				afterSteps = append(afterSteps, adviceStepToStep(as, step))
 			}
-			result = append(result, as)
-		}
-
-		// Recursively apply advice to children
-		if len(step.Children) > 0 {
-			clonedStep.Children = ApplyAdvice(step.Children, advice)
 		}
 	}
+	return beforeSteps, afterSteps
+}
 
-	return result
+func chainAdviceBefore(beforeSteps []*Step) {
+	nBefore := len(beforeSteps)
+	for i := 1; i < nBefore; i++ {
+		beforeSteps[i].Needs = appendUnique(beforeSteps[i].Needs, beforeSteps[i-1].ID)
+	}
+}
+
+func chainAdviceAfter(step *Step, afterSteps []*Step) {
+	for i, as := range afterSteps {
+		if i == 0 {
+			as.Needs = appendUnique(as.Needs, step.ID)
+		} else {
+			as.Needs = appendUnique(as.Needs, afterSteps[i-1].ID)
+		}
+	}
+}
+
+func applyAdviceAroundStep(step *Step, advice []*AdviceRule) []*Step {
+	beforeSteps, afterSteps := collectAdviceAround(step, advice)
+	chainAdviceBefore(beforeSteps)
+	clonedStep := cloneStep(step)
+	if len(beforeSteps) > 0 {
+		clonedStep.Needs = appendUnique(clonedStep.Needs, beforeSteps[len(beforeSteps)-1].ID)
+	}
+	chainAdviceAfter(step, afterSteps)
+	if len(step.Children) > 0 {
+		clonedStep.Children = ApplyAdvice(step.Children, advice)
+	}
+	out := make([]*Step, 0, len(beforeSteps)+1+len(afterSteps))
+	out = append(out, beforeSteps...)
+	out = append(out, clonedStep)
+	out = append(out, afterSteps...)
+	return out
 }
 
 // adviceStepToStep converts an AdviceStep to a Step.
@@ -166,13 +157,15 @@ func adviceStepToStep(as *AdviceStep, target *Step) *Step {
 	desc := substituteStepRef(as.Description, target)
 
 	return &Step{
-		ID:            id,
-		Title:         title,
-		Description:   desc,
-		Type:          as.Type,
-		SourceFormula: target.SourceFormula, // Inherit source formula from target
-		// SourceLocation will be "advice" to indicate this came from advice transformation
-		SourceLocation: "advice",
+		ID:          id,
+		Title:       title,
+		Description: desc,
+		Type:        as.Type,
+		StepExpansion: StepExpansion{
+			SourceFormula: target.SourceFormula, // Inherit source formula from target
+			// SourceLocation will be "advice" to indicate this came from advice transformation
+			SourceLocation: "advice",
+		},
 	}
 }
 

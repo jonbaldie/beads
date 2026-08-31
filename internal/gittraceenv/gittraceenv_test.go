@@ -1,6 +1,7 @@
 package gittraceenv
 
 import (
+	"errors"
 	"os"
 
 	"runtime"
@@ -8,6 +9,37 @@ import (
 	"sync"
 	"testing"
 )
+
+func TestWithScrubbedPropagatesError(t *testing.T) {
+	want := errors.New("operation failed")
+	if got := WithScrubbed(func() error { return want }); !errors.Is(got, want) {
+		t.Fatalf("WithScrubbed error = %v, want %v", got, want)
+	}
+}
+
+func TestEnvironmentStateNestedReleasePreservesThenClearsSnapshot(t *testing.T) {
+	t.Setenv("GIT_TRACE", "1")
+
+	state := &environmentState{}
+	state.acquire()
+	state.acquire()
+	state.release()
+
+	if state.depth != 1 {
+		t.Fatalf("depth after inner release = %d, want 1", state.depth)
+	}
+	if got := state.saved["GIT_TRACE"]; got != "1" {
+		t.Fatalf("saved GIT_TRACE after inner release = %q, want %q", got, "1")
+	}
+
+	state.release()
+	if state.depth != 0 {
+		t.Fatalf("depth after outer release = %d, want 0", state.depth)
+	}
+	if state.saved != nil {
+		t.Fatalf("saved state after outer release = %#v, want nil", state.saved)
+	}
+}
 
 func TestStderrDirected(t *testing.T) {
 	absPath := "/tmp/git.trace"
@@ -41,6 +73,8 @@ func TestStderrDirected(t *testing.T) {
 		// STDERR per plumbing call, so it is scrubbed there.
 		{"GIT_TRACE2", "af_unix:/tmp/trace.sock", false},
 		{"GIT_TRACE2_EVENT", "af_unix:stream:/tmp/trace.sock", false},
+		{"NOT_GIT_TRACE2", "af_unix:/tmp/trace.sock", true},
+		{"GIT_TRACE2", "not_af_unix:/tmp/trace.sock", true},
 		{"GIT_TRACE", "af_unix:/tmp/trace.sock", true},
 		{"GIT_TRACE_PACKET", "af_unix:/tmp/trace.sock", true},
 		// Relative path: git rejects it with a warning ON STDERR, scrub.

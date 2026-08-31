@@ -10,6 +10,14 @@ import (
 	"github.com/jonbaldie/beads/internal/types"
 )
 
+func newConfiguredTestTracker(api notionAPI, config *MappingConfig, dataSourceID string) *Tracker {
+	tracker := NewTracker()
+	tracker.state.client = api
+	tracker.state.config = config
+	tracker.state.dataSourceID = dataSourceID
+	return tracker
+}
+
 type fakeAPI struct {
 	user             *User
 	dataSource       *DataSource
@@ -96,7 +104,7 @@ func TestTrackerFetchIssuesFiltersArchivedAndState(t *testing.T) {
 			},
 		},
 	}
-	tracker := &Tracker{client: api, config: DefaultMappingConfig(), dataSourceID: "ds_123"}
+	tracker := newConfiguredTestTracker(api, DefaultMappingConfig(), "ds_123")
 
 	issues, err := tracker.FetchIssues(context.Background(), itracker.FetchOptions{State: "open"})
 	if err != nil {
@@ -143,7 +151,7 @@ func TestTrackerFetchIssuesBackfillStillHonorsClosedState(t *testing.T) {
 			},
 		},
 	}
-	tracker := &Tracker{client: api, config: DefaultMappingConfig(), dataSourceID: "ds_123"}
+	tracker := newConfiguredTestTracker(api, DefaultMappingConfig(), "ds_123")
 
 	since := time.Now().UTC().Add(-30 * time.Minute)
 	issues, err := tracker.FetchIssues(context.Background(), itracker.FetchOptions{
@@ -195,7 +203,7 @@ func TestTrackerFetchIssuesExcludesEqualLastSyncBoundary(t *testing.T) {
 			},
 		},
 	}
-	tracker := &Tracker{client: api, config: DefaultMappingConfig(), dataSourceID: "ds_123"}
+	tracker := newConfiguredTestTracker(api, DefaultMappingConfig(), "ds_123")
 
 	boundary = boundary.Add(23 * time.Second)
 	issues, err := tracker.FetchIssues(context.Background(), itracker.FetchOptions{Since: &boundary})
@@ -247,14 +255,20 @@ func TestTrackerCreateAndUpdateIssue(t *testing.T) {
 		createdPage: createdPage,
 		updatedPage: updatedPage,
 	}
-	tracker := &Tracker{client: api, config: DefaultMappingConfig(), dataSourceID: "ds_123"}
+	tracker := newConfiguredTestTracker(api, DefaultMappingConfig(), "ds_123")
 
 	created, err := tracker.CreateIssue(context.Background(), &types.Issue{
-		ID:        "bd-1",
-		Title:     "Create me",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "bd-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Create me",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	})
 	if err != nil {
 		t.Fatalf("CreateIssue returned error: %v", err)
@@ -267,11 +281,17 @@ func TestTrackerCreateAndUpdateIssue(t *testing.T) {
 	}
 
 	updated, err := tracker.UpdateIssue(context.Background(), "https://www.notion.so/Task-0123456789abcdef0123456789abcdef", &types.Issue{
-		ID:        "bd-1",
-		Title:     "Update me",
-		Status:    types.StatusInProgress,
-		Priority:  1,
-		IssueType: types.TypeFeature,
+		IssueID: types.IssueID{
+			ID: "bd-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Update me",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusInProgress,
+			Priority:  1,
+			IssueType: types.TypeFeature,
+		},
 	})
 	if err != nil {
 		t.Fatalf("UpdateIssue returned error: %v", err)
@@ -287,7 +307,7 @@ func TestTrackerCreateAndUpdateIssue(t *testing.T) {
 func TestTrackerBuildExternalRefFallbacks(t *testing.T) {
 	t.Parallel()
 
-	tracker := &Tracker{}
+	tracker := NewTracker()
 	if got := tracker.BuildExternalRef(&itracker.TrackerIssue{ID: "01234567-89ab-cdef-0123-456789abcdef"}); got != "https://www.notion.so/0123456789abcdef0123456789abcdef" {
 		t.Fatalf("got = %q", got)
 	}
@@ -339,25 +359,43 @@ func TestTrackerBatchPushReusesRemoteInventory(t *testing.T) {
 			},
 		},
 	}
-	tracker := &Tracker{client: api, config: DefaultMappingConfig(), dataSourceID: "ds_123"}
+	tracker := newConfiguredTestTracker(api, DefaultMappingConfig(), "ds_123")
 
 	result, err := tracker.BatchPush(context.Background(), []*types.Issue{
 		{
-			ID:          "bd-1",
-			Title:       "Updated local",
-			Status:      types.StatusInProgress,
-			Priority:    1,
-			IssueType:   types.TypeFeature,
-			ExternalRef: strPtr("https://www.notion.so/Task-0123456789abcdef0123456789abcdef"),
-			UpdatedAt:   remotePage.LastEditedTime.Add(30 * time.Minute),
+			IssueID: types.IssueID{
+				ID: "bd-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Updated local",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusInProgress,
+				Priority:  1,
+				IssueType: types.TypeFeature,
+			},
+			IssueTimes: types.IssueTimes{
+				UpdatedAt: remotePage.LastEditedTime.Add(30 * time.Minute),
+			},
+			IssueMeta: types.IssueMeta{
+				ExternalRef: strPtr("https://www.notion.so/Task-0123456789abcdef0123456789abcdef"),
+			},
 		},
 		{
-			ID:        "bd-2",
-			Title:     "Create me",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			UpdatedAt: remotePage.LastEditedTime.Add(30 * time.Minute),
+			IssueID: types.IssueID{
+				ID: "bd-2",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Create me",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				UpdatedAt: remotePage.LastEditedTime.Add(30 * time.Minute),
+			},
 		},
 	}, map[string]bool{})
 	if err != nil {
@@ -410,18 +448,28 @@ func TestTrackerBatchPushMatchesCurrentTargetByLocalID(t *testing.T) {
 			},
 		},
 	}
-	tracker := &Tracker{client: api, config: DefaultMappingConfig(), dataSourceID: "ds_123"}
+	tracker := newConfiguredTestTracker(api, DefaultMappingConfig(), "ds_123")
 	foreignRef := "https://www.notion.so/foreign-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 	result, err := tracker.BatchPush(context.Background(), []*types.Issue{
 		{
-			ID:          "bd-1",
-			Title:       "Updated local",
-			Status:      types.StatusInProgress,
-			Priority:    1,
-			IssueType:   types.TypeFeature,
-			ExternalRef: &foreignRef,
-			UpdatedAt:   remotePage.LastEditedTime.Add(30 * time.Minute),
+			IssueID: types.IssueID{
+				ID: "bd-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Updated local",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusInProgress,
+				Priority:  1,
+				IssueType: types.TypeFeature,
+			},
+			IssueTimes: types.IssueTimes{
+				UpdatedAt: remotePage.LastEditedTime.Add(30 * time.Minute),
+			},
+			IssueMeta: types.IssueMeta{
+				ExternalRef: &foreignRef,
+			},
 		},
 	}, map[string]bool{})
 	if err != nil {
@@ -442,18 +490,28 @@ func TestTrackerBatchPushSkipsStaleExternalRefOutsideCurrentTarget(t *testing.T)
 	t.Parallel()
 
 	api := &fakeAPI{}
-	tracker := &Tracker{client: api, config: DefaultMappingConfig(), dataSourceID: "ds_123"}
+	tracker := newConfiguredTestTracker(api, DefaultMappingConfig(), "ds_123")
 	foreignRef := "https://www.notion.so/foreign-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 	result, err := tracker.BatchPush(context.Background(), []*types.Issue{
 		{
-			ID:          "bd-1",
-			Title:       "Stale ref",
-			Status:      types.StatusOpen,
-			Priority:    2,
-			IssueType:   types.TypeTask,
-			ExternalRef: &foreignRef,
-			UpdatedAt:   time.Now().UTC(),
+			IssueID: types.IssueID{
+				ID: "bd-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Stale ref",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				UpdatedAt: time.Now().UTC(),
+			},
+			IssueMeta: types.IssueMeta{
+				ExternalRef: &foreignRef,
+			},
 		},
 	}, map[string]bool{})
 	if err != nil {
@@ -474,18 +532,28 @@ func TestTrackerBatchPushDryRunSkipsStaleExternalRefOutsideCurrentTarget(t *test
 	t.Parallel()
 
 	api := &fakeAPI{}
-	tracker := &Tracker{client: api, config: DefaultMappingConfig(), dataSourceID: "ds_123"}
+	tracker := newConfiguredTestTracker(api, DefaultMappingConfig(), "ds_123")
 	foreignRef := "https://www.notion.so/foreign-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 	result, err := tracker.BatchPushDryRun(context.Background(), []*types.Issue{
 		{
-			ID:          "bd-1",
-			Title:       "Stale ref",
-			Status:      types.StatusOpen,
-			Priority:    2,
-			IssueType:   types.TypeTask,
-			ExternalRef: &foreignRef,
-			UpdatedAt:   time.Now().UTC(),
+			IssueID: types.IssueID{
+				ID: "bd-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Stale ref",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				UpdatedAt: time.Now().UTC(),
+			},
+			IssueMeta: types.IssueMeta{
+				ExternalRef: &foreignRef,
+			},
 		},
 	}, map[string]bool{})
 	if err != nil {
@@ -524,17 +592,27 @@ func TestTrackerBatchPushDryRunTreatsLabelOnlyChangeAsUpdate(t *testing.T) {
 		},
 	}
 	api := &fakeAPI{pages: []Page{remotePage}}
-	tracker := &Tracker{client: api, config: DefaultMappingConfig(), dataSourceID: "ds_123"}
+	tracker := newConfiguredTestTracker(api, DefaultMappingConfig(), "ds_123")
 
 	result, err := tracker.BatchPushDryRun(context.Background(), []*types.Issue{
 		{
-			ID:        "bd-1",
-			Title:     "Existing remote",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Labels:    []string{"matrix-a", "matrix-c"},
-			UpdatedAt: remotePage.LastEditedTime.Add(30 * time.Minute),
+			IssueID: types.IssueID{
+				ID: "bd-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Existing remote",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				UpdatedAt: remotePage.LastEditedTime.Add(30 * time.Minute),
+			},
+			IssueGraph: types.IssueGraph{
+				Labels: []string{"matrix-a", "matrix-c"},
+			},
 		},
 	}, map[string]bool{})
 	if err != nil {
@@ -570,17 +648,27 @@ func TestTrackerBatchPushDryRunSkipsLabelOrderOnlyDifference(t *testing.T) {
 		},
 	}
 	api := &fakeAPI{pages: []Page{remotePage}}
-	tracker := &Tracker{client: api, config: DefaultMappingConfig(), dataSourceID: "ds_123"}
+	tracker := newConfiguredTestTracker(api, DefaultMappingConfig(), "ds_123")
 
 	result, err := tracker.BatchPushDryRun(context.Background(), []*types.Issue{
 		{
-			ID:        "bd-1",
-			Title:     "Existing remote",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Labels:    []string{"matrix-a", "matrix-b"},
-			UpdatedAt: remotePage.LastEditedTime.Add(30 * time.Minute),
+			IssueID: types.IssueID{
+				ID: "bd-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Existing remote",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				UpdatedAt: remotePage.LastEditedTime.Add(30 * time.Minute),
+			},
+			IssueGraph: types.IssueGraph{
+				Labels: []string{"matrix-a", "matrix-b"},
+			},
 		},
 	}, map[string]bool{})
 	if err != nil {
@@ -603,7 +691,7 @@ func TestTrackerBatchPushDryRunSkipsLabelOrderOnlyDifference(t *testing.T) {
 // code path works correctly if one is added in the future.
 func TestGetConfig_YamlOnlyKeyBypassesStore(t *testing.T) {
 	ctx := context.Background()
-	tr := &Tracker{store: nil}
+	tr := NewTracker()
 
 	// Use a key that's yaml-only via prefix match (dolt.* keys are yaml-only).
 	// This exercises the yaml-only branch without needing a Notion-specific secret.

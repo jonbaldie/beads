@@ -94,7 +94,7 @@ func listDoltProcessPIDs() []int {
 // dolt server on the canonical port rather than adopting it. This is conservative
 // (safer than accidentally adopting the wrong server). PID file and daemon PID
 // file adoption paths still work.
-func isProcessInDir(pid int, dir string) bool {
+func isProcessInDir(_ int, _ string) bool {
 	return false
 }
 
@@ -117,7 +117,7 @@ func isProcessAlive(pid int) bool {
 // directly. Data safety comes from FlushWorkingSet which runs in StopWithForce
 // before calling gracefulStop. The Unix SIGTERM is a courtesy; the real protection
 // is the flush.
-func gracefulStop(pid int, timeout time.Duration) error {
+func gracefulStop(pid int, _ time.Duration) error {
 	process, err := os.FindProcess(pid)
 	if err != nil {
 		return fmt.Errorf("finding process %d: %w", pid, err)

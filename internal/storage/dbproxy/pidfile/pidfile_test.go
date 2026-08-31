@@ -88,6 +88,33 @@ func TestValidateV2(t *testing.T) {
 	}
 }
 
+func TestValidatePortsBoundaries(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		port        int
+		controlPort int
+		wantErr     bool
+	}{
+		{name: "minimum port", port: 1},
+		{name: "maximum port", port: 65535},
+		{name: "minimum control port", port: 1234, controlPort: 1},
+		{name: "maximum control port", port: 1234, controlPort: 65535},
+		{name: "disabled control port", port: 1234, controlPort: 0},
+		{name: "zero port", port: 0, wantErr: true},
+		{name: "negative port", port: -1, wantErr: true},
+		{name: "port above maximum", port: 65536, wantErr: true},
+		{name: "negative control port", port: 1234, controlPort: -1, wantErr: true},
+		{name: "control port above maximum", port: 1234, controlPort: 65536, wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validatePorts(tt.port, tt.controlPort)
+			if gotErr := errors.Is(err, ErrBadPort); gotErr != tt.wantErr {
+				t.Fatalf("validatePorts(%d, %d) = %v, want ErrBadPort=%v", tt.port, tt.controlPort, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestReadMalformedJSON(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "proxy.pid"), []byte(`{"pid":`), 0o644); err != nil {

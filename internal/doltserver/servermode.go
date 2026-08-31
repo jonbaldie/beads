@@ -59,35 +59,34 @@ func (m ServerMode) String() string {
 // The function loads metadata.json only if the file exists, to avoid
 // triggering the legacy config.json -> metadata.json migration side effect.
 func ResolveServerMode(beadsDir string) ServerMode {
-	// 1. BEADS_DOLT_SERVER_MODE=1 env var -> external (explicit server mode)
-	if os.Getenv("BEADS_DOLT_SERVER_MODE") == "1" {
-		return ServerModeExternal
+	if mode, ok := runtimeServerMode(); ok {
+		return mode
 	}
+	return metadataServerMode(loadServerModeConfig(beadsDir))
+}
 
-	// 2. Shared server mode (env var or config.yaml) -> external.
-	// Must be checked before metadata.json so that a stale
-	// dolt_mode=embedded cannot override active shared-server intent.
-	if IsSharedServerMode() {
-		return ServerModeExternal
+func runtimeServerMode() (ServerMode, bool) {
+	if os.Getenv("BEADS_DOLT_SERVER_MODE") == "1" || IsSharedServerMode() {
+		return ServerModeExternal, true
 	}
+	return ServerModeOwned, false
+}
 
-	var fileCfg *configfile.Config
-
-	// Only load config if metadata.json exists (avoids legacy migration side effect)
+func loadServerModeConfig(beadsDir string) *configfile.Config {
 	metadataPath := configfile.ConfigPath(beadsDir)
-	if _, err := os.Stat(metadataPath); err == nil {
-		if cfg, loadErr := configfile.Load(beadsDir); loadErr == nil && cfg != nil {
-			fileCfg = cfg
-		}
+	if _, err := os.Stat(metadataPath); err != nil {
+		return nil
 	}
+	cfg, err := configfile.Load(beadsDir)
+	if err != nil || cfg == nil {
+		return nil
+	}
+	return cfg
+}
 
-	// 2b. Host-based inference (GH#3545) -> external. Uses the same
-	// centralized rule as IsDoltServerMode (explicit-mode gates, env
-	// suppression, effective-host precedence, proxied exemption) so the
-	// storage-mode and lifecycle resolvers cannot disagree: a server
-	// that lives on another machine cannot have a bd-owned lifecycle.
-	// Runs before the embedded-metadata check because a runtime env
-	// host beats stale metadata (GH#2949).
+func metadataServerMode(fileCfg *configfile.Config) ServerMode {
+	// Host-based inference runs before metadata mode so a runtime host beats
+	// stale embedded metadata. A nil config is treated as an empty config.
 	hostCfg := fileCfg
 	if hostCfg == nil {
 		hostCfg = &configfile.Config{}
@@ -95,18 +94,11 @@ func ResolveServerMode(beadsDir string) ServerMode {
 	if hostCfg.HostImpliesServerMode() {
 		return ServerModeExternal
 	}
-
-	// 3. Explicit embedded mode in metadata.json
-	if fileCfg != nil && strings.ToLower(fileCfg.DoltMode) == configfile.DoltModeEmbedded &&
-		fileCfg.DoltMode != "" { // empty defaults to embedded in GetDoltMode, but we treat empty as "unset"
+	if fileCfg != nil && fileCfg.DoltMode != "" && strings.EqualFold(fileCfg.DoltMode, configfile.DoltModeEmbedded) {
 		return ServerModeEmbedded
 	}
-
-	// 4. Explicit server port in metadata.json -> external
 	if fileCfg != nil && fileCfg.DoltServerPort > 0 {
 		return ServerModeExternal
 	}
-
-	// 5. Default: beads owns the server
 	return ServerModeOwned
 }

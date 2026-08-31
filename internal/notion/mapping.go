@@ -99,17 +99,29 @@ func BeadsIssueFromPullIssue(issue PulledIssue, config *MappingConfig) (*types.I
 	}
 
 	beadsIssue := &types.Issue{
-		ID:           strings.TrimSpace(issue.ID),
-		Title:        strings.TrimSpace(issue.Title),
-		Description:  strings.TrimSpace(issue.Description),
-		Status:       status,
-		Priority:     priority,
-		IssueType:    issueType,
-		Assignee:     issue.Assignee,
-		Labels:       append([]string(nil), issue.Labels...),
-		SourceSystem: "notion",
-		CreatedAt:    createdAt,
-		UpdatedAt:    updatedAt,
+		IssueID: types.IssueID{
+			ID: strings.TrimSpace(issue.ID),
+		},
+		IssueContent: types.IssueContent{
+			Title:       strings.TrimSpace(issue.Title),
+			Description: strings.TrimSpace(issue.Description),
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    status,
+			Priority:  priority,
+			IssueType: issueType,
+			Assignee:  issue.Assignee,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: createdAt,
+			UpdatedAt: updatedAt,
+		},
+		IssueMeta: types.IssueMeta{
+			SourceSystem: "notion",
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: append([]string(nil), issue.Labels...),
+		},
 	}
 
 	if externalRef := BuildNotionExternalRef(&issue); externalRef != "" {

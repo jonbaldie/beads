@@ -95,7 +95,7 @@ func (emptyDeps) DetectCycleReport(context.Context) (issueops.CycleReport, error
 // promises for a root with no edges, and a fake that answered nothing would let
 // a handler which dropped the root pass.
 func (emptyDeps) WalkDependencyTree(_ context.Context, req issueops.WalkTreeRequest) (issueops.TreeResult, error) {
-	return issueops.TreeResult{Nodes: []*types.TreeNode{{Issue: types.Issue{ID: req.RootID}}}}, nil
+	return issueops.TreeResult{Nodes: []*types.TreeNode{{Issue: types.Issue{IssueID: types.IssueID{ID: req.RootID}}}}}, nil
 }
 
 func (u *fakeUOW) Commit(_ context.Context, message string) error {
@@ -726,10 +726,12 @@ func TestCapabilitiesListImplementedOperationsOnly(t *testing.T) {
 func TestSemaphoreShedsLoadInsteadOfQueueingForever(t *testing.T) {
 	stderr := &lockedBuffer{}
 	s := &Server{
-		sem:        make(chan struct{}, 1),
-		semTimeout: 20 * time.Millisecond,
-		semWarn:    time.Nanosecond,
-		log:        newTestLogger(stderr),
+		limits: serverLimits{
+			sem:        make(chan struct{}, 1),
+			semTimeout: 20 * time.Millisecond,
+			semWarn:    time.Nanosecond,
+		},
+		output: serverOutput{log: newTestLogger(stderr)},
 	}
 
 	held, err := s.acquire(context.Background(), &reqInfo{id: "holder"})
@@ -788,11 +790,13 @@ func TestSemaphoreShedsLoadInsteadOfQueueingForever(t *testing.T) {
 func TestStalledResponseWriteReleasesItsSlot(t *testing.T) {
 	stderr := &lockedBuffer{}
 	s := &Server{
-		sem: make(chan struct{}, 1),
 		// Generous: the point is whether the slot comes back at all.
-		semTimeout: 5 * time.Second,
-		writeStall: 100 * time.Millisecond,
-		log:        newTestLogger(stderr),
+		limits: serverLimits{
+			sem:        make(chan struct{}, 1),
+			semTimeout: 5 * time.Second,
+			writeStall: 100 * time.Millisecond,
+		},
+		output: serverOutput{log: newTestLogger(stderr)},
 	}
 
 	writeErr := make(chan error, 1)
@@ -857,9 +861,11 @@ func TestStalledResponseWriteReleasesItsSlot(t *testing.T) {
 func TestPanickingHandlerStaysInTheContract(t *testing.T) {
 	stderr := &lockedBuffer{}
 	s := &Server{
-		sem:        make(chan struct{}, 1),
-		semTimeout: 5 * time.Second,
-		log:        newTestLogger(stderr),
+		limits: serverLimits{
+			sem:        make(chan struct{}, 1),
+			semTimeout: 5 * time.Second,
+		},
+		output: serverOutput{log: newTestLogger(stderr)},
 	}
 	boom := route{op: "boom", handler: func(*Server, http.ResponseWriter, *http.Request) {
 		panic("handler exploded on bd-1")
@@ -927,7 +933,7 @@ func TestPanickingHandlerStaysInTheContract(t *testing.T) {
 // line before the abort is handed back.
 func TestAbortHandlerPanicIsStillLogged(t *testing.T) {
 	stderr := &lockedBuffer{}
-	s := &Server{log: newTestLogger(stderr)}
+	s := &Server{output: serverOutput{log: newTestLogger(stderr)}}
 	h := s.withRequestContext(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		panic(http.ErrAbortHandler)
 	}))
@@ -1001,7 +1007,7 @@ func TestClientHangupIsNotBookedAsAServerFault(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stderr := &lockedBuffer{}
-			s := &Server{log: newTestLogger(stderr)}
+			s := &Server{output: serverOutput{log: newTestLogger(stderr)}}
 			hangup := route{op: "hangup", bypassSemaphore: true,
 				handler: func(s *Server, w http.ResponseWriter, r *http.Request) {
 					s.failErr(w, r, tc.err)
@@ -1121,7 +1127,10 @@ func TestRequestLogLine(t *testing.T) {
 // same reason; this is the connection tier's.
 func TestConnectionCapSaturationIsAnnounced(t *testing.T) {
 	stderr := &lockedBuffer{}
-	s := &Server{maxConns: 2, log: newTestLogger(stderr)}
+	s := &Server{
+		network: serverNetwork{maxConns: 2},
+		output:  serverOutput{log: newTestLogger(stderr)},
+	}
 
 	s.connState(nil, http.StateNew)
 	if strings.Contains(stderr.String(), "event=conn_cap_saturated") {
@@ -1556,10 +1565,12 @@ func TestAuthRefusalNamesWhyItWasRefused(t *testing.T) {
 func TestAuthRefusalCostsNoDatabaseSlot(t *testing.T) {
 	stderr := &lockedBuffer{}
 	s := &Server{
-		sem:        make(chan struct{}, 1),
-		semTimeout: 5 * time.Second,
-		log:        newTestLogger(stderr),
-		auth:       authTokenFile(t, "real-token"),
+		limits: serverLimits{
+			sem:        make(chan struct{}, 1),
+			semTimeout: 5 * time.Second,
+		},
+		output:   serverOutput{log: newTestLogger(stderr)},
+		identity: serverIdentity{auth: authTokenFile(t, "real-token")},
 	}
 
 	held, err := s.acquire(context.Background(), &reqInfo{id: "holder"})
@@ -1586,8 +1597,8 @@ func TestAuthRefusalCostsNoDatabaseSlot(t *testing.T) {
 		t.Error("the handler ran for an unauthenticated request")
 	}
 	// The slot is still the holder's: the refusal neither took nor leaked one.
-	if len(s.sem) != 1 {
-		t.Errorf("semaphore holds %d slots, want the holder's 1", len(s.sem))
+	if len(s.limits.sem) != 1 {
+		t.Errorf("semaphore holds %d slots, want the holder's 1", len(s.limits.sem))
 	}
 }
 
@@ -1665,7 +1676,7 @@ func TestListenRefusesAnUnservablePosture(t *testing.T) {
 			cfg.Stdout, cfg.Stderr = &bytes.Buffer{}, &lockedBuffer{}
 			srv, err := Listen(cfg)
 			if err == nil {
-				_ = srv.http.Close()
+				_ = srv.network.http.Close()
 				t.Fatalf("Listen accepted %+v, want a refusal naming %s", tc.cfg, tc.wantErr)
 			}
 			if !strings.Contains(err.Error(), tc.wantErr) {

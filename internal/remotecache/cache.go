@@ -102,25 +102,8 @@ func (c *Cache) Ensure(ctx context.Context, remoteURL string) (string, error) {
 	defer c.releaseLock(lock)
 
 	target := c.cloneTarget(remoteURL)
-	if c.doltExists(target) {
-		// Warm start: skip pull if the cache is still fresh
-		if c.FreshFor > 0 {
-			meta := c.readMeta(remoteURL)
-			age := time.Since(time.Unix(0, meta.LastPull))
-			if age < c.FreshFor {
-				debug.Logf("remotecache: skipping pull for %s (%.1fs old, fresh for %.0fs)\n",
-					remoteURL, age.Seconds(), c.FreshFor.Seconds())
-				return entry, nil
-			}
-		}
-		if err := c.doltPull(ctx, target); err != nil {
-			return "", fmt.Errorf("dolt pull failed for %s: %w", remoteURL, err)
-		}
-	} else {
-		// Cold start: clone
-		if err := c.doltClone(ctx, remoteURL, target); err != nil {
-			return "", fmt.Errorf("dolt clone failed for %s: %w", remoteURL, err)
-		}
+	if err := c.ensureTarget(ctx, remoteURL, target); err != nil {
+		return "", err
 	}
 
 	// Write metadata
@@ -131,6 +114,32 @@ func (c *Cache) Ensure(ctx context.Context, remoteURL string) (string, error) {
 	c.writeMeta(remoteURL, &meta)
 
 	return entry, nil
+}
+
+func (c *Cache) ensureTarget(ctx context.Context, remoteURL, target string) error {
+	if c.doltExists(target) {
+		return c.ensureWarm(ctx, remoteURL, target)
+	}
+	if err := c.doltClone(ctx, remoteURL, target); err != nil {
+		return fmt.Errorf("dolt clone failed for %s: %w", remoteURL, err)
+	}
+	return nil
+}
+
+func (c *Cache) ensureWarm(ctx context.Context, remoteURL, target string) error {
+	if c.FreshFor > 0 {
+		meta := c.readMeta(remoteURL)
+		age := time.Since(time.Unix(0, meta.LastPull))
+		if age < c.FreshFor {
+			debug.Logf("remotecache: skipping pull for %s (%.1fs old, fresh for %.0fs)\n",
+				remoteURL, age.Seconds(), c.FreshFor.Seconds())
+			return nil
+		}
+	}
+	if err := c.doltPull(ctx, target); err != nil {
+		return fmt.Errorf("dolt pull failed for %s: %w", remoteURL, err)
+	}
+	return nil
 }
 
 // Push pushes local commits in the cached clone back to the remote.
@@ -227,13 +236,7 @@ func (c *Cache) doltPull(ctx context.Context, dbDir string) error {
 // acquireLock acquires an exclusive file lock for a cache entry.
 func (c *Cache) acquireLock(ctx context.Context, remoteURL string) (*os.File, error) {
 	lp := c.lockPath(remoteURL)
-
-	// Clean up stale locks
-	if info, err := os.Stat(lp); err == nil {
-		if time.Since(info.ModTime()) > staleLockAge {
-			_ = os.Remove(lp)
-		}
-	}
+	cleanStaleLock(lp)
 
 	// #nosec G304 - controlled path
 	f, err := os.OpenFile(lp, os.O_CREATE|os.O_RDWR, 0o600)
@@ -241,7 +244,17 @@ func (c *Cache) acquireLock(ctx context.Context, remoteURL string) (*os.File, er
 		return nil, err
 	}
 
-	// Poll with timeout
+	return waitForCacheLock(ctx, f, remoteURL)
+}
+
+func cleanStaleLock(path string) {
+	info, err := os.Stat(path)
+	if err == nil && time.Since(info.ModTime()) > staleLockAge {
+		_ = os.Remove(path)
+	}
+}
+
+func waitForCacheLock(ctx context.Context, f *os.File, remoteURL string) (*os.File, error) {
 	deadline := time.Now().Add(2 * time.Minute)
 	for {
 		err := lockfile.FlockExclusiveNonBlocking(f)

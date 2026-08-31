@@ -56,16 +56,23 @@ type Issue struct {
 	UpdatedAt *time.Time `json:"updated_at"`
 	ClosedAt  *time.Time `json:"closed_at,omitempty"`
 	Labels    []Label    `json:"labels"`
-	Assignee  *User      `json:"assignee,omitempty"`
-	Assignees []User     `json:"assignees,omitempty"`
-	User      *User      `json:"user,omitempty"` // Issue author
-	Milestone *Milestone `json:"milestone,omitempty"`
 	HTMLURL   string     `json:"html_url"`
 	Locked    bool       `json:"locked"`
+	IssueActors
 
 	// PullRequest is non-nil if this issue is actually a pull request.
 	// Used to filter PRs out of issue listings.
 	PullRequest *PullRequestRef `json:"pull_request,omitempty"`
+}
+
+// IssueActors groups the optional people and milestone attached to an issue.
+// Embedding keeps Issue's core representation shallow while preserving the
+// promoted selectors used by the mapper and API clients.
+type IssueActors struct {
+	Assignee  *User      `json:"assignee,omitempty"`
+	Assignees []User     `json:"assignees,omitempty"`
+	User      *User      `json:"user,omitempty"` // Issue author
+	Milestone *Milestone `json:"milestone,omitempty"`
 }
 
 // PullRequestRef is a minimal reference indicating an issue is a PR.
@@ -75,16 +82,22 @@ type PullRequestRef struct {
 
 // IsPullRequest returns true if this issue is actually a pull request.
 func (i *Issue) IsPullRequest() bool {
-	return i.PullRequest != nil
+	pullRequest, _ := i.issueData()
+	return pullRequest != nil
 }
 
 // LabelNames returns the names of all labels on this issue.
 func (i *Issue) LabelNames() []string {
-	names := make([]string, 0, len(i.Labels))
-	for _, l := range i.Labels {
+	_, labels := i.issueData()
+	names := make([]string, 0, len(labels))
+	for _, l := range labels {
 		names = append(names, l.Name)
 	}
 	return names
+}
+
+func (i *Issue) issueData() (*PullRequestRef, []Label) {
+	return i.PullRequest, i.Labels
 }
 
 // User represents a GitHub user.

@@ -30,14 +30,49 @@ var ghShorthandPattern = regexp.MustCompile(`^github:([1-9]\d*)$`)
 
 // Tracker implements tracker.IssueTracker for GitHub.
 type Tracker struct {
+	TrackerMetadata
+	ExternalReference
 	client *Client
 	config *MappingConfig
 	store  storage.Storage
 }
 
-func (t *Tracker) Name() string         { return "github" }
-func (t *Tracker) DisplayName() string  { return "GitHub" }
-func (t *Tracker) ConfigPrefix() string { return "github" }
+type TrackerMetadata struct{}
+
+func (*TrackerMetadata) Name() string         { return "github" }
+func (*TrackerMetadata) DisplayName() string  { return "GitHub" }
+func (*TrackerMetadata) ConfigPrefix() string { return "github" }
+
+type ExternalReference struct{}
+
+// IsExternalRef checks if a ref belongs to this GitHub tracker.
+// It recognizes both full GitHub URLs and the "github:{id}" shorthand format
+// produced by BuildExternalRef when a URL is unavailable.
+func (*ExternalReference) IsExternalRef(ref string) bool {
+	if ghShorthandPattern.MatchString(ref) {
+		return true
+	}
+	return strings.Contains(ref, "github.com") && issueNumberPattern.MatchString(ref)
+}
+
+// ExtractIdentifier extracts the issue number from a GitHub URL or shorthand ref.
+func (*ExternalReference) ExtractIdentifier(ref string) string {
+	if m := ghShorthandPattern.FindStringSubmatch(ref); len(m) >= 2 {
+		return m[1]
+	}
+	matches := issueNumberPattern.FindStringSubmatch(ref)
+	if len(matches) < 2 {
+		return ""
+	}
+	return matches[1]
+}
+
+func (*ExternalReference) BuildExternalRef(issue *tracker.TrackerIssue) string {
+	if issue.URL != "" {
+		return issue.URL
+	}
+	return fmt.Sprintf("github:%s", issue.Identifier)
+}
 
 func (t *Tracker) Init(ctx context.Context, store storage.Storage) error {
 	t.store = store
@@ -204,35 +239,6 @@ func canonicalGitHubBaseURL(raw string) string {
 		u.RawPath = strings.TrimRight(u.RawPath, "/")
 	}
 	return u.String()
-}
-
-// IsExternalRef checks if a ref belongs to this GitHub tracker.
-// It recognizes both full GitHub URLs and the "github:{id}" shorthand format
-// produced by BuildExternalRef when a URL is unavailable.
-func (t *Tracker) IsExternalRef(ref string) bool {
-	if ghShorthandPattern.MatchString(ref) {
-		return true
-	}
-	return strings.Contains(ref, "github.com") && issueNumberPattern.MatchString(ref)
-}
-
-// ExtractIdentifier extracts the issue number from a GitHub URL or shorthand ref.
-func (t *Tracker) ExtractIdentifier(ref string) string {
-	if m := ghShorthandPattern.FindStringSubmatch(ref); len(m) >= 2 {
-		return m[1]
-	}
-	matches := issueNumberPattern.FindStringSubmatch(ref)
-	if len(matches) < 2 {
-		return ""
-	}
-	return matches[1]
-}
-
-func (t *Tracker) BuildExternalRef(issue *tracker.TrackerIssue) string {
-	if issue.URL != "" {
-		return issue.URL
-	}
-	return fmt.Sprintf("github:%s", issue.Identifier)
 }
 
 // getConfig reads a config value from storage, falling back to env var.

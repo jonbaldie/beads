@@ -34,7 +34,7 @@ func (ts *testServer) closeIssue(t *testing.T, path, body string) *http.Response
 // partial source, and a close reaches none of them.
 func newCloseServer(t *testing.T, lifecycle *roleLifecycle) *testServer {
 	t.Helper()
-	return newTestServer(t, rolesConfig(Config{Lifecycle: lifecycle}))
+	return newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{Lifecycle: lifecycle}}}))
 }
 
 func closedIssue(id string) *types.Issue {
@@ -272,7 +272,7 @@ func TestCloseRefusesABodyItCannotRead(t *testing.T) {
 // triggers a preflight this server never approves.
 func TestCloseRefusesAForeignMediaType(t *testing.T) {
 	lifecycle := &roleLifecycle{}
-	ts := newTestServer(t, rolesConfig(Config{Lifecycle: lifecycle}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{Lifecycle: lifecycle}}}))
 
 	resp := ts.postBody(t, closePath, "text/plain", `{"actor":"alice"}`)
 	if resp.StatusCode != http.StatusBadRequest {

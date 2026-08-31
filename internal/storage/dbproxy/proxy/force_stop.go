@@ -187,34 +187,56 @@ func requireUnverifiableRecord(rootDir string, record *pidfile.PidFile, wantKind
 }
 
 func inspectAndStopUnverifiedPID(rootDir string, pid int, deadline time.Time, report *ForceStopReport) error {
+	proc, gone, err := openUnverifiedProcessForStop(pid, report)
+	if err != nil || gone {
+		if gone {
+			report.ProcessWasGone = true
+		}
+		return err
+	}
+	defer closeUnverifiedProcess(proc)
+
+	executable, gone, err := inspectUnverifiedExecutable(proc, rootDir, pid, report)
+	if executable != "" {
+		report.Executable = executable
+	}
+	if err != nil || gone {
+		if gone {
+			report.ProcessWasGone = true
+		}
+		return err
+	}
+	return signalAndWaitUnverifiedProcess(proc, pid, deadline, report)
+}
+
+func openUnverifiedProcessForStop(pid int, report *ForceStopReport) (*unverifiedProcess, bool, error) {
 	if pid <= 0 {
-		return fmt.Errorf("proxy.ForceStopUnverified: record %s has invalid pid %d", report.RecordPath, pid)
+		return nil, false, fmt.Errorf("proxy.ForceStopUnverified: record %s has invalid pid %d", report.RecordPath, pid)
 	}
 	// One stable handle covers inspection and signaling, so the PID cannot be
 	// recycled between the executable check and the kill on platforms with a
 	// pinning primitive (Linux pidfd, Windows process handle).
 	proc, gone, err := openUnverifiedProcess(pid)
 	if err != nil {
-		return fmt.Errorf("proxy.ForceStopUnverified: open pid %d: %w", pid, err)
+		return nil, false, fmt.Errorf("proxy.ForceStopUnverified: open pid %d: %w", pid, err)
 	}
 	if gone {
-		report.ProcessWasGone = true
-		return nil
+		return nil, true, nil
 	}
-	defer proc.close()
+	return proc, false, nil
+}
 
-	executable, gone, err := proc.executableBasename()
+func inspectUnverifiedExecutable(proc *unverifiedProcess, rootDir string, pid int, report *ForceStopReport) (string, bool, error) {
+	executable, gone, err := executableBasename(proc)
 	if err != nil {
-		return fmt.Errorf("proxy.ForceStopUnverified: inspect executable for pid %d: %w", pid, err)
+		return "", false, fmt.Errorf("proxy.ForceStopUnverified: inspect executable for pid %d: %w", pid, err)
 	}
 	if gone {
-		report.ProcessWasGone = true
-		return nil
+		return "", true, nil
 	}
 	executable = normalizeForceStopExecutable(executable)
-	report.Executable = executable
 	if executable != "bd" && executable != "dolt" {
-		return fmt.Errorf(
+		return executable, false, fmt.Errorf(
 			"proxy.ForceStopUnverified: refusing to signal pid %d from %s: executable basename is %q, want bd or dolt",
 			pid,
 			report.RecordPath,
@@ -225,9 +247,9 @@ func inspectAndStopUnverifiedPID(rootDir string, pid int, deadline time.Time, re
 	// Basename alone would let a recycled PID now running an unrelated bd or
 	// dolt be killed; require the command line to tie the process to THIS
 	// workspace, and refuse when that scope cannot be established.
-	scoped, gone, err := proc.commandLineContains(rootDir)
+	scoped, gone, err := commandLineContains(proc, rootDir)
 	if err != nil {
-		return fmt.Errorf(
+		return executable, false, fmt.Errorf(
 			"proxy.ForceStopUnverified: refusing to signal pid %d from %s: workspace scope could not be established (%v); stop the process manually, then quarantine the record by renaming %s to %s.stale-<unix-timestamp> before retrying",
 			pid,
 			report.RecordPath,
@@ -237,11 +259,10 @@ func inspectAndStopUnverifiedPID(rootDir string, pid int, deadline time.Time, re
 		)
 	}
 	if gone {
-		report.ProcessWasGone = true
-		return nil
+		return "", true, nil
 	}
 	if !scoped {
-		return fmt.Errorf(
+		return executable, false, fmt.Errorf(
 			"proxy.ForceStopUnverified: refusing to signal pid %d from %s: its command line does not reference workspace %s, so it may be an unrelated %s process; stop it manually if it is yours, then quarantine the record by renaming %s to %s.stale-<unix-timestamp> before retrying",
 			pid,
 			report.RecordPath,
@@ -251,8 +272,11 @@ func inspectAndStopUnverifiedPID(rootDir string, pid int, deadline time.Time, re
 			report.RecordPath,
 		)
 	}
+	return executable, false, nil
+}
 
-	gone, err = proc.kill()
+func signalAndWaitUnverifiedProcess(proc *unverifiedProcess, pid int, deadline time.Time, report *ForceStopReport) error {
+	gone, err := killUnverifiedProcess(proc)
 	if err != nil {
 		return fmt.Errorf("proxy.ForceStopUnverified: signal pid %d: %w", pid, err)
 	}
@@ -261,9 +285,12 @@ func inspectAndStopUnverifiedPID(rootDir string, pid int, deadline time.Time, re
 		return nil
 	}
 	report.SignalSent = true
+	return waitForUnverifiedProcessExit(proc, pid, deadline)
+}
 
+func waitForUnverifiedProcessExit(proc *unverifiedProcess, pid int, deadline time.Time) error {
 	for {
-		exited, err := proc.exited()
+		exited, err := unverifiedProcessExited(proc)
 		if err != nil {
 			return fmt.Errorf("proxy.ForceStopUnverified: confirm pid %d exit: %w", pid, err)
 		}

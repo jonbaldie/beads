@@ -44,7 +44,7 @@ func TestWaitLetsAFiredHookFinish(t *testing.T) {
 	writeHook(t, dir, HookOnUpdate, "#!/bin/sh\nsleep 0.2\necho fired > \""+marker+"\"\n")
 
 	runner := NewRunner(dir)
-	runner.Run(EventUpdate, &types.Issue{ID: "bd-1"})
+	runner.Run(EventUpdate, &types.Issue{IssueID: types.IssueID{ID: "bd-1"}})
 
 	if !runner.Wait(10 * time.Second) {
 		t.Fatal("Wait timed out on a hook that sleeps 0.2s")
@@ -63,7 +63,7 @@ func TestWaitIsBounded(t *testing.T) {
 	writeHook(t, dir, HookOnUpdate, "#!/bin/sh\nsleep 30\n")
 
 	runner := NewRunner(dir)
-	runner.Run(EventUpdate, &types.Issue{ID: "bd-1"})
+	runner.Run(EventUpdate, &types.Issue{IssueID: types.IssueID{ID: "bd-1"}})
 
 	start := time.Now()
 	if runner.Wait(150 * time.Millisecond) {
@@ -87,7 +87,7 @@ func TestWaitReturnsWithNothingInFlight(t *testing.T) {
 	}
 	// A skipped hook — the directory has no script — must not leave the group
 	// held either, or every command would pay the full budget at teardown.
-	runner.Run(EventUpdate, &types.Issue{ID: "bd-1"})
+	runner.Run(EventUpdate, &types.Issue{IssueID: types.IssueID{ID: "bd-1"}})
 	if !runner.Wait(2 * time.Second) {
 		t.Fatal("Wait timed out after a hook that did not exist")
 	}
@@ -106,7 +106,7 @@ func TestRunEnforcesThePerHookTimeout(t *testing.T) {
 
 	runner := NewRunner(dir)
 	runner.timeout = 200 * time.Millisecond
-	runner.Run(EventUpdate, &types.Issue{ID: "bd-1"})
+	runner.Run(EventUpdate, &types.Issue{IssueID: types.IssueID{ID: "bd-1"}})
 
 	if !runner.Wait(10 * time.Second) {
 		t.Fatal("the async hook outlived its own 200ms timeout: Run does not enforce it")

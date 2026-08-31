@@ -75,8 +75,9 @@ type cachedCred struct {
 }
 
 var (
-	credCacheMu sync.Mutex
-	credCache   = map[string]cachedCred{}
+	// sync.Map keeps the process-local cache safe for concurrent store opens
+	// without exposing a mutable package map to every caller.
+	credCache sync.Map
 
 	// credRunner runs the helper; a package var so tests can stub it without a shell.
 	credRunner = func(ctx context.Context, command string) ([]byte, error) {
@@ -108,13 +109,13 @@ var (
 func resolveCredentialToken(ctx context.Context, command string) (token, username string, expiry time.Time, err error) {
 	now := time.Now()
 
-	credCacheMu.Lock()
-	if c, ok := credCache[command]; ok && now.Before(c.expires.Add(-credExpirySkew)) {
-		tok, user, exp := c.token, c.username, c.expires
-		credCacheMu.Unlock()
-		return tok, user, exp, nil
+	if cached, ok := credCache.Load(command); ok {
+		c := cached.(cachedCred)
+		if now.Before(c.expires.Add(-credExpirySkew)) {
+			tok, user, exp := c.token, c.username, c.expires
+			return tok, user, exp, nil
+		}
 	}
-	credCacheMu.Unlock()
 
 	runCtx, cancel := context.WithTimeout(ctx, credCommandTimeout)
 	defer cancel()
@@ -130,9 +131,7 @@ func resolveCredentialToken(ctx context.Context, command string) (token, usernam
 		expiry = now.Add(credDefaultTTL)
 	}
 
-	credCacheMu.Lock()
-	credCache[command] = cachedCred{token: token, username: username, expires: expiry}
-	credCacheMu.Unlock()
+	credCache.Store(command, cachedCred{token: token, username: username, expires: expiry})
 	return token, username, expiry, nil
 }
 
@@ -148,29 +147,42 @@ func parseCredential(raw []byte) (token, username string, expiry time.Time, err 
 	}
 
 	if trimmed[0] == '{' {
-		var c execCredential
-		if jerr := json.Unmarshal(trimmed, &c); jerr != nil {
-			return "", "", time.Time{}, fmt.Errorf("credential command returned unparseable JSON: %w", jerr)
-		}
-		token = c.Token
-		if token == "" {
-			token = c.AccessToken
-		}
-		if token == "" {
-			return "", "", time.Time{}, fmt.Errorf("credential command JSON has no token/access_token field")
-		}
-		switch {
-		case c.ExpirationTimestamp != "":
-			if t, perr := time.Parse(time.RFC3339, c.ExpirationTimestamp); perr == nil {
-				expiry = t
-			}
-		case c.ExpiresIn > 0:
-			expiry = time.Now().Add(time.Duration(c.ExpiresIn) * time.Second)
-		}
-		return token, c.Username, expiry, nil
+		return parseCredentialJSON(trimmed)
 	}
 
-	bare := string(trimmed)
+	return parseBareCredential(trimmed)
+}
+
+func parseCredentialJSON(raw []byte) (token, username string, expiry time.Time, err error) {
+	var c execCredential
+	if jerr := json.Unmarshal(raw, &c); jerr != nil {
+		return "", "", time.Time{}, fmt.Errorf("credential command returned unparseable JSON: %w", jerr)
+	}
+	token = c.Token
+	if token == "" {
+		token = c.AccessToken
+	}
+	if token == "" {
+		return "", "", time.Time{}, fmt.Errorf("credential command JSON has no token/access_token field")
+	}
+	expiry = credentialExpiry(c)
+	return token, c.Username, expiry, nil
+}
+
+func credentialExpiry(c execCredential) time.Time {
+	if c.ExpirationTimestamp != "" {
+		if t, err := time.Parse(time.RFC3339, c.ExpirationTimestamp); err == nil {
+			return t
+		}
+	}
+	if c.ExpiresIn > 0 {
+		return time.Now().Add(time.Duration(c.ExpiresIn) * time.Second)
+	}
+	return time.Time{}
+}
+
+func parseBareCredential(raw []byte) (string, string, time.Time, error) {
+	bare := string(raw)
 	if strings.ContainsAny(bare, " \t\r\n") {
 		return "", "", time.Time{}, fmt.Errorf("credential command output is not a bare token (contains whitespace); expected a token or a JSON {token,expirationTimestamp} envelope")
 	}

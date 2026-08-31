@@ -63,7 +63,7 @@ func (ts *testServer) unsetSetting(t *testing.T, path string) *http.Response {
 
 func newSettingsServer(t *testing.T, settings *roleSettings) *testServer {
 	t.Helper()
-	return newTestServer(t, rolesConfig(Config{Settings: settings}))
+	return newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Settings: settings}}}))
 }
 
 // TestSetSettingProjectsTheWholeRequest drives the two halves of the request,

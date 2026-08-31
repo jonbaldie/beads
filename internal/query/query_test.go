@@ -517,33 +517,57 @@ func TestPredicateEvaluation(t *testing.T) {
 	now := time.Date(2025, 2, 4, 12, 0, 0, 0, time.UTC)
 
 	openBug := &types.Issue{
-		ID:        "bd-1",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeBug,
-		Labels:    []string{"urgent", "frontend"},
-		CreatedAt: now.AddDate(0, 0, -5),
-		UpdatedAt: now.AddDate(0, 0, -1),
+		IssueID: types.IssueID{
+			ID: "bd-1",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeBug,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now.AddDate(0, 0, -5),
+			UpdatedAt: now.AddDate(0, 0, -1),
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"urgent", "frontend"},
+		},
 	}
 
 	closedTask := &types.Issue{
-		ID:        "bd-2",
-		Status:    types.StatusClosed,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Labels:    []string{"backend"},
-		CreatedAt: now.AddDate(0, 0, -30),
-		UpdatedAt: now.AddDate(0, 0, -10),
+		IssueID: types.IssueID{
+			ID: "bd-2",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now.AddDate(0, 0, -30),
+			UpdatedAt: now.AddDate(0, 0, -10),
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"backend"},
+		},
 	}
 
 	blockedFeature := &types.Issue{
-		ID:        "bd-3",
-		Status:    types.StatusBlocked,
-		Priority:  0,
-		IssueType: types.TypeFeature,
-		Labels:    []string{},
-		CreatedAt: now.AddDate(0, 0, -2),
-		UpdatedAt: now,
+		IssueID: types.IssueID{
+			ID: "bd-3",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusBlocked,
+			Priority:  0,
+			IssueType: types.TypeFeature,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now.AddDate(0, 0, -2),
+			UpdatedAt: now,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{},
+		},
 	}
 
 	tests := []struct {
@@ -860,8 +884,12 @@ func TestHasMetadataKeyPredicateEvaluation(t *testing.T) {
 
 	// Issue with the key present
 	issueMatch := &types.Issue{
-		Status:   types.StatusOpen,
-		Metadata: []byte(`{"team":"platform"}`),
+		IssueWorkflow: types.IssueWorkflow{
+			Status: types.StatusOpen,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: []byte(`{"team":"platform"}`),
+		},
 	}
 	if !result.Predicate(issueMatch) {
 		t.Error("predicate should match issue with team key present")
@@ -869,8 +897,12 @@ func TestHasMetadataKeyPredicateEvaluation(t *testing.T) {
 
 	// Issue without the key
 	issueNoKey := &types.Issue{
-		Status:   types.StatusOpen,
-		Metadata: []byte(`{"sprint":"Q1"}`),
+		IssueWorkflow: types.IssueWorkflow{
+			Status: types.StatusOpen,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: []byte(`{"sprint":"Q1"}`),
+		},
 	}
 	if result.Predicate(issueNoKey) {
 		t.Error("predicate should not match issue without team key")
@@ -878,7 +910,9 @@ func TestHasMetadataKeyPredicateEvaluation(t *testing.T) {
 
 	// Issue with no metadata but closed status (matches second branch)
 	issueClosed := &types.Issue{
-		Status: types.StatusClosed,
+		IssueWorkflow: types.IssueWorkflow{
+			Status: types.StatusClosed,
+		},
 	}
 	if !result.Predicate(issueClosed) {
 		t.Error("predicate should match closed issue via OR")
@@ -898,8 +932,12 @@ func TestMetadataPredicateEvaluation(t *testing.T) {
 
 	// Issue with matching metadata
 	issueMatch := &types.Issue{
-		Status:   types.StatusOpen,
-		Metadata: []byte(`{"team":"platform"}`),
+		IssueWorkflow: types.IssueWorkflow{
+			Status: types.StatusOpen,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: []byte(`{"team":"platform"}`),
+		},
 	}
 	if !result.Predicate(issueMatch) {
 		t.Error("predicate should match issue with team=platform")
@@ -907,8 +945,12 @@ func TestMetadataPredicateEvaluation(t *testing.T) {
 
 	// Issue with non-matching metadata
 	issueNoMatch := &types.Issue{
-		Status:   types.StatusOpen,
-		Metadata: []byte(`{"team":"frontend"}`),
+		IssueWorkflow: types.IssueWorkflow{
+			Status: types.StatusOpen,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: []byte(`{"team":"frontend"}`),
+		},
 	}
 	if result.Predicate(issueNoMatch) {
 		t.Error("predicate should not match issue with team=frontend")
@@ -916,7 +958,9 @@ func TestMetadataPredicateEvaluation(t *testing.T) {
 
 	// Issue with no metadata but closed status (matches second branch)
 	issueClosed := &types.Issue{
-		Status: types.StatusClosed,
+		IssueWorkflow: types.IssueWorkflow{
+			Status: types.StatusClosed,
+		},
 	}
 	if !result.Predicate(issueClosed) {
 		t.Error("predicate should match closed issue via OR")

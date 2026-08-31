@@ -115,22 +115,31 @@ func (s *Server) addDependencyEdges(w http.ResponseWriter, r *http.Request, memb
 		s.fail(w, r, InvalidArgument("edges", ReasonInvalidValue, "`edges` is required"))
 		return nil, false
 	}
+	rawEdges, res := decodeDependencyEdges(raw)
+	if res != nil {
+		s.fail(w, r, *res)
+		return nil, false
+	}
+	return s.projectDependencyEdges(w, r, rawEdges)
+}
+
+func decodeDependencyEdges(raw json.RawMessage) ([]map[string]json.RawMessage, *Result) {
 	var rawEdges []map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &rawEdges); err != nil || rawEdges == nil {
-		s.fail(w, r, InvalidArgument("edges", ReasonInvalidValue, "`edges` must be an array of objects"))
-		return nil, false
+		return nil, dependencyRefusal("edges", "`edges` must be an array of objects")
 	}
 	switch {
 	case len(rawEdges) == 0:
-		s.fail(w, r, InvalidArgument("edges", ReasonInvalidValue,
-			"`edges` must carry at least one edge; a write that writes nothing is refused rather than answered"))
-		return nil, false
+		return nil, dependencyRefusal("edges",
+			"`edges` must carry at least one edge; a write that writes nothing is refused rather than answered")
 	case len(rawEdges) > maxAddDependencyEdges:
-		s.fail(w, r, InvalidArgument("edges", ReasonInvalidValue,
-			fmt.Sprintf("`edges` carries %d edges; the limit is %d per request", len(rawEdges), maxAddDependencyEdges)))
-		return nil, false
+		return nil, dependencyRefusal("edges",
+			fmt.Sprintf("`edges` carries %d edges; the limit is %d per request", len(rawEdges), maxAddDependencyEdges))
 	}
+	return rawEdges, nil
+}
 
+func (s *Server) projectDependencyEdges(w http.ResponseWriter, r *http.Request, rawEdges []map[string]json.RawMessage) ([]issueops.DependencyEdge, bool) {
 	edges := make([]issueops.DependencyEdge, 0, len(rawEdges))
 	for i, rawEdge := range rawEdges {
 		if rawEdge == nil {
@@ -149,6 +158,11 @@ func (s *Server) addDependencyEdges(w http.ResponseWriter, r *http.Request, memb
 		edges = append(edges, edge)
 	}
 	return edges, true
+}
+
+func dependencyRefusal(param, detail string) *Result {
+	res := InvalidArgument(param, ReasonInvalidValue, detail)
+	return &res
 }
 
 // addDependencyEdge projects one decoded edge onto the role's edge, or reports

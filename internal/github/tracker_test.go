@@ -182,9 +182,9 @@ func TestGitHubToTrackerIssue(t *testing.T) {
 			{Name: "bug"},
 			{Name: "priority::high"},
 		},
-		CreatedAt: &now,
-		UpdatedAt: &now,
-		Assignee:  &User{ID: 5, Login: "bob"},
+		CreatedAt:   &now,
+		UpdatedAt:   &now,
+		IssueActors: IssueActors{Assignee: &User{ID: 5, Login: "bob"}},
 	}
 
 	ti := githubToTrackerIssue(gh)

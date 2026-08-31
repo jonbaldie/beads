@@ -26,7 +26,7 @@ import (
 func newEdgeCountServer(t *testing.T, result issueops.EdgeCountResult) (*testServer, *roleGraphCounter) {
 	t.Helper()
 	counter := &roleGraphCounter{result: result}
-	return newTestServer(t, rolesConfig(Config{GraphCounter: counter})), counter
+	return newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{GraphRoles: GraphRoles{GraphCounter: counter}}})), counter
 }
 
 // TestCountDependencyEdgesProjectsTheWholeRequest drives every parameter, alone
@@ -229,7 +229,7 @@ func TestCountDependencyEdgesNamesTheRefusedParameter(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			counter := &roleGraphCounter{}
-			ts := newTestServer(t, rolesConfig(Config{GraphCounter: counter}))
+			ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{GraphRoles: GraphRoles{GraphCounter: counter}}}))
 			// The refusals under test are the ROLE's, so the fake has to raise
 			// them rather than the handler pre-empting them — which is the
 			// arrangement the handler's doc comment describes.
@@ -344,7 +344,9 @@ func TestCountDependencyEdgesStaysStrictAboutParameters(t *testing.T) {
 func TestCountDependencyEdgesReachesItsOwnRole(t *testing.T) {
 	counter := &roleGraphCounter{}
 	reader := &roleEdgeReader{}
-	ts := newTestServer(t, rolesConfig(Config{GraphCounter: counter, EdgeReader: reader}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{
+		GraphRoles: GraphRoles{GraphCounter: counter, EdgeReader: reader},
+	}}))
 
 	resp := ts.get(t, "/v0/beads/dependencies:count?issue_id=bd-1&direction=out")
 	if resp.StatusCode != http.StatusOK {
@@ -363,7 +365,7 @@ func TestCountDependencyEdgesReachesItsOwnRole(t *testing.T) {
 // request-validation refusal must not be reported as the caller's fault.
 func TestCountDependencyEdgesKeepsANonValidationFailureAtFiveHundred(t *testing.T) {
 	counter := &roleGraphCounter{err: errors.New("backend is unreachable")}
-	ts := newTestServer(t, rolesConfig(Config{GraphCounter: counter}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{GraphRoles: GraphRoles{GraphCounter: counter}}}))
 
 	resp := ts.get(t, "/v0/beads/dependencies:count?issue_id=bd-1&direction=out")
 	if resp.StatusCode != http.StatusInternalServerError {

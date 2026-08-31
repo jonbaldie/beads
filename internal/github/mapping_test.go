@@ -244,16 +244,16 @@ func TestGitHubIssueToBeads(t *testing.T) {
 		},
 		CreatedAt: &createdAt,
 		UpdatedAt: &updatedAt,
-		Assignee: &User{
+		IssueActors: IssueActors{Assignee: &User{
 			ID:    101,
 			Login: "jdoe",
 			Name:  "John Doe",
 		},
-		User: &User{
-			ID:    102,
-			Login: "alice",
-			Name:  "Alice Smith",
-		},
+			User: &User{
+				ID:    102,
+				Login: "alice",
+				Name:  "Alice Smith",
+			}},
 		HTMLURL: "https://github.com/org/repo/issues/42",
 	}
 
@@ -328,12 +328,17 @@ func TestBeadsIssueToGitHubFields(t *testing.T) {
 	config := DefaultMappingConfig()
 
 	beadsIssue := &types.Issue{
-		Title:       "New feature request",
-		Description: "Add dark mode support",
-		IssueType:   types.TypeFeature,
-		Priority:    1, // High
-		Status:      types.StatusInProgress,
-		Assignee:    "jdoe",
+		IssueContent: types.IssueContent{
+			Title:       "New feature request",
+			Description: "Add dark mode support",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeFeature,
+			Priority:  1,
+			// High
+			Status:   types.StatusInProgress,
+			Assignee: "jdoe",
+		},
 	}
 
 	fields := BeadsIssueToGitHubFields(beadsIssue, config)
@@ -387,8 +392,12 @@ func TestBeadsIssueToGitHubFields_ClosedState(t *testing.T) {
 	config := DefaultMappingConfig()
 
 	closedIssue := &types.Issue{
-		Title:  "Completed task",
-		Status: types.StatusClosed,
+		IssueContent: types.IssueContent{
+			Title: "Completed task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status: types.StatusClosed,
+		},
 	}
 
 	fields := BeadsIssueToGitHubFields(closedIssue, config)

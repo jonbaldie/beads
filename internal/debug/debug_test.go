@@ -139,15 +139,15 @@ func TestPrintf(t *testing.T) {
 }
 
 func TestSetVerbose(t *testing.T) {
-	oldVerbose := verboseMode
+	oldVerbose := verboseMode.Load()
 	oldEnabled := enabled
 	defer func() {
-		verboseMode = oldVerbose
+		verboseMode.Store(oldVerbose)
 		enabled = oldEnabled
 	}()
 
 	enabled = false
-	verboseMode = false
+	verboseMode.Store(false)
 
 	if Enabled() {
 		t.Error("Enabled() should be false initially")
@@ -165,10 +165,10 @@ func TestSetVerbose(t *testing.T) {
 }
 
 func TestSetQuietAndIsQuiet(t *testing.T) {
-	oldQuiet := quietMode
-	defer func() { quietMode = oldQuiet }()
+	oldQuiet := quietMode.Load()
+	defer func() { quietMode.Store(oldQuiet) }()
 
-	quietMode = false
+	quietMode.Store(false)
 
 	if IsQuiet() {
 		t.Error("IsQuiet() should be false initially")
@@ -211,14 +211,14 @@ func TestPrintNormal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldQuiet := quietMode
+			oldQuiet := quietMode.Load()
 			oldStdout := os.Stdout
 			defer func() {
-				quietMode = oldQuiet
+				quietMode.Store(oldQuiet)
 				os.Stdout = oldStdout
 			}()
 
-			quietMode = tt.quiet
+			quietMode.Store(tt.quiet)
 
 			r, w, _ := os.Pipe()
 			os.Stdout = w
@@ -259,14 +259,14 @@ func TestPrintlnNormal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldQuiet := quietMode
+			oldQuiet := quietMode.Load()
 			oldStdout := os.Stdout
 			defer func() {
-				quietMode = oldQuiet
+				quietMode.Store(oldQuiet)
 				os.Stdout = oldStdout
 			}()
 
-			quietMode = tt.quiet
+			quietMode.Store(tt.quiet)
 
 			r, w, _ := os.Pipe()
 			os.Stdout = w

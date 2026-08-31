@@ -58,51 +58,65 @@ type queueEntry struct {
 	size    int64
 }
 
-// pruneQueue is PruneQueue with the knobs exposed for tests.
-func pruneQueue(dir string, now time.Time, ttl time.Duration, maxFiles int, maxBytes int64) (dropped int, freed int64) {
+type queueInspection struct {
+	entry     queueEntry
+	stale     bool
+	staleSize int64
+}
+
+func inspectQueueFile(dir string, de os.DirEntry, now time.Time, ttl time.Duration) (queueInspection, bool) {
+	if de.IsDir() {
+		return queueInspection{}, false
+	}
+	name := de.Name()
+	isBatch := filepath.Ext(name) == queuedEventExt
+	isOrphanTemp := strings.HasPrefix(name, writeTempPrefix)
+	if !isBatch && !isOrphanTemp {
+		return queueInspection{}, false
+	}
+	fi, err := de.Info()
+	if err != nil {
+		return queueInspection{}, false
+	}
+	if now.Sub(fi.ModTime()) > ttl {
+		return queueInspection{stale: true, staleSize: fi.Size()}, true
+	}
+	if !isBatch {
+		return queueInspection{}, true
+	}
+	return queueInspection{entry: queueEntry{filepath.Join(dir, name), fi.ModTime(), fi.Size()}}, true
+}
+
+func collectQueueEntries(dir string, now time.Time, ttl time.Duration) (live []queueEntry, liveBytes int64, dropped int, freed int64) {
 	dirents, err := os.ReadDir(dir)
 	if err != nil {
-		// Missing/unreadable queue dir: nothing to prune.
-		return 0, 0
+		return nil, 0, 0, 0
 	}
-
-	var live []queueEntry // surviving .evtq batches, candidates for the caps
-	var liveBytes int64
 	for _, de := range dirents {
-		if de.IsDir() {
+		inspection, ok := inspectQueueFile(dir, de, now, ttl)
+		if !ok {
 			continue
 		}
-		name := de.Name()
-		isBatch := filepath.Ext(name) == queuedEventExt
-		isOrphanTemp := strings.HasPrefix(name, writeTempPrefix)
-		if !isBatch && !isOrphanTemp {
-			// Never touch the throttle marker, the flusher lock, or anything
-			// else that is not queue payload.
-			continue
-		}
-		fi, err := de.Info()
-		if err != nil {
-			// Vanished between ReadDir and Info (a concurrent flusher child
-			// uploads-and-deletes): already gone, nothing to do.
-			continue
-		}
-		if now.Sub(fi.ModTime()) > ttl {
-			if remove(filepath.Join(dir, name)) {
+		if inspection.stale {
+			if remove(filepath.Join(dir, de.Name())) {
 				dropped++
-				freed += fi.Size()
+				freed += inspection.staleSize
 			}
 			continue
 		}
-		if isBatch {
-			live = append(live, queueEntry{filepath.Join(dir, name), fi.ModTime(), fi.Size()})
-			liveBytes += fi.Size()
+		if inspection.entry.path == "" {
+			continue
 		}
+		live = append(live, inspection.entry)
+		liveBytes += inspection.entry.size
 	}
+	return live, liveBytes, dropped, freed
+}
 
+func pruneQueueCaps(live []queueEntry, liveBytes int64, maxFiles int, maxBytes int64) (dropped int, freed int64) {
 	if len(live) <= maxFiles && liveBytes <= maxBytes {
-		return dropped, freed
+		return 0, 0
 	}
-	// Drop oldest-first until both caps are satisfied.
 	sort.Slice(live, func(i, j int) bool { return live[i].modTime.Before(live[j].modTime) })
 	remaining, remainingBytes := len(live), liveBytes
 	for _, e := range live {
@@ -118,6 +132,15 @@ func pruneQueue(dir string, now time.Time, ttl time.Duration, maxFiles int, maxB
 		remaining--
 		remainingBytes -= e.size
 	}
+	return dropped, freed
+}
+
+// pruneQueue is PruneQueue with the knobs exposed for tests.
+func pruneQueue(dir string, now time.Time, ttl time.Duration, maxFiles int, maxBytes int64) (dropped int, freed int64) {
+	live, liveBytes, dropped, freed := collectQueueEntries(dir, now, ttl)
+	capDropped, capFreed := pruneQueueCaps(live, liveBytes, maxFiles, maxBytes)
+	dropped += capDropped
+	freed += capFreed
 	return dropped, freed
 }
 

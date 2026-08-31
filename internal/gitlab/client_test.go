@@ -77,7 +77,7 @@ func TestBuildURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := client.buildURL(tt.path, tt.params)
+			got := gitlabBuildURL(client, tt.path, tt.params)
 			if !strings.HasPrefix(got, tt.wantURL) {
 				t.Errorf("buildURL(%q) = %q, want prefix %q", tt.path, got, tt.wantURL)
 			}
@@ -374,7 +374,7 @@ func TestProjectIDURLEncoding(t *testing.T) {
 	client := NewClient("token", "https://gitlab.example.com", "group/subgroup/project")
 
 	// Build URL and verify encoding
-	url := client.buildURL("/projects/"+client.projectPath()+"/issues", nil)
+	url := gitlabBuildURL(client, "/projects/"+client.projectPath()+"/issues", nil)
 
 	// URL should contain encoded slashes: group%2Fsubgroup%2Fproject
 	if !strings.Contains(url, "group%2Fsubgroup%2Fproject") {
@@ -986,7 +986,7 @@ func TestWithGroupID_PreservesGroupID(t *testing.T) {
 // TestIssuesBasePath_Project verifies issuesBasePath returns project path when no GroupID.
 func TestIssuesBasePath_Project(t *testing.T) {
 	client := NewClient("token", "https://gitlab.example.com", "123")
-	got := client.issuesBasePath()
+	got := gitlabIssuesBasePath(client)
 	want := "/projects/123/issues"
 	if got != want {
 		t.Errorf("issuesBasePath() = %q, want %q", got, want)
@@ -997,7 +997,7 @@ func TestIssuesBasePath_Project(t *testing.T) {
 func TestIssuesBasePath_Group(t *testing.T) {
 	client := NewClient("token", "https://gitlab.example.com", "123").
 		WithGroupID("mygroup")
-	got := client.issuesBasePath()
+	got := gitlabIssuesBasePath(client)
 	want := "/groups/mygroup/issues"
 	if got != want {
 		t.Errorf("issuesBasePath() = %q, want %q", got, want)
@@ -1008,7 +1008,7 @@ func TestIssuesBasePath_Group(t *testing.T) {
 func TestIssuesBasePath_GroupPathEncoded(t *testing.T) {
 	client := NewClient("token", "https://gitlab.example.com", "123").
 		WithGroupID("parent/child")
-	got := client.issuesBasePath()
+	got := gitlabIssuesBasePath(client)
 	want := "/groups/parent%2Fchild/issues"
 	if got != want {
 		t.Errorf("issuesBasePath() = %q, want %q", got, want)

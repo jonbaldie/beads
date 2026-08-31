@@ -244,14 +244,16 @@ func TestGitLabIssueToBeads(t *testing.T) {
 			Username: "jdoe",
 			Name:     "John Doe",
 		},
-		Author: &User{
-			ID:       102,
-			Username: "alice",
-			Name:     "Alice Smith",
+		WebURL: "https://gitlab.example.com/group/project/-/issues/42",
+		IssueSupplemental: IssueSupplemental{
+			Author: &User{
+				ID:       102,
+				Username: "alice",
+				Name:     "Alice Smith",
+			},
+			DueDate: "2024-01-20",
+			Weight:  3,
 		},
-		WebURL:  "https://gitlab.example.com/group/project/-/issues/42",
-		DueDate: "2024-01-20",
-		Weight:  3,
 	}
 
 	conversion := GitLabIssueToBeads(glIssue, config)
@@ -308,13 +310,13 @@ func TestGitLabIssueToBeads_ClosedIssue(t *testing.T) {
 
 	closedAt := time.Date(2024, 1, 17, 10, 0, 0, 0, time.UTC)
 	glIssue := &Issue{
-		ID:       100,
-		IID:      10,
-		Title:    "Closed task",
-		State:    "closed",
-		ClosedAt: &closedAt,
-		Labels:   []string{"status::in_progress"}, // Should be overridden by closed state
-		WebURL:   "https://gitlab.example.com/project/-/issues/10",
+		ID:                100,
+		IID:               10,
+		Title:             "Closed task",
+		State:             "closed",
+		Labels:            []string{"status::in_progress"}, // Should be overridden by closed state
+		WebURL:            "https://gitlab.example.com/project/-/issues/10",
+		IssueSupplemental: IssueSupplemental{ClosedAt: &closedAt},
 	}
 
 	conversion := GitLabIssueToBeads(glIssue, config)
@@ -334,13 +336,18 @@ func TestBeadsIssueToGitLabFields(t *testing.T) {
 
 	estimatedMinutes := 300 // 5 hours
 	beadsIssue := &types.Issue{
-		Title:            "New feature request",
-		Description:      "Add dark mode support",
-		IssueType:        types.TypeFeature,
-		Priority:         1, // High
-		Status:           types.StatusInProgress,
-		Assignee:         "jdoe",
-		EstimatedMinutes: &estimatedMinutes,
+		IssueContent: types.IssueContent{
+			Title:       "New feature request",
+			Description: "Add dark mode support",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeFeature,
+			Priority:  1,
+			// High
+			Status:           types.StatusInProgress,
+			Assignee:         "jdoe",
+			EstimatedMinutes: &estimatedMinutes,
+		},
 	}
 
 	fields := BeadsIssueToGitLabFields(beadsIssue, config)
@@ -410,7 +417,7 @@ func TestBeadsIssueToGitLabFields_StateEvent(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fields := BeadsIssueToGitLabFields(&types.Issue{Title: "t", Status: tt.status}, config)
+			fields := BeadsIssueToGitLabFields(&types.Issue{IssueContent: types.IssueContent{Title: "t"}, IssueWorkflow: types.IssueWorkflow{Status: tt.status}}, config)
 			if fields["state_event"] != tt.want {
 				t.Errorf("state_event = %v, want %q", fields["state_event"], tt.want)
 			}
@@ -423,9 +430,13 @@ func TestBeadsIssueToGitLabFields_OpenStatus(t *testing.T) {
 	config := DefaultMappingConfig()
 
 	openIssue := &types.Issue{
-		Title:     "New task",
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
+		IssueContent: types.IssueContent{
+			Title: "New task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+		},
 	}
 
 	fields := BeadsIssueToGitLabFields(openIssue, config)

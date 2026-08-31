@@ -45,44 +45,14 @@ const (
 
 // String returns the string representation of a TokenType.
 func (t TokenType) String() string {
-	switch t {
-	case TokenEOF:
-		return "EOF"
-	case TokenIdent:
-		return "IDENT"
-	case TokenString:
-		return "STRING"
-	case TokenNumber:
-		return "NUMBER"
-	case TokenDuration:
-		return "DURATION"
-	case TokenEquals:
-		return "="
-	case TokenNotEquals:
-		return "!="
-	case TokenLess:
-		return "<"
-	case TokenLessEq:
-		return "<="
-	case TokenGreater:
-		return ">"
-	case TokenGreaterEq:
-		return ">="
-	case TokenAnd:
-		return "AND"
-	case TokenOr:
-		return "OR"
-	case TokenNot:
-		return "NOT"
-	case TokenLParen:
-		return "("
-	case TokenRParen:
-		return ")"
-	case TokenComma:
-		return ","
-	default:
-		return fmt.Sprintf("UNKNOWN(%d)", t)
+	names := [...]string{
+		"EOF", "IDENT", "STRING", "NUMBER", "DURATION", "=", "!=", "<", "<=", ">", ">=",
+		"AND", "OR", "NOT", "(", ")", ",",
 	}
+	if t >= TokenEOF && int(t) < len(names) {
+		return names[t]
+	}
+	return fmt.Sprintf("UNKNOWN(%d)", t)
 }
 
 // Token represents a single token from the lexer.
@@ -148,14 +118,15 @@ func (l *Lexer) skipWhitespace() {
 // NextToken returns the next token from the input.
 func (l *Lexer) NextToken() (Token, error) {
 	l.skipWhitespace()
-
 	startPos := l.pos
 	r := l.next()
-
 	if r == 0 {
 		return Token{Type: TokenEOF, Pos: startPos}, nil
 	}
+	return lexRune(l, r, startPos)
+}
 
+func lexRune(l *Lexer, r rune, startPos int) (Token, error) {
 	switch r {
 	case '(':
 		return Token{Type: TokenLParen, Value: "(", Pos: startPos}, nil
@@ -165,36 +136,48 @@ func (l *Lexer) NextToken() (Token, error) {
 		return Token{Type: TokenComma, Value: ",", Pos: startPos}, nil
 	case '=':
 		return Token{Type: TokenEquals, Value: "=", Pos: startPos}, nil
+	case '!', '<', '>':
+		return lexComparison(l, r, startPos)
+	case '"', '\'':
+		return l.readString(r, startPos)
+	default:
+		return lexWord(l, r, startPos)
+	}
+}
+
+func lexWord(l *Lexer, r rune, startPos int) (Token, error) {
+	l.backup()
+	if unicode.IsDigit(r) || r == '-' || r == '+' {
+		return l.readNumberOrDuration(startPos)
+	}
+	if isIdentStart(r) {
+		return l.readIdent(startPos)
+	}
+	l.next()
+	return Token{}, fmt.Errorf("unexpected character %q at position %d", r, startPos)
+}
+
+func lexComparison(l *Lexer, r rune, startPos int) (Token, error) {
+	hasEquals := l.peek() == '='
+	if hasEquals {
+		l.next()
+	}
+	switch r {
 	case '!':
-		if l.peek() == '=' {
-			l.next()
+		if hasEquals {
 			return Token{Type: TokenNotEquals, Value: "!=", Pos: startPos}, nil
 		}
 		return Token{}, fmt.Errorf("unexpected character '!' at position %d (did you mean '!=' or 'NOT'?)", startPos)
 	case '<':
-		if l.peek() == '=' {
-			l.next()
+		if hasEquals {
 			return Token{Type: TokenLessEq, Value: "<=", Pos: startPos}, nil
 		}
 		return Token{Type: TokenLess, Value: "<", Pos: startPos}, nil
-	case '>':
-		if l.peek() == '=' {
-			l.next()
+	default:
+		if hasEquals {
 			return Token{Type: TokenGreaterEq, Value: ">=", Pos: startPos}, nil
 		}
 		return Token{Type: TokenGreater, Value: ">", Pos: startPos}, nil
-	case '"', '\'':
-		return l.readString(r, startPos)
-	default:
-		if unicode.IsDigit(r) || r == '-' || r == '+' {
-			l.backup()
-			return l.readNumberOrDuration(startPos)
-		}
-		if isIdentStart(r) {
-			l.backup()
-			return l.readIdent(startPos)
-		}
-		return Token{}, fmt.Errorf("unexpected character %q at position %d", r, startPos)
 	}
 }
 
@@ -210,27 +193,27 @@ func (l *Lexer) readString(quote rune, startPos int) (Token, error) {
 			return Token{Type: TokenString, Value: sb.String(), Pos: startPos}, nil
 		}
 		if r == '\\' {
-			// Handle escape sequences
-			escaped := l.next()
-			switch escaped {
-			case 'n':
-				sb.WriteRune('\n')
-			case 't':
-				sb.WriteRune('\t')
-			case '\\':
-				sb.WriteRune('\\')
-			case '"':
-				sb.WriteRune('"')
-			case '\'':
-				sb.WriteRune('\'')
-			case 0:
+			escaped, ok := escapedRune(l.next())
+			if !ok {
 				return Token{}, fmt.Errorf("unterminated escape sequence at position %d", l.pos-1)
-			default:
-				sb.WriteRune(escaped)
 			}
+			sb.WriteRune(escaped)
 		} else {
 			sb.WriteRune(r)
 		}
+	}
+}
+
+func escapedRune(r rune) (rune, bool) {
+	switch r {
+	case 'n':
+		return '\n', true
+	case 't':
+		return '\t', true
+	case 0:
+		return 0, false
+	default:
+		return r, true
 	}
 }
 
@@ -242,39 +225,16 @@ func (l *Lexer) readString(quote rune, startPos int) (Token, error) {
 // "label=1-alpha". Signed forms ("-3-foo") still error — the user has
 // to quote them.
 func (l *Lexer) readNumberOrDuration(startPos int) (Token, error) {
-	var sb strings.Builder
-
-	// Handle optional sign
-	r := l.next()
-	hadSign := r == '-' || r == '+'
-	if hadSign {
-		sb.WriteRune(r)
-		r = l.next()
-	}
-
-	// Must have at least one digit
-	if !unicode.IsDigit(r) {
-		l.backup()
-		// This might be a minus in front of an identifier, which is invalid
-		return Token{}, fmt.Errorf("expected digit at position %d", l.pos)
-	}
-	sb.WriteRune(r)
-
-	// Read remaining digits
-	for {
-		r = l.next()
-		if !unicode.IsDigit(r) {
-			break
-		}
-		sb.WriteRune(r)
+	value, r, hadSign, err := readNumberRun(l)
+	if err != nil {
+		return Token{}, err
 	}
 
 	// Check for duration suffix. Only commit to a duration when the suffix
 	// stands alone — if more identifier characters follow (e.g. "7day"),
 	// fall through to the identifier-fallback below.
 	if r != 0 && isDurationSuffix(r) && !isIdentChar(l.peek()) {
-		sb.WriteRune(r)
-		return Token{Type: TokenDuration, Value: sb.String(), Pos: startPos}, nil
+		return Token{Type: TokenDuration, Value: value + string(r), Pos: startPos}, nil
 	}
 
 	// Identifier-continuation fallback: an unsigned digit-led run that
@@ -293,7 +253,29 @@ func (l *Lexer) readNumberOrDuration(startPos int) (Token, error) {
 		l.backup()
 	}
 
-	return Token{Type: TokenNumber, Value: sb.String(), Pos: startPos}, nil
+	return Token{Type: TokenNumber, Value: value, Pos: startPos}, nil
+}
+
+func readNumberRun(l *Lexer) (string, rune, bool, error) {
+	var value strings.Builder
+	r := l.next()
+	hadSign := r == '-' || r == '+'
+	if hadSign {
+		value.WriteRune(r)
+		r = l.next()
+	}
+	if !unicode.IsDigit(r) {
+		l.backup()
+		return "", 0, false, fmt.Errorf("expected digit at position %d", l.pos)
+	}
+	value.WriteRune(r)
+	for {
+		r = l.next()
+		if !unicode.IsDigit(r) {
+			return value.String(), r, hadSign, nil
+		}
+		value.WriteRune(r)
+	}
 }
 
 // readIdent reads an identifier or keyword.

@@ -19,7 +19,7 @@ import (
 
 func newBlockingServer(t *testing.T, annotator *roleBlockingAnnotator) *testServer {
 	t.Helper()
-	return newTestServer(t, rolesConfig(Config{BlockingAnnotator: annotator}))
+	return newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{BlockingAnnotator: annotator}}}))
 }
 
 // TestBlockingAnnotationsPassTheIDsThroughUnaltered pins the half of this

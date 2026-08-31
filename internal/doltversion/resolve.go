@@ -176,6 +176,14 @@ func completeExecutableExt(path string) string {
 // fine, a symlink to a directory or to nothing is not), and have at least
 // one executable bit set.
 func validateExplicitPath(path string) error {
+	realPath, info, err := explicitPathInfo(path)
+	if err != nil {
+		return err
+	}
+	return validateExplicitFile(realPath, info)
+}
+
+func explicitPathInfo(path string) (string, os.FileInfo, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
 		// A missing path is genuinely ErrNotFound. Anything else (most
@@ -185,24 +193,27 @@ func validateExplicitPath(path string) error {
 		// stat error preserved rather than being folded into the same
 		// not-found bucket.
 		if os.IsNotExist(err) {
-			return fmt.Errorf("%w: %v", ErrNotFound, err)
+			return "", nil, fmt.Errorf("%w: %v", ErrNotFound, err)
 		}
-		return fmt.Errorf("%w: stat failed: %v", ErrNotExecutable, err)
+		return "", nil, fmt.Errorf("%w: stat failed: %v", ErrNotExecutable, err)
 	}
 
 	realPath := path
 	if info.Mode()&os.ModeSymlink != 0 {
 		resolved, err := filepath.EvalSymlinks(path)
 		if err != nil {
-			return fmt.Errorf("%w: resolving symlink: %v", ErrNotFound, err)
+			return "", nil, fmt.Errorf("%w: resolving symlink: %v", ErrNotFound, err)
 		}
 		realPath = resolved
 		info, err = os.Stat(realPath)
 		if err != nil {
-			return fmt.Errorf("%w: %v", ErrNotFound, err)
+			return "", nil, fmt.Errorf("%w: %v", ErrNotFound, err)
 		}
 	}
+	return realPath, info, nil
+}
 
+func validateExplicitFile(realPath string, info os.FileInfo) error {
 	if info.IsDir() {
 		return fmt.Errorf("%w: %s is a directory", ErrNotExecutable, realPath)
 	}

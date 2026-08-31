@@ -141,6 +141,10 @@ func (h *Handle) verifyThenSignal(sig os.Signal) error {
 	if !match {
 		return fmt.Errorf("procid: process %d no longer matches token", h.pid)
 	}
+	return h.signalVerified(sig)
+}
+
+func (h *Handle) signalVerified(sig os.Signal) error {
 	unixSig, ok := sig.(syscall.Signal)
 	if !ok {
 		return fmt.Errorf("procid: unsupported signal %v", sig)
@@ -154,7 +158,7 @@ func (h *Handle) verifyThenSignal(sig os.Signal) error {
 	if isFatalSignal(unixSig) {
 		return h.confirmFatalSignal()
 	}
-	match, err = Verify(h.pid, h.token)
+	match, err := Verify(h.pid, h.token)
 	if err != nil {
 		return err
 	}

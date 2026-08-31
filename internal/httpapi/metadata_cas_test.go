@@ -26,7 +26,7 @@ func (ts *testServer) casMetadata(t *testing.T, path, body string) *http.Respons
 // here would mean the dispatcher routed the segment to the wrong row.
 func TestCASMetadataPathReachesItsHandler(t *testing.T) {
 	cas := &roleMetadataCAS{result: issueops.CompareAndSetKeyResult{Swapped: true}}
-	ts := newTestServer(t, rolesConfig(Config{MetadataCAS: cas}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{MetadataCAS: cas}}}))
 
 	resp := ts.casMetadata(t, casMetadataPath, `{"actor":"alice","key":"gc.lease","value":"holder"}`)
 	if resp.StatusCode != http.StatusOK {
@@ -46,7 +46,7 @@ func TestCASMetadataPathReachesItsHandler(t *testing.T) {
 // 9007199254740993 into a float and lose the swap it was asking for.
 func TestCASMetadataForwardsEveryDocumentedMember(t *testing.T) {
 	cas := &roleMetadataCAS{}
-	ts := newTestServer(t, rolesConfig(Config{MetadataCAS: cas}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{MetadataCAS: cas}}}))
 
 	resp := ts.casMetadata(t, casMetadataPath, `{
 		"actor": "  alice  ",
@@ -108,7 +108,7 @@ func TestCASMetadataDistinguishesAnOmittedMemberFromANullOne(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			cas := &roleMetadataCAS{}
-			ts := newTestServer(t, rolesConfig(Config{MetadataCAS: cas}))
+			ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{MetadataCAS: cas}}}))
 
 			if resp := ts.casMetadata(t, casMetadataPath, test.body); resp.StatusCode != http.StatusOK {
 				t.Fatalf("status = %d, want 200: %s", resp.StatusCode, readAll(t, resp))
@@ -129,7 +129,7 @@ func TestCASMetadataDistinguishesAnOmittedMemberFromANullOne(t *testing.T) {
 func TestCASMetadataReportsALostRaceAsA200(t *testing.T) {
 	current := json.RawMessage(`"holder-a"`)
 	cas := &roleMetadataCAS{result: issueops.CompareAndSetKeyResult{Swapped: false, Current: &current}}
-	ts := newTestServer(t, rolesConfig(Config{MetadataCAS: cas}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{MetadataCAS: cas}}}))
 
 	resp := ts.casMetadata(t, casMetadataPath, `{"actor":"alice","key":"gc.lease","value":"holder-b"}`)
 	if resp.StatusCode != http.StatusOK {
@@ -150,7 +150,7 @@ func TestCASMetadataReportsALostRaceAsA200(t *testing.T) {
 // null" without a second call.
 func TestCASMetadataOmitsCurrentWhenTheKeyIsAbsent(t *testing.T) {
 	cas := &roleMetadataCAS{result: issueops.CompareAndSetKeyResult{Swapped: true}}
-	ts := newTestServer(t, rolesConfig(Config{MetadataCAS: cas}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{MetadataCAS: cas}}}))
 
 	resp := ts.casMetadata(t, casMetadataPath, `{"actor":"alice","key":"gc.lease"}`)
 	if resp.StatusCode != http.StatusOK {
@@ -185,7 +185,7 @@ func TestCASMetadataRejectsTheShapesTheDocumentRefuses(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			cas := &roleMetadataCAS{}
-			ts := newTestServer(t, rolesConfig(Config{MetadataCAS: cas}))
+			ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{MetadataCAS: cas}}}))
 
 			resp := ts.casMetadata(t, casMetadataPath, test.body)
 			if resp.StatusCode != http.StatusBadRequest {
@@ -203,7 +203,7 @@ func TestCASMetadataRejectsTheShapesTheDocumentRefuses(t *testing.T) {
 // handler quietly opt out of them.
 func TestCASMetadataRefusesAQueryParameterAndAForeignMediaType(t *testing.T) {
 	cas := &roleMetadataCAS{}
-	ts := newTestServer(t, rolesConfig(Config{MetadataCAS: cas}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{MetadataCAS: cas}}}))
 
 	body := `{"actor":"alice","key":"k"}`
 	if resp := ts.casMetadata(t, casMetadataPath+"?verbose=1", body); resp.StatusCode != http.StatusBadRequest {
@@ -223,7 +223,7 @@ func TestCASMetadataRefusesAQueryParameterAndAForeignMediaType(t *testing.T) {
 // converge on, and the reason this operation documents a 404 at all.
 func TestCASMetadataOfAnAbsentIssueIs404(t *testing.T) {
 	cas := &roleMetadataCAS{err: issueops.ErrNotFound}
-	ts := newTestServer(t, rolesConfig(Config{MetadataCAS: cas}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{MetadataCAS: cas}}}))
 
 	resp := ts.casMetadata(t, casMetadataPath, `{"actor":"alice","key":"k"}`)
 	if resp.StatusCode != http.StatusNotFound {
@@ -236,7 +236,7 @@ func TestCASMetadataOfAnAbsentIssueIs404(t *testing.T) {
 // not JSON — arrive as the document's 400 rather than as a 500.
 func TestCASMetadataMapsARoleValidationRefusalToTheDocumented400(t *testing.T) {
 	cas := &roleMetadataCAS{err: issueops.ErrValidation}
-	ts := newTestServer(t, rolesConfig(Config{MetadataCAS: cas}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{MetadataCAS: cas}}}))
 
 	resp := ts.casMetadata(t, casMetadataPath, `{"actor":"alice","key":"k"}`)
 	if resp.StatusCode != http.StatusBadRequest {

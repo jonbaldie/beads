@@ -241,62 +241,100 @@ func ResolveDataSourceReference(ctx context.Context, client DataSourceResolver, 
 	}
 }
 
-func (c *Client) doRequest(ctx context.Context, method, path string, requestBody interface{}) ([]byte, error) {
+func validateNotionClient(c *Client) error {
 	if c == nil {
-		return nil, fmt.Errorf("notion client is nil")
+		return fmt.Errorf("notion client is nil")
 	}
 	if strings.TrimSpace(c.Token) == "" {
-		return nil, fmt.Errorf("Notion token not configured")
+		return fmt.Errorf("Notion token not configured")
 	}
+	return nil
+}
+
+func (c *Client) notionHTTPClient() *http.Client {
 	httpClient := c.HTTPClient
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: DefaultTimeout}
 	}
+	return httpClient
+}
 
-	var bodyReader io.Reader
-	if requestBody != nil {
-		payload, err := json.Marshal(requestBody)
-		if err != nil {
-			return nil, fmt.Errorf("marshal request body: %w", err)
-		}
-		bodyReader = bytes.NewReader(payload)
+func marshalNotionRequestBody(requestBody interface{}) (io.Reader, error) {
+	if requestBody == nil {
+		return nil, nil
 	}
+	payload, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request body: %w", err)
+	}
+	return bytes.NewReader(payload), nil
+}
 
-	requestURL := path
-	if !strings.HasPrefix(requestURL, "http://") && !strings.HasPrefix(requestURL, "https://") {
-		requestURL = strings.TrimSuffix(c.BaseURL, "/") + path
+func notionRequestURL(c *Client, path string) string {
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		return path
 	}
-	req, err := http.NewRequestWithContext(ctx, method, requestURL, bodyReader)
+	return strings.TrimSuffix(c.BaseURL, "/") + path
+}
+
+func (c *Client) newNotionRequest(ctx context.Context, method, path string, body io.Reader, hasBody bool) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, method, notionRequestURL(c, path), body)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.Token)
 	req.Header.Set("Notion-Version", c.NotionVersion)
 	req.Header.Set("Accept", "application/json")
-	if requestBody != nil {
+	if hasBody {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	return req, nil
+}
 
-	resp, err := httpClient.Do(req) //nolint:gosec // G704: URL is constructed from configured Notion API base, not user input
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
+func readNotionResponse(resp *http.Response) ([]byte, error) {
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
 	}
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return body, nil
-	}
+	return body, nil
+}
 
+func notionAPIError(statusCode int, body []byte) error {
 	var apiErr struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(body, &apiErr); err == nil && apiErr.Message != "" {
-		return nil, fmt.Errorf("Notion API error %s (%d): %s", apiErr.Code, resp.StatusCode, apiErr.Message)
+		return fmt.Errorf("Notion API error %s (%d): %s", apiErr.Code, statusCode, apiErr.Message)
 	}
-	return nil, fmt.Errorf("Notion API error (%d): %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	return fmt.Errorf("Notion API error (%d): %s", statusCode, strings.TrimSpace(string(body)))
+}
+
+func (c *Client) doRequest(ctx context.Context, method, path string, requestBody interface{}) ([]byte, error) {
+	if err := validateNotionClient(c); err != nil {
+		return nil, err
+	}
+	bodyReader, err := marshalNotionRequestBody(requestBody)
+	if err != nil {
+		return nil, err
+	}
+	req, err := c.newNotionRequest(ctx, method, path, bodyReader, requestBody != nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.notionHTTPClient().Do(req) //nolint:gosec // G704: URL is constructed from configured Notion API base, not user input
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := readNotionResponse(resp)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return body, nil
+	}
+	return nil, notionAPIError(resp.StatusCode, body)
 }

@@ -143,11 +143,10 @@ func itoa(n int) string {
 }
 
 func newTestLinearTracker(t *testing.T, serverURL string) *Tracker {
-	tr := &Tracker{
-		teamIDs: []string{"team-uuid"},
-		clients: map[string]*Client{
-			"team-uuid": NewClient("test-key", "team-uuid").WithEndpoint(serverURL),
-		},
+	tr := NewTracker()
+	tr.teamIDs = []string{"team-uuid"}
+	tr.clients = map[string]*Client{
+		"team-uuid": NewClient("test-key", "team-uuid").WithEndpoint(serverURL),
 	}
 	return tr
 }
@@ -163,7 +162,10 @@ func newTestMultiTeamTracker(t *testing.T, serverURLs []string) (*Tracker, []str
 		teamIDs[i] = id
 		clients[id] = NewClient("test-key", id).WithEndpoint(url)
 	}
-	return &Tracker{teamIDs: teamIDs, clients: clients}, teamIDs
+	tr := NewTracker()
+	tr.teamIDs = teamIDs
+	tr.clients = clients
+	return tr, teamIDs
 }
 
 // TestReconcileParents_HappyPath verifies that a child needing its parent
@@ -204,7 +206,7 @@ func TestReconcileParents_HappyPath(t *testing.T) {
 func TestReconcileParents_IdempotentSkip(t *testing.T) {
 	mock := newLinearMock(t)
 	mock.issues["TEAM-1"] = &Issue{ID: "uuid-child", Identifier: "TEAM-1",
-		Parent: &Parent{ID: "uuid-parent", Identifier: "TEAM-2"}}
+		IssueRelations: IssueRelations{Parent: &Parent{ID: "uuid-parent", Identifier: "TEAM-2"}}}
 	mock.issues["TEAM-2"] = &Issue{ID: "uuid-parent", Identifier: "TEAM-2"}
 	server := httptest.NewServer(mock)
 	defer server.Close()
@@ -230,7 +232,7 @@ func TestReconcileParents_IdempotentSkip(t *testing.T) {
 func TestReconcileParents_RewiresWrongParent(t *testing.T) {
 	mock := newLinearMock(t)
 	mock.issues["TEAM-1"] = &Issue{ID: "uuid-child", Identifier: "TEAM-1",
-		Parent: &Parent{ID: "uuid-WRONG-parent", Identifier: "TEAM-99"}}
+		IssueRelations: IssueRelations{Parent: &Parent{ID: "uuid-WRONG-parent", Identifier: "TEAM-99"}}}
 	mock.issues["TEAM-2"] = &Issue{ID: "uuid-parent", Identifier: "TEAM-2"}
 	server := httptest.NewServer(mock)
 	defer server.Close()
@@ -313,7 +315,7 @@ func TestReconcileParents_MissingChildOrParent(t *testing.T) {
 
 // TestReconcileParents_EmptyLinks short-circuits cleanly.
 func TestReconcileParents_EmptyLinks(t *testing.T) {
-	tr := &Tracker{} // no client needed
+	tr := NewTracker() // no client needed
 	stats, err := tr.ReconcileParents(context.Background(), nil, false)
 	if err != nil {
 		t.Fatalf("ReconcileParents err: %v", err)
@@ -427,7 +429,7 @@ func TestReconcileParents_DryRunNoMutations(t *testing.T) {
 	mock := newLinearMock(t)
 	mock.issues["TEAM-1"] = &Issue{ID: "uuid-c1", Identifier: "TEAM-1"} // needs parent
 	mock.issues["TEAM-2"] = &Issue{ID: "uuid-c2", Identifier: "TEAM-2", //
-		Parent: &Parent{ID: "uuid-p", Identifier: "TEAM-99"}} // already correct
+		IssueRelations: IssueRelations{Parent: &Parent{ID: "uuid-p", Identifier: "TEAM-99"}}} // already correct
 	mock.issues["TEAM-3"] = &Issue{ID: "uuid-c3", Identifier: "TEAM-3"} // needs parent
 	mock.issues["TEAM-99"] = &Issue{ID: "uuid-p", Identifier: "TEAM-99"}
 	server := httptest.NewServer(mock)
@@ -472,7 +474,7 @@ func TestReconcileParents_DryRunNoMutations(t *testing.T) {
 func TestReconcileParents_DryRunIdempotentSkipUnchanged(t *testing.T) {
 	mock := newLinearMock(t)
 	mock.issues["TEAM-1"] = &Issue{ID: "uuid-c", Identifier: "TEAM-1",
-		Parent: &Parent{ID: "uuid-p", Identifier: "TEAM-2"}}
+		IssueRelations: IssueRelations{Parent: &Parent{ID: "uuid-p", Identifier: "TEAM-2"}}}
 	mock.issues["TEAM-2"] = &Issue{ID: "uuid-p", Identifier: "TEAM-2"}
 	server := httptest.NewServer(mock)
 	defer server.Close()

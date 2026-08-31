@@ -111,53 +111,63 @@ func publishSyncLockInfoWithOps(path string, ops syncLockWindowsOps) syncLockMet
 		_ = ops.closeFile(sidecar)
 		return syncLockMetadata{}
 	}
+	return publishSyncLockGeneration(sidecar, ops, zeros, processCreated)
+}
 
+func publishSyncLockGeneration(sidecar *os.File, ops syncLockWindowsOps, zeros [syncLockRecordSize]byte, processCreated uint64) syncLockMetadata {
 	started := time.Now().UTC()
 	for range syncLockGenerationRetries {
-		var generation syncLockGeneration
-		n, randomErr := ops.readRandom(generation[:])
-		if randomErr != nil || n != len(generation) || generation.isZero() {
-			_ = ops.closeFile(sidecar)
-			return syncLockMetadata{}
-		}
-
-		leaseOffset := generation.leaseOffset()
-		acquired, lockErr := ops.tryLockGenerationByte(sidecar, leaseOffset, true)
-		if lockErr != nil {
-			_ = ops.closeFile(sidecar)
-			return syncLockMetadata{}
-		}
-		if !acquired {
-			continue
-		}
-
-		record := syncLockRecord{
-			info: SyncLockInfo{
-				PID:     os.Getpid(),
-				Started: started,
-			},
-			processCreated: processCreated,
-			generation:     generation,
-		}
-		encoded := record.marshal()
-		written, writeErr := ops.writeAt(sidecar, encoded[:], 0)
-		if writeErr != nil || written != len(encoded) {
-			_, _ = ops.writeAt(sidecar, zeros[:], 0)
-			_ = ops.unlockGenerationByte(sidecar, leaseOffset)
-			_ = ops.closeFile(sidecar)
-			return syncLockMetadata{}
-		}
-
-		return syncLockMetadata{
-			file:        sidecar,
-			leaseOffset: leaseOffset,
-			leaseHeld:   true,
-			ops:         ops,
+		metadata, acquired := tryPublishSyncLockGeneration(sidecar, ops, zeros, processCreated, started)
+		if acquired {
+			return metadata
 		}
 	}
 
 	_ = ops.closeFile(sidecar)
 	return syncLockMetadata{}
+}
+
+func tryPublishSyncLockGeneration(sidecar *os.File, ops syncLockWindowsOps, zeros [syncLockRecordSize]byte, processCreated uint64, started time.Time) (syncLockMetadata, bool) {
+	var generation syncLockGeneration
+	n, randomErr := ops.readRandom(generation[:])
+	if randomErr != nil || n != len(generation) || generation.isZero() {
+		_ = ops.closeFile(sidecar)
+		return syncLockMetadata{}, true
+	}
+
+	leaseOffset := generation.leaseOffset()
+	acquired, lockErr := ops.tryLockGenerationByte(sidecar, leaseOffset, true)
+	if lockErr != nil {
+		_ = ops.closeFile(sidecar)
+		return syncLockMetadata{}, true
+	}
+	if !acquired {
+		return syncLockMetadata{}, false
+	}
+
+	record := syncLockRecord{
+		info: SyncLockInfo{
+			PID:     os.Getpid(),
+			Started: started,
+		},
+		processCreated: processCreated,
+		generation:     generation,
+	}
+	encoded := record.marshal()
+	written, writeErr := ops.writeAt(sidecar, encoded[:], 0)
+	if writeErr != nil || written != len(encoded) {
+		_, _ = ops.writeAt(sidecar, zeros[:], 0)
+		_ = ops.unlockGenerationByte(sidecar, leaseOffset)
+		_ = ops.closeFile(sidecar)
+		return syncLockMetadata{}, true
+	}
+
+	return syncLockMetadata{
+		file:        sidecar,
+		leaseOffset: leaseOffset,
+		leaseHeld:   true,
+		ops:         ops,
+	}, true
 }
 
 func clearSyncLockInfo(_ *os.File, _ string, metadata *syncLockMetadata) error {
@@ -184,7 +194,10 @@ func readContendedSyncLockInfo(path string) *SyncLockInfo {
 		return nil
 	}
 	defer func() { _ = sidecar.Close() }()
+	return readContendedSyncLockInfoFromFile(sidecar)
+}
 
+func readContendedSyncLockInfoFromFile(sidecar *os.File) *SyncLockInfo {
 	record, first, ok := readSyncLockRecord(sidecar)
 	if !ok {
 		return nil
@@ -196,8 +209,7 @@ func readContendedSyncLockInfo(path string) *SyncLockInfo {
 	}
 	defer func() { _ = windows.CloseHandle(process) }()
 
-	active, err := probeSyncGenerationLease(sidecar, record.generation.leaseOffset())
-	if err != nil || !active {
+	if !syncLockRecordLeaseActive(sidecar, record) {
 		return nil
 	}
 
@@ -206,13 +218,17 @@ func readContendedSyncLockInfo(path string) *SyncLockInfo {
 		return nil
 	}
 
-	active, err = probeSyncGenerationLease(sidecar, secondRecord.generation.leaseOffset())
-	if err != nil || !active || !processHandleIsRunning(process) {
+	if !syncLockRecordLeaseActive(sidecar, secondRecord) || !processHandleIsRunning(process) {
 		return nil
 	}
 
 	info := record.info
 	return &info
+}
+
+func syncLockRecordLeaseActive(sidecar *os.File, record syncLockRecord) bool {
+	active, err := probeSyncGenerationLease(sidecar, record.generation.leaseOffset())
+	return err == nil && active
 }
 
 func (record syncLockRecord) marshal() [syncLockRecordSize]byte {
@@ -246,40 +262,17 @@ func readSyncLockRecord(f *os.File) (syncLockRecord, [syncLockRecordSize]byte, b
 }
 
 func parseSyncLockRecord(encoded [syncLockRecordSize]byte) (syncLockRecord, bool) {
-	if [8]byte(encoded[syncLockRecordMagicOffset:syncLockRecordVersionOffset]) != syncLockRecordMagic {
-		return syncLockRecord{}, false
-	}
-	if binary.LittleEndian.Uint16(encoded[syncLockRecordVersionOffset:]) != syncLockRecordVersion ||
-		binary.LittleEndian.Uint16(encoded[syncLockRecordSizeOffset:]) != syncLockRecordSize {
+	if !validSyncLockHeader(encoded) {
 		return syncLockRecord{}, false
 	}
 
-	pid := binary.LittleEndian.Uint32(encoded[syncLockRecordPIDOffset:])
-	startedUnixNano := int64(binary.LittleEndian.Uint64(encoded[syncLockRecordStartedOffset:]))
-	processCreated := binary.LittleEndian.Uint64(encoded[syncLockRecordProcessCreatedOffset:])
-	if pid == 0 || pid > uint32(1<<31-1) || startedUnixNano <= 0 || processCreated == 0 {
+	pid, startedUnixNano, processCreated, ok := syncLockRecordIdentity(encoded)
+	if !ok {
 		return syncLockRecord{}, false
 	}
 
-	var generationA, generationB syncLockGeneration
-	copy(generationA[:], encoded[syncLockRecordGenerationAOffset:syncLockRecordGenerationBOffset])
-	copy(generationB[:], encoded[syncLockRecordGenerationBOffset:syncLockRecordChecksumOffset])
-	if generationA.isZero() || generationA != generationB {
-		return syncLockRecord{}, false
-	}
-
-	for _, value := range encoded[syncLockRecordPaddingOffset:] {
-		if value != 0 {
-			return syncLockRecord{}, false
-		}
-	}
-
-	var checksum [syncLockChecksumSize]byte
-	copy(checksum[:], encoded[syncLockRecordChecksumOffset:syncLockRecordPaddingOffset])
-	checksumInput := encoded
-	clear(checksumInput[syncLockRecordChecksumOffset:syncLockRecordPaddingOffset])
-	expected := sha256.Sum256(checksumInput[:])
-	if checksum != expected {
+	generation, ok := syncLockRecordGeneration(encoded)
+	if !ok || !validSyncLockChecksum(encoded) {
 		return syncLockRecord{}, false
 	}
 
@@ -289,8 +282,44 @@ func parseSyncLockRecord(encoded [syncLockRecordSize]byte) (syncLockRecord, bool
 			Started: time.Unix(0, startedUnixNano).UTC(),
 		},
 		processCreated: processCreated,
-		generation:     generationA,
+		generation:     generation,
 	}, true
+}
+
+func validSyncLockHeader(encoded [syncLockRecordSize]byte) bool {
+	return [8]byte(encoded[syncLockRecordMagicOffset:syncLockRecordVersionOffset]) == syncLockRecordMagic &&
+		binary.LittleEndian.Uint16(encoded[syncLockRecordVersionOffset:]) == syncLockRecordVersion &&
+		binary.LittleEndian.Uint16(encoded[syncLockRecordSizeOffset:]) == syncLockRecordSize
+}
+
+func syncLockRecordIdentity(encoded [syncLockRecordSize]byte) (pid uint32, startedUnixNano int64, processCreated uint64, ok bool) {
+	pid = binary.LittleEndian.Uint32(encoded[syncLockRecordPIDOffset:])
+	startedUnixNano = int64(binary.LittleEndian.Uint64(encoded[syncLockRecordStartedOffset:]))
+	processCreated = binary.LittleEndian.Uint64(encoded[syncLockRecordProcessCreatedOffset:])
+	return pid, startedUnixNano, processCreated,
+		pid != 0 && pid <= uint32(1<<31-1) && startedUnixNano > 0 && processCreated != 0
+}
+
+func syncLockRecordGeneration(encoded [syncLockRecordSize]byte) (syncLockGeneration, bool) {
+	var generationA, generationB syncLockGeneration
+	copy(generationA[:], encoded[syncLockRecordGenerationAOffset:syncLockRecordGenerationBOffset])
+	copy(generationB[:], encoded[syncLockRecordGenerationBOffset:syncLockRecordChecksumOffset])
+	return generationA, !generationA.isZero() && generationA == generationB
+}
+
+func validSyncLockChecksum(encoded [syncLockRecordSize]byte) bool {
+	for _, value := range encoded[syncLockRecordPaddingOffset:] {
+		if value != 0 {
+			return false
+		}
+	}
+
+	var checksum [syncLockChecksumSize]byte
+	copy(checksum[:], encoded[syncLockRecordChecksumOffset:syncLockRecordPaddingOffset])
+	checksumInput := encoded
+	clear(checksumInput[syncLockRecordChecksumOffset:syncLockRecordPaddingOffset])
+	expected := sha256.Sum256(checksumInput[:])
+	return checksum == expected
 }
 
 func (generation syncLockGeneration) isZero() bool {

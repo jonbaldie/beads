@@ -18,7 +18,7 @@ import (
 
 func newEdgesServer(t *testing.T, edges *roleEdgeReader) *testServer {
 	t.Helper()
-	return newTestServer(t, rolesConfig(Config{EdgeReader: edges}))
+	return newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{GraphRoles: GraphRoles{EdgeReader: edges}}}))
 }
 
 // TestDependenciesFlattenTheRoleAnswer pins the wire projection: the per-anchor

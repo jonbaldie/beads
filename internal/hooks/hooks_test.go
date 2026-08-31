@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -119,7 +120,7 @@ func TestRunSync_NoHook(t *testing.T) {
 	tmpDir := t.TempDir()
 	runner := NewRunner(tmpDir)
 
-	issue := &types.Issue{ID: "bd-test", Title: "Test"}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueContent: types.IssueContent{Title: "Test"}}
 
 	// Should not error when hook doesn't exist
 	err := runner.RunSync(EventCreate, issue)
@@ -138,7 +139,7 @@ func TestRunSync_NotExecutable(t *testing.T) {
 	}
 
 	runner := NewRunner(tmpDir)
-	issue := &types.Issue{ID: "bd-test", Title: "Test"}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueContent: types.IssueContent{Title: "Test"}}
 
 	// Should not error when hook is not executable
 	err := runner.RunSync(EventCreate, issue)
@@ -170,7 +171,7 @@ echo "$1 $2" > ` + outputFile
 	}
 
 	runner := NewRunner(tmpDir)
-	issue := &types.Issue{ID: "bd-test", Title: "Test Issue"}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueContent: types.IssueContent{Title: "Test Issue"}}
 
 	err := runner.RunSync(EventCreate, issue)
 	if err != nil {
@@ -213,9 +214,15 @@ cat > ` + outputFile
 
 	runner := NewRunner(tmpDir)
 	issue := &types.Issue{
-		ID:       "bd-test",
-		Title:    "Test Issue",
-		Assignee: "bob",
+		IssueID: types.IssueID{
+			ID: "bd-test",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Test Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Assignee: "bob",
+		},
 	}
 
 	err := runner.RunSync(EventCreate, issue)
@@ -267,7 +274,7 @@ sleep 60`
 		hooksDir: tmpDir,
 		timeout:  500 * time.Millisecond, // Short timeout
 	}
-	issue := &types.Issue{ID: "bd-test", Title: "Test"}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueContent: types.IssueContent{Title: "Test"}}
 
 	start := time.Now()
 	err := runner.RunSync(EventCreate, issue)
@@ -309,7 +316,7 @@ func TestRunSync_KillsDescendants(t *testing.T) {
 		hooksDir: tmpDir,
 		timeout:  500 * time.Millisecond,
 	}
-	issue := &types.Issue{ID: "bd-test", Title: "Test"}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueContent: types.IssueContent{Title: "Test"}}
 
 	err := runner.RunSync(EventCreate, issue)
 	if err == nil {
@@ -327,10 +334,12 @@ func TestRunSync_KillsDescendants(t *testing.T) {
 		t.Fatalf("Invalid pid in pid file: %v", err)
 	}
 
-	// Check /proc/<pid> does not exist - retry a few times in case of timing
+	// Check that the process is no longer running. In the resource-capped
+	// container, PID 1 may leave an exited child as a zombie briefly, so mere
+	// existence of /proc/<pid> is not evidence that the kill failed.
 	for i := 0; i < 10; i++ {
-		if _, err := os.Stat(filepath.Join("/proc", strconv.Itoa(pid))); err != nil {
-			// Process is gone, test passed
+		stat, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+		if err != nil || bytes.Contains(stat, []byte(") Z ")) {
 			return
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -362,7 +371,7 @@ exit 1`
 	}
 
 	runner := NewRunner(tmpDir)
-	issue := &types.Issue{ID: "bd-test", Title: "Test"}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueContent: types.IssueContent{Title: "Test"}}
 
 	err := runner.RunSync(EventUpdate, issue)
 	if err == nil {
@@ -393,7 +402,7 @@ func TestRun_Async(t *testing.T) {
 	}
 
 	runner := NewRunner(tmpDir)
-	issue := &types.Issue{ID: "bd-test", Title: "Test"}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueContent: types.IssueContent{Title: "Test"}}
 
 	// Run should return immediately
 	runner.Run(EventClose, issue)

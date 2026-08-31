@@ -16,29 +16,34 @@ import (
 // see clientForExternalID's fallback behavior in tracker.go).
 //
 // Returns (nil, nil, nil) when no team has the issue.
-func (t *Tracker) fetchIssueAcrossTeams(ctx context.Context, identifier string) (*Issue, *Client, error) {
+func (t *trackerParent) fetchIssueAcrossTeams(ctx context.Context, identifier string) (*Issue, *Client, error) {
 	if identifier == "" {
 		return nil, nil, nil
 	}
-	if len(t.teamIDs) <= 1 {
-		client := t.primaryClient()
-		if client == nil {
-			return nil, nil, errors.New("no Linear client available")
-		}
-		li, err := client.FetchIssueByIdentifier(ctx, identifier)
-		if err != nil {
-			return nil, nil, err
-		}
-		if li == nil {
-			return nil, nil, nil
-		}
-		return li, client, nil
+	if len(t.owner.teamIDs) <= 1 {
+		return t.fetchIssueFromPrimaryTeam(ctx, identifier)
 	}
+	return t.fetchIssueFromAllTeams(ctx, identifier)
+}
+
+func (t *trackerParent) fetchIssueFromPrimaryTeam(ctx context.Context, identifier string) (*Issue, *Client, error) {
+	client := t.owner.primaryClient()
+	if client == nil {
+		return nil, nil, errors.New("no Linear client available")
+	}
+	li, err := client.FetchIssueByIdentifier(ctx, identifier)
+	if err != nil || li == nil {
+		return li, nil, err
+	}
+	return li, client, nil
+}
+
+func (t *trackerParent) fetchIssueFromAllTeams(ctx context.Context, identifier string) (*Issue, *Client, error) {
 	// Multi-team: try each client. First non-nil result wins. Rate-limit
 	// errors abort immediately (the cross-team probe shouldn't burn
 	// through quota when the circuit breaker has already tripped).
-	for _, teamID := range t.teamIDs {
-		client := t.clients[teamID]
+	for _, teamID := range t.owner.teamIDs {
+		client := t.owner.clients[teamID]
 		if client == nil {
 			continue
 		}
@@ -106,6 +111,39 @@ type ParentReconcileStats struct {
 	Errors []error
 }
 
+type parentIssueEntry struct {
+	issue  *Issue
+	client *Client
+}
+
+type parentIssueCache struct {
+	tracker *trackerParent
+	ctx     context.Context
+	issues  map[string]parentIssueEntry
+}
+
+func newParentIssueCache(ctx context.Context, tracker *trackerParent, capacity int) *parentIssueCache {
+	return &parentIssueCache{
+		tracker: tracker,
+		ctx:     ctx,
+		issues:  make(map[string]parentIssueEntry, capacity),
+	}
+}
+
+func (c *parentIssueCache) fetch(identifier string) (parentIssueEntry, error) {
+	if cached, ok := c.issues[identifier]; ok {
+		return cached, nil
+	}
+	issue, client, err := c.tracker.fetchIssueAcrossTeams(c.ctx, identifier)
+	if err != nil {
+		return parentIssueEntry{}, err
+	}
+	entry := parentIssueEntry{issue: issue, client: client}
+	// Cache nil too — repeated lookups are still cheap.
+	c.issues[identifier] = entry
+	return entry, nil
+}
+
 // ReconcileParents wires parent-child relationships from bead-side
 // dependencies to Linear's parent issue field. Used as a post-sync pass
 // to handle two cases that the per-issue create/update path can't cover:
@@ -133,117 +171,85 @@ type ParentReconcileStats struct {
 // Returns nil error when the pass completed (even if per-link errors
 // were collected in Stats.Errors). A non-nil error indicates a setup-level
 // failure that prevented any work from running.
-func (t *Tracker) ReconcileParents(ctx context.Context, links []ParentLink, dryRun bool) (*ParentReconcileStats, error) {
+func (t *trackerParent) ReconcileParents(ctx context.Context, links []ParentLink, dryRun bool) (*ParentReconcileStats, error) {
 	stats := &ParentReconcileStats{}
 	if len(links) == 0 {
 		return stats, nil
 	}
-	if t.primaryClient() == nil {
+	if t.owner.primaryClient() == nil {
 		return nil, errors.New("no Linear client available")
 	}
-
-	// Cache identifier → (issue, host client) so we don't refetch when a
-	// parent is shared by many children, AND so the update path uses the
-	// SAME client that successfully fetched the child (avoids re-probing
-	// via clientForExternalID, which silently falls back to the primary
-	// client on transient probe errors and could send the update to the
-	// wrong team).
-	type entry struct {
-		issue  *Issue
-		client *Client
-	}
-	fetched := make(map[string]entry, len(links)*2)
-	fetchIssue := func(identifier string) (entry, error) {
-		if cached, ok := fetched[identifier]; ok {
-			return cached, nil
-		}
-		issue, client, err := t.fetchIssueAcrossTeams(ctx, identifier)
-		if err != nil {
-			return entry{}, err
-		}
-		e := entry{issue: issue, client: client}
-		// Cache nil too — repeated lookups are still cheap.
-		fetched[identifier] = e
-		return e, nil
-	}
-
+	fetched := newParentIssueCache(ctx, t, len(links)*2)
 	for _, link := range links {
-		if link.ChildIdentifier == "" || link.ParentIdentifier == "" {
-			continue
+		if err := t.reconcileParentLink(ctx, fetched, link, dryRun, stats); err != nil {
+			return stats, err
 		}
-
-		childE, err := fetchIssue(link.ChildIdentifier)
-		if err != nil {
-			// Rate-limit circuit breaker tripped — stop now rather than
-			// hammer the API for every remaining link.
-			if isRateLimitExhausted(err) {
-				return stats, fmt.Errorf("fetch child %s: %w", link.ChildIdentifier, err)
-			}
-			stats.Errors = append(stats.Errors,
-				fmt.Errorf("fetch child %s: %w", link.ChildIdentifier, err))
-			continue
-		}
-		if childE.issue == nil {
-			stats.NotFound = append(stats.NotFound, link.ChildIdentifier)
-			continue
-		}
-
-		parentE, err := fetchIssue(link.ParentIdentifier)
-		if err != nil {
-			if isRateLimitExhausted(err) {
-				return stats, fmt.Errorf("fetch parent %s: %w", link.ParentIdentifier, err)
-			}
-			stats.Errors = append(stats.Errors,
-				fmt.Errorf("fetch parent %s: %w", link.ParentIdentifier, err))
-			continue
-		}
-		if parentE.issue == nil {
-			stats.NotFound = append(stats.NotFound, link.ParentIdentifier)
-			continue
-		}
-
-		// Idempotency: skip if remote parent already matches by UUID.
-		if childE.issue.Parent != nil && childE.issue.Parent.ID == parentE.issue.ID {
-			stats.Skipped++
-			continue
-		}
-
-		if dryRun {
-			// Dry-run: record the intended mutation but skip the API call.
-			// All read-only state (fetch results, idempotency check above)
-			// matched wet-run, so the preview is trustworthy.
-			stats.Mutations = append(stats.Mutations, link)
-			stats.WouldUpdate++
-			continue
-		}
-
-		// Use the child's host client (resolved during fetch) so the
-		// update goes to the correct team in multi-team setups.
-		updated, err := childE.client.UpdateIssue(ctx, childE.issue.ID, map[string]interface{}{
-			"parentId": parentE.issue.ID,
-		})
-		if err != nil {
-			if isRateLimitExhausted(err) {
-				return stats, fmt.Errorf("set parent of %s → %s: %w",
-					link.ChildIdentifier, link.ParentIdentifier, err)
-			}
-			stats.Errors = append(stats.Errors,
-				fmt.Errorf("set parent of %s → %s: %w",
-					link.ChildIdentifier, link.ParentIdentifier, err))
-			continue
-		}
-		// Refresh cache with the post-update issue (Linear returns the
-		// updated record), so a later link that references this child
-		// as a parent sees the freshest state. Host client is unchanged.
-		if updated != nil {
-			fetched[link.ChildIdentifier] = entry{issue: updated, client: childE.client}
-		}
-		// Record the mutation only AFTER the API call succeeds, so
-		// Mutations reflects actual state propagated to Linear (callers
-		// can trust the list for accurate post-sync reporting).
-		stats.Mutations = append(stats.Mutations, link)
-		stats.Updated++
 	}
 
 	return stats, nil
+}
+
+func (t *trackerParent) reconcileParentLink(ctx context.Context, fetched *parentIssueCache, link ParentLink, dryRun bool, stats *ParentReconcileStats) error {
+	if link.ChildIdentifier == "" || link.ParentIdentifier == "" {
+		return nil
+	}
+	child, parent, ok, err := lookupParentPair(fetched, link, stats)
+	if err != nil || !ok {
+		return err
+	}
+	if child.issue.Parent != nil && child.issue.Parent.ID == parent.issue.ID {
+		stats.Skipped++
+		return nil
+	}
+	if dryRun {
+		stats.Mutations = append(stats.Mutations, link)
+		stats.WouldUpdate++
+		return nil
+	}
+	return t.applyParentMutation(ctx, fetched, link, child, parent, stats)
+}
+
+func lookupParentPair(fetched *parentIssueCache, link ParentLink, stats *ParentReconcileStats) (parentIssueEntry, parentIssueEntry, bool, error) {
+	child, ok, err := lookupParentIssue(fetched, link.ChildIdentifier, "child", stats)
+	if err != nil || !ok {
+		return parentIssueEntry{}, parentIssueEntry{}, false, err
+	}
+	parent, ok, err := lookupParentIssue(fetched, link.ParentIdentifier, "parent", stats)
+	if err != nil || !ok {
+		return parentIssueEntry{}, parentIssueEntry{}, false, err
+	}
+	return child, parent, true, nil
+}
+
+func lookupParentIssue(fetched *parentIssueCache, identifier, role string, stats *ParentReconcileStats) (parentIssueEntry, bool, error) {
+	entry, err := fetched.fetch(identifier)
+	if err == nil {
+		if entry.issue == nil {
+			stats.NotFound = append(stats.NotFound, identifier)
+			return parentIssueEntry{}, false, nil
+		}
+		return entry, true, nil
+	}
+	if isRateLimitExhausted(err) {
+		return parentIssueEntry{}, false, fmt.Errorf("fetch %s %s: %w", role, identifier, err)
+	}
+	stats.Errors = append(stats.Errors, fmt.Errorf("fetch %s %s: %w", role, identifier, err))
+	return parentIssueEntry{}, false, nil
+}
+
+func (t *trackerParent) applyParentMutation(ctx context.Context, fetched *parentIssueCache, link ParentLink, child, parent parentIssueEntry, stats *ParentReconcileStats) error {
+	updated, err := child.client.UpdateIssue(ctx, child.issue.ID, map[string]interface{}{"parentId": parent.issue.ID})
+	if err != nil {
+		if isRateLimitExhausted(err) {
+			return fmt.Errorf("set parent of %s → %s: %w", link.ChildIdentifier, link.ParentIdentifier, err)
+		}
+		stats.Errors = append(stats.Errors, fmt.Errorf("set parent of %s → %s: %w", link.ChildIdentifier, link.ParentIdentifier, err))
+		return nil
+	}
+	if updated != nil {
+		fetched.issues[link.ChildIdentifier] = parentIssueEntry{issue: updated, client: child.client}
+	}
+	stats.Mutations = append(stats.Mutations, link)
+	stats.Updated++
+	return nil
 }

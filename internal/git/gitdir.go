@@ -21,48 +21,52 @@ type gitContext struct {
 }
 
 var (
-	gitCtxOnce sync.Once
-	gitCtx     gitContext
+	gitCache = &gitContextCache{}
 )
+
+type gitContextCache struct {
+	once sync.Once
+	ctx  gitContext
+}
 
 // initGitContext populates the gitContext with a single git call.
 // This is called once per process via sync.Once.
-func initGitContext() {
+func (c *gitContextCache) init() {
 	// Get all three values with a single git call
 	cmd := exec.Command("git", "rev-parse", "--git-dir", "--git-common-dir", "--show-toplevel")
 	output, err := cmd.Output()
 	if err != nil {
-		gitCtx.err = fmt.Errorf("not a git repository: %w", err)
+		c.ctx.err = fmt.Errorf("not a git repository: %w", err)
 		return
 	}
 
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 	if len(lines) < 3 {
-		gitCtx.err = fmt.Errorf("unexpected git rev-parse output: got %d lines, expected 3", len(lines))
+		c.ctx.err = fmt.Errorf("unexpected git rev-parse output: got %d lines, expected 3", len(lines))
 		return
 	}
 
-	gitCtx.gitDir = strings.TrimSpace(lines[0])
+	c.ctx.gitDir = strings.TrimSpace(lines[0])
 	commonDirRaw := strings.TrimSpace(lines[1])
 	repoRootRaw := strings.TrimSpace(lines[2])
 
 	// Convert commonDir to absolute for reliable comparison
 	absCommon, err := filepath.Abs(commonDirRaw)
 	if err != nil {
-		gitCtx.err = fmt.Errorf("failed to resolve common dir path: %w", err)
+		c.ctx.err = fmt.Errorf("failed to resolve common dir path: %w", err)
 		return
 	}
-	gitCtx.commonDir = absCommon
+	c.ctx.commonDir = absCommon
 
 	// Convert gitDir to absolute for worktree comparison
-	absGitDir, err := filepath.Abs(gitCtx.gitDir)
+	absGitDir, err := filepath.Abs(c.ctx.gitDir)
 	if err != nil {
-		gitCtx.err = fmt.Errorf("failed to resolve git dir path: %w", err)
+		c.ctx.err = fmt.Errorf("failed to resolve git dir path: %w", err)
 		return
 	}
 
 	// Derive isWorktree from comparing absolute paths
-	gitCtx.isWorktree = absGitDir != absCommon
+	c.ctx.isWorktree = absGitDir != absCommon
 
 	// Process repoRoot: normalize Windows paths, resolve symlinks,
 	// and canonicalize case on case-insensitive filesystems (GH#880).
@@ -75,16 +79,20 @@ func initGitContext() {
 	if canonicalized := canonicalizeCase(repoRoot); canonicalized != "" {
 		repoRoot = canonicalized
 	}
-	gitCtx.repoRoot = repoRoot
+	c.ctx.repoRoot = repoRoot
 }
 
 // getGitContext returns the cached git context, initializing it if needed.
 func getGitContext() (*gitContext, error) {
-	gitCtxOnce.Do(initGitContext)
-	if gitCtx.err != nil {
-		return nil, gitCtx.err
+	gitCache.once.Do(gitCache.init)
+	if gitCache.ctx.err != nil {
+		return nil, gitCache.ctx.err
 	}
-	return &gitCtx, nil
+	return gitCache.context(), nil
+}
+
+func (c *gitContextCache) context() *gitContext {
+	return &c.ctx
 }
 
 // GetGitDir returns the actual .git directory path for the current repository.
@@ -129,34 +137,7 @@ func GetGitHooksDir() (string, error) {
 	if out, err := cmd.Output(); err == nil {
 		hooksPath := strings.TrimSpace(string(out))
 		if hooksPath != "" {
-			// Expand tilde — git config may return ~/... which Go doesn't expand.
-			// Without this, Windows treats "~/.githooks" as a relative path and
-			// joins it to the repo root, creating a literal "~" directory. (GH#1796)
-			if strings.HasPrefix(hooksPath, "~/") || strings.HasPrefix(hooksPath, "~\\") {
-				if home, err := os.UserHomeDir(); err == nil {
-					hooksPath = filepath.Join(home, hooksPath[2:])
-				}
-			} else if hooksPath == "~" {
-				if home, err := os.UserHomeDir(); err == nil {
-					hooksPath = home
-				}
-			}
-
-			if filepath.IsAbs(hooksPath) {
-				return hooksPath, nil
-			}
-			ctx, err := getGitContext()
-			if err != nil {
-				return "", err
-			}
-			// Git treats relative core.hooksPath as relative to the repo root in common usage.
-			// (e.g., ".beads/hooks", ".githooks").
-			p := filepath.Join(ctx.repoRoot, hooksPath)
-			if abs, err := filepath.Abs(p); err == nil {
-				return abs, nil
-			}
-
-			return p, nil
+			return resolveConfiguredHooksPath(hooksPath)
 		}
 	}
 
@@ -166,6 +147,41 @@ func GetGitHooksDir() (string, error) {
 		return "", err
 	}
 	return filepath.Join(ctx.commonDir, "hooks"), nil
+}
+
+func resolveConfiguredHooksPath(hooksPath string) (string, error) {
+	hooksPath = expandHooksHome(hooksPath)
+	if filepath.IsAbs(hooksPath) {
+		return hooksPath, nil
+	}
+	ctx, err := getGitContext()
+	if err != nil {
+		return "", err
+	}
+	// Git treats relative core.hooksPath as relative to the repo root in common usage.
+	// (e.g., ".beads/hooks", ".githooks").
+	p := filepath.Join(ctx.repoRoot, hooksPath)
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs, nil
+	}
+	return p, nil
+}
+
+func expandHooksHome(hooksPath string) string {
+	// Expand tilde — git config may return ~/... which Go doesn't expand.
+	// Without this, Windows treats "~/.githooks" as a relative path and
+	// joins it to the repo root, creating a literal "~" directory. (GH#1796)
+	if strings.HasPrefix(hooksPath, "~/") || strings.HasPrefix(hooksPath, "~\\") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, hooksPath[2:])
+		}
+	}
+	if hooksPath == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home
+		}
+	}
+	return hooksPath
 }
 
 // GetGitRefsDir returns the path to the Git refs directory.
@@ -285,8 +301,12 @@ func NormalizePath(path string) string {
 //
 // WARNING: Not thread-safe. Only call from single-threaded test contexts.
 func ResetCaches() {
-	gitCtxOnce = sync.Once{}
-	gitCtx = gitContext{}
+	gitCache.reset()
+}
+
+func (c *gitContextCache) reset() {
+	c.once = sync.Once{}
+	c.ctx = gitContext{}
 }
 
 // IsJujutsuRepo returns true if the current directory is in a jujutsu (jj) repository.

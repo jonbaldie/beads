@@ -12,15 +12,25 @@ func TestBuildPagePropertiesAndPulledIssueRoundTrip(t *testing.T) {
 
 	externalRef := "https://www.notion.so/Task-0123456789abcdef0123456789abcdef"
 	issue := &types.Issue{
-		ID:          "bd-123",
-		Title:       "Sync from Notion",
-		Description: "Short summary",
-		Status:      types.StatusInProgress,
-		Priority:    1,
-		IssueType:   types.TypeFeature,
-		Assignee:    "osamu",
-		Labels:      []string{"sync", "notion"},
-		ExternalRef: &externalRef,
+		IssueID: types.IssueID{
+			ID: "bd-123",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Sync from Notion",
+			Description: "Short summary",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusInProgress,
+			Priority:  1,
+			IssueType: types.TypeFeature,
+			Assignee:  "osamu",
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: &externalRef,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"sync", "notion"},
+		},
 	}
 
 	pushIssue, err := PushIssueFromIssue(issue, nil)
@@ -150,11 +160,17 @@ func TestPushIssueFromIssueRejectsUnsupportedIssueType(t *testing.T) {
 	t.Parallel()
 
 	issue := &types.Issue{
-		ID:        "bd-event-1",
-		Title:     "State change: progress -> in_progress",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeEvent,
+		IssueID: types.IssueID{
+			ID: "bd-event-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "State change: progress -> in_progress",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeEvent,
+		},
 	}
 
 	if SupportsIssueType(issue.IssueType, nil) {

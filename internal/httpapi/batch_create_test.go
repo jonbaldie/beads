@@ -21,7 +21,7 @@ const batchCreatePath = "/v0/beads/issues:batchCreate"
 
 func newBatchCreateServer(t *testing.T, creator *roleBatchCreator) *testServer {
 	t.Helper()
-	return newTestServer(t, rolesConfig(Config{BatchCreator: creator}))
+	return newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{BatchCreator: creator}}}))
 }
 
 // TestBatchCreatePassesTheRequestToTheRoleAndAnswersWithWhatItCreated pins the

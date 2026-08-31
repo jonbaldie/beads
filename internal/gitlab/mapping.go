@@ -69,18 +69,8 @@ func statusFromLabelsAndState(labels []string, state string, config *MappingConf
 	for _, label := range labels {
 		prefix, value := parseLabelPrefix(label)
 		if prefix == "status" {
-			normalized := strings.ToLower(value)
-			switch normalized {
-			case "open":
-				return "open"
-			case "in_progress":
-				return "in_progress"
-			case "blocked":
-				return "blocked"
-			case "deferred":
-				return "deferred"
-			case "done":
-				return "closed"
+			if status, ok := statusFromLabelValue(value); ok {
+				return status
 			}
 		}
 	}
@@ -90,6 +80,23 @@ func statusFromLabelsAndState(labels []string, state string, config *MappingConf
 		return s
 	}
 	return "open"
+}
+
+func statusFromLabelValue(value string) (string, bool) {
+	switch strings.ToLower(value) {
+	case "open":
+		return "open", true
+	case "in_progress":
+		return "in_progress", true
+	case "blocked":
+		return "blocked", true
+	case "deferred":
+		return "deferred", true
+	case "done":
+		return "closed", true
+	default:
+		return "", false
+	}
 }
 
 // typeFromLabels extracts issue type from GitLab labels.
@@ -119,14 +126,22 @@ func GitLabIssueToBeads(gl *Issue, config *MappingConfig) *IssueConversion {
 	sourceSystem := fmt.Sprintf("gitlab:%d:%d", gl.ProjectID, gl.IID)
 
 	issue := &types.Issue{
-		Title:        gl.Title,
-		Description:  gl.Description,
-		ExternalRef:  &webURL,
-		SourceSystem: sourceSystem,
-		IssueType:    types.IssueType(typeFromLabels(gl.Labels, config)),
-		Priority:     priorityFromLabels(gl.Labels, config),
-		Status:       types.Status(statusFromLabelsAndState(gl.Labels, gl.State, config)),
-		Labels:       filterNonScopedLabels(gl.Labels),
+		IssueContent: types.IssueContent{
+			Title:       gl.Title,
+			Description: gl.Description,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.IssueType(typeFromLabels(gl.Labels, config)),
+			Priority:  priorityFromLabels(gl.Labels, config),
+			Status:    types.Status(statusFromLabelsAndState(gl.Labels, gl.State, config)),
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef:  &webURL,
+			SourceSystem: sourceSystem,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: filterNonScopedLabels(gl.Labels),
+		},
 	}
 
 	// Set estimate from weight (convert to minutes - assume 1 weight = 1 hour)
@@ -158,7 +173,7 @@ func GitLabIssueToBeads(gl *Issue, config *MappingConfig) *IssueConversion {
 }
 
 // BeadsIssueToGitLabFields converts a beads Issue to GitLab API update fields.
-func BeadsIssueToGitLabFields(issue *types.Issue, config *MappingConfig) map[string]interface{} {
+func BeadsIssueToGitLabFields(issue *types.Issue, _ *MappingConfig) map[string]interface{} {
 	fields := map[string]interface{}{
 		"title":       issue.Title,
 		"description": issue.Description,

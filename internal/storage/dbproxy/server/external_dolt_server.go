@@ -16,13 +16,55 @@ import (
 )
 
 type ExternalDoltServer struct {
-	id              string
-	host            string
-	port            int
-	socket          string
+	externalDoltEndpoint
+	ExternalDoltLifecycle
 	keepAlivePeriod time.Duration
+}
 
+type externalDoltEndpoint struct {
+	id     string
+	host   string
+	port   int
+	socket string
+}
+
+type ExternalDoltLifecycle struct {
 	started atomic.Bool
+}
+
+func (e *externalDoltEndpoint) ID(_ context.Context) string {
+	return e.id
+}
+
+func (e *externalDoltEndpoint) DSN(_ context.Context, database, user, password string) string {
+	dsn := util.DoltServerDSN{
+		User:     user,
+		Password: password,
+		Database: database,
+	}
+	if e.socket != "" {
+		dsn.Socket = e.socket
+	} else {
+		dsn.Host = e.host
+		dsn.Port = e.port
+	}
+	return dsn.String()
+}
+
+func (e *ExternalDoltLifecycle) Start(_ context.Context) error {
+	if !e.started.CompareAndSwap(false, true) {
+		return errors.New("server: ExternalDoltServer.Start: server already started")
+	}
+	return nil
+}
+
+func (e *ExternalDoltLifecycle) Stop(_ context.Context) error {
+	e.started.Store(false)
+	return nil
+}
+
+func (e *ExternalDoltLifecycle) Running(_ context.Context) bool {
+	return e.started.Load()
 }
 
 var _ DatabaseServer = (*ExternalDoltServer)(nil)
@@ -36,10 +78,12 @@ func NewExternalDoltServer(cfg configfile.ExternalDoltConfig) (*ExternalDoltServ
 		keepAlive = defaultKeepAlivePeriod
 	}
 	return &ExternalDoltServer{
-		id:              ExternalDoltServerID(cfg),
-		host:            cfg.Host,
-		port:            cfg.Port,
-		socket:          cfg.Socket,
+		externalDoltEndpoint: externalDoltEndpoint{
+			id:     ExternalDoltServerID(cfg),
+			host:   cfg.Host,
+			port:   cfg.Port,
+			socket: cfg.Socket,
+		},
 		keepAlivePeriod: keepAlive,
 	}, nil
 }
@@ -54,41 +98,6 @@ func externalDoltServerTarget(cfg configfile.ExternalDoltConfig) string {
 		return "unix://" + cfg.Socket
 	}
 	return "tcp://" + net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
-}
-
-func (s *ExternalDoltServer) ID(_ context.Context) string {
-	return s.id
-}
-
-func (s *ExternalDoltServer) DSN(_ context.Context, database, user, password string) string {
-	dsn := util.DoltServerDSN{
-		User:     user,
-		Password: password,
-		Database: database,
-	}
-	if s.socket != "" {
-		dsn.Socket = s.socket
-	} else {
-		dsn.Host = s.host
-		dsn.Port = s.port
-	}
-	return dsn.String()
-}
-
-func (s *ExternalDoltServer) Start(_ context.Context) error {
-	if !s.started.CompareAndSwap(false, true) {
-		return errors.New("server: ExternalDoltServer.Start: server already started")
-	}
-	return nil
-}
-
-func (s *ExternalDoltServer) Stop(_ context.Context) error {
-	s.started.Store(false)
-	return nil
-}
-
-func (s *ExternalDoltServer) Running(_ context.Context) bool {
-	return s.started.Load()
 }
 
 func (s *ExternalDoltServer) Dial(ctx context.Context) (net.Conn, error) {

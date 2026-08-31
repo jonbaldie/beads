@@ -29,13 +29,13 @@ func openUnverifiedProcess(pid int) (proc *unverifiedProcess, gone bool, err err
 	return &unverifiedProcess{pid: pid}, false, nil
 }
 
-func (p *unverifiedProcess) executableBasename() (basename string, gone bool, err error) {
+func executableBasename(p *unverifiedProcess) (basename string, gone bool, err error) {
 	return processExecutableBasename(p.pid)
 }
 
 // commandLineContains reports whether the process command line contains
 // needle, read best-effort through ps.
-func (p *unverifiedProcess) commandLineContains(needle string) (matched bool, gone bool, err error) {
+func commandLineContains(p *unverifiedProcess, needle string) (matched bool, gone bool, err error) {
 	output, commandErr := exec.Command("ps", "-p", strconv.Itoa(p.pid), "-o", "args=").Output()
 	if commandErr != nil {
 		if killErr := syscall.Kill(p.pid, 0); errors.Is(killErr, unix.ESRCH) {
@@ -47,7 +47,7 @@ func (p *unverifiedProcess) commandLineContains(needle string) (matched bool, go
 }
 
 // kill sends SIGKILL. gone reports a target that had already exited.
-func (p *unverifiedProcess) kill() (gone bool, err error) {
+func killUnverifiedProcess(p *unverifiedProcess) (gone bool, err error) {
 	if killErr := syscall.Kill(p.pid, syscall.SIGKILL); killErr != nil {
 		if errors.Is(killErr, unix.ESRCH) {
 			return true, nil
@@ -57,7 +57,7 @@ func (p *unverifiedProcess) kill() (gone bool, err error) {
 	return false, nil
 }
 
-func (p *unverifiedProcess) exited() (bool, error) {
+func unverifiedProcessExited(p *unverifiedProcess) (bool, error) {
 	_, gone, err := processExecutableBasename(p.pid)
 	if err != nil {
 		return false, err
@@ -65,4 +65,4 @@ func (p *unverifiedProcess) exited() (bool, error) {
 	return gone, nil
 }
 
-func (p *unverifiedProcess) close() {}
+func closeUnverifiedProcess(_ *unverifiedProcess) {}

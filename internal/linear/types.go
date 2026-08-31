@@ -7,7 +7,6 @@ package linear
 
 import (
 	"fmt"
-	"net/http"
 	"time"
 )
 
@@ -52,19 +51,6 @@ const (
 	AuthModeAPIKey AuthMode = iota
 	AuthModeOAuth
 )
-
-// Client provides methods to interact with the Linear GraphQL API.
-type Client struct {
-	APIKey         string
-	TeamID         string
-	ProjectID      string // Optional: filter issues to a specific project
-	Endpoint       string // GraphQL endpoint URL (defaults to DefaultAPIEndpoint)
-	HTTPClient     *http.Client
-	AuthMode       AuthMode
-	TokenManager   *OAuthTokenManager
-	RateLimitFloor int // Minimum remaining quota before circuit breaker trips (0 = use DefaultRateLimitFloor)
-	rateLimitState *rateLimitState
-}
 
 // RateLimitInfo captures rate-limit state from Linear API response headers.
 type RateLimitInfo struct {
@@ -120,22 +106,28 @@ type GraphQLError struct {
 
 // Issue represents an issue from the Linear API.
 type Issue struct {
-	ID               string            `json:"id"`
-	Identifier       string            `json:"identifier"` // e.g., "TEAM-123"
-	Title            string            `json:"title"`
-	Description      string            `json:"description"`
-	URL              string            `json:"url"`
-	Priority         int               `json:"priority"` // 0=no priority, 1=urgent, 2=high, 3=medium, 4=low
-	State            *State            `json:"state"`
-	Assignee         *User             `json:"assignee"`
-	Labels           *Labels           `json:"labels"`
+	ID          string  `json:"id"`
+	Identifier  string  `json:"identifier"` // e.g., "TEAM-123"
+	Title       string  `json:"title"`
+	Description string  `json:"description"`
+	URL         string  `json:"url"`
+	Priority    int     `json:"priority"` // 0=no priority, 1=urgent, 2=high, 3=medium, 4=low
+	State       *State  `json:"state"`
+	Assignee    *User   `json:"assignee"`
+	Labels      *Labels `json:"labels"`
+	IssueRelations
+	CreatedAt   string `json:"createdAt"`
+	UpdatedAt   string `json:"updatedAt"`
+	CompletedAt string `json:"completedAt,omitempty"`
+}
+
+// IssueRelations keeps the optional relationship payload together while the
+// anonymous embedding preserves Issue's flat JSON shape and promoted fields.
+type IssueRelations struct {
 	Project          *Project          `json:"project,omitempty"`
 	ProjectMilestone *ProjectMilestone `json:"projectMilestone,omitempty"`
 	Parent           *Parent           `json:"parent,omitempty"`
 	Relations        *Relations        `json:"relations,omitempty"`
-	CreatedAt        string            `json:"createdAt"`
-	UpdatedAt        string            `json:"updatedAt"`
-	CompletedAt      string            `json:"completedAt,omitempty"`
 }
 
 // State represents a workflow state in Linear.

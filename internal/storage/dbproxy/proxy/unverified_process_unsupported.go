@@ -15,24 +15,24 @@ var errUnverifiedUnsupported = fmt.Errorf(
 
 type unverifiedProcess struct{}
 
-func openUnverifiedProcess(pid int) (proc *unverifiedProcess, gone bool, err error) {
+func openUnverifiedProcess(_ int) (proc *unverifiedProcess, gone bool, err error) {
 	return nil, false, errUnverifiedUnsupported
 }
 
-func (p *unverifiedProcess) executableBasename() (basename string, gone bool, err error) {
+func executableBasename(_ *unverifiedProcess) (basename string, gone bool, err error) {
 	return "", false, errUnverifiedUnsupported
 }
 
-func (p *unverifiedProcess) commandLineContains(needle string) (matched bool, gone bool, err error) {
+func commandLineContains(_ *unverifiedProcess, _ string) (matched bool, gone bool, err error) {
 	return false, false, errUnverifiedUnsupported
 }
 
-func (p *unverifiedProcess) kill() (gone bool, err error) {
+func killUnverifiedProcess(_ *unverifiedProcess) (gone bool, err error) {
 	return false, errUnverifiedUnsupported
 }
 
-func (p *unverifiedProcess) exited() (bool, error) {
+func unverifiedProcessExited(_ *unverifiedProcess) (bool, error) {
 	return false, errUnverifiedUnsupported
 }
 
-func (p *unverifiedProcess) close() {}
+func closeUnverifiedProcess(_ *unverifiedProcess) {}

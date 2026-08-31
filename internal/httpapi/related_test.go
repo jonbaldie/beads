@@ -29,14 +29,14 @@ import (
 func newRelatedServer(t *testing.T, items []*issueops.RelatedIssue) (*testServer, *roleRelations) {
 	t.Helper()
 	rel := &roleRelations{items: items}
-	return newTestServer(t, rolesConfig(Config{Relations: rel})), rel
+	return newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{Relations: rel}}})), rel
 }
 
 // relatedNeighbor is the smallest element the role can answer with: an issue
 // and the type of the edge that led to it.
 func relatedNeighbor(id string, depType types.DependencyType) *issueops.RelatedIssue {
 	return &issueops.RelatedIssue{
-		Issue:          types.Issue{ID: id, Title: "neighbor " + id},
+		Issue:          types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: "neighbor " + id}},
 		DependencyType: depType,
 	}
 }
@@ -238,7 +238,7 @@ func TestListRelatedIssuesAnswersAnEmptyArrayNotNull(t *testing.T) {
 // the empty list is the common case — so a typo would never surface.
 func TestListRelatedIssuesAnswersAnAbsentAnchorWithNotFound(t *testing.T) {
 	rel := &roleRelations{err: storage.ErrNotFound}
-	ts := newTestServer(t, rolesConfig(Config{Relations: rel}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{Relations: rel}}}))
 
 	resp := ts.get(t, "/v0/beads/issues/bd-gone/related?direction=out")
 	if resp.StatusCode != http.StatusNotFound {
@@ -288,7 +288,7 @@ func TestListRelatedIssuesNamesTheRefusedParameter(t *testing.T) {
 			// them rather than the handler pre-empting them — which is the
 			// arrangement the handler's doc comment describes.
 			rel := &roleRelations{err: issueops.ErrValidation}
-			ts := newTestServer(t, rolesConfig(Config{Relations: rel}))
+			ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{Relations: rel}}}))
 
 			resp := ts.get(t, "/v0/beads/issues/bd-1/related"+tc.query)
 			if resp.StatusCode != http.StatusBadRequest {
@@ -415,7 +415,10 @@ func TestListRelatedIssuesReachesItsOwnRole(t *testing.T) {
 	rel := &roleRelations{}
 	edges := &roleEdgeReader{}
 	rd := &roleReader{}
-	ts := newTestServer(t, rolesConfig(Config{Relations: rel, EdgeReader: edges, Reader: rd}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{
+		IssueRoles: IssueRoles{Relations: rel, Reader: rd},
+		GraphRoles: GraphRoles{EdgeReader: edges},
+	}}))
 
 	resp := ts.get(t, "/v0/beads/issues/bd-1/related?direction=out")
 	if resp.StatusCode != http.StatusOK {
@@ -438,7 +441,7 @@ func TestListRelatedIssuesReachesItsOwnRole(t *testing.T) {
 // fault.
 func TestListRelatedIssuesKeepsANonValidationFailureAtFiveHundred(t *testing.T) {
 	rel := &roleRelations{err: errors.New("backend is unreachable")}
-	ts := newTestServer(t, rolesConfig(Config{Relations: rel}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{Relations: rel}}}))
 
 	resp := ts.get(t, "/v0/beads/issues/bd-1/related?direction=out")
 	if resp.StatusCode != http.StatusInternalServerError {

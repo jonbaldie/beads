@@ -314,7 +314,7 @@ func TestValidate_ValidFormula(t *testing.T) {
 		Type:    TypeWorkflow,
 		Steps: []*Step{
 			{ID: "step1", Title: "Step 1"},
-			{ID: "step2", Title: "Step 2", DependsOn: []string{"step1"}},
+			{ID: "step2", Title: "Step 2", StepExpansion: StepExpansion{DependsOn: []string{"step1"}}},
 		},
 	}
 
@@ -359,7 +359,7 @@ func TestValidate_InvalidDependency(t *testing.T) {
 		Version: 1,
 		Type:    TypeWorkflow,
 		Steps: []*Step{
-			{ID: "step1", Title: "Step 1", DependsOn: []string{"nonexistent"}},
+			{ID: "step1", Title: "Step 1", StepExpansion: StepExpansion{DependsOn: []string{"nonexistent"}}},
 		},
 	}
 
@@ -414,7 +414,7 @@ func TestValidate_ChildSteps(t *testing.T) {
 				Title: "Epic 1",
 				Children: []*Step{
 					{ID: "child1", Title: "Child 1"},
-					{ID: "child2", Title: "Child 2", DependsOn: []string{"child1"}},
+					{ID: "child2", Title: "Child 2", StepExpansion: StepExpansion{DependsOn: []string{"child1"}}},
 				},
 			},
 		},
@@ -436,7 +436,7 @@ func TestValidate_ChildStepsInvalidDependsOn(t *testing.T) {
 				Title: "Epic 1",
 				Children: []*Step{
 					{ID: "child1", Title: "Child 1"},
-					{ID: "child2", Title: "Child 2", DependsOn: []string{"nonexistent"}},
+					{ID: "child2", Title: "Child 2", StepExpansion: StepExpansion{DependsOn: []string{"nonexistent"}}},
 				},
 			},
 		},
@@ -998,7 +998,7 @@ func TestValidate_WaitsForField(t *testing.T) {
 		Type:    TypeWorkflow,
 		Steps: []*Step{
 			{ID: "fanout", Title: "Fanout"},
-			{ID: "aggregate", Title: "Aggregate", Needs: []string{"fanout"}, WaitsFor: "all-children"},
+			{ID: "aggregate", Title: "Aggregate", Needs: []string{"fanout"}, StepExpansion: StepExpansion{WaitsFor: "all-children"}},
 		},
 	}
 
@@ -1012,7 +1012,7 @@ func TestValidate_WaitsForField(t *testing.T) {
 		Version: 1,
 		Type:    TypeWorkflow,
 		Steps: []*Step{
-			{ID: "step1", Title: "Step 1", WaitsFor: "invalid-gate"},
+			{ID: "step1", Title: "Step 1", StepExpansion: StepExpansion{WaitsFor: "invalid-gate"}},
 		},
 	}
 
@@ -1031,7 +1031,7 @@ func TestValidate_WaitsForChildrenOf(t *testing.T) {
 		Type:    TypeWorkflow,
 		Steps: []*Step{
 			{ID: "survey-workers", Title: "Survey Workers"},
-			{ID: "aggregate", Title: "Aggregate", Needs: []string{"survey-workers"}, WaitsFor: "children-of(survey-workers)"},
+			{ID: "aggregate", Title: "Aggregate", Needs: []string{"survey-workers"}, StepExpansion: StepExpansion{WaitsFor: "children-of(survey-workers)"}},
 		},
 	}
 
@@ -1045,7 +1045,7 @@ func TestValidate_WaitsForChildrenOf(t *testing.T) {
 		Version: 1,
 		Type:    TypeWorkflow,
 		Steps: []*Step{
-			{ID: "step1", Title: "Step 1", WaitsFor: "children-of(unknown-step)"},
+			{ID: "step1", Title: "Step 1", StepExpansion: StepExpansion{WaitsFor: "children-of(unknown-step)"}},
 		},
 	}
 
@@ -1059,7 +1059,7 @@ func TestValidate_WaitsForChildrenOf(t *testing.T) {
 		Version: 1,
 		Type:    TypeWorkflow,
 		Steps: []*Step{
-			{ID: "step1", Title: "Step 1", WaitsFor: "children-of()"},
+			{ID: "step1", Title: "Step 1", StepExpansion: StepExpansion{WaitsFor: "children-of()"}},
 		},
 	}
 
@@ -1118,7 +1118,7 @@ func TestValidate_ChildNeedsAndWaitsFor(t *testing.T) {
 				Title: "Epic 1",
 				Children: []*Step{
 					{ID: "child1", Title: "Child 1"},
-					{ID: "child2", Title: "Child 2", Needs: []string{"child1"}, WaitsFor: "any-children"},
+					{ID: "child2", Title: "Child 2", Needs: []string{"child1"}, StepExpansion: StepExpansion{WaitsFor: "any-children"}},
 				},
 			},
 		},
@@ -1158,7 +1158,7 @@ func TestValidate_ChildNeedsAndWaitsFor(t *testing.T) {
 				ID:    "epic1",
 				Title: "Epic 1",
 				Children: []*Step{
-					{ID: "child1", Title: "Child 1", WaitsFor: "bad-value"},
+					{ID: "child1", Title: "Child 1", StepExpansion: StepExpansion{WaitsFor: "bad-value"}},
 				},
 			},
 		},

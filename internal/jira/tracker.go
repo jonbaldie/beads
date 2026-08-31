@@ -4,15 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 
-	"github.com/jonbaldie/beads/internal/config"
-	"github.com/jonbaldie/beads/internal/debug"
 	"github.com/jonbaldie/beads/internal/storage"
 	"github.com/jonbaldie/beads/internal/tracker"
-	"github.com/jonbaldie/beads/internal/types"
 )
 
 func init() {
@@ -35,141 +31,7 @@ type Tracker struct {
 	typeCustomFields map[string]map[string]interface{} // Jira issue type → Jira field name/id → value
 }
 
-// SetProjectKeys sets project keys before Init(). When set, Init() uses these
-// instead of reading from config. This supports the --project CLI flag.
-func (t *Tracker) SetProjectKeys(keys []string) {
-	t.projectKeys = keys
-}
-
-// ProjectKeys returns the list of configured project keys.
-func (t *Tracker) ProjectKeys() []string {
-	return t.projectKeys
-}
-
-// PrimaryProjectKey returns the first configured project key.
-func (t *Tracker) PrimaryProjectKey() string {
-	if len(t.projectKeys) == 0 {
-		return ""
-	}
-	return t.projectKeys[0]
-}
-
-func (t *Tracker) Name() string         { return "jira" }
-func (t *Tracker) DisplayName() string  { return "Jira" }
-func (t *Tracker) ConfigPrefix() string { return "jira" }
-
-func (t *Tracker) Init(ctx context.Context, store storage.Storage) error {
-	t.store = store
-
-	jiraURL, err := t.getConfig(ctx, "jira.url", "JIRA_URL")
-	if err != nil || jiraURL == "" {
-		return fmt.Errorf("Jira URL not configured (set jira.url or JIRA_URL)")
-	}
-	t.jiraURL = jiraURL
-
-	// Resolve project keys: use pre-set keys (from CLI), or fall back to config.
-	if len(t.projectKeys) == 0 {
-		pluralVal, _ := t.getConfig(ctx, "jira.projects", "JIRA_PROJECTS")
-		singularVal, _ := t.getConfig(ctx, "jira.project", "JIRA_PROJECT")
-		t.projectKeys = tracker.ResolveProjectIDs(nil, pluralVal, singularVal)
-	}
-	if len(t.projectKeys) == 0 {
-		return fmt.Errorf("Jira project not configured (set jira.project, jira.projects, or JIRA_PROJECT)")
-	}
-
-	username, _ := t.getConfig(ctx, "jira.username", "JIRA_USERNAME")
-	apiToken, err := t.getConfig(ctx, "jira.api_token", "JIRA_API_TOKEN")
-	if err != nil || apiToken == "" {
-		return fmt.Errorf("Jira API token not configured (set jira.api_token or JIRA_API_TOKEN)")
-	}
-
-	t.client = NewClient(jiraURL, username, apiToken)
-
-	apiVersion, _ := t.getConfig(ctx, "jira.api_version", "JIRA_API_VERSION")
-	if apiVersion == "" {
-		apiVersion = "3"
-	}
-	t.apiVersion = apiVersion
-	t.client.APIVersion = apiVersion
-
-	// Load optional custom status map from all jira.status_map.* config keys.
-	// Using GetAllConfig supports arbitrary (including custom) beads status names.
-	if allConfig, err := t.store.GetAllConfig(ctx); err == nil {
-		const statusPrefix = "jira.status_map."
-		statusMap := make(map[string]string)
-		for key, val := range allConfig {
-			if strings.HasPrefix(key, statusPrefix) && val != "" {
-				statusMap[strings.TrimPrefix(key, statusPrefix)] = val
-			}
-		}
-		if len(statusMap) > 0 {
-			t.statusMap = statusMap
-		}
-
-		const typePrefix = "jira.type_map."
-		typeMap := make(map[string]string)
-		for key, val := range allConfig {
-			if strings.HasPrefix(key, typePrefix) && val != "" {
-				typeMap[strings.TrimPrefix(key, typePrefix)] = val
-			}
-		}
-		if len(typeMap) > 0 {
-			t.typeMap = typeMap
-		}
-
-		const priorityPrefix = "jira.priority_map."
-		priorityMap := make(map[string]string)
-		for key, val := range allConfig {
-			if strings.HasPrefix(key, priorityPrefix) && val != "" {
-				priorityMap[strings.TrimPrefix(key, priorityPrefix)] = val
-			}
-		}
-		if len(priorityMap) > 0 {
-			t.priorityMap = priorityMap
-		}
-
-		const customFieldPrefix = "jira.custom_fields."
-		customFields := make(map[string]interface{})
-		typeCustomFields := make(map[string]map[string]interface{})
-		for key, val := range allConfig {
-			if !strings.HasPrefix(key, customFieldPrefix) || strings.TrimSpace(val) == "" {
-				continue
-			}
-
-			suffix := strings.TrimPrefix(key, customFieldPrefix)
-			if suffix == "" {
-				continue
-			}
-
-			parsed, err := parseJiraCustomFieldValue(val)
-			if err != nil {
-				return fmt.Errorf("parse %s: %w", key, err)
-			}
-
-			parts := strings.SplitN(suffix, ".", 2)
-			if len(parts) == 2 {
-				if parts[0] == "" || parts[1] == "" {
-					continue
-				}
-				if typeCustomFields[parts[0]] == nil {
-					typeCustomFields[parts[0]] = make(map[string]interface{})
-				}
-				typeCustomFields[parts[0]][parts[1]] = parsed
-				continue
-			}
-			customFields[suffix] = parsed
-		}
-		if len(customFields) > 0 {
-			t.customFields = customFields
-		}
-		if len(typeCustomFields) > 0 {
-			t.typeCustomFields = typeCustomFields
-		}
-	}
-
-	return nil
-}
-
+// Validate checks that the tracker is properly initialized.
 func (t *Tracker) Validate() error {
 	if t.client == nil {
 		return fmt.Errorf("Jira tracker not initialized")
@@ -177,194 +39,127 @@ func (t *Tracker) Validate() error {
 	return nil
 }
 
-func (t *Tracker) Close() error { return nil }
+// SetProjectKeys sets project keys before Init(). When set, Init() uses these
+// instead of reading from config. This supports the --project CLI flag.
 
-func (t *Tracker) FetchIssues(ctx context.Context, opts tracker.FetchOptions) ([]tracker.TrackerIssue, error) {
-	// Build JQL query — use IN clause for multi-project.
-	var jql string
-	if len(t.projectKeys) == 1 {
-		jql = fmt.Sprintf("project = %q", t.projectKeys[0])
-	} else {
-		quoted := make([]string, len(t.projectKeys))
-		for i, k := range t.projectKeys {
-			quoted[i] = fmt.Sprintf("%q", k)
-		}
-		jql = fmt.Sprintf("project IN (%s)", strings.Join(quoted, ", "))
-	}
+// ProjectKeys returns the list of configured project keys.
 
-	// User-configured pull_jql filter (e.g. 'labels = "agent-ready"')
-	if pullJQL, _ := t.getConfig(ctx, "jira.pull_jql", "JIRA_PULL_JQL"); pullJQL != "" {
-		jql += " AND " + pullJQL
-	}
+// PrimaryProjectKey returns the first configured project key.
 
-	// State filter
-	switch opts.State {
-	case "open":
-		jql += " AND statusCategory != Done"
-	case "closed":
-		jql += " AND statusCategory = Done"
-	}
-
-	// Incremental sync
-	if opts.Since != nil {
-		jql += fmt.Sprintf(` AND updated >= "%s"`, opts.Since.UTC().Format("2006-01-02 15:04 UTC"))
-	}
-
-	jql += " ORDER BY updated DESC"
-
-	issues, err := t.client.SearchIssues(ctx, jql)
-	if err != nil {
-		return nil, err
-	}
-
-	result := make([]tracker.TrackerIssue, 0, len(issues))
-	for i := range issues {
-		result = append(result, jiraToTrackerIssue(&issues[i], t.priorityMap))
-	}
-	return result, nil
+type jiraInitConfig struct {
+	jiraURL     string
+	projectKeys []string
+	username    string
+	apiToken    string
+	apiVersion  string
 }
 
-func (t *Tracker) FetchIssue(ctx context.Context, identifier string) (*tracker.TrackerIssue, error) {
-	issue, err := t.client.GetIssue(ctx, identifier)
-	if err != nil {
-		return nil, err
+func loadJiraInitConfig(t *Tracker, ctx context.Context) (jiraInitConfig, error) {
+	jiraURL := t.getConfig(ctx, "jira.url", "JIRA_URL")
+	if jiraURL == "" {
+		return jiraInitConfig{}, fmt.Errorf("Jira URL not configured (set jira.url or JIRA_URL)")
 	}
-	if issue == nil {
-		return nil, nil
+	projectKeys := t.projectKeys
+	if len(projectKeys) == 0 {
+		pluralVal := t.getConfig(ctx, "jira.projects", "JIRA_PROJECTS")
+		singularVal := t.getConfig(ctx, "jira.project", "JIRA_PROJECT")
+		projectKeys = tracker.ResolveProjectIDs(nil, pluralVal, singularVal)
 	}
-	ti := jiraToTrackerIssue(issue, t.priorityMap)
-	return &ti, nil
+	if len(projectKeys) == 0 {
+		return jiraInitConfig{}, fmt.Errorf("Jira project not configured (set jira.project, jira.projects, or JIRA_PROJECT)")
+	}
+	username := t.getConfig(ctx, "jira.username", "JIRA_USERNAME")
+	apiToken := t.getConfig(ctx, "jira.api_token", "JIRA_API_TOKEN")
+	if apiToken == "" {
+		return jiraInitConfig{}, fmt.Errorf("Jira API token not configured (set jira.api_token or JIRA_API_TOKEN)")
+	}
+	apiVersion := t.getConfig(ctx, "jira.api_version", "JIRA_API_VERSION")
+	if apiVersion == "" {
+		apiVersion = "3"
+	}
+	return jiraInitConfig{jiraURL: jiraURL, projectKeys: projectKeys, username: username, apiToken: apiToken, apiVersion: apiVersion}, nil
 }
 
-func (t *Tracker) CreateIssue(ctx context.Context, issue *types.Issue) (*tracker.TrackerIssue, error) {
-	mapper := t.FieldMapper()
-	fields := mapper.IssueToTracker(issue)
-
-	// Set project to primary (first) project key.
-	fields["project"] = map[string]string{"key": t.PrimaryProjectKey()}
-
-	created, err := t.client.CreateIssue(ctx, fields)
+func loadJiraMappingConfig(t *Tracker, ctx context.Context) error {
+	allConfig, err := t.store.GetAllConfig(ctx)
 	if err != nil {
-		return nil, err
+		return nil
 	}
-
-	ti := jiraToTrackerIssue(created, t.priorityMap)
-	return &ti, nil
+	if statusMap := prefixedStringMap(allConfig, "jira.status_map."); len(statusMap) > 0 {
+		t.statusMap = statusMap
+	}
+	if typeMap := prefixedStringMap(allConfig, "jira.type_map."); len(typeMap) > 0 {
+		t.typeMap = typeMap
+	}
+	if priorityMap := prefixedStringMap(allConfig, "jira.priority_map."); len(priorityMap) > 0 {
+		t.priorityMap = priorityMap
+	}
+	customFields, typeCustomFields, err := prefixedCustomFields(allConfig, "jira.custom_fields.")
+	if err != nil {
+		return err
+	}
+	if len(customFields) > 0 {
+		t.customFields = customFields
+	}
+	if len(typeCustomFields) > 0 {
+		t.typeCustomFields = typeCustomFields
+	}
+	return nil
 }
 
-func (t *Tracker) UpdateIssue(ctx context.Context, externalID string, issue *types.Issue) (*tracker.TrackerIssue, error) {
-	mapper := t.FieldMapper()
-	fields := mapper.IssueToTracker(issue)
-
-	if err := t.client.UpdateIssue(ctx, externalID, fields); err != nil {
-		return nil, err
+func prefixedStringMap(config map[string]string, prefix string) map[string]string {
+	result := make(map[string]string)
+	for key, val := range config {
+		if strings.HasPrefix(key, prefix) && val != "" {
+			result[strings.TrimPrefix(key, prefix)] = val
+		}
 	}
+	return result
+}
 
-	// Fetch current state to check whether a status transition is actually needed.
-	current, err := t.client.GetIssue(ctx, externalID)
+func prefixedCustomFields(config map[string]string, prefix string) (map[string]interface{}, map[string]map[string]interface{}, error) {
+	customFields := make(map[string]interface{})
+	typeCustomFields := make(map[string]map[string]interface{})
+	for key, val := range config {
+		if strings.HasPrefix(key, prefix) && strings.TrimSpace(val) != "" {
+			if err := addPrefixedCustomField(customFields, typeCustomFields, strings.TrimPrefix(key, prefix), val, key); err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	return customFields, typeCustomFields, nil
+}
+
+func addPrefixedCustomField(customFields map[string]interface{}, typeCustomFields map[string]map[string]interface{}, suffix, value, key string) error {
+	if suffix == "" {
+		return nil
+	}
+	parsed, err := parseJiraCustomFieldValue(value)
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("parse %s: %w", key, err)
 	}
-
-	desiredName, _ := mapper.StatusToTracker(issue.Status).(string)
-	currentName := ""
-	if current.Fields.Status != nil {
-		currentName = current.Fields.Status.Name
-	}
-
-	if !strings.EqualFold(currentName, desiredName) {
-		// Status differs — apply the workflow transition.
-		if err := t.applyTransition(ctx, externalID, issue.Status); err != nil {
-			return nil, err
+	parts := strings.SplitN(suffix, ".", 2)
+	if len(parts) == 2 {
+		if parts[0] == "" || parts[1] == "" {
+			return nil
 		}
-		// Re-fetch to return the state after the transition.
-		current, err = t.client.GetIssue(ctx, externalID)
-		if err != nil {
-			return nil, err
+		if typeCustomFields[parts[0]] == nil {
+			typeCustomFields[parts[0]] = make(map[string]interface{})
 		}
+		typeCustomFields[parts[0]][parts[1]] = parsed
+		return nil
 	}
-
-	ti := jiraToTrackerIssue(current, t.priorityMap)
-	return &ti, nil
+	customFields[suffix] = parsed
+	return nil
 }
 
 // applyTransition finds and applies the Jira workflow transition matching the given beads status.
 // If no matching transition is available (e.g., the issue is already in the target state or the
 // workflow doesn't permit the path), it silently succeeds.
-func (t *Tracker) applyTransition(ctx context.Context, key string, status types.Status) error {
-	mapper := t.FieldMapper()
-	desiredName, ok := mapper.StatusToTracker(status).(string)
-	if !ok || desiredName == "" {
-		return nil
-	}
-
-	transitions, err := t.client.GetIssueTransitions(ctx, key)
-	if err != nil {
-		return err
-	}
-
-	for _, tr := range transitions {
-		if strings.EqualFold(tr.To.Name, desiredName) {
-			return t.client.TransitionIssue(ctx, key, tr.ID)
-		}
-	}
-
-	debug.Logf("jira: no available transition to %q for %s (%d transitions checked)\n", desiredName, key, len(transitions))
-	return nil
-}
-
-func (t *Tracker) FieldMapper() tracker.FieldMapper {
-	return &jiraFieldMapper{
-		apiVersion:       t.apiVersion,
-		statusMap:        t.statusMap,
-		typeMap:          t.typeMap,
-		priorityMap:      t.priorityMap,
-		customFields:     t.customFields,
-		typeCustomFields: t.typeCustomFields,
-	}
-}
-
-func (t *Tracker) IsExternalRef(ref string) bool {
-	return IsJiraExternalRef(ref, t.jiraURL)
-}
-
-func (t *Tracker) ExtractIdentifier(ref string) string {
-	return ExtractJiraKey(ref)
-}
-
-func (t *Tracker) BuildExternalRef(issue *tracker.TrackerIssue) string {
-	return fmt.Sprintf("%s/browse/%s", t.jiraURL, issue.Identifier)
-}
 
 // getConfig reads a config value from storage, falling back to env var.
 // For yaml-only keys (e.g. jira.api_token), reads from config.yaml first
 // to avoid leaking secrets when pushing the Dolt database to remotes.
-func (t *Tracker) getConfig(ctx context.Context, key, envVar string) (string, error) {
-	// Secret keys are stored in config.yaml, not the Dolt database,
-	// to avoid leaking secrets when pushing to remotes.
-	if config.IsYamlOnlyKey(key) {
-		if val := config.GetString(key); val != "" {
-			return val, nil
-		}
-		if envVar != "" {
-			if envVal := os.Getenv(envVar); envVal != "" {
-				return envVal, nil
-			}
-		}
-		return "", nil
-	}
-
-	val, err := t.store.GetConfig(ctx, key)
-	if err == nil && val != "" {
-		return val, nil
-	}
-	if envVar != "" {
-		if envVal := os.Getenv(envVar); envVal != "" {
-			return envVal, nil
-		}
-	}
-	return "", nil
-}
 
 func parseJiraCustomFieldValue(value string) (interface{}, error) {
 	trimmed := strings.TrimSpace(value)
@@ -393,65 +188,53 @@ func jiraToTrackerIssue(ji *Issue, priorityMap map[string]string) tracker.Tracke
 		Raw:        ji,
 	}
 
-	// Description: convert ADF to plain text
-	ti.Description = DescriptionToPlainText(ji.Fields.Description)
+	applyJiraDetails(&ti, ji, priorityMap)
+	return ti
+}
 
-	// Priority
+func applyJiraDetails(ti *tracker.TrackerIssue, ji *Issue, priorityMap map[string]string) {
+	ti.Description = DescriptionToPlainText(ji.Fields.Description)
 	if ji.Fields.Priority != nil {
 		ti.Priority = jiraPriorityToNumeric(ji.Fields.Priority.Name, priorityMap)
 	}
-
-	// State
 	if ji.Fields.Status != nil {
 		ti.State = ji.Fields.Status.Name
 	}
-
-	// Type
 	if ji.Fields.IssueType != nil {
 		ti.Type = ji.Fields.IssueType.Name
 	}
-
-	// Assignee
 	if ji.Fields.Assignee != nil {
 		ti.Assignee = ji.Fields.Assignee.DisplayName
 		ti.AssigneeEmail = ji.Fields.Assignee.EmailAddress
 		ti.AssigneeID = ji.Fields.Assignee.AccountID
 	}
+	applyJiraTimestamps(ti, ji)
+	applyJiraMetadata(ti, ji)
+}
 
-	// Timestamps
-	if t, err := ParseTimestamp(ji.Fields.Created); err == nil {
-		ti.CreatedAt = t
+func applyJiraTimestamps(ti *tracker.TrackerIssue, ji *Issue) {
+	if parsed, err := ParseTimestamp(ji.Fields.Created); err == nil {
+		ti.CreatedAt = parsed
 	}
-	if t, err := ParseTimestamp(ji.Fields.Updated); err == nil {
-		ti.UpdatedAt = t
+	if parsed, err := ParseTimestamp(ji.Fields.Updated); err == nil {
+		ti.UpdatedAt = parsed
 	}
+}
 
-	// Store Jira-specific metadata
-	ti.Metadata = map[string]interface{}{
-		"source_system": fmt.Sprintf("jira:%s:%s", projectKeyFromIssue(ji), ji.Key),
-	}
+func applyJiraMetadata(ti *tracker.TrackerIssue, ji *Issue) {
+	ti.Metadata = map[string]interface{}{"source_system": fmt.Sprintf("jira:%s:%s", projectKeyFromIssue(ji), ji.Key)}
 	if ji.Fields.IssueType != nil {
 		ti.Metadata["jira_type"] = ji.Fields.IssueType.Name
 	}
-
-	return ti
 }
 
 // jiraPriorityToNumeric converts a Jira priority name to a numeric value (0=highest, 4=lowest).
 // If priorityMap is non-nil, it checks the custom mapping first (inverted: find which beads
 // priority key maps to a Jira name matching the input).
 func jiraPriorityToNumeric(name string, priorityMap map[string]string) int {
-	// Check custom map first (inverted lookup: find beads key whose value matches name).
-	if priorityMap != nil {
-		for beadsKey, jiraName := range priorityMap {
-			if strings.EqualFold(name, jiraName) {
-				if v, err := strconv.Atoi(beadsKey); err == nil && v >= 0 && v <= 4 {
-					return v
-				}
-			}
-		}
+	if priority, ok := customJiraPriority(name, priorityMap); ok {
+		return priority
 	}
-	// Hardcoded defaults.
 	switch strings.ToLower(name) {
 	case "highest":
 		return 0
@@ -466,6 +249,19 @@ func jiraPriorityToNumeric(name string, priorityMap map[string]string) int {
 	default:
 		return 2
 	}
+}
+
+func customJiraPriority(name string, priorityMap map[string]string) (int, bool) {
+	for beadsKey, jiraName := range priorityMap {
+		if !strings.EqualFold(name, jiraName) {
+			continue
+		}
+		priority, err := strconv.Atoi(beadsKey)
+		if err == nil && priority >= 0 && priority <= 4 {
+			return priority, true
+		}
+	}
+	return 0, false
 }
 
 // projectKeyFromIssue extracts the project key from a Jira issue.

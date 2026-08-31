@@ -40,14 +40,14 @@ func openUnverifiedProcess(pid int) (proc *unverifiedProcess, gone bool, err err
 	return nil, false, fmt.Errorf("pidfd open %d: %w", pid, err)
 }
 
-func (p *unverifiedProcess) executableBasename() (basename string, gone bool, err error) {
+func executableBasename(p *unverifiedProcess) (basename string, gone bool, err error) {
 	return processExecutableBasename(p.pid)
 }
 
 // commandLineContains reports whether the process command line contains
 // needle. The managed proxy child is spawned as "db-proxy-child --root
 // <rootDir>", so a workspace's own processes always match their root path.
-func (p *unverifiedProcess) commandLineContains(needle string) (matched bool, gone bool, err error) {
+func commandLineContains(p *unverifiedProcess, needle string) (matched bool, gone bool, err error) {
 	data, err := os.ReadFile("/proc/" + strconv.Itoa(p.pid) + "/cmdline")
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, unix.ESRCH) {
@@ -65,7 +65,7 @@ func (p *unverifiedProcess) commandLineContains(needle string) (matched bool, go
 
 // kill sends SIGKILL through the held handle. gone reports a target that had
 // already exited.
-func (p *unverifiedProcess) kill() (gone bool, err error) {
+func killUnverifiedProcess(p *unverifiedProcess) (gone bool, err error) {
 	if p.pidfd >= 0 {
 		if err := unix.PidfdSendSignal(p.pidfd, unix.SIGKILL, nil, 0); err != nil {
 			if errors.Is(err, unix.ESRCH) {
@@ -86,7 +86,7 @@ func (p *unverifiedProcess) kill() (gone bool, err error) {
 
 // exited reports whether the process is gone (or reduced to a zombie). While
 // the pidfd is held the PID cannot be recycled, so a /proc probe is stable.
-func (p *unverifiedProcess) exited() (bool, error) {
+func unverifiedProcessExited(p *unverifiedProcess) (bool, error) {
 	_, gone, err := processExecutableBasename(p.pid)
 	if err != nil {
 		return false, err
@@ -94,7 +94,7 @@ func (p *unverifiedProcess) exited() (bool, error) {
 	return gone, nil
 }
 
-func (p *unverifiedProcess) close() {
+func closeUnverifiedProcess(p *unverifiedProcess) {
 	if p.pidfd >= 0 {
 		_ = unix.Close(p.pidfd)
 		p.pidfd = -1

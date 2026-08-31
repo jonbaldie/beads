@@ -351,8 +351,10 @@ func TestGetTypeFromLabel(t *testing.T) {
 func TestIssueConversion(t *testing.T) {
 	conversion := &IssueConversion{
 		Issue: &types.Issue{
-			Title:       "Test issue",
-			Description: "Test description",
+			IssueContent: types.IssueContent{
+				Title:       "Test issue",
+				Description: "Test description",
+			},
 		},
 		Dependencies: []DependencyInfo{},
 	}

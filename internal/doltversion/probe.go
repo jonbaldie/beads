@@ -79,6 +79,29 @@ type Identity struct {
 //     ErrNotFound/ErrNotExecutable errors from this package instead of a
 //     raw, harder-to-branch-on *exec.Error.
 func Probe(ctx context.Context, path string) (Identity, error) {
+	id, err := probeIdentity(path)
+	if err != nil {
+		return Identity{}, err
+	}
+
+	probeCtx, cancel := probeContext(ctx)
+	defer cancel()
+	stdout, stderr, runErr := runVersionProbe(probeCtx, path)
+	id.RawOutput = firstLineTrimmed(stdout)
+
+	if runErr != nil {
+		return id, classifyProbeError(probeCtx, path, runErr, stderr)
+	}
+
+	ver, err := ParseVersion(stdout)
+	if err != nil {
+		return id, fmt.Errorf("%w: %s: output %q: %v", ErrUnparseableVersion, path, id.RawOutput, err)
+	}
+	id.Version = ver
+	return id, nil
+}
+
+func probeIdentity(path string) (Identity, error) {
 	if err := validateExplicitPath(path); err != nil {
 		return Identity{}, err
 	}
@@ -105,19 +128,22 @@ func Probe(ctx context.Context, path string) (Identity, error) {
 		return Identity{}, fmt.Errorf("%w: stat %s: %v", ErrNotExecutable, realPath, err)
 	}
 
-	id := Identity{
+	return Identity{
 		GivenPath:   path,
 		RealPath:    realPath,
 		FileSize:    info.Size(),
 		FileModTime: info.ModTime(),
-	}
+	}, nil
+}
 
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, defaultProbeTimeout)
-		defer cancel()
+func probeContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, hasDeadline := ctx.Deadline(); hasDeadline {
+		return ctx, func() {}
 	}
+	return context.WithTimeout(ctx, defaultProbeTimeout)
+}
 
+func runVersionProbe(ctx context.Context, path string) (string, string, error) {
 	cmd := exec.CommandContext(ctx, path, "version") //nolint:gosec // G204: path is caller-resolved and pre-exec-validated above, not user-request input
 	// WaitDelay bounds how long Wait() waits for the child's I/O pipes to
 	// close after the context is done / the process is signaled. Without
@@ -133,39 +159,28 @@ func Probe(ctx context.Context, path string) (Identity, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	runErr := cmd.Run()
-	id.RawOutput = firstLineTrimmed(stdout.buf.String())
+	err := cmd.Run()
+	return stdout.buf.String(), stderr.buf.String(), err
+}
 
-	if runErr != nil {
-		if isExecFormatError(runErr) {
-			return id, fmt.Errorf(
-				"%w: %s: exec format error — this usually means the dolt binary's architecture/loader doesn't match this machine (running %s/%s): %v",
-				ErrProbeFailed, path, runtime.GOOS, runtime.GOARCH, runErr,
-			)
-		}
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return id, fmt.Errorf("%w: %s: timed out running `%s version`: %v", ErrProbeFailed, path, path, runErr)
-		}
-		if errors.Is(ctx.Err(), context.Canceled) {
-			// Distinct from every other branch here: the process wasn't
-			// killed because dolt is broken, it was killed because the
-			// CALLER's context was canceled (e.g. the user hit Ctrl-C, or
-			// an outer operation gave up). Wrapping context.Canceled
-			// (rather than ErrProbeFailed) lets a caller tell "the user
-			// aborted this" apart from "dolt itself is unusable" via
-			// errors.Is, which matters if it wants to skip printing a
-			// misleading "dolt is broken, reinstall it" hint.
-			return id, fmt.Errorf("%s: version probe canceled: %w", path, ctx.Err())
-		}
-		return id, fmt.Errorf("%w: %s: %v (stderr: %s)", ErrProbeFailed, path, runErr, firstLineTrimmed(stderr.buf.String()))
+func classifyProbeError(ctx context.Context, path string, runErr error, stderr string) error {
+	if isExecFormatError(runErr) {
+		return fmt.Errorf(
+			"%w: %s: exec format error — this usually means the dolt binary's architecture/loader doesn't match this machine (running %s/%s): %v",
+			ErrProbeFailed, path, runtime.GOOS, runtime.GOARCH, runErr,
+		)
 	}
-
-	ver, err := ParseVersion(stdout.buf.String())
-	if err != nil {
-		return id, fmt.Errorf("%w: %s: output %q: %v", ErrUnparseableVersion, path, id.RawOutput, err)
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return fmt.Errorf("%w: %s: timed out running `%s version`: %v", ErrProbeFailed, path, path, runErr)
 	}
-	id.Version = ver
-	return id, nil
+	if errors.Is(ctx.Err(), context.Canceled) {
+		// Distinct from every other branch here: the process wasn't killed
+		// because dolt is broken, it was killed because the CALLER's context
+		// was canceled. Wrapping context.Canceled lets callers distinguish
+		// user cancellation from an unusable dolt binary via errors.Is.
+		return fmt.Errorf("%s: version probe canceled: %w", path, ctx.Err())
+	}
+	return fmt.Errorf("%w: %s: %v (stderr: %s)", ErrProbeFailed, path, runErr, firstLineTrimmed(stderr))
 }
 
 // firstLineTrimmed returns the first line of s, trimmed of surrounding

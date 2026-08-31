@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
@@ -96,125 +95,127 @@ func (s *Server) sweepRequest(w http.ResponseWriter, r *http.Request) (issueops.
 		return issueops.SweepRequest{}, false
 	}
 
-	var unknown []string
-	for name := range members {
-		if !slices.Contains(sweepMembers, name) {
-			unknown = append(unknown, name)
-		}
-	}
-	if len(unknown) > 0 {
+	if offender, unknown := unknownMember(members, sweepMembers); unknown {
 		// One offender, chosen deterministically so a client dispatching on
 		// `param` never sees it depend on map order.
-		offender := slices.Min(unknown)
 		requestInfo(r.Context()).refuse(offender)
 		s.fail(w, r, InvalidArgument(offender, ReasonUnknownParameter,
 			"this operation's request body carries "+sweepMemberList()+" and nothing else"))
 		return issueops.SweepRequest{}, false
 	}
 
-	var request issueops.SweepRequest
-	// protect_referenced DEFAULTS ON over HTTP, and the default is set here
-	// rather than left to the zero value on purpose.
-	//
-	// This is the only destructive operation on the surface, and a configured
-	// bearer is not a per-caller right: one shared token admits a client to
-	// everything published here, so being authenticated says nothing about
-	// whether this particular deletion was meant. A remote caller that omits
-	// the member must not get weaker protection than the operator typing `bd
-	// prune`, which protects unless --ignore-references is passed. Leaving the
-	// zero value would have inverted exactly that: locally you opt OUT of
-	// protection, remotely you had to opt IN.
-	//
-	// The cost is a full scan of the not-done set and its comments. A caller
-	// that wants the cheaper sweep asks for it by sending
-	// `protect_referenced: false`.
-	request.ProtectReferenced = true
+	request, res := parseSweepRequest(members)
+	if res != nil {
+		s.fail(w, r, *res)
+		return issueops.SweepRequest{}, false
+	}
+	return request, true
+}
 
+func parseSweepRequest(members map[string]json.RawMessage) (issueops.SweepRequest, *Result) {
+	tier, res := decodeSweepTier(members)
+	if res != nil {
+		return issueops.SweepRequest{}, res
+	}
+	actor, res := optionalActorMember(members)
+	if res != nil {
+		return issueops.SweepRequest{}, res
+	}
+	closedBefore, res := decodeSweepClosedBefore(members)
+	if res != nil {
+		return issueops.SweepRequest{}, res
+	}
+	pattern, res := decodeSweepPattern(members)
+	if res != nil {
+		return issueops.SweepRequest{}, res
+	}
+	flags, res := decodeSweepFlags(members)
+	if res != nil {
+		return issueops.SweepRequest{}, res
+	}
+	return issueops.SweepRequest{
+		Actor:             actor,
+		Tier:              tier,
+		ClosedBefore:      closedBefore,
+		IDPattern:         pattern,
+		ProtectReferenced: flags.protectReferenced,
+		DryRun:            flags.dryRun,
+	}, nil
+}
+
+func decodeSweepTier(members map[string]json.RawMessage) (issueops.SweepTier, *Result) {
 	raw, ok := members[sweepTierMember]
 	if !ok {
-		s.fail(w, r, InvalidArgument(sweepTierMember, ReasonInvalidValue,
-			"`"+sweepTierMember+"` is required and has no default"))
-		return issueops.SweepRequest{}, false
+		return "", sweepRefusal(sweepTierMember, "`"+sweepTierMember+"` is required and has no default")
 	}
 	var tier *string
 	if err := json.Unmarshal(raw, &tier); err != nil || tier == nil {
-		s.fail(w, r, InvalidArgument(sweepTierMember, ReasonInvalidValue,
-			"`"+sweepTierMember+"` must be a string"))
-		return issueops.SweepRequest{}, false
+		return "", sweepRefusal(sweepTierMember, "`"+sweepTierMember+"` must be a string")
 	}
 	// The enum check uses the GENERATED validator, which is derived from the
 	// document rather than a second hand-written copy of the vocabulary. The
 	// role refuses an unrecognized tier too; this is here so the refusal can
 	// name the member.
 	if !apigen.SweepRequestTier(*tier).Valid() {
-		s.fail(w, r, InvalidArgument(sweepTierMember, ReasonInvalidValue,
-			"`"+sweepTierMember+"` must be \"ephemeral\" or \"durable\""))
-		return issueops.SweepRequest{}, false
+		return "", sweepRefusal(sweepTierMember,
+			"`"+sweepTierMember+"` must be \"ephemeral\" or \"durable\"")
 	}
-	request.Tier = issueops.SweepTier(*tier)
+	return issueops.SweepTier(*tier), nil
+}
 
-	if raw, ok := members[sweepActorMember]; ok {
-		var value *string
-		if err := json.Unmarshal(raw, &value); err != nil || value == nil {
-			s.fail(w, r, InvalidArgument(sweepActorMember, ReasonInvalidValue,
-				"`"+sweepActorMember+"` must be a string"))
-			return issueops.SweepRequest{}, false
-		}
-		// The claim's rules, unchanged: trim, then refuse empty, over-long and
-		// any control character. `param` reads "actor" there too, so the two
-		// operations are one vocabulary for a client.
-		trimmed, res := validateActor(*value)
-		if res != nil {
-			s.fail(w, r, *res)
-			return issueops.SweepRequest{}, false
-		}
-		request.Actor = trimmed
+func decodeSweepClosedBefore(members map[string]json.RawMessage) (*time.Time, *Result) {
+	raw, ok := members[sweepClosedBeforeMember]
+	if !ok {
+		return nil, nil
 	}
-
-	if raw, ok := members[sweepClosedBeforeMember]; ok {
-		var value *time.Time
-		if err := json.Unmarshal(raw, &value); err != nil || value == nil {
-			s.fail(w, r, InvalidArgument(sweepClosedBeforeMember, ReasonInvalidValue,
-				"`"+sweepClosedBeforeMember+"` must be an RFC 3339 timestamp"))
-			return issueops.SweepRequest{}, false
-		}
-		request.ClosedBefore = value
+	var value *time.Time
+	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
+		return nil, sweepRefusal(sweepClosedBeforeMember,
+			"`"+sweepClosedBeforeMember+"` must be an RFC 3339 timestamp")
 	}
+	return value, nil
+}
 
-	if raw, ok := members[sweepPatternMember]; ok {
-		var value *string
-		if err := json.Unmarshal(raw, &value); err != nil || value == nil {
-			s.fail(w, r, InvalidArgument(sweepPatternMember, ReasonInvalidValue,
-				"`"+sweepPatternMember+"` must be a string"))
-			return issueops.SweepRequest{}, false
-		}
-		// A malformed glob is NOT refused here. The role refuses it, and
-		// routing it through the role is what keeps one definition of what a
-		// pattern is: filepath.Match's, matched in Go on both front doors.
-		request.IDPattern = *value
+func decodeSweepPattern(members map[string]json.RawMessage) (string, *Result) {
+	raw, ok := members[sweepPatternMember]
+	if !ok {
+		return "", nil
 	}
-
-	for _, flag := range []struct {
-		member string
-		dest   *bool
-	}{
-		{sweepProtectReferencedMember, &request.ProtectReferenced},
-		{sweepDryRunMember, &request.DryRun},
-	} {
-		raw, ok := members[flag.member]
-		if !ok {
-			continue
-		}
-		var value *bool
-		if err := json.Unmarshal(raw, &value); err != nil || value == nil {
-			s.fail(w, r, InvalidArgument(flag.member, ReasonInvalidValue,
-				"`"+flag.member+"` must be a boolean"))
-			return issueops.SweepRequest{}, false
-		}
-		*flag.dest = *value
+	var value *string
+	if err := json.Unmarshal(raw, &value); err != nil || value == nil {
+		return "", sweepRefusal(sweepPatternMember, "`"+sweepPatternMember+"` must be a string")
 	}
+	// A malformed glob is NOT refused here. The role refuses it, and routing it
+	// through the role is what keeps one definition of what a pattern is:
+	// filepath.Match's, matched in Go on both front doors.
+	return *value, nil
+}
 
-	return request, true
+type sweepFlags struct {
+	protectReferenced bool
+	dryRun            bool
+}
+
+func decodeSweepFlags(members map[string]json.RawMessage) (sweepFlags, *Result) {
+	protectReferenced, res := applyBoolMember(members, "", sweepProtectReferencedMember)
+	if res != nil {
+		return sweepFlags{}, res
+	}
+	dryRun, res := applyBoolMember(members, "", sweepDryRunMember)
+	if res != nil {
+		return sweepFlags{}, res
+	}
+	// protect_referenced DEFAULTS ON over HTTP, unlike the zero value used by
+	// the role. An omitted member must not weaken the operator's safe default.
+	if _, present := members[sweepProtectReferencedMember]; !present {
+		protectReferenced = true
+	}
+	return sweepFlags{protectReferenced: protectReferenced, dryRun: dryRun}, nil
+}
+
+func sweepRefusal(param, detail string) *Result {
+	res := InvalidArgument(param, ReasonInvalidValue, detail)
+	return &res
 }
 
 func sweepMemberList() string {

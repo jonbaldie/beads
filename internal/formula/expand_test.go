@@ -402,7 +402,7 @@ func TestUpdateDependenciesForExpansion(t *testing.T) {
 	steps := []*Step{
 		{ID: "design", Title: "Design"},
 		{ID: "test", Title: "Test", Needs: []string{"implement"}},
-		{ID: "deploy", Title: "Deploy", DependsOn: []string{"implement", "test"}},
+		{ID: "deploy", Title: "Deploy", StepExpansion: StepExpansion{DependsOn: []string{"implement", "test"}}},
 	}
 
 	result := UpdateDependenciesForExpansion(steps, "implement", "implement.refine")
@@ -852,7 +852,7 @@ func TestApplyExpansionsCrossExpansionDeps(t *testing.T) {
 	t.Run("expand with depends_on preserves cross-expansion deps", func(t *testing.T) {
 		steps := []*Step{
 			{ID: "step-1", Title: "Step 1"},
-			{ID: "step-2", Title: "Step 2", DependsOn: []string{"step-1"}},
+			{ID: "step-2", Title: "Step 2", StepExpansion: StepExpansion{DependsOn: []string{"step-1"}}},
 		}
 
 		compose := &ComposeRules{
@@ -927,10 +927,10 @@ func TestApplyInlineExpansionsCrossExpansionDeps(t *testing.T) {
 		steps := []*Step{
 			{ID: "setup", Title: "Setup"},
 			{
-				ID:     "work",
-				Title:  "Work",
-				Needs:  []string{"setup"},
-				Expand: "inline-exp",
+				ID:            "work",
+				Title:         "Work",
+				Needs:         []string{"setup"},
+				StepExpansion: StepExpansion{Expand: "inline-exp"},
 			},
 		}
 

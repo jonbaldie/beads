@@ -36,7 +36,7 @@ func (ts *testServer) addComment(t *testing.T, path, body string) *http.Response
 // source, and an append reaches none of them.
 func newCommentServer(t *testing.T, commenter *roleCommenter) *testServer {
 	t.Helper()
-	return newTestServer(t, rolesConfig(Config{Commenter: commenter}))
+	return newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{Commenter: commenter}}}))
 }
 
 // storedComment is a row as the insert left it: an id the request never sent and

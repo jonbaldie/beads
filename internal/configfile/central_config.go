@@ -60,7 +60,16 @@ func ApplyCentralDefaults(project *Config, central *Config) {
 	if central == nil {
 		return
 	}
+	applyCentralStringDefaults(project, central)
+	if project.DoltServerPort == 0 && central.DoltServerPort != 0 {
+		project.DoltServerPort = central.DoltServerPort
+	}
+	if !project.DoltServerTLS && central.DoltServerTLS {
+		project.DoltServerTLS = central.DoltServerTLS
+	}
+}
 
+func applyCentralStringDefaults(project, central *Config) {
 	// Server connection fields only — these are the fields that are
 	// typically identical across all projects on a machine.
 	if project.DoltMode == "" && central.DoltMode != "" {
@@ -74,13 +83,5 @@ func ApplyCentralDefaults(project *Config, central *Config) {
 	}
 	if project.DoltServerUser == "" && central.DoltServerUser != "" {
 		project.DoltServerUser = central.DoltServerUser
-	}
-	// Note: DoltServerTLS is a bool — zero value (false) is indistinguishable
-	// from "not set". We only apply central TLS=true when project has TLS=false,
-	// which means central can enable TLS but project cannot explicitly disable it
-	// via the zero value. To disable TLS when central enables it, use the
-	// BEADS_DOLT_SERVER_TLS=0 env var.
-	if !project.DoltServerTLS && central.DoltServerTLS {
-		project.DoltServerTLS = central.DoltServerTLS
 	}
 }

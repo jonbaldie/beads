@@ -62,14 +62,168 @@ func (c *Client) repoPath() string {
 	return "/repos/" + c.Owner + "/" + c.Repo
 }
 
-func (c *Client) doRequest(ctx context.Context, method, urlStr string, body interface{}) ([]byte, http.Header, error) {
-	var jsonBody []byte
-	if body != nil {
-		var err error
-		jsonBody, err = json.Marshal(body)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to marshal request body: %w", err)
+type githubResponseAction struct {
+	body           []byte
+	headers        http.Header
+	err            error
+	rateLimit      *RateLimitError
+	retry          bool
+	immediateRetry bool
+	retryDelay     time.Duration
+}
+
+type githubAttemptOutcome struct {
+	body        []byte
+	headers     http.Header
+	terminalErr error
+	retry       bool
+	retryDelay  time.Duration
+}
+
+func marshalGitHubRequestBody(body interface{}) ([]byte, error) {
+	if body == nil {
+		return nil, nil
+	}
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request body: %w", err)
+	}
+	return jsonBody, nil
+}
+
+func (c *Client) newGitHubRequest(ctx context.Context, method, urlStr string, jsonBody []byte) (*http.Request, error) {
+	var reqBody io.Reader
+	if jsonBody != nil {
+		reqBody = bytes.NewReader(jsonBody)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, urlStr, reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	req.Header.Set(headerAccept, "application/vnd.github+json")
+	req.Header.Set(headerAPIVersion, "2022-11-28")
+	if jsonBody != nil {
+		req.Header.Set(headerContentType, "application/json")
+	}
+	return req, nil
+}
+
+func readGitHubResponse(resp *http.Response) ([]byte, error) {
+	const maxResponseSize = 50 * 1024 * 1024
+	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
+	_ = resp.Body.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	return respBody, nil
+}
+
+func (c *Client) evaluateGitHubResponse(resp *http.Response, respBody []byte, urlStr string, attempt int, retry RetryConfig) githubResponseAction {
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return githubResponseAction{body: respBody, headers: resp.Header}
+	}
+
+	if rlErr := classifyGitHubRateLimit(resp, respBody, urlStr); rlErr != nil {
+		return githubResponseAction{
+			rateLimit:  rlErr,
+			retry:      attempt < retry.MaxRetries,
+			retryDelay: computeRetryDelay(rlErr, attempt, retry),
 		}
+	}
+	if resp.StatusCode == http.StatusForbidden {
+		return githubResponseAction{err: &AuthError{
+			StatusCode: resp.StatusCode,
+			Message:    extractGitHubMessage(respBody),
+			URL:        urlStr,
+		}}
+	}
+	if isGitHubTransientStatus(resp.StatusCode) {
+		delay := exponentialBackoff(retry.BaseDelay, attempt, retry.MaxBackoff)
+		if half := int64(delay / 2); half > 0 {
+			delay += time.Duration(rand.Int64N(half)) //nolint:gosec // jitter does not need crypto rand
+		}
+		return githubResponseAction{
+			err:        fmt.Errorf("transient error %d (attempt %d/%d): %s", resp.StatusCode, attempt+1, retry.MaxRetries+1, extractGitHubMessage(respBody)),
+			retry:      true,
+			retryDelay: delay,
+		}
+	}
+	return githubResponseAction{err: fmt.Errorf("API error: %s (status %d)", string(respBody), resp.StatusCode)}
+}
+
+func classifyGitHubRateLimit(resp *http.Response, body []byte, urlStr string) *RateLimitError {
+	if resp.StatusCode != http.StatusForbidden && resp.StatusCode != http.StatusTooManyRequests {
+		return nil
+	}
+	return classifyRateLimit(resp.Header, body, resp.StatusCode, urlStr)
+}
+
+func isGitHubTransientStatus(status int) bool {
+	switch status {
+	case http.StatusInternalServerError, http.StatusBadGateway,
+		http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *Client) performGitHubRequest(ctx context.Context, method, urlStr string, jsonBody []byte, attempt int, retry RetryConfig) githubResponseAction {
+	req, err := c.newGitHubRequest(ctx, method, urlStr, jsonBody)
+	if err != nil {
+		return githubResponseAction{err: err}
+	}
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return githubResponseAction{
+			err:            fmt.Errorf("request failed (attempt %d/%d): %w", attempt+1, retry.MaxRetries+1, err),
+			retry:          true,
+			immediateRetry: true,
+		}
+	}
+
+	respBody, readErr := readGitHubResponse(resp)
+	if readErr != nil {
+		return githubResponseAction{
+			err:            fmt.Errorf("failed to read response (attempt %d/%d): %w", attempt+1, retry.MaxRetries+1, readErr),
+			retry:          true,
+			immediateRetry: true,
+		}
+	}
+	return c.evaluateGitHubResponse(resp, respBody, urlStr, attempt, retry)
+}
+
+func handleGitHubAttempt(action githubResponseAction, lastErr *error, lastRateLimit **RateLimitError) githubAttemptOutcome {
+	if action.body != nil || action.headers != nil {
+		return githubAttemptOutcome{body: action.body, headers: action.headers}
+	}
+	if action.rateLimit != nil {
+		*lastRateLimit = action.rateLimit
+		*lastErr = action.rateLimit
+		if action.retry {
+			return githubAttemptOutcome{retry: true, retryDelay: action.retryDelay}
+		}
+		return githubAttemptOutcome{}
+	}
+	if action.err == nil {
+		return githubAttemptOutcome{}
+	}
+	if !action.retry {
+		return githubAttemptOutcome{terminalErr: action.err}
+	}
+	*lastErr = action.err
+	if action.immediateRetry {
+		return githubAttemptOutcome{}
+	}
+	return githubAttemptOutcome{retry: true, retryDelay: action.retryDelay}
+}
+
+func (c *Client) doRequest(ctx context.Context, method, urlStr string, body interface{}) ([]byte, http.Header, error) {
+	jsonBody, err := marshalGitHubRequestBody(body)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	retry := c.Retry
@@ -77,74 +231,19 @@ func (c *Client) doRequest(ctx context.Context, method, urlStr string, body inte
 	var lastRateLimit *RateLimitError
 
 	for attempt := 0; attempt <= retry.MaxRetries; attempt++ {
-		var reqBody io.Reader
-		if jsonBody != nil {
-			reqBody = bytes.NewReader(jsonBody)
+		action := c.performGitHubRequest(ctx, method, urlStr, jsonBody, attempt, retry)
+		outcome := handleGitHubAttempt(action, &lastErr, &lastRateLimit)
+		if outcome.body != nil || outcome.headers != nil {
+			return outcome.body, outcome.headers, nil
 		}
-		req, err := http.NewRequestWithContext(ctx, method, urlStr, reqBody)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create request: %w", err)
+		if outcome.terminalErr != nil {
+			return nil, nil, outcome.terminalErr
 		}
-		req.Header.Set("Authorization", "Bearer "+c.Token)
-		req.Header.Set(headerAccept, "application/vnd.github+json")
-		req.Header.Set(headerAPIVersion, "2022-11-28")
-		if jsonBody != nil {
-			req.Header.Set(headerContentType, "application/json")
-		}
-
-		resp, err := c.HTTPClient.Do(req)
-		if err != nil {
-			lastErr = fmt.Errorf("request failed (attempt %d/%d): %w", attempt+1, retry.MaxRetries+1, err)
-			continue
-		}
-
-		const maxResponseSize = 50 * 1024 * 1024
-		respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
-		_ = resp.Body.Close()
-		if readErr != nil {
-			lastErr = fmt.Errorf("failed to read response (attempt %d/%d): %w", attempt+1, retry.MaxRetries+1, readErr)
-			continue
-		}
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			return respBody, resp.Header, nil
-		}
-
-		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
-			if rlErr := classifyRateLimit(resp.Header, respBody, resp.StatusCode, urlStr); rlErr != nil {
-				lastRateLimit = rlErr
-				lastErr = rlErr
-				if attempt >= retry.MaxRetries {
-					continue
-				}
-				if err := sleep(ctx, computeRetryDelay(rlErr, attempt, retry)); err != nil {
-					return nil, nil, err
-				}
-				continue
-			}
-			if resp.StatusCode == http.StatusForbidden {
-				return nil, nil, &AuthError{
-					StatusCode: resp.StatusCode,
-					Message:    extractGitHubMessage(respBody),
-					URL:        urlStr,
-				}
-			}
-		}
-
-		switch resp.StatusCode {
-		case http.StatusInternalServerError, http.StatusBadGateway,
-			http.StatusServiceUnavailable, http.StatusGatewayTimeout:
-			delay := exponentialBackoff(retry.BaseDelay, attempt, retry.MaxBackoff)
-			if half := int64(delay / 2); half > 0 {
-				delay += time.Duration(rand.Int64N(half)) //nolint:gosec // jitter does not need crypto rand
-			}
-			lastErr = fmt.Errorf("transient error %d (attempt %d/%d): %s", resp.StatusCode, attempt+1, retry.MaxRetries+1, extractGitHubMessage(respBody))
-			if err := sleep(ctx, delay); err != nil {
+		if outcome.retry {
+			if err := sleep(ctx, outcome.retryDelay); err != nil {
 				return nil, nil, err
 			}
-			continue
 		}
-
-		return nil, nil, fmt.Errorf("API error: %s (status %d)", string(respBody), resp.StatusCode)
 	}
 
 	if lastRateLimit != nil {

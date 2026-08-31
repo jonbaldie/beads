@@ -163,3 +163,21 @@ func TestPruneWithinCapsIsNoop(t *testing.T) {
 		t.Fatal("in-cap file pruned")
 	}
 }
+
+func TestInspectQueueFileTTLBoundaryIsLive(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	const ttl = time.Hour
+	writeQueueFile(t, dir, "boundary.evtq", 7, now.Add(-ttl))
+	dirents, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inspection, ok := inspectQueueFile(dir, dirents[0], now, ttl)
+	if !ok || inspection.stale {
+		t.Fatalf("inspection = %#v, ok=%v; exact TTL must remain live", inspection, ok)
+	}
+	if inspection.entry.size != 7 || inspection.entry.path != filepath.Join(dir, "boundary.evtq") {
+		t.Fatalf("entry = %#v", inspection.entry)
+	}
+}

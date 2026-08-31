@@ -31,7 +31,7 @@ func (ts *testServer) batchClose(t *testing.T, body string) *http.Response {
 
 func newBatchCloseServer(t *testing.T, closer *roleBatchCloser) *testServer {
 	t.Helper()
-	return newTestServer(t, rolesConfig(Config{BatchCloser: closer}))
+	return newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{BatchCloser: closer}}}))
 }
 
 func outcomesOf(t *testing.T, resp *http.Response) []map[string]any {

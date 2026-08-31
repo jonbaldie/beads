@@ -205,7 +205,7 @@ func DetermineTargetRepo(config *RoutingConfig, userRole UserRole, repoPath stri
 // rule matched so callers can produce an accurate diagnosis (e.g. a notice
 // explaining why a read was routed elsewhere) instead of assuming a single
 // hardcoded cause.
-func DetermineTargetRepoWithRule(config *RoutingConfig, userRole UserRole, repoPath string) (string, RoutingRule) {
+func DetermineTargetRepoWithRule(config *RoutingConfig, userRole UserRole, _ string) (string, RoutingRule) {
 	// Explicit override takes precedence
 	if config.ExplicitOverride != "" {
 		return config.ExplicitOverride, RuleExplicitOverride

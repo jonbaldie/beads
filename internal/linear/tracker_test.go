@@ -15,6 +15,14 @@ import (
 	"github.com/jonbaldie/beads/internal/types"
 )
 
+func newConfiguredTestTracker(teamIDs []string, clients map[string]*Client, config *MappingConfig) *Tracker {
+	tr := NewTracker()
+	tr.teamIDs = teamIDs
+	tr.clients = clients
+	tr.config = config
+	return tr
+}
+
 // teamStatesResp builds the JSON body for a TeamStates GraphQL response.
 func teamStatesResp(teamID, stateID, stateName, stateType string) map[string]interface{} {
 	return map[string]interface{}{
@@ -127,20 +135,28 @@ func TestBatchPush_SkipsUnchangedIssue(t *testing.T) {
 	// Priority 4 (beads backlog) → PriorityToLinear = 0 (no priority) via default map.
 	// Status open + state backlog → PushFieldsEqual returns true.
 	local := &types.Issue{
-		ID:          "local-1",
-		Title:       "My Issue",
-		Status:      types.StatusOpen,
-		Priority:    4,
-		ExternalRef: &extRef,
+		IssueID: types.IssueID{
+			ID: "local-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "My Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:   types.StatusOpen,
+			Priority: 4,
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: &extRef,
+		},
 	}
 
-	tr := &Tracker{
-		teamIDs: []string{"team-1"},
-		clients: map[string]*Client{
+	tr := newConfiguredTestTracker(
+		[]string{"team-1"},
+		map[string]*Client{
 			"team-1": NewClient("key", "team-1").WithEndpoint(server.URL),
 		},
-		config: cfg,
-	}
+		cfg,
+	)
 
 	result, err := tr.BatchPush(context.Background(), []*types.Issue{local}, nil)
 	if err != nil {
@@ -200,22 +216,30 @@ func TestBatchPush_SkipsUnchangedIssueWithPreformattedDescription(t *testing.T) 
 
 	extRef := "https://linear.app/team/issue/TEAM-1"
 	local := &types.Issue{
-		ID:                 "local-1",
-		Title:              "My Issue",
-		Description:        formattedDescription,
-		AcceptanceCriteria: "Must pass",
-		Status:             types.StatusOpen,
-		Priority:           4,
-		ExternalRef:        &extRef,
+		IssueID: types.IssueID{
+			ID: "local-1",
+		},
+		IssueContent: types.IssueContent{
+			Title:              "My Issue",
+			Description:        formattedDescription,
+			AcceptanceCriteria: "Must pass",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:   types.StatusOpen,
+			Priority: 4,
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: &extRef,
+		},
 	}
 
-	tr := &Tracker{
-		teamIDs: []string{"team-1"},
-		clients: map[string]*Client{
+	tr := newConfiguredTestTracker(
+		[]string{"team-1"},
+		map[string]*Client{
 			"team-1": NewClient("key", "team-1").WithEndpoint(server.URL),
 		},
-		config: cfg,
-	}
+		cfg,
+	)
 
 	result, err := tr.BatchPush(context.Background(), []*types.Issue{local}, nil)
 	if err != nil {
@@ -272,20 +296,28 @@ func TestBatchPush_ForceBypassesSkip(t *testing.T) {
 
 	extRef := "https://linear.app/team/issue/TEAM-1"
 	local := &types.Issue{
-		ID:          "local-1",
-		Title:       "My Issue",
-		Status:      types.StatusOpen,
-		Priority:    4,
-		ExternalRef: &extRef,
+		IssueID: types.IssueID{
+			ID: "local-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "My Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:   types.StatusOpen,
+			Priority: 4,
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: &extRef,
+		},
 	}
 
-	tr := &Tracker{
-		teamIDs: []string{"team-1"},
-		clients: map[string]*Client{
+	tr := newConfiguredTestTracker(
+		[]string{"team-1"},
+		map[string]*Client{
 			"team-1": NewClient("key", "team-1").WithEndpoint(server.URL),
 		},
-		config: cfg,
-	}
+		cfg,
+	)
 
 	forceIDs := map[string]bool{"local-1": true}
 	result, err := tr.BatchPush(context.Background(), []*types.Issue{local}, forceIDs)
@@ -355,16 +387,16 @@ func TestBatchPush_BatchCreateMappingByTitle(t *testing.T) {
 	cfg.ExplicitStateMap = map[string]string{"backlog": "open"}
 
 	// Two new issues — no ExternalRef, so they go through the batch-create path.
-	alpha := &types.Issue{ID: "local-alpha", Title: "Alpha Issue", Status: types.StatusOpen, Priority: 4}
-	beta := &types.Issue{ID: "local-beta", Title: "Beta Issue", Status: types.StatusOpen, Priority: 4}
+	alpha := &types.Issue{IssueID: types.IssueID{ID: "local-alpha"}, IssueContent: types.IssueContent{Title: "Alpha Issue"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 4}}
+	beta := &types.Issue{IssueID: types.IssueID{ID: "local-beta"}, IssueContent: types.IssueContent{Title: "Beta Issue"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 4}}
 
-	tr := &Tracker{
-		teamIDs: []string{"team-1"},
-		clients: map[string]*Client{
+	tr := newConfiguredTestTracker(
+		[]string{"team-1"},
+		map[string]*Client{
 			"team-1": NewClient("key", "team-1").WithEndpoint(server.URL),
 		},
-		config: cfg,
-	}
+		cfg,
+	)
 
 	result, err := tr.BatchPush(context.Background(), []*types.Issue{alpha, beta}, nil)
 	if err != nil {
@@ -459,21 +491,30 @@ func TestBatchPush_PerTeamStateCache(t *testing.T) {
 
 	extRef := "https://linear.app/team/issue/T2-1"
 	local := &types.Issue{
-		ID:          "local-t2-1",
-		Title:       "New Title", // differs from "Old Title" → not skipped
-		Status:      types.StatusOpen,
-		Priority:    4,
-		ExternalRef: &extRef,
+		IssueID: types.IssueID{
+			ID: "local-t2-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "New Title",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			// differs from "Old Title" → not skipped
+			Status:   types.StatusOpen,
+			Priority: 4,
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: &extRef,
+		},
 	}
 
-	tr := &Tracker{
-		teamIDs: []string{"team-1", "team-2"},
-		clients: map[string]*Client{
+	tr := newConfiguredTestTracker(
+		[]string{"team-1", "team-2"},
+		map[string]*Client{
 			"team-1": NewClient("key", "team-1").WithEndpoint(team1Server.URL),
 			"team-2": NewClient("key", "team-2").WithEndpoint(team2Server.URL),
 		},
-		config: cfg,
-	}
+		cfg,
+	)
 
 	result, err := tr.BatchPush(context.Background(), []*types.Issue{local}, nil)
 	if err != nil {
@@ -560,18 +601,18 @@ func TestBatchPush_DuplicateTitlesFallbackToSingleCreate(t *testing.T) {
 	cfg := DefaultMappingConfig()
 	cfg.ExplicitStateMap = map[string]string{"backlog": "open"}
 
-	tr := &Tracker{
-		teamIDs: []string{"team-1"},
-		clients: map[string]*Client{
+	tr := newConfiguredTestTracker(
+		[]string{"team-1"},
+		map[string]*Client{
 			"team-1": NewClient("key", "team-1").WithEndpoint(server.URL),
 		},
-		config: cfg,
-	}
+		cfg,
+	)
 
 	// Two issues with the same title + one unique title.
-	dupA := &types.Issue{ID: "dup-a", Title: "Duplicate Title", Status: types.StatusOpen, Priority: 4}
-	dupB := &types.Issue{ID: "dup-b", Title: "Duplicate Title", Status: types.StatusOpen, Priority: 4}
-	unique := &types.Issue{ID: "unique-1", Title: "Unique Title", Status: types.StatusOpen, Priority: 4}
+	dupA := &types.Issue{IssueID: types.IssueID{ID: "dup-a"}, IssueContent: types.IssueContent{Title: "Duplicate Title"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 4}}
+	dupB := &types.Issue{IssueID: types.IssueID{ID: "dup-b"}, IssueContent: types.IssueContent{Title: "Duplicate Title"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 4}}
+	unique := &types.Issue{IssueID: types.IssueID{ID: "unique-1"}, IssueContent: types.IssueContent{Title: "Unique Title"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 4}}
 
 	result, err := tr.BatchPush(context.Background(), []*types.Issue{dupA, dupB, unique}, nil)
 	if err != nil {
@@ -678,16 +719,16 @@ func TestBatchPush_AmbiguousBatchFailureSearchesMarkers(t *testing.T) {
 	cfg := DefaultMappingConfig()
 	cfg.ExplicitStateMap = map[string]string{"backlog": "open"}
 
-	tr := &Tracker{
-		teamIDs: []string{"team-1"},
-		clients: map[string]*Client{
+	tr := newConfiguredTestTracker(
+		[]string{"team-1"},
+		map[string]*Client{
 			"team-1": NewClient("key", "team-1").WithEndpoint(server.URL),
 		},
-		config: cfg,
-	}
+		cfg,
+	)
 
-	issueA := &types.Issue{ID: "local-a", Title: "Issue A", Status: types.StatusOpen, Priority: 4}
-	issueB := &types.Issue{ID: "local-b", Title: "Issue B", Status: types.StatusOpen, Priority: 4}
+	issueA := &types.Issue{IssueID: types.IssueID{ID: "local-a"}, IssueContent: types.IssueContent{Title: "Issue A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 4}}
+	issueB := &types.Issue{IssueID: types.IssueID{ID: "local-b"}, IssueContent: types.IssueContent{Title: "Issue B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 4}}
 
 	result, err := tr.BatchPush(context.Background(), []*types.Issue{issueA, issueB}, nil)
 	// We expect a warning/error about unconfirmed issues, but no panic or full-chunk retry.
@@ -738,7 +779,7 @@ func TestRegistered(t *testing.T) {
 }
 
 func TestIsExternalRef(t *testing.T) {
-	tr := &Tracker{}
+	tr := NewTracker()
 	tests := []struct {
 		ref  string
 		want bool
@@ -756,7 +797,7 @@ func TestIsExternalRef(t *testing.T) {
 }
 
 func TestExtractIdentifier(t *testing.T) {
-	tr := &Tracker{}
+	tr := NewTracker()
 	tests := []struct {
 		ref  string
 		want string
@@ -772,7 +813,7 @@ func TestExtractIdentifier(t *testing.T) {
 }
 
 func TestBuildExternalRef(t *testing.T) {
-	tr := &Tracker{}
+	tr := NewTracker()
 	ti := &tracker.TrackerIssue{
 		URL:        "https://linear.app/team/issue/PROJ-123/some-title-slug",
 		Identifier: "PROJ-123",
@@ -815,7 +856,7 @@ func TestFieldMapperStatus(t *testing.T) {
 
 func TestTrackerMultiTeamValidate(t *testing.T) {
 	// Empty tracker should fail validation.
-	tr := &Tracker{}
+	tr := NewTracker()
 	if err := tr.Validate(); err == nil {
 		t.Error("expected Validate() to fail on uninitialized tracker")
 	}
@@ -830,7 +871,7 @@ func TestTrackerMultiTeamValidate(t *testing.T) {
 }
 
 func TestTrackerSetTeamIDs(t *testing.T) {
-	tr := &Tracker{}
+	tr := NewTracker()
 	ids := []string{"id-1", "id-2", "id-3"}
 	tr.SetTeamIDs(ids)
 
@@ -845,7 +886,8 @@ func TestTrackerSetTeamIDs(t *testing.T) {
 }
 
 func TestTrackerTeamIDsAccessor(t *testing.T) {
-	tr := &Tracker{teamIDs: []string{"a", "b"}}
+	tr := NewTracker()
+	tr.teamIDs = []string{"a", "b"}
 	got := tr.TeamIDs()
 	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
 		t.Errorf("TeamIDs() = %v, want [a b]", got)
@@ -853,13 +895,14 @@ func TestTrackerTeamIDsAccessor(t *testing.T) {
 }
 
 func TestTrackerPrimaryClient(t *testing.T) {
-	tr := &Tracker{
-		teamIDs: []string{"team-1", "team-2"},
-		clients: map[string]*Client{
+	tr := newConfiguredTestTracker(
+		[]string{"team-1", "team-2"},
+		map[string]*Client{
 			"team-1": NewClient("key", "team-1"),
 			"team-2": NewClient("key", "team-2"),
 		},
-	}
+		nil,
+	)
 
 	client := tr.PrimaryClient()
 	if client == nil {
@@ -870,7 +913,7 @@ func TestTrackerPrimaryClient(t *testing.T) {
 	}
 
 	// Empty tracker should return nil.
-	empty := &Tracker{}
+	empty := NewTracker()
 	if empty.PrimaryClient() != nil {
 		t.Error("PrimaryClient() should return nil for empty tracker")
 	}
@@ -888,13 +931,13 @@ func TestLinearToTrackerIssue(t *testing.T) {
 		UpdatedAt:   "2026-01-16T14:30:00Z",
 		Assignee:    &User{ID: "user-1", Name: "Alice", Email: "alice@example.com"},
 		State:       &State{Type: "started", Name: "In Progress"},
-		ProjectMilestone: &ProjectMilestone{
+		IssueRelations: IssueRelations{ProjectMilestone: &ProjectMilestone{
 			ID:          "milestone-1",
 			Name:        "M7: Team-Ready",
 			Description: "Team-ready milestone",
 			Progress:    60.61,
 			TargetDate:  "2026-05-12",
-		},
+		}},
 	}
 
 	ti := linearToTrackerIssue(li)
@@ -944,7 +987,7 @@ func TestTrackerInitOAuthOnly(t *testing.T) {
 	t.Setenv("LINEAR_OAUTH_CLIENT_SECRET", "test-client-secret")
 	// No LINEAR_API_KEY set — OAuth-only path.
 
-	tr := &Tracker{}
+	tr := NewTracker()
 	tr.SetTeamIDs([]string{"team-uuid-1"})
 	// Inject the test token server so we don't hit production.
 	oauthClient := NewOAuthClient(OAuthConfig{
@@ -976,7 +1019,7 @@ func TestTrackerInitNoAuthFails(t *testing.T) {
 	t.Setenv("LINEAR_OAUTH_CLIENT_SECRET", "")
 	t.Setenv("LINEAR_API_KEY", "")
 
-	tr := &Tracker{}
+	tr := NewTracker()
 	tr.SetTeamIDs([]string{"team-uuid-1"})
 
 	err := tr.Init(context.Background(), nil)
@@ -1069,17 +1112,17 @@ func TestCreateIssueNoDoubleFormatDescription(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tr := &Tracker{
-		teamIDs: []string{"team-1"},
-		clients: map[string]*Client{
+	tr := newConfiguredTestTracker(
+		[]string{"team-1"},
+		map[string]*Client{
 			"team-1": NewClient("key", "team-1").WithEndpoint(server.URL),
 		},
-		config: func() *MappingConfig {
+		func() *MappingConfig {
 			cfg := DefaultMappingConfig()
 			cfg.ExplicitStateMap["todo"] = "open"
 			return cfg
 		}(),
-	}
+	)
 
 	createdAt := time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC)
 
@@ -1087,14 +1130,23 @@ func TestCreateIssueNoDoubleFormatDescription(t *testing.T) {
 	// formatted output of BuildLinearDescription (base + AC/Design/Notes merged in).
 	formattedDesc := "base description\n\n## Acceptance Criteria\ncriteria here\n\n## Design\ndesign here"
 	issue := &types.Issue{
-		ID:                 "bead-1",
-		Title:              "Test",
-		Description:        formattedDesc, // pre-formatted by sync engine
-		AcceptanceCriteria: "criteria here",
-		Design:             "design here",
-		Status:             types.StatusOpen,
-		CreatedBy:          "dev@test.com",
-		CreatedAt:          createdAt,
+		IssueID: types.IssueID{
+			ID: "bead-1",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Test",
+			Description: formattedDesc,
+			// pre-formatted by sync engine
+			AcceptanceCriteria: "criteria here",
+			Design:             "design here",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status: types.StatusOpen,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedBy: "dev@test.com",
+			CreatedAt: createdAt,
+		},
 	}
 
 	_, err := tr.CreateIssue(t.Context(), issue)

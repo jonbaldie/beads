@@ -51,7 +51,6 @@ type ComparisonNode struct {
 	ValueType TokenType // TokenIdent, TokenString, TokenNumber, or TokenDuration
 }
 
-func (n *ComparisonNode) node() {}
 func (n *ComparisonNode) String() string {
 	return fmt.Sprintf("%s%s%s", n.Field, n.Op.String(), n.Value)
 }
@@ -62,7 +61,6 @@ type AndNode struct {
 	Right Node
 }
 
-func (n *AndNode) node() {}
 func (n *AndNode) String() string {
 	return fmt.Sprintf("(%s AND %s)", n.Left.String(), n.Right.String())
 }
@@ -73,7 +71,6 @@ type OrNode struct {
 	Right Node
 }
 
-func (n *OrNode) node() {}
 func (n *OrNode) String() string {
 	return fmt.Sprintf("(%s OR %s)", n.Left.String(), n.Right.String())
 }
@@ -83,7 +80,6 @@ type NotNode struct {
 	Operand Node
 }
 
-func (n *NotNode) node() {}
 func (n *NotNode) String() string {
 	return fmt.Sprintf("NOT %s", n.Operand.String())
 }
@@ -135,19 +131,6 @@ func (p *Parser) advance() error {
 	}
 	p.current = tok
 	return nil
-}
-
-// peek returns the next token without consuming it.
-func (p *Parser) peek() (Token, error) {
-	if p.peeked != nil {
-		return *p.peeked, nil
-	}
-	tok, err := p.lexer.NextToken()
-	if err != nil {
-		return Token{}, err
-	}
-	p.peeked = &tok
-	return tok, nil
 }
 
 // parseOr parses OR expressions (lowest precedence).
@@ -232,23 +215,34 @@ func (p *Parser) parsePrimary() (Node, error) {
 
 // parseComparison parses a field comparison.
 func (p *Parser) parseComparison() (Node, error) {
-	if p.current.Type != TokenIdent {
-		return nil, fmt.Errorf("expected field name at position %d, got %s", p.current.Pos, p.current.Type.String())
+	field, err := p.parseComparisonField()
+	if err != nil {
+		return nil, err
 	}
+	op, err := p.parseComparisonOperator()
+	if err != nil {
+		return nil, err
+	}
+	value, valueType, err := p.parseComparisonValue()
+	if err != nil {
+		return nil, err
+	}
+	return &ComparisonNode{Field: field, Op: op, Value: value, ValueType: valueType}, nil
+}
 
-	// Field names are case-insensitive, but the key suffix of a
-	// metadata.<key> field keeps its original case: metadata keys are
-	// case-sensitive JSON keys (has_metadata_key and the --metadata flag
-	// already preserve case), so lowercasing it would make mixed-case keys
-	// silently unqueryable.
+func (p *Parser) parseComparisonField() (string, error) {
+	if p.current.Type != TokenIdent {
+		return "", fmt.Errorf("expected field name at position %d, got %s", p.current.Pos, p.current.Type.String())
+	}
+	// Field names are case-insensitive, but metadata keys retain their case.
 	field := strings.ToLower(p.current.Value)
 	if strings.HasPrefix(field, "metadata.") && len(field) > len("metadata.") {
 		field = "metadata." + p.current.Value[len("metadata."):]
 	}
-	if err := p.advance(); err != nil {
-		return nil, err
-	}
+	return field, p.advance()
+}
 
+func (p *Parser) parseComparisonOperator() (ComparisonOp, error) {
 	var op ComparisonOp
 	switch p.current.Type {
 	case TokenEquals:
@@ -264,43 +258,20 @@ func (p *Parser) parseComparison() (Node, error) {
 	case TokenGreaterEq:
 		op = OpGreaterEq
 	default:
-		return nil, fmt.Errorf("expected comparison operator at position %d, got %s", p.current.Pos, p.current.Type.String())
+		return 0, fmt.Errorf("expected comparison operator at position %d, got %s", p.current.Pos, p.current.Type.String())
 	}
+	return op, p.advance()
+}
 
-	if err := p.advance(); err != nil {
-		return nil, err
-	}
-
-	// Value can be identifier, string, number, or duration
-	var value string
-	var valueType TokenType
-	switch p.current.Type {
-	case TokenIdent:
-		value = p.current.Value
-		valueType = TokenIdent
-	case TokenString:
-		value = p.current.Value
-		valueType = TokenString
-	case TokenNumber:
-		value = p.current.Value
-		valueType = TokenNumber
-	case TokenDuration:
-		value = p.current.Value
-		valueType = TokenDuration
+func (p *Parser) parseComparisonValue() (string, TokenType, error) {
+	value := p.current.Value
+	valueType := p.current.Type
+	switch valueType {
+	case TokenIdent, TokenString, TokenNumber, TokenDuration:
+		return value, valueType, p.advance()
 	default:
-		return nil, fmt.Errorf("expected value at position %d, got %s", p.current.Pos, p.current.Type.String())
+		return "", 0, fmt.Errorf("expected value at position %d, got %s", p.current.Pos, p.current.Type.String())
 	}
-
-	if err := p.advance(); err != nil {
-		return nil, err
-	}
-
-	return &ComparisonNode{
-		Field:     field,
-		Op:        op,
-		Value:     value,
-		ValueType: valueType,
-	}, nil
 }
 
 // Parse is a convenience function that parses a query string.

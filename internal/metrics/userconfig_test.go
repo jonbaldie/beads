@@ -9,6 +9,33 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func TestUserConfigHasLeafShapes(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want bool
+	}{
+		{"nested scalar", "metrics:\n  endpoint: value\n", true},
+		{"nested empty", "metrics:\n  endpoint: ''\n", false},
+		{"nested mapping", "metrics:\n  endpoint:\n    child: value\n", false},
+		{"flat scalar", "metrics.endpoint: value\n", true},
+		{"flat empty", "metrics.endpoint: ''\n", false},
+		{"flat mapping", "metrics.endpoint:\n  child: value\n", false},
+		{"missing", "other: value\n", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root, err := parseUserConfig("fixture", []byte(tt.yaml))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := userConfigHasLeaf(root, "metrics", "endpoint"); got != tt.want {
+				t.Fatalf("userConfigHasLeaf() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func setupUserConfigHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
@@ -23,7 +50,7 @@ func userConfigPath(home string) string {
 	return filepath.Join(home, ".config", "bd", "config.yaml")
 }
 
-func parseUserConfig(t *testing.T, path string) map[string]interface{} {
+func parseUserConfigFixture(t *testing.T, path string) map[string]interface{} {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -54,7 +81,7 @@ func TestEnsureUserConfigDefaults_CreatesMissingFile(t *testing.T) {
 	if err := EnsureUserConfigDefaults(); err != nil {
 		t.Fatalf("EnsureUserConfigDefaults: %v", err)
 	}
-	parsed := parseUserConfig(t, userConfigPath(home))
+	parsed := parseUserConfigFixture(t, userConfigPath(home))
 	if got := metricsLeaf(t, parsed, "disabled"); got != false {
 		t.Errorf("metrics.disabled = %v, want false", got)
 	}
@@ -76,7 +103,7 @@ func TestEnsureUserConfigDefaults_AddsMissingMetricsBlock(t *testing.T) {
 	if err := EnsureUserConfigDefaults(); err != nil {
 		t.Fatalf("EnsureUserConfigDefaults: %v", err)
 	}
-	parsed := parseUserConfig(t, path)
+	parsed := parseUserConfigFixture(t, path)
 	if parsed["other"] != "value" {
 		t.Errorf("existing key clobbered: %#v", parsed)
 	}
@@ -102,7 +129,7 @@ func TestEnsureUserConfigDefaults_FillsMissingLeafKeepsExisting(t *testing.T) {
 	if err := EnsureUserConfigDefaults(); err != nil {
 		t.Fatalf("EnsureUserConfigDefaults: %v", err)
 	}
-	parsed := parseUserConfig(t, path)
+	parsed := parseUserConfigFixture(t, path)
 	if got := metricsLeaf(t, parsed, "endpoint"); got != "https://existing.example.com" {
 		t.Errorf("metrics.endpoint clobbered = %v", got)
 	}

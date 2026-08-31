@@ -687,17 +687,17 @@ JSON. Lets formulas pre-declare keys that downstream tooling can project
 without a post-pour compose step.`,
 			},
 			{
-				Name:     "DependsOn",
-				Type:     "[]string",
-				JSONName: "depends_on",
-				Doc:      `DependsOn lists step IDs this step blocks on (within the formula).`,
-			},
-			{
 				Name:     "Needs",
 				Type:     "[]string",
 				JSONName: "needs",
 				Doc: `Needs is a simpler alias for DependsOn - lists sibling step IDs that must complete first.
 Either Needs or DependsOn can be used; they are merged during cooking.`,
+			},
+			{
+				Name:     "DependsOn",
+				Type:     "[]string",
+				JSONName: "depends_on",
+				Doc:      `DependsOn lists step IDs this step blocks on (within the formula).`,
 			},
 			{
 				Name:     "WaitsFor",
@@ -763,6 +763,49 @@ When set, the step becomes a container that expands its body.`,
 				JSONName: "on_complete",
 				Doc: `OnComplete defines actions triggered when this step completes.
 Used for runtime expansion over step output (the for-each construct).`,
+			},
+		},
+	},
+	{
+		Name: "StepExpansion",
+		Doc: `StepExpansion contains optional dependency, expansion, and source-tracing
+details for a formula step. It is anonymously embedded in Step so the JSON
+and TOML documents keep their existing flat shape.`,
+		Fields: []FieldDoc{
+			{
+				Name:     "DependsOn",
+				Type:     "[]string",
+				JSONName: "depends_on",
+				Doc:      `DependsOn lists step IDs this step blocks on (within the formula).`,
+			},
+			{
+				Name:     "WaitsFor",
+				Type:     "string",
+				JSONName: "waits_for",
+				Doc: `WaitsFor specifies a fanout gate type for this step.
+Values: "all-children" (wait for all dynamic children) or "any-children" (wait for first).
+When set, the cooked issue gets a "gate:<value>" label.`,
+			},
+			{
+				Name:     "Assignee",
+				Type:     "string",
+				JSONName: "assignee",
+				Doc:      `Assignee is the default assignee (supports substitution).`,
+			},
+			{
+				Name:     "Expand",
+				Type:     "string",
+				JSONName: "expand",
+				Doc: `Expand references an expansion formula to inline here.
+When set, this step is replaced by the expansion's template steps.
+See ApplyInlineExpansions in expand.go for implementation.`,
+			},
+			{
+				Name:     "ExpandVars",
+				Type:     "map[string]string",
+				JSONName: "expand_vars",
+				Doc: `ExpandVars are variable overrides for the expansion.
+Merged with the expansion formula's default vars during inline expansion.`,
 			},
 		},
 	},

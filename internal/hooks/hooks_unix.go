@@ -78,22 +78,34 @@ func (r *Runner) runHook(hookPath, event string, issue *types.Issue) (retErr err
 		done <- cmd.Wait()
 	}()
 
+	return waitForHook(ctx, cmd, done, span, &stdout, &stderr)
+}
+
+func waitForHook(ctx context.Context, cmd *exec.Cmd, done <-chan error, span trace.Span, stdout, stderr *bytes.Buffer) error {
 	select {
 	case <-ctx.Done():
-		if cmd.Process != nil {
-			if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
-				return fmt.Errorf("kill process group: %w", err)
-			}
+		if err := killHookGroup(cmd); err != nil {
+			return err
 		}
 		// Wait for process to exit after the kill attempt
 		<-done
-		addHookOutputEvents(span, &stdout, &stderr)
+		addHookOutputEvents(span, stdout, stderr)
 		return ctx.Err()
 	case err := <-done:
-		addHookOutputEvents(span, &stdout, &stderr)
+		addHookOutputEvents(span, stdout, stderr)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
+}
+
+func killHookGroup(cmd *exec.Cmd) error {
+	if cmd.Process == nil {
+		return nil
+	}
+	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+		return fmt.Errorf("kill process group: %w", err)
+	}
+	return nil
 }

@@ -19,7 +19,32 @@ type Counters struct {
 	BytesBackendToClient int64
 }
 
+// Stats groups related counters into small state objects. The groups remain
+// embedded so the historical Stats method set and zero-value behavior remain
+// unchanged while each state object has a focused public surface.
 type Stats struct {
+	StatsLifecycle
+	StatsBackend
+	StatsConnections
+	StatsBytes
+}
+
+type StatsLifecycle struct {
+	mu       sync.Mutex
+	counters Counters
+}
+
+type StatsBackend struct {
+	mu       sync.Mutex
+	counters Counters
+}
+
+type StatsConnections struct {
+	mu       sync.Mutex
+	counters Counters
+}
+
+type StatsBytes struct {
 	mu       sync.Mutex
 	counters Counters
 }
@@ -28,37 +53,108 @@ func (s *Stats) Snapshot() Counters {
 	if s == nil {
 		return Counters{}
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.counters
-}
-
-func (s *Stats) update(fn func(*Counters)) {
-	if s == nil {
-		return
+	lifecycle := s.StatsLifecycle.snapshot()
+	backend := s.StatsBackend.snapshot()
+	connections := s.StatsConnections.snapshot()
+	bytes := s.StatsBytes.snapshot()
+	return Counters{
+		ListenAndServeCalls:  lifecycle.ListenAndServeCalls,
+		BackendStartCalls:    backend.BackendStartCalls,
+		BackendStopCalls:     backend.BackendStopCalls,
+		IdleTimeouts:         lifecycle.IdleTimeouts,
+		SignalsReceived:      lifecycle.SignalsReceived,
+		AcceptCalls:          connections.AcceptCalls,
+		AcceptErrors:         connections.AcceptErrors,
+		BackendDialAttempts:  backend.BackendDialAttempts,
+		BackendDialSuccess:   backend.BackendDialSuccess,
+		BackendDialErrors:    backend.BackendDialErrors,
+		BackendDeadShutdowns: backend.BackendDeadShutdowns,
+		HandledConns:         connections.HandledConns,
+		BytesClientToBackend: bytes.BytesClientToBackend,
+		BytesBackendToClient: bytes.BytesBackendToClient,
 	}
-	s.mu.Lock()
-	fn(&s.counters)
-	s.mu.Unlock()
 }
 
-func (s *Stats) IncListenAndServe()     { s.update(func(c *Counters) { c.ListenAndServeCalls++ }) }
-func (s *Stats) IncBackendStart()       { s.update(func(c *Counters) { c.BackendStartCalls++ }) }
-func (s *Stats) IncBackendStop()        { s.update(func(c *Counters) { c.BackendStopCalls++ }) }
-func (s *Stats) IncIdleTimeout()        { s.update(func(c *Counters) { c.IdleTimeouts++ }) }
-func (s *Stats) IncSignalReceived()     { s.update(func(c *Counters) { c.SignalsReceived++ }) }
-func (s *Stats) IncAccept()             { s.update(func(c *Counters) { c.AcceptCalls++ }) }
-func (s *Stats) IncAcceptError()        { s.update(func(c *Counters) { c.AcceptErrors++ }) }
-func (s *Stats) IncBackendDialAttempt() { s.update(func(c *Counters) { c.BackendDialAttempts++ }) }
-func (s *Stats) IncBackendDialSuccess() { s.update(func(c *Counters) { c.BackendDialSuccess++ }) }
-func (s *Stats) IncBackendDialError()   { s.update(func(c *Counters) { c.BackendDialErrors++ }) }
-func (s *Stats) IncBackendDeadShutdown() {
-	s.update(func(c *Counters) { c.BackendDeadShutdowns++ })
+func snapshotStats(mu *sync.Mutex, counters *Counters) Counters {
+	mu.Lock()
+	defer mu.Unlock()
+	return *counters
 }
-func (s *Stats) IncHandledConn() { s.update(func(c *Counters) { c.HandledConns++ }) }
-func (s *Stats) AddBytesClientToBackend(n int64) {
-	s.update(func(c *Counters) { c.BytesClientToBackend += n })
+
+func (s *StatsLifecycle) snapshot() Counters {
+	return snapshotStats(&s.mu, &s.counters)
 }
-func (s *Stats) AddBytesBackendToClient(n int64) {
-	s.update(func(c *Counters) { c.BytesBackendToClient += n })
+
+func (s *StatsBackend) snapshot() Counters {
+	return snapshotStats(&s.mu, &s.counters)
+}
+
+func (s *StatsConnections) snapshot() Counters {
+	return snapshotStats(&s.mu, &s.counters)
+}
+
+func (s *StatsBytes) snapshot() Counters {
+	return snapshotStats(&s.mu, &s.counters)
+}
+
+func updateStats(mu *sync.Mutex, counters *Counters, fn func(*Counters)) {
+	mu.Lock()
+	fn(counters)
+	mu.Unlock()
+}
+
+func (s *StatsLifecycle) IncListenAndServe() {
+	updateStats(&s.mu, &s.counters, func(c *Counters) { c.ListenAndServeCalls++ })
+}
+
+func (s *StatsLifecycle) IncIdleTimeout() {
+	updateStats(&s.mu, &s.counters, func(c *Counters) { c.IdleTimeouts++ })
+}
+
+func (s *StatsLifecycle) IncSignalReceived() {
+	updateStats(&s.mu, &s.counters, func(c *Counters) { c.SignalsReceived++ })
+}
+
+func (s *StatsBackend) IncBackendStart() {
+	updateStats(&s.mu, &s.counters, func(c *Counters) { c.BackendStartCalls++ })
+}
+
+func (s *StatsBackend) IncBackendStop() {
+	updateStats(&s.mu, &s.counters, func(c *Counters) { c.BackendStopCalls++ })
+}
+
+func (s *StatsBackend) IncBackendDialAttempt() {
+	updateStats(&s.mu, &s.counters, func(c *Counters) { c.BackendDialAttempts++ })
+}
+
+func (s *StatsBackend) IncBackendDialSuccess() {
+	updateStats(&s.mu, &s.counters, func(c *Counters) { c.BackendDialSuccess++ })
+}
+
+func (s *StatsBackend) IncBackendDialError() {
+	updateStats(&s.mu, &s.counters, func(c *Counters) { c.BackendDialErrors++ })
+}
+
+func (s *StatsBackend) IncBackendDeadShutdown() {
+	updateStats(&s.mu, &s.counters, func(c *Counters) { c.BackendDeadShutdowns++ })
+}
+
+func (s *StatsConnections) IncAccept() {
+	updateStats(&s.mu, &s.counters, func(c *Counters) { c.AcceptCalls++ })
+}
+
+func (s *StatsConnections) IncAcceptError() {
+	updateStats(&s.mu, &s.counters, func(c *Counters) { c.AcceptErrors++ })
+}
+
+func (s *StatsConnections) IncHandledConn() {
+	updateStats(&s.mu, &s.counters, func(c *Counters) { c.HandledConns++ })
+}
+
+func (s *StatsBytes) AddBytesClientToBackend(n int64) {
+	updateStats(&s.mu, &s.counters, func(c *Counters) { c.BytesClientToBackend += n })
+}
+
+func (s *StatsBytes) AddBytesBackendToClient(n int64) {
+	updateStats(&s.mu, &s.counters, func(c *Counters) { c.BytesBackendToClient += n })
 }

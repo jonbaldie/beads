@@ -30,15 +30,17 @@ func populatedContextInfo() domain.ContextInfo {
 		IsWorktree:   true,
 		Backend:      "dolt",
 		DoltMode:     "proxied-server",
-		ServerHost:   fakeDoltAddress,
-		ServerPort:   3307,
-		ProxiedDir:   "/host/workspace/.beads/dolt",
-		Database:     "beads",
-		DataDir:      "/host/workspace/.beads/embeddeddolt",
-		ProjectID:    "proj-1",
-		SyncRemote:   fakeSyncRemote,
-		Role:         "maintainer",
-		BdVersion:    "9.9.9",
+		ContextServer: domain.ContextServer{
+			ServerHost: fakeDoltAddress,
+			ServerPort: 3307,
+			ProxiedDir: "/host/workspace/.beads/dolt",
+		},
+		Database:   "beads",
+		DataDir:    "/host/workspace/.beads/embeddeddolt",
+		ProjectID:  "proj-1",
+		SyncRemote: fakeSyncRemote,
+		Role:       "maintainer",
+		BdVersion:  "9.9.9",
 	}
 }
 

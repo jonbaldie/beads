@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/dolthub/eventkit"
@@ -28,16 +29,20 @@ const (
 )
 
 var (
-	enabled  bool
-	endpoint string
+	enabled  atomic.Bool
+	endpoint atomic.Value
 )
 
 func Enabled() bool {
-	return enabled
+	return enabled.Load()
 }
 
 func Endpoint() string {
-	return endpoint
+	value := endpoint.Load()
+	if value == nil {
+		return ""
+	}
+	return value.(string)
 }
 
 func DataDir() (string, error) {
@@ -49,11 +54,11 @@ func DataDir() (string, error) {
 }
 
 func Init(version string, enable bool, metricsEndpoint string) (func(context.Context), error) {
-	enabled = enable
-	endpoint = metricsEndpoint
-	if endpoint == "" {
-		endpoint = DefaultEndpoint
+	enabled.Store(enable)
+	if metricsEndpoint == "" {
+		metricsEndpoint = DefaultEndpoint
 	}
+	endpoint.Store(metricsEndpoint)
 
 	var emitter eventkit.Emitter = eventkit.NullEmitter{}
 	// The distinct ID is resolved only on the enabled path: computing it can
@@ -61,7 +66,7 @@ func Init(version string, enable bool, metricsEndpoint string) (func(context.Con
 	// never emits an event that would carry it. The placeholder below is inert
 	// — NullEmitter drops everything and WithDisabled gates emission anyway.
 	distinctID := "disabled"
-	if enabled {
+	if Enabled() {
 		dir, err := DataDir()
 		if err != nil {
 			return func(context.Context) {}, fmt.Errorf("metrics: resolve data dir: %w", err)
@@ -78,7 +83,7 @@ func Init(version string, enable bool, metricsEndpoint string) (func(context.Con
 		eventkit.WithDistinctID(distinctID),
 		eventkit.WithAppName(AppName),
 		eventkit.WithAppVersion(version),
-		eventkit.WithDisabled(func() bool { return !enabled }),
+		eventkit.WithDisabled(func() bool { return !Enabled() }),
 	)
 	eventkit.SetGlobal(c)
 

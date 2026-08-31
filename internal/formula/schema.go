@@ -53,14 +53,16 @@ func PrimitiveByName(name string) *PrimitiveDoc {
 		return nil
 	}
 	target := normalizePrimitiveName(name)
-	for i := range Primitives {
-		if normalizePrimitiveName(Primitives[i].Name) == target {
-			return &Primitives[i]
+	for _, primitive := range Primitives {
+		if normalizePrimitiveName(primitive.Name) == target {
+			match := primitive
+			return &match
 		}
 	}
-	for i := range Primitives {
-		if stripPrimitiveSuffix(normalizePrimitiveName(Primitives[i].Name)) == target {
-			return &Primitives[i]
+	for _, primitive := range Primitives {
+		if stripPrimitiveSuffix(normalizePrimitiveName(primitive.Name)) == target {
+			match := primitive
+			return &match
 		}
 	}
 	return nil
@@ -68,7 +70,8 @@ func PrimitiveByName(name string) *PrimitiveDoc {
 
 func normalizePrimitiveName(s string) string {
 	out := make([]byte, 0, len(s))
-	for i := 0; i < len(s); i++ {
+	n := len(s)
+	for i := 0; i < n; i++ {
 		c := s[i]
 		if c == '_' || c == '-' || c == ' ' {
 			continue

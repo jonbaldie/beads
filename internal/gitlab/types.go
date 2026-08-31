@@ -6,7 +6,6 @@
 package gitlab
 
 import (
-	"net/http"
 	"strings"
 	"time"
 
@@ -44,48 +43,38 @@ type IssueFilter struct {
 	Assignee  string // Assignee username
 }
 
-// Client provides methods to interact with the GitLab REST API.
-type Client struct {
-	Token      string       // GitLab personal access token or OAuth token
-	BaseURL    string       // GitLab instance URL (e.g., "https://gitlab.com/api/v4")
-	ProjectID  string       // Project ID or URL-encoded path (e.g., "group/project")
-	GroupID    string       // Optional group ID or path for group-level issue fetching
-	HTTPClient *http.Client // Optional custom HTTP client
-
-	// taskTypeID caches the GraphQL GID for the "Task" work item type.
-	// Populated lazily on first call to getTaskWorkItemTypeID.
-	taskTypeID string
+// IssueSupplemental contains optional GitLab issue metadata and related-link
+// payloads. It is anonymously embedded in Issue to keep the API response JSON
+// flat while separating the less frequently used fields from the core issue.
+type IssueSupplemental struct {
+	ClosedAt       *time.Time  `json:"closed_at,omitempty"`
+	ClosedBy       *User       `json:"closed_by,omitempty"`
+	Assignees      []User      `json:"assignees,omitempty"`
+	Author         *User       `json:"author,omitempty"`
+	DueDate        string      `json:"due_date,omitempty"` // YYYY-MM-DD format
+	Weight         int         `json:"weight,omitempty"`   // GitLab Premium feature
+	Confidential   bool        `json:"confidential"`
+	Links          *IssueLinks `json:"links,omitempty"`
+	IssueLinksData []IssueLink `json:"-"`
 }
 
 // Issue represents an issue from the GitLab API.
 type Issue struct {
-	ID           int        `json:"id"`  // Global issue ID
-	IID          int        `json:"iid"` // Project-scoped issue ID
-	ProjectID    int        `json:"project_id"`
-	Title        string     `json:"title"`
-	Description  string     `json:"description"`
-	State        string     `json:"state"` // "opened", "closed", "reopened"
-	CreatedAt    *time.Time `json:"created_at"`
-	UpdatedAt    *time.Time `json:"updated_at"`
-	ClosedAt     *time.Time `json:"closed_at,omitempty"`
-	ClosedBy     *User      `json:"closed_by,omitempty"`
-	Labels       []string   `json:"labels"`
-	Assignee     *User      `json:"assignee,omitempty"`
-	Assignees    []User     `json:"assignees,omitempty"`
-	Author       *User      `json:"author,omitempty"`
-	Milestone    *Milestone `json:"milestone,omitempty"`
-	WebURL       string     `json:"web_url"`
-	DueDate      string     `json:"due_date,omitempty"` // YYYY-MM-DD format
-	Weight       int        `json:"weight,omitempty"`   // GitLab Premium feature
-	Type         string     `json:"type,omitempty"`     // "issue", "incident", "test_case", "task"
-	Confidential bool       `json:"confidential"`
+	ID          int        `json:"id"`  // Global issue ID
+	IID         int        `json:"iid"` // Project-scoped issue ID
+	ProjectID   int        `json:"project_id"`
+	Title       string     `json:"title"`
+	Description string     `json:"description"`
+	State       string     `json:"state"` // "opened", "closed", "reopened"
+	CreatedAt   *time.Time `json:"created_at"`
+	UpdatedAt   *time.Time `json:"updated_at"`
+	Labels      []string   `json:"labels"`
+	Assignee    *User      `json:"assignee,omitempty"`
+	Milestone   *Milestone `json:"milestone,omitempty"`
+	WebURL      string     `json:"web_url"`
+	Type        string     `json:"type,omitempty"` // "issue", "incident", "test_case", "task"
 
-	// Links contains related URLs (populated in some API responses)
-	Links *IssueLinks `json:"links,omitempty"`
-
-	// IssueLinksData holds related issue links fetched via the /issues/:iid/links API.
-	// Not part of the standard issue response; populated separately during sync.
-	IssueLinksData []IssueLink `json:"-"`
+	IssueSupplemental
 }
 
 // IssueLinks contains related URLs for an issue.

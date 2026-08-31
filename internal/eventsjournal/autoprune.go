@@ -3,6 +3,7 @@ package eventsjournal
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -167,13 +168,11 @@ const DefaultAutoPrunePassTimeout = 30 * time.Second
 // that already happened is indistinguishable from one that just did.
 func AutoPrune(ctx context.Context, runner issueops.EventsMaintenanceRunner, opts AutoPruneOptions) (int64, error) {
 	opts = opts.resolved()
-	if runner == nil {
-		return 0, fmt.Errorf("events journal: no maintenance plumbing")
-	}
-	if opts.RetainDays <= 0 && opts.RetainRows <= 0 {
-		// An unbounded ledger by explicit configuration. Costs nothing: not even
-		// the throttle read runs.
-		return 0, nil
+	if err := validateAutoPruneRequest(runner, opts); err != nil {
+		if errors.Is(err, errAutoPruneDisabled) {
+			return 0, nil
+		}
+		return 0, err
 	}
 
 	// Every transaction below runs under the pass budget, including the ones a
@@ -182,11 +181,46 @@ func AutoPrune(ctx context.Context, runner issueops.EventsMaintenanceRunner, opt
 	ctx, cancel := context.WithTimeout(ctx, opts.Timeout)
 	defer cancel()
 
-	var (
-		due  bool
-		head int64
-	)
-	if err := runner.RunEventsMaintenanceTx(ctx, func(ctx context.Context, tx issueops.DBTX) error {
+	due, head, err := readAutoPruneDue(ctx, runner, opts)
+	if err != nil {
+		return 0, err
+	}
+	if !due || head <= 0 {
+		return 0, nil
+	}
+
+	if err := stampAutoPrune(ctx, runner, opts, head); err != nil {
+		return 0, err
+	}
+
+	bound, skip, err := resolveAutoPruneBound(ctx, runner, opts)
+	if err != nil {
+		return 0, err
+	}
+	if skip {
+		return 0, nil
+	}
+	return pruneAutoPruneBatches(ctx, runner, bound)
+}
+
+var errAutoPruneDisabled = errors.New("events journal: auto-prune disabled")
+
+func validateAutoPruneRequest(runner issueops.EventsMaintenanceRunner, opts AutoPruneOptions) error {
+	if runner == nil {
+		return fmt.Errorf("events journal: no maintenance plumbing")
+	}
+	if opts.RetainDays <= 0 && opts.RetainRows <= 0 {
+		// An unbounded ledger by explicit configuration costs nothing: not even
+		// the throttle read runs.
+		return errAutoPruneDisabled
+	}
+	return nil
+}
+
+func readAutoPruneDue(ctx context.Context, runner issueops.EventsMaintenanceRunner, opts AutoPruneOptions) (bool, int64, error) {
+	var due bool
+	var head int64
+	err := runner.RunEventsMaintenanceTx(ctx, func(ctx context.Context, tx issueops.DBTX) error {
 		watermark, currentHead, err := issueops.ReadEventsAutoPruneStateInTx(ctx, tx, AutoPruneSlotKey)
 		if err != nil {
 			return err
@@ -194,38 +228,32 @@ func AutoPrune(ctx context.Context, runner issueops.EventsMaintenanceRunner, opt
 		head = currentHead
 		due = autoPruneDue(watermark, currentHead, opts)
 		return nil
-	}); err != nil {
-		return 0, err
-	}
-	if !due || head <= 0 {
-		return 0, nil
-	}
+	})
+	return due, head, err
+}
 
+func stampAutoPrune(ctx context.Context, runner issueops.EventsMaintenanceRunner, opts AutoPruneOptions, head int64) error {
 	stamp, err := json.Marshal(autoPruneState{TS: opts.Now, Head: head})
 	if err != nil {
-		return 0, fmt.Errorf("events journal: encode auto-prune watermark: %w", err)
+		return fmt.Errorf("events journal: encode auto-prune watermark: %w", err)
 	}
-	if err := runner.RunEventsMaintenanceTx(ctx, func(ctx context.Context, tx issueops.DBTX) error {
+	return runner.RunEventsMaintenanceTx(ctx, func(ctx context.Context, tx issueops.DBTX) error {
 		return issueops.SetEventsAutoPruneStateInTx(ctx, tx, AutoPruneSlotKey, string(stamp))
-	}); err != nil {
-		return 0, err
-	}
+	})
+}
 
-	var (
-		bound int64
-		skip  bool
-	)
-	if err := runner.RunEventsMaintenanceTx(ctx, func(ctx context.Context, tx issueops.DBTX) error {
-		var boundErr error
-		bound, skip, boundErr = issueops.ComputeEventsAutoPruneBoundInTx(ctx, tx, opts.RetainDays, opts.RetainRows, opts.Now)
-		return boundErr
-	}); err != nil {
-		return 0, err
-	}
-	if skip {
-		return 0, nil
-	}
+func resolveAutoPruneBound(ctx context.Context, runner issueops.EventsMaintenanceRunner, opts AutoPruneOptions) (int64, bool, error) {
+	var bound int64
+	var skip bool
+	err := runner.RunEventsMaintenanceTx(ctx, func(ctx context.Context, tx issueops.DBTX) error {
+		var err error
+		bound, skip, err = issueops.ComputeEventsAutoPruneBoundInTx(ctx, tx, opts.RetainDays, opts.RetainRows, opts.Now)
+		return err
+	})
+	return bound, skip, err
+}
 
+func pruneAutoPruneBatches(ctx context.Context, runner issueops.EventsMaintenanceRunner, bound int64) (int64, error) {
 	var deleted int64
 	for range issueops.EventsAutoPruneMaxBatches {
 		var n int64

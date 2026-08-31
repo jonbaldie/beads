@@ -104,73 +104,72 @@ func ValidateRemoteURL(rawURL string) error {
 
 // validateSchemeURL validates a scheme-based URL (https://, dolthub://, etc.)
 func validateSchemeURL(rawURL string) error {
-	// net/url doesn't understand git+ssh:// etc., so we normalize first
-	normalizedURL := rawURL
-	scheme := ""
-	if idx := strings.Index(rawURL, "://"); idx > 0 {
-		scheme = rawURL[:idx]
-		// For net/url parsing, replace git+ssh with a parseable scheme
-		if strings.HasPrefix(scheme, "git+") {
-			normalizedURL = rawURL[len(scheme)+3:] // strip scheme://
-			normalizedURL = "placeholder://" + normalizedURL
-		}
+	normalizedURL, scheme, err := normalizeSchemeURL(rawURL)
+	if err != nil {
+		return err
 	}
-
-	if scheme == "" {
-		return fmt.Errorf("remote URL has no scheme (expected one of: %s)", strings.Join(sortedSchemes(), ", "))
-	}
-
-	if !allowedSchemes[scheme] {
-		return fmt.Errorf("remote URL scheme %q is not allowed (expected one of: %s)", scheme, strings.Join(sortedSchemes(), ", "))
-	}
-
 	parsed, err := url.Parse(normalizedURL)
 	if err != nil {
 		return fmt.Errorf("remote URL is malformed: %w", err)
 	}
+	return validateSchemeStructure(scheme, parsed)
+}
 
-	// Scheme-specific structural validation
+func normalizeSchemeURL(rawURL string) (normalizedURL, scheme string, err error) {
+	// net/url doesn't understand git+ssh:// etc., so normalize those first.
+	normalizedURL = rawURL
+	if idx := strings.Index(rawURL, "://"); idx > 0 {
+		scheme = rawURL[:idx]
+		if strings.HasPrefix(scheme, "git+") {
+			normalizedURL = "placeholder://" + rawURL[len(scheme)+3:]
+		}
+	}
+	if scheme == "" {
+		return "", "", fmt.Errorf("remote URL has no scheme (expected one of: %s)", strings.Join(sortedSchemes(), ", "))
+	}
+	if !allowedSchemes[scheme] {
+		return "", "", fmt.Errorf("remote URL scheme %q is not allowed (expected one of: %s)", scheme, strings.Join(sortedSchemes(), ", "))
+	}
+	return normalizedURL, scheme, nil
+}
+
+func validateSchemeStructure(scheme string, parsed *url.URL) error {
 	switch scheme {
 	case "dolthub":
-		// dolthub://org/repo — requires org and repo
-		p := strings.TrimPrefix(parsed.Path, "/")
-		host := parsed.Host
-		combined := host
-		if p != "" {
-			combined = host + "/" + p
-		}
-		parts := strings.Split(combined, "/")
-		if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
-			return fmt.Errorf("dolthub:// URL must have org/repo format (e.g., dolthub://myorg/myrepo)")
-		}
+		return validateDolthubStructure(parsed)
 	case "https", "http", "git+https", "git+http":
-		if parsed.Host == "" {
-			return fmt.Errorf("%s:// URL must include a hostname", scheme)
-		}
+		return requireURLHost(scheme, parsed, "hostname")
 	case "ssh", "git", "git+ssh":
-		if parsed.Host == "" {
-			return fmt.Errorf("%s:// URL must include a hostname", scheme)
-		}
+		return requireURLHost(scheme, parsed, "hostname")
 	case "s3", "aws", "gs":
-		// s3://bucket/path, aws://bucket/path, gs://bucket/path — host is the bucket
-		if parsed.Host == "" {
-			return fmt.Errorf("%s:// URL must include a bucket name", scheme)
-		}
+		return requireURLHost(scheme, parsed, "bucket name")
 	case "az":
-		// az://account.blob.core.windows.net/container/path
-		if parsed.Host == "" {
-			return fmt.Errorf("az:// URL must include a storage account hostname")
-		}
+		return requireURLHost(scheme, parsed, "storage account hostname")
 	case "oci":
-		if parsed.Host == "" {
-			return fmt.Errorf("oci:// URL must include a namespace or bucket host")
-		}
-	case "file":
-		// file:// is allowed with any path
-	case "git+file":
-		// git+file:// is Dolt's normalized form for local git remotes.
+		return requireURLHost(scheme, parsed, "namespace or bucket host")
 	}
 
+	return nil
+}
+
+func validateDolthubStructure(parsed *url.URL) error {
+	// dolthub://org/repo — requires org and repo.
+	p := strings.TrimPrefix(parsed.Path, "/")
+	combined := parsed.Host
+	if p != "" {
+		combined += "/" + p
+	}
+	parts := strings.Split(combined, "/")
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return fmt.Errorf("dolthub:// URL must have org/repo format (e.g., dolthub://myorg/myrepo)")
+	}
+	return nil
+}
+
+func requireURLHost(scheme string, parsed *url.URL, kind string) error {
+	if parsed.Host == "" {
+		return fmt.Errorf("%s:// URL must include a %s", scheme, kind)
+	}
 	return nil
 }
 

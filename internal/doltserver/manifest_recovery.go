@@ -131,18 +131,44 @@ func nomsDirLooksCorrupt(nomsDir string) (bool, error) {
 		return false, err // no manifest = not the shape we're recovering
 	}
 
-	if info, err := os.Stat(filepath.Join(nomsDir, "journal.idx")); err == nil {
-		if info.Size() > 0 {
-			return false, nil
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
+	empty, err := journalIndexEmpty(nomsDir)
+	if err != nil {
 		return false, err
+	}
+	if !empty {
+		return false, nil
 	}
 
 	entries, err := os.ReadDir(nomsDir)
 	if err != nil {
 		return false, err
 	}
+	hasData, err := hasJournalData(entries)
+	if err != nil {
+		return false, err
+	}
+	oldgenData, err := hasOldgenData(nomsDir)
+	if err != nil {
+		return false, err
+	}
+	if hasData || oldgenData {
+		return false, nil
+	}
+	return true, nil
+}
+
+func journalIndexEmpty(nomsDir string) (bool, error) {
+	info, err := os.Stat(filepath.Join(nomsDir, "journal.idx"))
+	if err == nil {
+		return info.Size() == 0, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	}
+	return false, err
+}
+
+func hasJournalData(entries []os.DirEntry) (bool, error) {
 	for _, e := range entries {
 		if !e.Type().IsRegular() {
 			continue
@@ -156,25 +182,30 @@ func nomsDirLooksCorrupt(nomsDir string) (bool, error) {
 			}
 			// Journal header is 40 bytes; anything larger may contain data.
 			if info.Size() > 64 {
-				return false, nil
+				return true, nil
 			}
 		}
 	}
+	return false, nil
+}
 
+func hasOldgenData(nomsDir string) (bool, error) {
 	oldgen := filepath.Join(nomsDir, "oldgen")
-	if oldgenEntries, err := os.ReadDir(oldgen); err == nil {
-		for _, e := range oldgenEntries {
-			if e.Type().IsRegular() && e.Name() != "manifest" && e.Name() != "LOCK" {
-				if info, infoErr := e.Info(); infoErr == nil && info.Size() > 0 {
-					return false, nil
-				}
-			}
+	oldgenEntries, err := os.ReadDir(oldgen)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
 		}
-	} else if !errors.Is(err, os.ErrNotExist) {
 		return false, err
 	}
-
-	return true, nil
+	for _, e := range oldgenEntries {
+		if e.Type().IsRegular() && e.Name() != "manifest" && e.Name() != "LOCK" {
+			if info, infoErr := e.Info(); infoErr == nil && info.Size() > 0 {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 func isLowerAlphaName(s string) bool {

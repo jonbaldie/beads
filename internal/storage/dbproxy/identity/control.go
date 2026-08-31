@@ -39,36 +39,63 @@ type IdentReply struct {
 
 // Identify authenticates to a proxy control listener and returns its identity.
 func Identify(host string, controlPort int, secret string, timeout time.Duration) (*IdentReply, error) {
+	conn, err := openIdentityConnection(host, controlPort, timeout)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = conn.Close() }()
+
+	nonce, err := sendIdentityRequest(conn, secret)
+	if err != nil {
+		return nil, err
+	}
+	line, err := readIdentityReply(conn)
+	if err != nil {
+		return nil, err
+	}
+	return decodeIdentityReply(line, secret, nonce)
+}
+
+func openIdentityConnection(host string, controlPort int, timeout time.Duration) (net.Conn, error) {
 	addr := net.JoinHostPort(host, strconv.Itoa(controlPort))
 	conn, err := net.DialTimeout("tcp", addr, timeout)
 	if err != nil {
 		return nil, fmt.Errorf("identity: dial control listener: %w", err)
 	}
-	defer func() { _ = conn.Close() }()
-
 	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+		_ = conn.Close()
 		return nil, fmt.Errorf("identity: set control deadline: %w", err)
 	}
+	return conn, nil
+}
+
+func sendIdentityRequest(conn net.Conn, secret string) (string, error) {
 	nonceBytes := make([]byte, identNonceBytes)
 	if _, err := rand.Read(nonceBytes); err != nil {
-		return nil, fmt.Errorf("identity: generate request nonce: %w", err)
+		return "", fmt.Errorf("identity: generate request nonce: %w", err)
 	}
 	nonce := hex.EncodeToString(nonceBytes)
 	if _, err := io.WriteString(conn, "IDENT "+secret+" "+nonce+"\n"); err != nil {
-		return nil, fmt.Errorf("identity: write request: %w", err)
+		return "", fmt.Errorf("identity: write request: %w", err)
 	}
+	return nonce, nil
+}
 
+func readIdentityReply(conn net.Conn) (string, error) {
 	line, err := bufio.NewReader(io.LimitReader(conn, maxIdentReplyBytes+1)).ReadString('\n')
 	if errors.Is(err, io.EOF) && len(line) == 0 {
-		return nil, ErrIdentRefused
+		return "", ErrIdentRefused
 	}
 	if err != nil {
-		return nil, fmt.Errorf("identity: read reply: %w", err)
+		return "", fmt.Errorf("identity: read reply: %w", err)
 	}
 	if len(line) > maxIdentReplyBytes {
-		return nil, errors.New("identity: oversized reply")
+		return "", errors.New("identity: oversized reply")
 	}
+	return line, nil
+}
 
+func decodeIdentityReply(line, secret, nonce string) (*IdentReply, error) {
 	var reply IdentReply
 	if err := json.Unmarshal([]byte(line), &reply); err != nil {
 		return nil, fmt.Errorf("identity: decode reply: %w", err)

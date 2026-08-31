@@ -21,6 +21,9 @@ func TestInitDisabledKeepsEnabledFalse(t *testing.T) {
 	if Enabled() {
 		t.Fatalf("Enabled() = true, want false")
 	}
+	if got := Endpoint(); got != DefaultEndpoint {
+		t.Fatalf("Endpoint() = %q, want default %q", got, DefaultEndpoint)
+	}
 
 	evt := NewCommandEvent("init")
 	Global().CloseEventAndAdd(evt)
@@ -33,6 +36,19 @@ func TestInitDisabledKeepsEnabledFalse(t *testing.T) {
 				t.Errorf("disabled Init produced .evtq file: %s", e.Name())
 			}
 		}
+	}
+}
+
+func TestInitPreservesExplicitEndpoint(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	const want = "https://metrics.example.test/collect"
+	closeFn, err := Init("0.0.0-test", false, want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { closeFn(context.Background()) })
+	if got := Endpoint(); got != want {
+		t.Fatalf("Endpoint() = %q, want %q", got, want)
 	}
 }
 

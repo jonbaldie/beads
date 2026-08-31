@@ -58,34 +58,49 @@ func listDoltProcessPIDs() []int {
 func parseDoltProcessPIDs(snapshot []byte) []int {
 	var pids []int
 	for _, line := range strings.Split(string(snapshot), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		pidText, rest, ok := splitPSField(line)
-		if !ok {
-			continue
-		}
-		state, command, ok := splitPSField(rest)
-		if !ok {
-			continue
-		}
-
-		pid, err := strconv.Atoi(pidText)
-		if err != nil || pid <= 0 {
-			continue
-		}
-		if state[0] == 'Z' || state[0] == 'X' {
-			continue
-		}
-
-		doltIndex := strings.Index(command, "dolt")
-		if doltIndex >= 0 && strings.Contains(command[doltIndex+len("dolt"):], "sql-server") {
+		if pid, ok := parseDoltProcessPID(line); ok {
 			pids = append(pids, pid)
 		}
 	}
 	return pids
+}
+
+func parseDoltProcessPID(line string) (int, bool) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return 0, false
+	}
+
+	pidText, state, command, ok := parseDoltProcessFields(line)
+	if !ok {
+		return 0, false
+	}
+
+	pid, err := strconv.Atoi(pidText)
+	if err != nil || pid <= 0 {
+		return 0, false
+	}
+	if state[0] == 'Z' || state[0] == 'X' {
+		return 0, false
+	}
+
+	doltIndex := strings.Index(command, "dolt")
+	if doltIndex < 0 || !strings.Contains(command[doltIndex+len("dolt"):], "sql-server") {
+		return 0, false
+	}
+	return pid, true
+}
+
+func parseDoltProcessFields(line string) (pid, state, command string, ok bool) {
+	pid, rest, ok := splitPSField(line)
+	if !ok {
+		return "", "", "", false
+	}
+	state, command, ok = splitPSField(rest)
+	if !ok || len(state) == 0 {
+		return "", "", "", false
+	}
+	return pid, state, command, true
 }
 
 // splitPSField separates the next whitespace-delimited ps field from the

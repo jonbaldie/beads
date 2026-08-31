@@ -39,7 +39,7 @@ func eventsRows(from int64, n int) []storage.EventsJournalRow {
 // journal ENABLED — the ordinary configuration. The disabled case names itself.
 func journalServer(t *testing.T, journal *roleEventsJournal) *testServer {
 	t.Helper()
-	return newTestServer(t, rolesConfig(Config{EventsJournal: journal, EventsJournalEnabled: true}))
+	return newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{JournalRoles: JournalRoles{EventsJournal: journal, EventsJournalEnabled: true}}}))
 }
 
 // TestEventsServesTheRecordsAndTheHead is the happy path, and it asserts the
@@ -176,7 +176,7 @@ func TestEventsEmptyJournalIsNotTheDisabledRefusal(t *testing.T) {
 // records nothing must not spend a slot and a transaction to say so.
 func TestEventsRefusesWhenTheJournalIsDisabled(t *testing.T) {
 	journal := &roleEventsJournal{page: storage.EventsJournalPage{Rows: eventsRows(1, 2), Head: 2}}
-	ts := newTestServer(t, rolesConfig(Config{EventsJournal: journal, EventsJournalEnabled: false}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{JournalRoles: JournalRoles{EventsJournal: journal, EventsJournalEnabled: false}}}))
 
 	resp := ts.get(t, "/v0/beads/events?since=0")
 	if resp.StatusCode != http.StatusConflict {
@@ -454,7 +454,7 @@ func TestListenRequiresTheJournalReaderOnlyWhenTheWorkspaceHasOne(t *testing.T) 
 
 		srv, err := Listen(cfg)
 		if err == nil {
-			_ = srv.http.Close()
+			_ = srv.network.http.Close()
 			t.Fatal("Listen bound a journal-enabled server with no EventsJournal reader")
 		}
 	})

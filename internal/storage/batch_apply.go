@@ -113,53 +113,73 @@ func PlanApplyBatch(in issueops.ApplyBatchRequest) (ApplyBatchPlan, error) {
 func planApplyBatchKeys(items []issueops.ApplyItem) (map[string]int, error) {
 	keyIndex := make(map[string]int, len(items))
 	for i, item := range items {
-		payloads := 0
-		for _, present := range []bool{item.Create != nil, item.Update != nil, item.Close != nil, item.DepAdd != nil} {
-			if present {
-				payloads++
-			}
-		}
-		if payloads != 1 {
-			return nil, fmt.Errorf("%w: apply batch item %d must carry exactly one payload, got %d",
-				issueops.ErrValidation, i, payloads)
-		}
-		var matches bool
-		switch item.Kind {
-		case issueops.ItemCreate:
-			matches = item.Create != nil
-		case issueops.ItemUpdate:
-			matches = item.Update != nil
-		case issueops.ItemClose:
-			matches = item.Close != nil
-		case issueops.ItemDepAdd:
-			matches = item.DepAdd != nil
-		default:
-			return nil, fmt.Errorf("%w: apply batch item %d has unknown kind %q", issueops.ErrValidation, i, item.Kind)
-		}
-		if !matches {
-			return nil, fmt.Errorf("%w: apply batch item %d is kind %q but carries another kind's payload",
-				issueops.ErrValidation, i, item.Kind)
+		if err := validateApplyBatchItemShape(item, i); err != nil {
+			return nil, err
 		}
 		if item.Create == nil {
 			continue
 		}
-		if item.Create.Issue == nil {
-			return nil, fmt.Errorf("%w: apply batch item %d requires an issue", issueops.ErrValidation, i)
+		if err := registerApplyBatchCreate(item.Create, i, keyIndex); err != nil {
+			return nil, err
 		}
-		if len(item.Create.Issue.Comments) > 0 || len(item.Create.Issue.Dependencies) > 0 {
-			return nil, fmt.Errorf("%w: apply batch item %d must not carry comments or dependencies on the issue; edges are their own items",
-				issueops.ErrValidation, i)
-		}
-		if item.Create.Key == "" {
-			continue
-		}
-		if prior, dup := keyIndex[item.Create.Key]; dup {
-			return nil, fmt.Errorf("%w: apply batch item %d reuses key %q, already declared by item %d",
-				issueops.ErrValidation, i, item.Create.Key, prior)
-		}
-		keyIndex[item.Create.Key] = i
 	}
 	return keyIndex, nil
+}
+
+func validateApplyBatchItemShape(item issueops.ApplyItem, index int) error {
+	payloads := 0
+	for _, present := range []bool{item.Create != nil, item.Update != nil, item.Close != nil, item.DepAdd != nil} {
+		if present {
+			payloads++
+		}
+	}
+	if payloads != 1 {
+		return fmt.Errorf("%w: apply batch item %d must carry exactly one payload, got %d",
+			issueops.ErrValidation, index, payloads)
+	}
+	matches, known := applyBatchKindHasPayload(item)
+	if !known {
+		return fmt.Errorf("%w: apply batch item %d has unknown kind %q", issueops.ErrValidation, index, item.Kind)
+	}
+	if !matches {
+		return fmt.Errorf("%w: apply batch item %d is kind %q but carries another kind's payload",
+			issueops.ErrValidation, index, item.Kind)
+	}
+	return nil
+}
+
+func applyBatchKindHasPayload(item issueops.ApplyItem) (matches, known bool) {
+	switch item.Kind {
+	case issueops.ItemCreate:
+		return item.Create != nil, true
+	case issueops.ItemUpdate:
+		return item.Update != nil, true
+	case issueops.ItemClose:
+		return item.Close != nil, true
+	case issueops.ItemDepAdd:
+		return item.DepAdd != nil, true
+	default:
+		return false, false
+	}
+}
+
+func registerApplyBatchCreate(item *issueops.CreateItem, index int, keyIndex map[string]int) error {
+	if item.Issue == nil {
+		return fmt.Errorf("%w: apply batch item %d requires an issue", issueops.ErrValidation, index)
+	}
+	if len(item.Issue.Comments) > 0 || len(item.Issue.Dependencies) > 0 {
+		return fmt.Errorf("%w: apply batch item %d must not carry comments or dependencies on the issue; edges are their own items",
+			issueops.ErrValidation, index)
+	}
+	if item.Key == "" {
+		return nil
+	}
+	if prior, dup := keyIndex[item.Key]; dup {
+		return fmt.Errorf("%w: apply batch item %d reuses key %q, already declared by item %d",
+			issueops.ErrValidation, index, item.Key, prior)
+	}
+	keyIndex[item.Key] = index
+	return nil
 }
 
 // planApplyBatchItem validates one item's refs, guards and edge metadata, and
@@ -361,16 +381,25 @@ func applyRefLabel(ref issueops.Ref) string {
 // for being well-formed JSON when it is present at all: the blob is
 // type-specific and this role does not know the types.
 func normalizeApplyEdgeMetadata(depType types.DependencyType, metadata string) (string, error) {
-	trimmed := strings.TrimSpace(metadata)
 	if depType != types.DepWaitsFor {
-		if trimmed == "" {
-			return "", nil
-		}
-		if !json.Valid([]byte(trimmed)) {
-			return "", fmt.Errorf("edge metadata is not well-formed JSON")
-		}
-		return metadata, nil
+		return normalizeNonWaitsForMetadata(metadata)
 	}
+	return normalizeWaitsForMetadata(metadata)
+}
+
+func normalizeNonWaitsForMetadata(metadata string) (string, error) {
+	trimmed := strings.TrimSpace(metadata)
+	if trimmed == "" {
+		return "", nil
+	}
+	if !json.Valid([]byte(trimmed)) {
+		return "", fmt.Errorf("edge metadata is not well-formed JSON")
+	}
+	return metadata, nil
+}
+
+func normalizeWaitsForMetadata(metadata string) (string, error) {
+	trimmed := strings.TrimSpace(metadata)
 	meta := types.WaitsForMeta{}
 	if trimmed != "" && trimmed != "{}" {
 		if err := json.Unmarshal([]byte(trimmed), &meta); err != nil {

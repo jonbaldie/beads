@@ -80,12 +80,14 @@ func DisabledEnv(env []string) []string {
 // The refcount also makes nesting safe, which matters because the server-mode
 // credential path and the shared versioncontrolops path can both wrap the same
 // call.
-var (
+var processState = &environmentState{}
+
+type environmentState struct {
 	mu       sync.Mutex
 	depth    int
 	saved    string
 	hadSaved bool
-)
+}
 
 // WithDisabled runs fn with git client-side hooks disabled process-wide,
 // restoring the previous GIT_CONFIG_PARAMETERS afterwards.
@@ -96,28 +98,36 @@ func WithDisabled(fn func() error) error {
 }
 
 func acquire() {
-	mu.Lock()
-	defer mu.Unlock()
-	if depth == 0 {
-		saved, hadSaved = os.LookupEnv(ParametersEnv)
+	processState.acquire()
+}
+
+func (s *environmentState) acquire() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.depth == 0 {
+		s.saved, s.hadSaved = os.LookupEnv(ParametersEnv)
 		// Best effort: Setenv failure is extremely rare, and a push that runs
 		// hooks is better than no push at all.
-		_ = os.Setenv(ParametersEnv, AppendParameter(saved, NoHooksParam))
+		_ = os.Setenv(ParametersEnv, AppendParameter(s.saved, NoHooksParam))
 	}
-	depth++
+	s.depth++
 }
 
 func release() {
-	mu.Lock()
-	defer mu.Unlock()
-	depth--
-	if depth > 0 {
+	processState.release()
+}
+
+func (s *environmentState) release() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.depth--
+	if s.depth > 0 {
 		return
 	}
-	if hadSaved {
-		_ = os.Setenv(ParametersEnv, saved)
+	if s.hadSaved {
+		_ = os.Setenv(ParametersEnv, s.saved)
 	} else {
 		_ = os.Unsetenv(ParametersEnv)
 	}
-	saved, hadSaved = "", false
+	s.saved, s.hadSaved = "", false
 }

@@ -251,107 +251,131 @@ func ResolvePhysicalRoots(beadsDir string) (PhysicalRoots, error) {
 	}
 	abs = filepath.Clean(abs)
 	pr := PhysicalRoots{BeadsDir: abs}
-
-	// Side-effect-free config load: never trigger the legacy config.json
-	// migration. Absent metadata.json is treated as cfg == nil.
-	var cfg *configfile.Config
-	if _, statErr := os.Stat(configfile.ConfigPath(abs)); statErr == nil {
-		loaded, loadErr := configfile.Load(abs)
-		if loadErr != nil {
-			// A present-but-broken metadata.json is authoritative: the open
-			// path refuses to fall back, so gate planning refuses to guess.
-			return PhysicalRoots{}, fmt.Errorf("loading config for gate resolution: %w", loadErr)
-		}
-		cfg = loaded
+	cfg, err := loadPhysicalRootConfig(abs)
+	if err != nil {
+		return PhysicalRoots{}, err
 	}
-
-	addRoot := func(root string) error {
-		rootAbs, aerr := filepath.Abs(root)
-		if aerr != nil {
-			return fmt.Errorf("resolving physical root %s: %w", root, aerr)
+	if handled, err := resolveConfiguredPhysicalRoots(abs, cfg, &pr); handled || err != nil {
+		if err != nil {
+			return PhysicalRoots{}, err
 		}
-		pr.Roots = append(pr.Roots, filepath.Clean(rootAbs))
-		return nil
+		return pr, nil
 	}
-
-	switch {
-	case cfg != nil && cfg.IsDoltProxiedServerMode():
-		pr.Mode = "proxied-server"
-		root, perr := ResolveProxiedServerRootPath(abs)
-		if perr != nil {
-			return PhysicalRoots{}, fmt.Errorf("resolving proxied-server root: %w", perr)
-		}
-		pr.Provenance = fmt.Sprintf("metadata.json dolt_mode=proxied-server; root %s via env/client-info/default", root)
-		if err := addRoot(root); err != nil {
-			return PhysicalRoots{}, err
-		}
-
-	case IsSharedServerMode():
-		pr.Mode = "shared-server"
-		root, serr := SharedDoltPath()
-		if serr != nil {
-			return PhysicalRoots{}, fmt.Errorf("resolving shared-server root: %w", serr)
-		}
-		pr.Provenance = fmt.Sprintf("shared-server mode active (BEADS_DOLT_SHARED_SERVER or config.yaml dolt.shared-server), overriding any metadata dolt_mode; root %s", root)
-		if err := addRoot(root); err != nil {
-			return PhysicalRoots{}, err
-		}
-
-	case cfg != nil && cfg.IsDoltServerMode():
-		pr.Mode = "server"
-		host := cfg.GetDoltServerHost()
-		if isRemoteServerHost(host) {
-			pr.RemoteBackend = true
-			pr.Provenance = fmt.Sprintf("server mode with remote host %s; no local physical root", host)
-			break
-		}
-		root := cfg.DatabasePath(abs)
-		pr.Provenance = fmt.Sprintf("server mode (env/metadata/config.yaml, local host); root %s via DatabasePath semantics", root)
-		if err := addRoot(root); err != nil {
-			return PhysicalRoots{}, err
-		}
-
-	case cfg != nil:
-		// GetDoltMode defaults empty to embedded; anything that is not one
-		// of the server flavors above opens the embedded engine, whose data
-		// dir is hardcoded to .beads/embeddeddolt.
-		pr.Mode = "embedded"
-		root := filepath.Join(abs, "embeddeddolt")
-		pr.Provenance = fmt.Sprintf("metadata.json dolt_mode=%q -> embedded; root %s (embedded engine hardcodes embeddeddolt)", cfg.DoltMode, root)
-		if err := addRoot(root); err != nil {
-			return PhysicalRoots{}, err
-		}
-
-	default:
-		// No metadata.json at all: mirror the open path's on-disk discovery.
-		embedded := filepath.Join(abs, "embeddeddolt")
-		doltDir := filepath.Join(abs, "dolt")
-		if fi, serr := os.Stat(embedded); serr == nil && fi.IsDir() {
-			pr.Mode = "embedded"
-			pr.Provenance = fmt.Sprintf("no metadata.json; embeddeddolt/ directory present; root %s", embedded)
-			if err := addRoot(embedded); err != nil {
-				return PhysicalRoots{}, err
-			}
-		} else if fi, serr := os.Stat(doltDir); serr == nil && fi.IsDir() {
-			pr.Mode = "server"
-			pr.Provenance = fmt.Sprintf("no metadata.json; dolt/ server-layout directory present; root %s", doltDir)
-			if err := addRoot(doltDir); err != nil {
-				return PhysicalRoots{}, err
-			}
-		} else {
-			// Nothing on disk yet: default to the embedded root the open
-			// path would create. Gating a not-yet-existing root is fine —
-			// the gate file lives beside it in .beads, and workspacegate
-			// only requires the gate file's parent directory to exist.
-			pr.Mode = "embedded"
-			pr.Provenance = fmt.Sprintf("no metadata.json and no data directories; defaulting to embedded root %s", embedded)
-			if err := addRoot(embedded); err != nil {
-				return PhysicalRoots{}, err
-			}
-		}
+	if err := resolveDiscoveredPhysicalRoots(abs, &pr); err != nil {
+		return PhysicalRoots{}, err
 	}
 
 	return pr, nil
+}
+
+func loadPhysicalRootConfig(abs string) (*configfile.Config, error) {
+	// Side-effect-free config load: never trigger the legacy config.json
+	// migration. Absent metadata.json is treated as cfg == nil.
+	if _, err := os.Stat(configfile.ConfigPath(abs)); err != nil {
+		return nil, nil
+	}
+	cfg, err := configfile.Load(abs)
+	if err != nil {
+		// A present-but-broken metadata.json is authoritative: the open
+		// path refuses to fall back, so gate planning refuses to guess.
+		return nil, fmt.Errorf("loading config for gate resolution: %w", err)
+	}
+	return cfg, nil
+}
+
+func resolveConfiguredPhysicalRoots(abs string, cfg *configfile.Config, pr *PhysicalRoots) (bool, error) {
+	if cfg != nil && cfg.IsDoltProxiedServerMode() {
+		return true, resolveProxiedPhysicalRoot(abs, pr)
+	}
+	if IsSharedServerMode() {
+		return true, resolveSharedPhysicalRoot(pr)
+	}
+	if cfg != nil && cfg.IsDoltServerMode() {
+		return true, resolveServerPhysicalRoot(abs, cfg, pr)
+	}
+	if cfg != nil {
+		return true, resolveEmbeddedPhysicalRoot(abs, cfg, pr)
+	}
+	return false, nil
+}
+
+func resolveProxiedPhysicalRoot(abs string, pr *PhysicalRoots) error {
+	pr.Mode = "proxied-server"
+	root, err := ResolveProxiedServerRootPath(abs)
+	if err != nil {
+		return fmt.Errorf("resolving proxied-server root: %w", err)
+	}
+	pr.Provenance = fmt.Sprintf("metadata.json dolt_mode=proxied-server; root %s via env/client-info/default", root)
+	return appendPhysicalRoot(pr, root)
+}
+
+func resolveSharedPhysicalRoot(pr *PhysicalRoots) error {
+	pr.Mode = "shared-server"
+	root, err := SharedDoltPath()
+	if err != nil {
+		return fmt.Errorf("resolving shared-server root: %w", err)
+	}
+	pr.Provenance = fmt.Sprintf("shared-server mode active (BEADS_DOLT_SHARED_SERVER or config.yaml dolt.shared-server), overriding any metadata dolt_mode; root %s", root)
+	return appendPhysicalRoot(pr, root)
+}
+
+func resolveServerPhysicalRoot(abs string, cfg *configfile.Config, pr *PhysicalRoots) error {
+	pr.Mode = "server"
+	host := cfg.GetDoltServerHost()
+	if isRemoteServerHost(host) {
+		pr.RemoteBackend = true
+		pr.Provenance = fmt.Sprintf("server mode with remote host %s; no local physical root", host)
+		return nil
+	}
+	root := cfg.DatabasePath(abs)
+	pr.Provenance = fmt.Sprintf("server mode (env/metadata/config.yaml, local host); root %s via DatabasePath semantics", root)
+	return appendPhysicalRoot(pr, root)
+}
+
+func resolveEmbeddedPhysicalRoot(abs string, cfg *configfile.Config, pr *PhysicalRoots) error {
+	// GetDoltMode defaults empty to embedded; anything that is not one
+	// of the server flavors above opens the embedded engine, whose data
+	// dir is hardcoded to .beads/embeddeddolt.
+	pr.Mode = "embedded"
+	root := filepath.Join(abs, "embeddeddolt")
+	pr.Provenance = fmt.Sprintf("metadata.json dolt_mode=%q -> embedded; root %s (embedded engine hardcodes embeddeddolt)", cfg.DoltMode, root)
+	return appendPhysicalRoot(pr, root)
+}
+
+func resolveDiscoveredPhysicalRoots(abs string, pr *PhysicalRoots) error {
+	// No metadata.json at all: mirror the open path's on-disk discovery.
+	embedded := filepath.Join(abs, "embeddeddolt")
+	if physicalRootDirectoryExists(embedded) {
+		pr.Mode = "embedded"
+		pr.Provenance = fmt.Sprintf("no metadata.json; embeddeddolt/ directory present; root %s", embedded)
+		return appendPhysicalRoot(pr, embedded)
+	}
+	doltDir := filepath.Join(abs, "dolt")
+	if physicalRootDirectoryExists(doltDir) {
+		pr.Mode = "server"
+		pr.Provenance = fmt.Sprintf("no metadata.json; dolt/ server-layout directory present; root %s", doltDir)
+		return appendPhysicalRoot(pr, doltDir)
+	}
+	// Nothing on disk yet: default to the embedded root the open path would
+	// create. Gating a not-yet-existing root is fine — the gate file lives
+	// beside it in .beads, and workspacegate only requires the parent.
+	pr.Mode = "embedded"
+	pr.Provenance = fmt.Sprintf("no metadata.json and no data directories; defaulting to embedded root %s", embedded)
+	return appendPhysicalRoot(pr, embedded)
+}
+
+func physicalRootDirectoryExists(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.IsDir()
+}
+
+func appendPhysicalRoot(pr *PhysicalRoots, root string) error {
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return fmt.Errorf("resolving physical root %s: %w", root, err)
+	}
+	pr.Roots = append(pr.Roots, filepath.Clean(rootAbs))
+	return nil
 }
 
 // LibraryOpenRootPath returns the physical root the LIBRARY open path

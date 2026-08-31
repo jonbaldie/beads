@@ -29,7 +29,7 @@ const countPath = "/v0/beads/issues:count"
 
 func newCountServer(t *testing.T, counter *roleCounter) *testServer {
 	t.Helper()
-	return newTestServer(t, rolesConfig(Config{Counter: counter}))
+	return newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{GraphRoles: GraphRoles{Counter: counter}}}))
 }
 
 // countBody decodes the answer into the generated type, which is what a client
@@ -132,37 +132,19 @@ func TestCountForwardsEveryDocumentedParameter(t *testing.T) {
 	}
 	pri := func(v int) *int { return &v }
 	want := issueops.CountRequest{
-		Status:    "in_progress",
-		IssueType: "bug",
-		Assignee:  "alice",
-
-		Priority:    pri(0),
-		PriorityMin: pri(1),
-		PriorityMax: pri(3),
-
-		Labels:    []string{"backend", "urgent"},
-		LabelsAny: []string{"triage"},
-
-		TitleSearch: "flake",
-		// AS WRITTEN, not pre-split: the role owns what an id set means.
-		IDFilter: "bd-1,bd-2",
-
-		TitleContains: "retry",
-		DescContains:  "timeout",
-		NotesContains: "rollback",
-
-		CreatedAfter:  at("2026-01-01T00:00:00Z"),
-		CreatedBefore: at("2026-02-01T00:00:00Z"),
-		UpdatedAfter:  at("2026-03-01T00:00:00Z"),
-		UpdatedBefore: at("2026-04-01T00:00:00Z"),
-		ClosedAfter:   at("2026-05-01T00:00:00Z"),
-		ClosedBefore:  at("2026-06-01T00:00:00Z"),
-
-		EmptyDesc:  true,
-		NoAssignee: true,
-		NoLabels:   true,
-
-		IncludeInfra: true,
+		CountIdentityFilters: issueops.CountIdentityFilters{Status: "in_progress", IssueType: "bug", Assignee: "alice"},
+		CountPriorityFilters: issueops.CountPriorityFilters{Priority: pri(0), PriorityMin: pri(1), PriorityMax: pri(3)},
+		CountTextFilters: issueops.CountTextFilters{
+			Labels: []string{"backend", "urgent"}, LabelsAny: []string{"triage"}, TitleSearch: "flake",
+			// AS WRITTEN, not pre-split: the role owns what an id set means.
+			IDFilter: "bd-1,bd-2", TitleContains: "retry", DescContains: "timeout", NotesContains: "rollback",
+		},
+		CountTimeFilters: issueops.CountTimeFilters{
+			CreatedAfter: at("2026-01-01T00:00:00Z"), CreatedBefore: at("2026-02-01T00:00:00Z"),
+			UpdatedAfter: at("2026-03-01T00:00:00Z"), UpdatedBefore: at("2026-04-01T00:00:00Z"),
+			ClosedAfter: at("2026-05-01T00:00:00Z"), ClosedBefore: at("2026-06-01T00:00:00Z"),
+		},
+		CountPresenceFilters: issueops.CountPresenceFilters{EmptyDesc: true, NoAssignee: true, NoLabels: true, IncludeInfra: true},
 	}
 	if !reflect.DeepEqual(got[0], want) {
 		t.Errorf("request = %+v\nwant     %+v", got[0], want)
@@ -625,8 +607,10 @@ func TestEveryCountRequestFieldIsPublished(t *testing.T) {
 
 	declared := map[string]bool{}
 	typ := reflect.TypeOf(issueops.CountRequest{})
-	for i := range typ.NumField() {
-		declared[typ.Field(i).Name] = true
+	for _, field := range reflect.VisibleFields(typ) {
+		if !field.Anonymous {
+			declared[field.Name] = true
+		}
 	}
 	if missing := diff(declared, published); len(missing) > 0 {
 		t.Errorf("issueops.CountRequest declares filters this operation publishes no parameter for: %v\n"+

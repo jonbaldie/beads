@@ -23,7 +23,7 @@ import (
 func planApplyCreate(key string) issueops.ApplyItem {
 	return issueops.ApplyItem{
 		Kind:   issueops.ItemCreate,
-		Create: &issueops.CreateItem{Key: key, Issue: &issueops.Issue{Title: "t"}},
+		Create: &issueops.CreateItem{Key: key, Issue: &issueops.Issue{IssueContent: types.IssueContent{Title: "t"}}},
 	}
 }
 
@@ -105,7 +105,7 @@ func TestPlanApplyBatchRefusesAnUnusableRequest(t *testing.T) {
 		{
 			"create carrying inline dependencies",
 			planApplyRequest(issueops.ApplyItem{Kind: issueops.ItemCreate, Create: &issueops.CreateItem{
-				Issue: &issueops.Issue{Dependencies: []*types.Dependency{{IssueID: "a", DependsOnID: "b"}}},
+				Issue: &issueops.Issue{IssueGraph: types.IssueGraph{Dependencies: []*types.Dependency{{IssueID: "a", DependsOnID: "b"}}}},
 			}}),
 			"edges are their own items",
 		},
@@ -286,7 +286,7 @@ func TestPlanApplyBatchResolvesKeysBackwardOnly(t *testing.T) {
 func TestPlanApplyBatchMetadataRefsReachAnyDirection(t *testing.T) {
 	forward := issueops.ApplyItem{Kind: issueops.ItemCreate, Create: &issueops.CreateItem{
 		Key:          "first",
-		Issue:        &issueops.Issue{Title: "first"},
+		Issue:        &issueops.Issue{IssueContent: types.IssueContent{Title: "first"}},
 		MetadataRefs: map[string]issueops.Ref{"gc.retry_of": {Key: "second"}, "gc.self": {Key: "first"}},
 	}}
 	if _, err := PlanApplyBatch(planApplyRequest(forward, planApplyCreate("second"))); err != nil {
@@ -294,7 +294,7 @@ func TestPlanApplyBatchMetadataRefsReachAnyDirection(t *testing.T) {
 	}
 
 	unknown := issueops.ApplyItem{Kind: issueops.ItemCreate, Create: &issueops.CreateItem{
-		Issue:        &issueops.Issue{Title: "first"},
+		Issue:        &issueops.Issue{IssueContent: types.IssueContent{Title: "first"}},
 		MetadataRefs: map[string]issueops.Ref{"gc.retry_of": {Key: "ghost"}},
 	}}
 	_, err := PlanApplyBatch(planApplyRequest(unknown))
@@ -348,7 +348,7 @@ func TestPlanApplyBatchRefusesAVersionGuardOnARowThisRequestWrote(t *testing.T) 
 		{
 			"guard on a row an earlier item created by explicit id",
 			[]issueops.ApplyItem{
-				{Kind: issueops.ItemCreate, Create: &issueops.CreateItem{Issue: &issueops.Issue{ID: "bd-1"}}},
+				{Kind: issueops.ItemCreate, Create: &issueops.CreateItem{Issue: &issueops.Issue{IssueID: types.IssueID{ID: "bd-1"}}}},
 				planApplyClose(issueops.Ref{ID: "bd-1"}, int64Ptr(7)),
 			},
 		},

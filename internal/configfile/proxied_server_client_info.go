@@ -63,24 +63,3 @@ func resolveSidecarPath(beadsDir, p string) string {
 	}
 	return filepath.Join(beadsDir, p)
 }
-
-func (i *ProxiedServerClientInfo) ResolvedRootPath(beadsDir string) string {
-	if i == nil {
-		return ""
-	}
-	return resolveSidecarPath(beadsDir, i.RootPath)
-}
-
-func (i *ProxiedServerClientInfo) ResolvedConfigPath(beadsDir string) string {
-	if i == nil {
-		return ""
-	}
-	return resolveSidecarPath(beadsDir, i.ConfigPath)
-}
-
-func (i *ProxiedServerClientInfo) ResolvedLogPath(beadsDir string) string {
-	if i == nil {
-		return ""
-	}
-	return resolveSidecarPath(beadsDir, i.LogPath)
-}

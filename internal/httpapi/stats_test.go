@@ -15,7 +15,7 @@ import (
 // cannot show. Both halves matter because the two shipped backends differ.
 func TestStatsReportsTheSkippedScanFromTheAnswer(t *testing.T) {
 	reporter := &roleStats{summary: types.Statistics{TotalIssues: 3, OpenIssues: 2}}
-	ts := newTestServer(t, rolesConfig(Config{Stats: reporter}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Stats: reporter}}}))
 
 	resp := ts.get(t, "/v0/beads/stats?skip_blocked=true")
 	if resp.StatusCode != http.StatusOK {
@@ -57,7 +57,7 @@ func TestStatsRefusesAnEmptyAssignee(t *testing.T) {
 func statsAssertEmptyAssigneeRefused(t *testing.T, rawAssignee string) {
 	t.Helper()
 	reporter := &roleStats{}
-	ts := newTestServer(t, rolesConfig(Config{Stats: reporter}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Stats: reporter}}}))
 
 	resp := ts.get(t, "/v0/beads/stats?assignee="+rawAssignee)
 	if resp.StatusCode != http.StatusBadRequest {
@@ -79,7 +79,7 @@ func statsAssertEmptyAssigneeRefused(t *testing.T, rawAssignee string) {
 // TestStatsRefusesAMalformedSkipBlocked pins the other 400 this operation can
 // produce on its own.
 func TestStatsRefusesAMalformedSkipBlocked(t *testing.T) {
-	ts := newTestServer(t, rolesConfig(Config{Stats: &roleStats{}}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Stats: &roleStats{}}}}))
 
 	resp := ts.get(t, "/v0/beads/stats?skip_blocked=maybe")
 	if resp.StatusCode != http.StatusBadRequest {
@@ -95,7 +95,7 @@ func TestStatsRefusesAMalformedSkipBlocked(t *testing.T) {
 // parameter is how a client one version ahead of the server acts on an answer
 // it believes was narrowed.
 func TestStatsRefusesAnUnknownParameter(t *testing.T) {
-	ts := newTestServer(t, rolesConfig(Config{Stats: &roleStats{}}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Stats: &roleStats{}}}}))
 
 	resp := ts.get(t, "/v0/beads/stats?status=open")
 	if resp.StatusCode != http.StatusBadRequest {

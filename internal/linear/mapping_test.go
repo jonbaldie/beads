@@ -14,19 +14,31 @@ func TestGenerateIssueIDs(t *testing.T) {
 	// Create test issues without IDs
 	issues := []*types.Issue{
 		{
-			Title:       "First issue",
-			Description: "Description 1",
-			CreatedAt:   time.Now(),
+			IssueContent: types.IssueContent{
+				Title:       "First issue",
+				Description: "Description 1",
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		},
 		{
-			Title:       "Second issue",
-			Description: "Description 2",
-			CreatedAt:   time.Now().Add(-time.Hour),
+			IssueContent: types.IssueContent{
+				Title:       "Second issue",
+				Description: "Description 2",
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now().Add(-time.Hour),
+			},
 		},
 		{
-			Title:       "Third issue",
-			Description: "Description 3",
-			CreatedAt:   time.Now().Add(-2 * time.Hour),
+			IssueContent: types.IssueContent{
+				Title:       "Third issue",
+				Description: "Description 3",
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now().Add(-2 * time.Hour),
+			},
 		},
 	}
 
@@ -61,15 +73,25 @@ func TestGenerateIssueIDsPreservesExisting(t *testing.T) {
 	existingID := "test-existing"
 	issues := []*types.Issue{
 		{
-			ID:          existingID,
-			Title:       "Existing issue",
-			Description: "Has an ID already",
-			CreatedAt:   time.Now(),
+			IssueID: types.IssueID{
+				ID: existingID,
+			},
+			IssueContent: types.IssueContent{
+				Title:       "Existing issue",
+				Description: "Has an ID already",
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		},
 		{
-			Title:       "New issue",
-			Description: "Needs an ID",
-			CreatedAt:   time.Now(),
+			IssueContent: types.IssueContent{
+				Title:       "New issue",
+				Description: "Needs an ID",
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		},
 	}
 
@@ -97,14 +119,22 @@ func TestGenerateIssueIDsNoDuplicates(t *testing.T) {
 	now := time.Now()
 	issues := []*types.Issue{
 		{
-			Title:       "Same title",
-			Description: "Same description",
-			CreatedAt:   now,
+			IssueContent: types.IssueContent{
+				Title:       "Same title",
+				Description: "Same description",
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: now,
+			},
 		},
 		{
-			Title:       "Same title",
-			Description: "Same description",
-			CreatedAt:   now,
+			IssueContent: types.IssueContent{
+				Title:       "Same title",
+				Description: "Same description",
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: now,
+			},
 		},
 	}
 
@@ -128,9 +158,13 @@ func TestNormalizeIssueForLinearHashCanonicalizesExternalRef(t *testing.T) {
 	slugged := "https://linear.app/crown-dev/issue/BEA-93/updated-title-for-beads"
 	canonical := "https://linear.app/crown-dev/issue/BEA-93"
 	issue := &types.Issue{
-		Title:       "Title",
-		Description: "Description",
-		ExternalRef: &slugged,
+		IssueContent: types.IssueContent{
+			Title:       "Title",
+			Description: "Description",
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: &slugged,
+		},
 	}
 
 	normalized := NormalizeIssueForLinearHash(issue)
@@ -468,16 +502,16 @@ func TestIssueToBeadsWithParent(t *testing.T) {
 	config := DefaultMappingConfig()
 
 	linearIssue := &Issue{
-		ID:          "uuid-456",
-		Identifier:  "PROJ-456",
-		Title:       "Child Issue",
-		Description: "Child description",
-		URL:         "https://linear.app/team/issue/PROJ-456",
-		Priority:    3,
-		State:       &State{Type: "unstarted", Name: "Todo"},
-		Parent:      &Parent{ID: "uuid-123", Identifier: "PROJ-123"},
-		CreatedAt:   "2024-01-15T10:00:00Z",
-		UpdatedAt:   "2024-01-16T12:00:00Z",
+		ID:             "uuid-456",
+		Identifier:     "PROJ-456",
+		Title:          "Child Issue",
+		Description:    "Child description",
+		URL:            "https://linear.app/team/issue/PROJ-456",
+		Priority:       3,
+		State:          &State{Type: "unstarted", Name: "Todo"},
+		IssueRelations: IssueRelations{Parent: &Parent{ID: "uuid-123", Identifier: "PROJ-123"}},
+		CreatedAt:      "2024-01-15T10:00:00Z",
+		UpdatedAt:      "2024-01-16T12:00:00Z",
 	}
 
 	result := IssueToBeads(linearIssue, config)
@@ -510,7 +544,7 @@ func TestIssueToBeadsRelationMappedToParentChildKeepsRelationSource(t *testing.T
 		URL:        "https://linear.app/team/issue/PROJ-456",
 		Priority:   3,
 		State:      &State{Type: "unstarted", Name: "Todo"},
-		Relations: &Relations{Nodes: []Relation{
+		IssueRelations: IssueRelations{Relations: &Relations{Nodes: []Relation{
 			{
 				ID:   "rel-1",
 				Type: "related",
@@ -519,7 +553,7 @@ func TestIssueToBeadsRelationMappedToParentChildKeepsRelationSource(t *testing.T
 					Identifier string `json:"identifier"`
 				}{ID: "uuid-789", Identifier: "PROJ-789"},
 			},
-		}},
+		}}},
 		CreatedAt: "2024-01-15T10:00:00Z",
 		UpdatedAt: "2024-01-16T12:00:00Z",
 	}
@@ -694,24 +728,28 @@ func TestBuildLinearDescription(t *testing.T) {
 	}{
 		{
 			name:  "description only",
-			issue: &types.Issue{Description: "Basic description"},
+			issue: &types.Issue{IssueContent: types.IssueContent{Description: "Basic description"}},
 			want:  "Basic description",
 		},
 		{
 			name: "with acceptance criteria",
 			issue: &types.Issue{
-				Description:        "Main description",
-				AcceptanceCriteria: "- Must do X\n- Must do Y",
+				IssueContent: types.IssueContent{
+					Description:        "Main description",
+					AcceptanceCriteria: "- Must do X\n- Must do Y",
+				},
 			},
 			want: "Main description\n\n## Acceptance Criteria\n- Must do X\n- Must do Y",
 		},
 		{
 			name: "with all fields",
 			issue: &types.Issue{
-				Description:        "Main description",
-				AcceptanceCriteria: "AC here",
-				Design:             "Design notes",
-				Notes:              "Additional notes",
+				IssueContent: types.IssueContent{
+					Description:        "Main description",
+					AcceptanceCriteria: "AC here",
+					Design:             "Design notes",
+					Notes:              "Additional notes",
+				},
 			},
 			want: "Main description\n\n## Acceptance Criteria\nAC here\n\n## Design\nDesign notes\n\n## Notes\nAdditional notes",
 		},
@@ -975,8 +1013,12 @@ func TestResolveLabelIDsDedupesAndReportsMissing(t *testing.T) {
 		},
 	}
 	issue := &types.Issue{
-		IssueType: types.TypeBug,
-		Labels:    []string{"Customer-X", "ghost"},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeBug,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"Customer-X", "ghost"},
+		},
 	}
 	ids, missing := ResolveLabelIDs(issue, cache, cfg)
 	sort.Strings(ids)
@@ -999,12 +1041,19 @@ func TestPushFieldsEqualComparesResolvedLabelIDs(t *testing.T) {
 		},
 	}
 	local := &types.Issue{
-		Title:       "x",
-		Description: "d",
-		Status:      types.StatusOpen,
-		Priority:    0, // critical in beads → urgent in Linear (priority 1)
-		IssueType:   types.TypeTask,
-		Labels:      []string{"A"},
+		IssueContent: types.IssueContent{
+			Title:       "x",
+			Description: "d",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:   types.StatusOpen,
+			Priority: 0,
+			// critical in beads → urgent in Linear (priority 1)
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"A"},
+		},
 	}
 	remote := &Issue{
 		Title:       "x",
@@ -1028,13 +1077,19 @@ func TestPushFieldsEqualComparesResolvedLabelIDs(t *testing.T) {
 func TestPushFieldsEqualIgnoresLocalOnlyDifferences(t *testing.T) {
 	config := DefaultMappingConfig()
 	local := &types.Issue{
-		Title:       "Ship the fix",
-		Description: "Main body",
-		Notes:       "Local-only notes",
-		Status:      types.StatusInProgress,
-		Priority:    1,
-		IssueType:   types.TypeFeature,
-		Labels:      []string{"customer-visible"},
+		IssueContent: types.IssueContent{
+			Title:       "Ship the fix",
+			Description: "Main body",
+			Notes:       "Local-only notes",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusInProgress,
+			Priority:  1,
+			IssueType: types.TypeFeature,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"customer-visible"},
+		},
 	}
 	remote := &Issue{
 		Title:       "Ship the fix",
@@ -1050,21 +1105,33 @@ func TestPushFieldsEqualIgnoresLocalOnlyDifferences(t *testing.T) {
 
 func TestPushFieldsEqualToBeads(t *testing.T) {
 	local := &types.Issue{
-		Title:       "Ship the fix",
-		Description: "Main body",
-		Notes:       "Local-only notes",
-		Status:      types.StatusInProgress,
-		Priority:    1,
-		IssueType:   types.TypeFeature,
-		Labels:      []string{"customer-visible"},
+		IssueContent: types.IssueContent{
+			Title:       "Ship the fix",
+			Description: "Main body",
+			Notes:       "Local-only notes",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusInProgress,
+			Priority:  1,
+			IssueType: types.TypeFeature,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"customer-visible"},
+		},
 	}
 	remote := &types.Issue{
-		Title:       "Ship the fix",
-		Description: "Main body\n\n## Notes\nLocal-only notes",
-		Status:      types.StatusInProgress,
-		Priority:    1,
-		IssueType:   types.TypeTask,
-		Labels:      []string{"ignored"},
+		IssueContent: types.IssueContent{
+			Title:       "Ship the fix",
+			Description: "Main body\n\n## Notes\nLocal-only notes",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusInProgress,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"ignored"},
+		},
 	}
 
 	if !PushFieldsEqualToBeads(local, remote) {

@@ -111,54 +111,103 @@ func (s *Server) createIssueRequest(w http.ResponseWriter, r *http.Request) (iss
 		s.failUnknownMember(w, r, offender, createRequestMembers)
 		return issueops.CreateRequest{}, false
 	}
-	// Explicit null, before any typed decode. NO MEMBER OF A CREATE IS
-	// NULLABLE: a create has nothing to clear, so `null` is never a third state
-	// here — unmarshaling it into *T yields nil, which is indistinguishable
-	// from omission, and the value the client asked for would be silently
-	// replaced by the workspace default. `metadata` is the one exception and
-	// travels unparsed for the reason applyDepAddItem gives about an edge blob:
-	// the role is the single definition of what that plane accepts, and a
-	// second parse here would be a second definition.
-	for name, value := range members {
-		if name != createMetadataMember && isJSONNull(value) {
-			return refuse(createRefusal(name, "`"+name+"` is not nullable; omit it to leave it at the workspace default"))
-		}
-	}
-
-	// The two members with a level below them are shaped BEFORE the typed
-	// decode, applyItems' order and for its reason: the whole-body decode fails
-	// as one unit, so a `waits_for` that is a string would otherwise be reported
-	// against the body rather than against the member the client can fix.
-	rawEdges, res := createRawEdges(members)
-	if res != nil {
+	if res := validateCreateMembers(members); res != nil {
 		return refuse(res)
 	}
-	rawWaitsFor, res := createRawWaitsFor(members)
-	if res != nil {
-		return refuse(res)
-	}
-
 	actor, ok := s.bodyActor(w, r, members)
 	if !ok {
 		return issueops.CreateRequest{}, false
 	}
 
-	// The typed decode, which is what makes a member's type the DOCUMENT's
-	// type: `priority: "high"` is refused here rather than reaching a role that
-	// would have to guess what the caller meant.
+	body, res := parseCreateBody(members)
+	if res != nil {
+		return refuse(res)
+	}
+
+	request := issueops.CreateRequest{
+		Actor:                   actor,
+		Issue:                   body.issue,
+		ParentID:                derefString(body.wire.ParentId),
+		InheritLabelsFromParent: derefBool(body.wire.InheritLabelsFromParent),
+		ForceIDPrefix:           derefBool(body.wire.ForceIdPrefix),
+	}
+	// IDPrefix stays ZERO, and its absence is a decision rather than an
+	// omission. It exists because a workspace's own config.yaml prefix wins over
+	// the database's and only a local front door can read that file
+	// (CreateRequest.IDPrefix). A remote client's config.yaml describes a
+	// workspace this server does not serve, so publishing it would let a caller
+	// override the served workspace's prefix rule from outside it.
+
+	request.Dependencies = body.dependencies
+	request.WaitsFor = body.waitsFor
+	return request, true
+}
+
+type parsedCreateBody struct {
+	wire         apigen.CreateIssueRequest
+	issue        *types.Issue
+	dependencies []issueops.CreateDependency
+	waitsFor     *issueops.WaitsFor
+}
+
+func parseCreateBody(members map[string]json.RawMessage) (parsedCreateBody, *Result) {
+	rawEdges, rawWaitsFor, res := createRawRelations(members)
+	if res != nil {
+		return parsedCreateBody{}, res
+	}
+	wire, res := decodeCreateWire(members)
+	if res != nil {
+		return parsedCreateBody{}, res
+	}
+	if res := validateCreateWire(&wire); res != nil {
+		return parsedCreateBody{}, res
+	}
+	dependencies, res := createDependencies(rawEdges, wire.Dependencies)
+	if res != nil {
+		return parsedCreateBody{}, res
+	}
+	waitsFor, res := createWaitsFor(rawWaitsFor, wire.WaitsFor)
+	if res != nil {
+		return parsedCreateBody{}, res
+	}
+	return parsedCreateBody{
+		wire: wire, issue: createIssueFromWire(&wire, members), dependencies: dependencies, waitsFor: waitsFor,
+	}, nil
+}
+
+func validateCreateMembers(members map[string]json.RawMessage) *Result {
+	for name, value := range members {
+		if name != createMetadataMember && isJSONNull(value) {
+			return createRefusal(name, "`"+name+"` is not nullable; omit it to leave it at the workspace default")
+		}
+	}
+	return nil
+}
+
+func createRawRelations(members map[string]json.RawMessage) ([]map[string]json.RawMessage, map[string]json.RawMessage, *Result) {
+	rawEdges, res := createRawEdges(members)
+	if res != nil {
+		return nil, nil, res
+	}
+	rawWaitsFor, res := createRawWaitsFor(members)
+	if res != nil {
+		return nil, nil, res
+	}
+	return rawEdges, rawWaitsFor, nil
+}
+
+func decodeCreateWire(members map[string]json.RawMessage) (apigen.CreateIssueRequest, *Result) {
 	var wire apigen.CreateIssueRequest
 	if err := json.Unmarshal(rawObject(members), &wire); err != nil {
-		return refuse(createRefusal("", "a request member carries the wrong JSON type"))
+		return apigen.CreateIssueRequest{}, createRefusal("", "a request member carries the wrong JSON type")
 	}
+	return wire, nil
+}
+
+func validateCreateWire(wire *apigen.CreateIssueRequest) *Result {
 	if strings.TrimSpace(wire.Title) == "" {
-		return refuse(createRefusal("title", "`title` is required and must not be blank"))
+		return createRefusal("title", "`title` is required and must not be blank")
 	}
-	// The role validates the type, the status and the id prefix against the
-	// workspace's own configuration, which this server cannot read without a
-	// transaction; what is checked here is only what the schema declares. A
-	// SLICE and not a map, so a request breaking two rules always names the same
-	// offender: `param` is what a client dispatches on and it must not depend on
-	// map order.
 	for _, bounded := range []struct {
 		member string
 		value  *string
@@ -169,39 +218,62 @@ func (s *Server) createIssueRequest(w http.ResponseWriter, r *http.Request) (iss
 		{"parent_id", wire.ParentId},
 	} {
 		if res := applyBoundedText("", bounded.member, bounded.value); res != nil {
-			return refuse(res)
+			return res
 		}
 	}
-	if wire.Priority != nil && (*wire.Priority < 0 || *wire.Priority > 4) {
-		return refuse(createRefusal("priority", fmt.Sprintf("`priority` is %d; the range is 0 to 4", *wire.Priority)))
+	if res := validateCreatePriority(wire.Priority); res != nil {
+		return res
 	}
-	if wire.Labels != nil {
-		if res := applyBoundedLabels("", "labels", *wire.Labels); res != nil {
-			return refuse(res)
-		}
+	if res := validateCreateLabels(wire.Labels); res != nil {
+		return res
 	}
-	if derefBool(wire.Ephemeral) && derefBool(wire.NoHistory) {
-		return refuse(createRefusal("no_history", "`ephemeral` and `no_history` select different retention modes; send one"))
+	if res := validateCreateRetention(wire); res != nil {
+		return res
 	}
+	return nil
+}
 
+func validateCreatePriority(priority *int) *Result {
+	if priority == nil {
+		return nil
+	}
+	if *priority < 0 || *priority > 4 {
+		return createRefusal("priority", fmt.Sprintf("`priority` is %d; the range is 0 to 4", *priority))
+	}
+	return nil
+}
+
+func validateCreateLabels(labels *[]string) *Result {
+	if labels == nil {
+		return nil
+	}
+	return applyBoundedLabels("", "labels", *labels)
+}
+
+func validateCreateRetention(wire *apigen.CreateIssueRequest) *Result {
+	if !derefBool(wire.Ephemeral) {
+		return nil
+	}
+	if derefBool(wire.NoHistory) {
+		return createRefusal("no_history", "`ephemeral` and `no_history` select different retention modes; send one")
+	}
+	return nil
+}
+
+func createIssueFromWire(wire *apigen.CreateIssueRequest, members map[string]json.RawMessage) *types.Issue {
 	issue := &types.Issue{
-		ID:                 derefString(wire.Id),
-		Title:              wire.Title,
-		Description:        derefString(wire.Description),
-		Design:             derefString(wire.Design),
-		AcceptanceCriteria: derefString(wire.AcceptanceCriteria),
-		Notes:              derefString(wire.Notes),
-		Status:             types.Status(derefString(wire.Status)),
-		IssueType:          types.IssueType(derefString(wire.IssueType)),
-		Assignee:           derefString(wire.Assignee),
-		Owner:              derefString(wire.Owner),
-		EstimatedMinutes:   wire.EstimatedMinutes,
-		ExternalRef:        wire.ExternalRef,
-		DueAt:              wire.DueAt,
-		DeferUntil:         wire.DeferUntil,
-		Sender:             derefString(wire.Sender),
-		Ephemeral:          derefBool(wire.Ephemeral),
-		NoHistory:          derefBool(wire.NoHistory),
+		IssueID: types.IssueID{ID: derefString(wire.Id)},
+		IssueContent: types.IssueContent{
+			Title: wire.Title, Description: derefString(wire.Description), Design: derefString(wire.Design),
+			AcceptanceCriteria: derefString(wire.AcceptanceCriteria), Notes: derefString(wire.Notes),
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status: types.Status(derefString(wire.Status)), IssueType: types.IssueType(derefString(wire.IssueType)),
+			Assignee: derefString(wire.Assignee), Owner: derefString(wire.Owner), EstimatedMinutes: wire.EstimatedMinutes,
+		},
+		IssueLease: types.IssueLease{DueAt: wire.DueAt, DeferUntil: wire.DeferUntil},
+		IssueMeta:  types.IssueMeta{ExternalRef: wire.ExternalRef},
+		IssueWisp:  types.IssueWisp{Sender: derefString(wire.Sender), Ephemeral: derefBool(wire.Ephemeral), NoHistory: derefBool(wire.NoHistory)},
 	}
 	if wire.Priority != nil {
 		issue.Priority = *wire.Priority
@@ -210,37 +282,9 @@ func (s *Server) createIssueRequest(w http.ResponseWriter, r *http.Request) (iss
 		issue.Labels = append([]string(nil), *wire.Labels...)
 	}
 	if raw, present := members[createMetadataMember]; present {
-		// COPIED rather than aliasing the decoded body, so nothing downstream
-		// can be surprised by the request buffer's lifetime.
 		issue.Metadata = applyRawCopy(raw)
 	}
-
-	request := issueops.CreateRequest{
-		Actor:                   actor,
-		Issue:                   issue,
-		ParentID:                derefString(wire.ParentId),
-		InheritLabelsFromParent: derefBool(wire.InheritLabelsFromParent),
-		ForceIDPrefix:           derefBool(wire.ForceIdPrefix),
-	}
-	// IDPrefix stays ZERO, and its absence is a decision rather than an
-	// omission. It exists because a workspace's own config.yaml prefix wins over
-	// the database's and only a local front door can read that file
-	// (CreateRequest.IDPrefix). A remote client's config.yaml describes a
-	// workspace this server does not serve, so publishing it would let a caller
-	// override the served workspace's prefix rule from outside it.
-
-	dependencies, res := createDependencies(rawEdges, wire.Dependencies)
-	if res != nil {
-		return refuse(res)
-	}
-	request.Dependencies = dependencies
-
-	waitsFor, res := createWaitsFor(rawWaitsFor, wire.WaitsFor)
-	if res != nil {
-		return refuse(res)
-	}
-	request.WaitsFor = waitsFor
-	return request, true
+	return issue
 }
 
 // createRawEdges reads `dependencies` as raw members, so an unknown member

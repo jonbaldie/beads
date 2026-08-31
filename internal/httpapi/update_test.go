@@ -46,7 +46,7 @@ func (ts *testServer) patchBody(t *testing.T, path, contentType, body string) *h
 
 func newUpdateServer(t *testing.T, lifecycle *roleLifecycle) *testServer {
 	t.Helper()
-	return newTestServer(t, rolesConfig(Config{Lifecycle: lifecycle}))
+	return newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{IssueRoles: IssueRoles{Lifecycle: lifecycle}}}))
 }
 
 func updatedIssue(id string) *types.Issue {

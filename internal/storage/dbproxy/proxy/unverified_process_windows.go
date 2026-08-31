@@ -49,7 +49,7 @@ func openUnverifiedProcess(pid int) (proc *unverifiedProcess, gone bool, err err
 	return &unverifiedProcess{pid: pid, handle: handle}, false, nil
 }
 
-func (p *unverifiedProcess) executableBasename() (basename string, gone bool, err error) {
+func executableBasename(p *unverifiedProcess) (basename string, gone bool, err error) {
 	buffer := make([]uint16, 32768)
 	size := uint32(len(buffer))
 	if err := windows.QueryFullProcessImageName(p.handle, 0, &buffer[0], &size); err != nil {
@@ -61,7 +61,7 @@ func (p *unverifiedProcess) executableBasename() (basename string, gone bool, er
 // commandLineContains cannot establish workspace scope on Windows: another
 // process's command line is only reachable through undocumented PEB reads,
 // so force-stop refuses rather than signaling on basename alone.
-func (p *unverifiedProcess) commandLineContains(string) (matched bool, gone bool, err error) {
+func commandLineContains(p *unverifiedProcess, _ string) (matched bool, gone bool, err error) {
 	exited, exitErr := handleExited(p.handle)
 	if exitErr == nil && exited {
 		return false, true, nil
@@ -71,7 +71,7 @@ func (p *unverifiedProcess) commandLineContains(string) (matched bool, gone bool
 
 // kill terminates the process through the held handle. gone reports a target
 // that had already exited.
-func (p *unverifiedProcess) kill() (gone bool, err error) {
+func killUnverifiedProcess(p *unverifiedProcess) (gone bool, err error) {
 	if err := windows.TerminateProcess(p.handle, 1); err != nil {
 		if exited, exitErr := handleExited(p.handle); exitErr == nil && exited {
 			return true, nil
@@ -81,11 +81,11 @@ func (p *unverifiedProcess) kill() (gone bool, err error) {
 	return false, nil
 }
 
-func (p *unverifiedProcess) exited() (bool, error) {
+func unverifiedProcessExited(p *unverifiedProcess) (bool, error) {
 	return handleExited(p.handle)
 }
 
-func (p *unverifiedProcess) close() {
+func closeUnverifiedProcess(p *unverifiedProcess) {
 	if p.handle != 0 {
 		_ = windows.CloseHandle(p.handle)
 		p.handle = 0

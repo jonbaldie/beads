@@ -29,7 +29,7 @@ func (ts *testServer) delete(t *testing.T, body string) *http.Response {
 // claim of an issue named ":delete".
 func TestDeletePathReachesItsHandler(t *testing.T) {
 	deleter := &roleDeleter{result: issueops.DeleteResult{Deleted: 1}}
-	ts := newTestServer(t, rolesConfig(Config{Deleter: deleter}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Deleter: deleter}}}))
 
 	resp := ts.delete(t, `{"ids":["bd-1"],"force":true}`)
 	if resp.StatusCode != http.StatusOK {
@@ -53,7 +53,7 @@ func TestDeletePathReachesItsHandler(t *testing.T) {
 // subtree the caller did not ask for.
 func TestDeleteForwardsEveryDocumentedMember(t *testing.T) {
 	deleter := &roleDeleter{}
-	ts := newTestServer(t, rolesConfig(Config{Deleter: deleter}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Deleter: deleter}}}))
 
 	resp := ts.delete(t, `{
 		"ids": ["bd-1", "bd-2"],
@@ -92,7 +92,7 @@ func TestDeleteForwardsEveryDocumentedMember(t *testing.T) {
 // is the protection, so a handler that "helpfully" defaulted force on is the bug.
 func TestDeleteDefaultsTheOptionalMembers(t *testing.T) {
 	deleter := &roleDeleter{}
-	ts := newTestServer(t, rolesConfig(Config{Deleter: deleter}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Deleter: deleter}}}))
 
 	if resp := ts.delete(t, `{"ids":["bd-1"]}`); resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, readAll(t, resp))
@@ -120,7 +120,7 @@ func TestDeletePublishesTheWholeResult(t *testing.T) {
 		ReferencesUpdated: 3,
 		Orphaned:          []string{"bd-orphan-a", "bd-orphan-b"},
 	}}
-	ts := newTestServer(t, rolesConfig(Config{Deleter: deleter}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Deleter: deleter}}}))
 
 	resp := ts.delete(t, `{"ids":["bd-1"],"force":true,"dry_run":true}`)
 	if resp.StatusCode != http.StatusOK {
@@ -146,7 +146,7 @@ func TestDeletePublishesTheWholeResult(t *testing.T) {
 // orphan" from "this mode could and did not".
 func TestDeleteOmitsAnEmptyOrphanList(t *testing.T) {
 	deleter := &roleDeleter{result: issueops.DeleteResult{Deleted: 1}}
-	ts := newTestServer(t, rolesConfig(Config{Deleter: deleter}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Deleter: deleter}}}))
 
 	body := decodeBody(t, ts.delete(t, `{"ids":["bd-1"],"cascade":true}`))
 	if _, present := body["orphaned"]; present {
@@ -174,7 +174,7 @@ func TestDeleteRefusesTheDocumentedBodies(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			deleter := &roleDeleter{}
-			ts := newTestServer(t, rolesConfig(Config{Deleter: deleter}))
+			ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Deleter: deleter}}}))
 
 			resp := ts.delete(t, test.body)
 			if resp.StatusCode != http.StatusBadRequest {
@@ -210,7 +210,7 @@ func TestDeletePublishesTheRolesGuardAsA400(t *testing.T) {
 		IssueID:    "bd-blocker",
 		Dependents: []string{"bd-dependent"},
 	}}
-	ts := newTestServer(t, rolesConfig(Config{Deleter: deleter}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Deleter: deleter}}}))
 
 	resp := ts.delete(t, `{"ids":["bd-blocker"]}`)
 	if resp.StatusCode != http.StatusBadRequest {
@@ -238,7 +238,7 @@ func TestDeletePublishesTheRolesGuardAsA400(t *testing.T) {
 // still names them, because it is answering the person who typed them.
 func TestDeletePublishesAnAbsentIDAsA404(t *testing.T) {
 	deleter := &roleDeleter{err: &issueops.NotFoundError{IDs: []string{"bd-nosuch"}}}
-	ts := newTestServer(t, rolesConfig(Config{Deleter: deleter}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Deleter: deleter}}}))
 
 	resp := ts.delete(t, `{"ids":["bd-nosuch"],"force":true}`)
 	if resp.StatusCode != http.StatusNotFound {
@@ -259,7 +259,7 @@ func TestDeletePublishesAnAbsentIDAsA404(t *testing.T) {
 // need the beads to be closed.
 func TestDeleteRefusesAForeignMediaType(t *testing.T) {
 	deleter := &roleDeleter{}
-	ts := newTestServer(t, rolesConfig(Config{Deleter: deleter}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Deleter: deleter}}}))
 
 	resp := ts.postBody(t, deletePath, "text/plain", `{"ids":["bd-1"]}`)
 	if resp.StatusCode != http.StatusBadRequest {
@@ -276,7 +276,7 @@ func TestDeleteRefusesAForeignMediaType(t *testing.T) {
 // TestDeletePublishesNoQueryParameters: this operation's whole vocabulary is
 // its body, so a query key is version skew rather than a bad value.
 func TestDeletePublishesNoQueryParameters(t *testing.T) {
-	ts := newTestServer(t, rolesConfig(Config{Deleter: &roleDeleter{}}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Deleter: &roleDeleter{}}}}))
 
 	resp := ts.postBody(t, deletePath+"?force=true", "application/json", `{"ids":["bd-1"]}`)
 	if resp.StatusCode != http.StatusBadRequest {
@@ -324,7 +324,7 @@ func TestDeleteForwardsTheVersionGuard(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			deleter := &roleDeleter{}
-			ts := newTestServer(t, rolesConfig(Config{Deleter: deleter}))
+			ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Deleter: deleter}}}))
 
 			resp := ts.delete(t, tc.body)
 			if resp.StatusCode != http.StatusOK {
@@ -356,7 +356,7 @@ func TestDeleteForwardsTheVersionGuard(t *testing.T) {
 // guarded request per bead.
 func TestDeleteRefusesAGuardBesideSeveralIDs(t *testing.T) {
 	deleter := &roleDeleter{}
-	ts := newTestServer(t, rolesConfig(Config{Deleter: deleter}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Deleter: deleter}}}))
 
 	resp := ts.delete(t, `{"ids":["bd-1","bd-2"],"expected_version":41}`)
 	if resp.StatusCode != http.StatusBadRequest {
@@ -399,7 +399,7 @@ func TestDeleteCountsDistinctIDsForTheGuard(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			deleter := &roleDeleter{}
-			ts := newTestServer(t, rolesConfig(Config{Deleter: deleter}))
+			ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Deleter: deleter}}}))
 
 			resp := ts.delete(t, `{"ids":`+tc.ids+`,"expected_version":41}`)
 			if resp.StatusCode != http.StatusOK {
@@ -436,7 +436,7 @@ func TestDeleteRefusesABlankID(t *testing.T) {
 		`{"ids":["bd-1",""]}`,
 	} {
 		deleter := &roleDeleter{}
-		ts := newTestServer(t, rolesConfig(Config{Deleter: deleter}))
+		ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Deleter: deleter}}}))
 
 		resp := ts.delete(t, body)
 		if resp.StatusCode != http.StatusBadRequest {
@@ -462,7 +462,7 @@ func TestDeleteRefusesABlankID(t *testing.T) {
 // Mutation-checked: deleting the arm makes this case fail with 500.
 func TestDeleteRefusesAStaleGuard(t *testing.T) {
 	deleter := &roleDeleter{err: fmt.Errorf("delete bd-1: %w", issueops.ErrVersionMismatch)}
-	ts := newTestServer(t, rolesConfig(Config{Deleter: deleter}))
+	ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Deleter: deleter}}}))
 
 	resp := ts.delete(t, `{"ids":["bd-1"],"expected_version":9007199254740993}`)
 	if resp.StatusCode != http.StatusConflict {
@@ -491,7 +491,7 @@ func TestDeleteRefusesAMalformedGuard(t *testing.T) {
 		`{"ids":["bd-1"],"expected_version":{}}`,
 	} {
 		deleter := &roleDeleter{}
-		ts := newTestServer(t, rolesConfig(Config{Deleter: deleter}))
+		ts := newTestServer(t, rolesConfig(Config{SourceRoles: SourceRoles{WorkspaceRoles: WorkspaceRoles{Deleter: deleter}}}))
 
 		resp := ts.delete(t, body)
 		if resp.StatusCode != http.StatusBadRequest {

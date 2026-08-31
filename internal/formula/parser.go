@@ -198,20 +198,10 @@ func (p *Parser) ParseTOML(data []byte) (*Formula, error) {
 // Resolve fully resolves a formula, processing extends and expansions.
 // Returns a new formula with all inheritance applied.
 func (p *Parser) Resolve(formula *Formula) (*Formula, error) {
-	// Check for cycles
-	if p.resolvingSet[formula.Formula] {
-		// Build the cycle chain for a clear error message
-		chain := append(p.resolvingChain, formula.Formula)
-		return nil, fmt.Errorf("circular extends detected: %s", strings.Join(chain, " -> "))
+	if err := p.enterResolve(formula.Formula); err != nil {
+		return nil, err
 	}
-	p.resolvingSet[formula.Formula] = true
-	p.resolvingChain = append(p.resolvingChain, formula.Formula)
-	defer func() {
-		delete(p.resolvingSet, formula.Formula)
-		p.resolvingChain = p.resolvingChain[:len(p.resolvingChain)-1]
-	}()
-
-	// If no extends, just validate and return
+	defer p.leaveResolve(formula.Formula)
 	if len(formula.Extends) == 0 {
 		if err := formula.Validate(); err != nil {
 			return nil, err
@@ -219,66 +209,72 @@ func (p *Parser) Resolve(formula *Formula) (*Formula, error) {
 		return formula, nil
 	}
 
-	// Build merged formula from parents
-	merged := &Formula{
-		Formula:     formula.Formula,
-		Description: formula.Description,
-		Version:     formula.Version,
-		Type:        formula.Type,
-		Source:      formula.Source,
-		Vars:        make(map[string]*VarDef),
-		Steps:       nil,
-		Compose:     nil,
+	merged, err := p.resolveParents(formula)
+	if err != nil {
+		return nil, err
 	}
-
-	// Apply each parent in order
-	for _, parentName := range formula.Extends {
-		parent, err := p.loadFormula(parentName)
-		if err != nil {
-			return nil, fmt.Errorf("extends %s: %w", parentName, err)
-		}
-
-		// Resolve parent recursively
-		parent, err = p.Resolve(parent)
-		if err != nil {
-			return nil, fmt.Errorf("resolve parent %s: %w", parentName, err)
-		}
-
-		// Merge parent vars (parent vars are inherited, child overrides)
-		for name, varDef := range parent.Vars {
-			if _, exists := merged.Vars[name]; !exists {
-				merged.Vars[name] = varDef
-			}
-		}
-
-		// Merge parent steps (append, child steps come after)
-		merged.Steps = append(merged.Steps, parent.Steps...)
-
-		// Merge parent compose rules
-		merged.Compose = mergeComposeRules(merged.Compose, parent.Compose)
-	}
-
-	// Apply child overrides
-	for name, varDef := range formula.Vars {
-		merged.Vars[name] = varDef
-	}
-
-	// Merge child steps: override parent steps by ID (preserving position),
-	// append new child steps at the end.
-	merged.Steps = mergeSteps(merged.Steps, formula.Steps)
-
-	merged.Compose = mergeComposeRules(merged.Compose, formula.Compose)
-
-	// Use child description if set
-	if formula.Description != "" {
-		merged.Description = formula.Description
-	}
+	applyFormulaOverrides(merged, formula)
 
 	if err := merged.Validate(); err != nil {
 		return nil, err
 	}
 
 	return merged, nil
+}
+
+func (p *Parser) enterResolve(name string) error {
+	if p.resolvingSet[name] {
+		chain := append(p.resolvingChain, name)
+		return fmt.Errorf("circular extends detected: %s", strings.Join(chain, " -> "))
+	}
+	p.resolvingSet[name] = true
+	p.resolvingChain = append(p.resolvingChain, name)
+	return nil
+}
+
+func (p *Parser) leaveResolve(name string) {
+	delete(p.resolvingSet, name)
+	p.resolvingChain = p.resolvingChain[:len(p.resolvingChain)-1]
+}
+
+func (p *Parser) resolveParents(formula *Formula) (*Formula, error) {
+	merged := &Formula{
+		Formula: formula.Formula, Description: formula.Description, Version: formula.Version,
+		Type: formula.Type, Source: formula.Source, Vars: make(map[string]*VarDef),
+	}
+	for _, parentName := range formula.Extends {
+		parent, err := p.loadFormula(parentName)
+		if err != nil {
+			return nil, fmt.Errorf("extends %s: %w", parentName, err)
+		}
+		parent, err = p.Resolve(parent)
+		if err != nil {
+			return nil, fmt.Errorf("resolve parent %s: %w", parentName, err)
+		}
+		mergeParentInto(merged, parent)
+	}
+	return merged, nil
+}
+
+func mergeParentInto(merged, parent *Formula) {
+	for name, varDef := range parent.Vars {
+		if _, exists := merged.Vars[name]; !exists {
+			merged.Vars[name] = varDef
+		}
+	}
+	merged.Steps = append(merged.Steps, parent.Steps...)
+	merged.Compose = mergeComposeRules(merged.Compose, parent.Compose)
+}
+
+func applyFormulaOverrides(merged, formula *Formula) {
+	for name, varDef := range formula.Vars {
+		merged.Vars[name] = varDef
+	}
+	merged.Steps = mergeSteps(merged.Steps, formula.Steps)
+	merged.Compose = mergeComposeRules(merged.Compose, formula.Compose)
+	if formula.Description != "" {
+		merged.Description = formula.Description
+	}
 }
 
 // loadFormula loads a formula by name from search paths.
@@ -494,54 +490,46 @@ func ValidateProvidedVars(formula *Formula, values map[string]string) error {
 // caller, since that case is presented differently by ValidateVars vs.
 // ValidateProvidedVars.
 func validateVarValue(name string, def *VarDef, val string, provided bool) []string {
-	var errs []string
-
 	// A variable with no default is effectively required: the command paths
 	// (extractRequiredVariables) demand a value for it, so a provided-but-empty
 	// value is the same unset-shell-variable trap as for required=true.
 	if (def.Required || def.Default == nil) && provided && val == "" {
-		errs = append(errs, fmt.Sprintf("variable %q is required and cannot be empty", name))
-		return errs
+		return []string{fmt.Sprintf("variable %q is required and cannot be empty", name)}
 	}
 
-	// Use default if not provided
 	if !provided && def.Default != nil {
 		val = *def.Default
 	}
-
-	// Skip further validation only when the var was genuinely not
-	// provided (absent from the map). A value that was explicitly
-	// provided as "" must still be checked against enum/pattern
-	// constraints rather than silently passing.
 	if !provided && val == "" {
-		return errs
+		return nil
 	}
+	return append(validateVarEnum(name, def, val), validateVarPattern(name, def, val)...)
+}
 
-	// Check enum constraint
-	if len(def.Enum) > 0 {
-		found := false
-		for _, allowed := range def.Enum {
-			if val == allowed {
-				found = true
-				break
-			}
-		}
-		if !found {
-			errs = append(errs, fmt.Sprintf("variable %q: value %q not in allowed values %v", name, val, def.Enum))
+func validateVarEnum(name string, def *VarDef, val string) []string {
+	if len(def.Enum) == 0 {
+		return nil
+	}
+	for _, allowed := range def.Enum {
+		if val == allowed {
+			return nil
 		}
 	}
+	return []string{fmt.Sprintf("variable %q: value %q not in allowed values %v", name, val, def.Enum)}
+}
 
-	// Check pattern constraint
-	if def.Pattern != "" {
-		re, err := regexp.Compile(def.Pattern)
-		if err != nil {
-			errs = append(errs, fmt.Sprintf("variable %q: invalid pattern %q: %v", name, def.Pattern, err))
-		} else if !re.MatchString(val) {
-			errs = append(errs, fmt.Sprintf("variable %q: value %q does not match pattern %q", name, val, def.Pattern))
-		}
+func validateVarPattern(name string, def *VarDef, val string) []string {
+	if def.Pattern == "" {
+		return nil
 	}
-
-	return errs
+	re, err := regexp.Compile(def.Pattern)
+	if err != nil {
+		return []string{fmt.Sprintf("variable %q: invalid pattern %q: %v", name, def.Pattern, err)}
+	}
+	if !re.MatchString(val) {
+		return []string{fmt.Sprintf("variable %q: value %q does not match pattern %q", name, val, def.Pattern)}
+	}
+	return nil
 }
 
 // ApplyDefaults returns a new map with default values filled in.

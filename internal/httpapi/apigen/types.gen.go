@@ -27,13 +27,7 @@ const (
 // Valid indicates whether the value is a known member of the ApplyItemKind enum.
 func (e ApplyItemKind) Valid() bool {
 	switch e {
-	case ApplyItemKindClose:
-		return true
-	case ApplyItemKindCreate:
-		return true
-	case ApplyItemKindDepAdd:
-		return true
-	case ApplyItemKindUpdate:
+	case ApplyItemKindClose, ApplyItemKindCreate, ApplyItemKindDepAdd, ApplyItemKindUpdate:
 		return true
 	default:
 		return false
@@ -51,13 +45,7 @@ const (
 // Valid indicates whether the value is a known member of the ApplyItemResultKind enum.
 func (e ApplyItemResultKind) Valid() bool {
 	switch e {
-	case ApplyItemResultKindClose:
-		return true
-	case ApplyItemResultKindCreate:
-		return true
-	case ApplyItemResultKindDepAdd:
-		return true
-	case ApplyItemResultKindUpdate:
+	case ApplyItemResultKindClose, ApplyItemResultKindCreate, ApplyItemResultKindDepAdd, ApplyItemResultKindUpdate:
 		return true
 	default:
 		return false
@@ -88,9 +76,7 @@ const (
 // Valid indicates whether the value is a known member of the SweepRequestTier enum.
 func (e SweepRequestTier) Valid() bool {
 	switch e {
-	case Durable:
-		return true
-	case Ephemeral:
+	case Durable, Ephemeral:
 		return true
 	default:
 		return false
@@ -107,11 +93,7 @@ const (
 // Valid indicates whether the value is a known member of the GetDependencyTreeParamsDirection enum.
 func (e GetDependencyTreeParamsDirection) Valid() bool {
 	switch e {
-	case Both:
-		return true
-	case Down:
-		return true
-	case Up:
+	case Both, Down, Up:
 		return true
 	default:
 		return false
@@ -127,9 +109,7 @@ const (
 // Valid indicates whether the value is a known member of the CountDependencyEdgesParamsDirection enum.
 func (e CountDependencyEdgesParamsDirection) Valid() bool {
 	switch e {
-	case CountDependencyEdgesParamsDirectionIn:
-		return true
-	case CountDependencyEdgesParamsDirectionOut:
+	case CountDependencyEdgesParamsDirectionIn, CountDependencyEdgesParamsDirectionOut:
 		return true
 	default:
 		return false
@@ -145,9 +125,7 @@ const (
 // Valid indicates whether the value is a known member of the ListRelatedIssuesParamsDirection enum.
 func (e ListRelatedIssuesParamsDirection) Valid() bool {
 	switch e {
-	case ListRelatedIssuesParamsDirectionIn:
-		return true
-	case ListRelatedIssuesParamsDirectionOut:
+	case ListRelatedIssuesParamsDirectionIn, ListRelatedIssuesParamsDirectionOut:
 		return true
 	default:
 		return false
@@ -164,11 +142,7 @@ const (
 // Valid indicates whether the value is a known member of the ClaimNextIssueParamsSort enum.
 func (e ClaimNextIssueParamsSort) Valid() bool {
 	switch e {
-	case ClaimNextIssueParamsSortHybrid:
-		return true
-	case ClaimNextIssueParamsSortOldest:
-		return true
-	case ClaimNextIssueParamsSortPriority:
+	case ClaimNextIssueParamsSortHybrid, ClaimNextIssueParamsSortOldest, ClaimNextIssueParamsSortPriority:
 		return true
 	default:
 		return false
@@ -187,15 +161,7 @@ const (
 // Valid indicates whether the value is a known member of the CountIssuesParamsGroupBy enum.
 func (e CountIssuesParamsGroupBy) Valid() bool {
 	switch e {
-	case CountIssuesParamsGroupByAssignee:
-		return true
-	case CountIssuesParamsGroupByLabel:
-		return true
-	case CountIssuesParamsGroupByPriority:
-		return true
-	case CountIssuesParamsGroupByStatus:
-		return true
-	case CountIssuesParamsGroupByType:
+	case CountIssuesParamsGroupByAssignee, CountIssuesParamsGroupByLabel, CountIssuesParamsGroupByPriority, CountIssuesParamsGroupByStatus, CountIssuesParamsGroupByType:
 		return true
 	default:
 		return false
@@ -218,23 +184,7 @@ const (
 // Valid indicates whether the value is a known member of the QueryIssuesParamsSort enum.
 func (e QueryIssuesParamsSort) Valid() bool {
 	switch e {
-	case QueryIssuesParamsSortAssignee:
-		return true
-	case QueryIssuesParamsSortClosed:
-		return true
-	case QueryIssuesParamsSortCreated:
-		return true
-	case QueryIssuesParamsSortId:
-		return true
-	case QueryIssuesParamsSortPriority:
-		return true
-	case QueryIssuesParamsSortStatus:
-		return true
-	case QueryIssuesParamsSortTitle:
-		return true
-	case QueryIssuesParamsSortType:
-		return true
-	case QueryIssuesParamsSortUpdated:
+	case QueryIssuesParamsSortAssignee, QueryIssuesParamsSortClosed, QueryIssuesParamsSortCreated, QueryIssuesParamsSortId, QueryIssuesParamsSortPriority, QueryIssuesParamsSortStatus, QueryIssuesParamsSortTitle, QueryIssuesParamsSortType, QueryIssuesParamsSortUpdated:
 		return true
 	default:
 		return false
@@ -251,11 +201,7 @@ const (
 // Valid indicates whether the value is a known member of the ListReadyWorkParamsSort enum.
 func (e ListReadyWorkParamsSort) Valid() bool {
 	switch e {
-	case ListReadyWorkParamsSortHybrid:
-		return true
-	case ListReadyWorkParamsSortOldest:
-		return true
-	case ListReadyWorkParamsSortPriority:
+	case ListReadyWorkParamsSortHybrid, ListReadyWorkParamsSortOldest, ListReadyWorkParamsSortPriority:
 		return true
 	default:
 		return false
@@ -399,6 +345,12 @@ type ApplyCloseItem struct {
 //
 // `metadata` is the issue's own metadata document and must be a JSON OBJECT where it is present at all. It is stored as sent; the resolved ids `metadata_refs` splices are written over its top-level keys after every id in the request exists.
 type ApplyCreateItem struct {
+	ApplyCreateItemFields1
+	ApplyCreateItemFields2
+}
+
+// ApplyCreateItemFields1 groups generated fields for ApplyCreateItem.
+type ApplyCreateItemFields1 struct {
 	AcceptanceCriteria *string `json:"acceptance_criteria,omitempty"`
 	Assignee           *string `json:"assignee,omitempty"`
 
@@ -437,7 +389,10 @@ type ApplyCreateItem struct {
 	//
 	// Where a member of this type is OMITTED, the key is absent; where it is present holding `null`, the key exists and holds null. Those are different states and this surface reports both.
 	Metadata MetadataValue `json:"metadata,omitempty"`
+}
 
+// ApplyCreateItemFields2 groups generated fields for ApplyCreateItem.
+type ApplyCreateItemFields2 struct {
 	// MetadataRefs Splices resolved ids into this issue's metadata: each entry writes the id its `Ref` resolves to as the WHOLE VALUE of one top-level metadata key.
 	//
 	// IT IS THE ONE PLACE A KEY MAY REACH FORWARD, or name this item's own `key` — see the operation's description. A ref here that names a key NO item declares is still a `400`.
@@ -619,6 +574,12 @@ type ApplyMetadataPatch struct {
 //
 // `parent_id` is deliberately absent, and its absence is this operation's one-edge-one-spelling rule: a parent is a `dep_add` item of type `parent-child`, so the order of every edge in the request stays total. The single patch has no ordering to express and publishes it directly. `persistence` is absent from both — moving a row between planes mid-plan is a different act from writing its fields, and nothing has asked for it here.
 type ApplyPatchBody struct {
+	ApplyPatchBodyFields1
+	ApplyPatchBodyFields2
+}
+
+// ApplyPatchBodyFields1 groups generated fields for ApplyPatchBody.
+type ApplyPatchBodyFields1 struct {
 	AcceptanceCriteria *string `json:"acceptance_criteria,omitempty"`
 
 	// AppendNotes Appends to the notes rather than replacing them. Mutually exclusive with `notes`.
@@ -657,9 +618,13 @@ type ApplyPatchBody struct {
 	Metadata *ApplyMetadataPatch `json:"metadata,omitempty"`
 
 	// Notes Replaces the notes. Mutually exclusive with `append_notes`; sending both is a `400`.
-	Notes    *string `json:"notes,omitempty"`
-	Owner    *string `json:"owner,omitempty"`
-	Priority *int    `json:"priority,omitempty"`
+	Notes *string `json:"notes,omitempty"`
+	Owner *string `json:"owner,omitempty"`
+}
+
+// ApplyPatchBodyFields2 groups generated fields for ApplyPatchBody.
+type ApplyPatchBodyFields2 struct {
+	Priority *int `json:"priority,omitempty"`
 
 	// Status The issue's status, from this workspace's own configured vocabulary.
 	//
@@ -1014,6 +979,12 @@ type CreateIssueDependency struct {
 //
 // The issue members mirror `ApplyCreateItem` exactly, minus that schema's two plan-only members (`key` and `metadata_refs`, which name items of a request this operation has only one of). What this adds is the edge vocabulary that operation moves into `dep_add` items: `parent_id`, `inherit_labels_from_parent`, `dependencies` and `waits_for`.
 type CreateIssueRequest struct {
+	CreateIssueRequestFields1
+	CreateIssueRequestFields2
+}
+
+// CreateIssueRequestFields1 groups generated fields for CreateIssueRequest.
+type CreateIssueRequestFields1 struct {
 	AcceptanceCriteria *string `json:"acceptance_criteria,omitempty"`
 
 	// Actor Who is creating the issue. `ClaimRequest.actor`'s rules exactly: the server trims it, then refuses an empty result, anything longer than 256 BYTES (the `maxLength` above counts characters — the byte limit is the binding one), and any control character including newline. The value reaches the created edges' author column, the history entry's attribution and the storage commit message, so an unvalidated newline would forge audit-trail lines.
@@ -1054,7 +1025,10 @@ type CreateIssueRequest struct {
 	//
 	// The DEFAULT IS FALSE and diverges from `bd create --parent`, whose default is to inherit. A wire caller sends what it means: this operation has no `--no-inherit-labels` to turn off, and a create that silently acquired labels the request never named would be a set the caller has to read back to learn.
 	InheritLabelsFromParent *bool `json:"inherit_labels_from_parent,omitempty"`
+}
 
+// CreateIssueRequestFields2 groups generated fields for CreateIssueRequest.
+type CreateIssueRequestFields2 struct {
 	// IssueType Issue type. Spelled `issue_type` rather than `type`, matching the member `Issue` carries, and validated against the built-ins plus the workspace's configured custom types by the ROLE — this server cannot read that vocabulary without a transaction, so it checks only what this schema declares and an unknown one arrives as a `400`.
 	//
 	// SEND ONE. The member is optional in this schema and the role validates the EMPTY type against the same vocabulary as any other, where it is neither a built-in nor a configured type — so an omitted `issue_type` is refused with everything else the request asked for. It stays optional because the vocabulary belongs to the workspace and a deployment may configure a default this server cannot read, but it is not optional in practice on any workspace shipped today. `POST /v0/beads/issues:batchCreate` has the same property and does not say so, which is why this member does.
@@ -1306,6 +1280,12 @@ type IssueDetails = types.IssueDetails
 //
 // It now agrees with `ApplyPatchBody` on every member it publishes, and the two differ only in the SHAPE of two of them: `labels` is complete replacement here and an ordered add/remove/replace patch there, because that operation edits a set it did not compose. Everything else — down to the `metadata` algebra and the four nullable members — is one definition, so a caller cannot get a different answer for the same edit depending on which operation it sent.
 type IssuePatchBody struct {
+	IssuePatchBodyFields1
+	IssuePatchBodyFields2
+}
+
+// IssuePatchBodyFields1 groups generated fields for IssuePatchBody.
+type IssuePatchBodyFields1 struct {
 	AcceptanceCriteria *string `json:"acceptance_criteria,omitempty"`
 
 	// AddLabels Labels to add, applied AFTER any `labels` replacement.
@@ -1356,7 +1336,10 @@ type IssuePatchBody struct {
 
 	// Notes Replaces the notes. Mutually exclusive with `append_notes`; sending both is a `400`.
 	Notes *string `json:"notes,omitempty"`
+}
 
+// IssuePatchBodyFields2 groups generated fields for IssuePatchBody.
+type IssuePatchBodyFields2 struct {
 	// ParentId Replaces the issue's parents atomically: a nonempty value makes THAT issue the only parent, and an EMPTY STRING removes every parent-child edge the issue has. Labels are not inherited — that is a create-time choice (`CreateIssueRequest.inherit_labels_from_parent`) and a reparent does not re-run it.
 	//
 	// IT IS A GRAPH EDIT, and it earns the graph's refusals: a new parent this workspace holds no row for is a `400`, a pair that already carries an edge of another type is `409 dependency_exists`, and a move under the issue's own descendant is `409 dependency_cycle` — the PLAIN one, carrying no `issue_id`/`blocker_id`/ `blocker_is_ancestor`, because the hierarchy refusal answers only to blocking edges and this member writes a `parent-child` edge. Naming the issue itself is a `400`. One call rather than a remove-then-add pair, which is the whole reason it is here: the two-call spelling leaves the issue parentless if the second call fails.
@@ -1430,6 +1413,13 @@ type MetadataValue = json.RawMessage
 
 // Problem RFC 9457 problem detail. This is the only error shape on this surface. The core declares `type`; this server never emits it, so `about:blank` is implied throughout.
 type Problem struct {
+	ProblemFields1
+	ProblemFields2
+	ProblemFields3
+}
+
+// ProblemFields1 groups generated fields for Problem.
+type ProblemFields1 struct {
 	// ActualAssignee With `precondition_failed`: the assignee the row was found holding. Present under `actual_version`'s rule.
 	ActualAssignee *string `json:"actual_assignee,omitempty"`
 
@@ -1481,7 +1471,10 @@ type Problem struct {
 
 	// Floor With `events_journal_truncated`: the lowest seq still retained, or `head + 1` when the journal retains nothing at all. Resuming from `floor - 1` continues with a known, explicit gap.
 	Floor *int64 `json:"floor,omitempty"`
+}
 
+// ProblemFields2 groups generated fields for Problem.
+type ProblemFields2 struct {
 	// Head With `events_journal_truncated`: the highest seq this journal has ever assigned. It never decreases under a prune, so `floor > head` means the journal was pruned empty and the caller is at the end of its history. Emitted even when zero.
 	Head *int64 `json:"head,omitempty"`
 
@@ -1535,7 +1528,10 @@ type Problem struct {
 	//
 	// It is NOT always the value the request sent. In the ordinary case — the prefix you asked for was pruned — it IS your checkpoint. When the prefix is intact but the retained window has an interior hole, it is instead the last seq the server could serve contiguously from your checkpoint, and `floor` is where the next intact stretch begins. It never reports a value BELOW what you sent, so echoing it back can never re-deliver records you already hold.
 	Since *int64 `json:"since,omitempty"`
+}
 
+// ProblemFields3 groups generated fields for Problem.
+type ProblemFields3 struct {
 	// Status The HTTP status code, repeated in the body.
 	Status int `json:"status"`
 
@@ -2073,6 +2069,12 @@ type WatchEventsParams struct {
 
 // ListIssuesParams defines parameters for ListIssues.
 type ListIssuesParams struct {
+	ListIssuesParamsFields1
+	ListIssuesParamsFields2
+}
+
+// ListIssuesParamsFields1 groups generated fields for ListIssuesParams.
+type ListIssuesParamsFields1 struct {
 	// Status Status filter. Repeat the parameter, or pass a comma-separated list. Custom statuses configured for the workspace are honored.
 	//
 	// Setting this REPLACES the default status exclusions rather than fighting with them: `status=closed` on its own returns closed issues, and does NOT also need `all=true`. Leave it unset to get the default view described above.
@@ -2118,7 +2120,10 @@ type ListIssuesParams struct {
 
 	// CreatedAfter Only issues created strictly after this instant (RFC 3339).
 	CreatedAfter *time.Time `form:"created_after,omitempty" json:"created_after,omitempty"`
+}
 
+// ListIssuesParamsFields2 groups generated fields for ListIssuesParams.
+type ListIssuesParamsFields2 struct {
 	// MetadataField Top-level metadata equality filter as `key=value`, split on the first `=`. Repeatable. An invalid key is a 400.
 	MetadataField *[]string `form:"metadata_field,omitempty" json:"metadata_field,omitempty"`
 
@@ -2179,6 +2184,12 @@ type ListRelatedIssuesParamsDirection string
 
 // ClaimNextIssueParams defines parameters for ClaimNextIssue.
 type ClaimNextIssueParams struct {
+	ClaimNextIssueParamsFields1
+	ClaimNextIssueParamsFields2
+}
+
+// ClaimNextIssueParamsFields1 groups generated fields for ClaimNextIssueParams.
+type ClaimNextIssueParamsFields1 struct {
 	// Assignee Only issues assigned to this actor.
 	Assignee *string `form:"assignee,omitempty" json:"assignee,omitempty"`
 
@@ -2224,7 +2235,10 @@ type ClaimNextIssueParams struct {
 
 	// IncludeEphemeral Include ephemeral (non-synced) rows.
 	IncludeEphemeral *bool `form:"include_ephemeral,omitempty" json:"include_ephemeral,omitempty"`
+}
 
+// ClaimNextIssueParamsFields2 groups generated fields for ClaimNextIssueParams.
+type ClaimNextIssueParamsFields2 struct {
 	// IncludeDeferred Include issues whose `defer_until` is still in the future.
 	IncludeDeferred *bool `form:"include_deferred,omitempty" json:"include_deferred,omitempty"`
 
@@ -2239,6 +2253,12 @@ type ClaimNextIssueParamsSort string
 
 // CountIssuesParams defines parameters for CountIssues.
 type CountIssuesParams struct {
+	CountIssuesParamsFields1
+	CountIssuesParamsFields2
+}
+
+// CountIssuesParamsFields1 groups generated fields for CountIssuesParams.
+type CountIssuesParamsFields1 struct {
 	// Status One stored status. The empty value and the literal `all` both mean EVERY status, which is what makes a bare count answer for closed rows as well as open ones.
 	//
 	// IT IS ONE STATUS, NOT A COMMA-SEPARATED SET, and that is the one parameter name this operation shares with `GET /v0/beads/issues` while meaning something narrower — that one takes a comma-separated OR set. It is stated here rather than quietly reconciled, because a client that assumed otherwise would read a plausible number instead of an error.
@@ -2286,7 +2306,10 @@ type CountIssuesParams struct {
 
 	// CreatedAfter RFC 3339. Only issues created strictly after this instant.
 	CreatedAfter *time.Time `form:"created_after,omitempty" json:"created_after,omitempty"`
+}
 
+// CountIssuesParamsFields2 groups generated fields for CountIssuesParams.
+type CountIssuesParamsFields2 struct {
 	// CreatedBefore RFC 3339. Only issues created strictly before this instant.
 	CreatedBefore *time.Time `form:"created_before,omitempty" json:"created_before,omitempty"`
 
@@ -2370,6 +2393,12 @@ type ListMemoriesParams struct {
 
 // ListReadyWorkParams defines parameters for ListReadyWork.
 type ListReadyWorkParams struct {
+	ListReadyWorkParamsFields1
+	ListReadyWorkParamsFields2
+}
+
+// ListReadyWorkParamsFields1 groups generated fields for ListReadyWorkParams.
+type ListReadyWorkParamsFields1 struct {
 	// Assignee Only issues assigned to this actor.
 	Assignee *string `form:"assignee,omitempty" json:"assignee,omitempty"`
 
@@ -2415,7 +2444,10 @@ type ListReadyWorkParams struct {
 
 	// IncludeEphemeral Include ephemeral (non-synced) rows.
 	IncludeEphemeral *bool `form:"include_ephemeral,omitempty" json:"include_ephemeral,omitempty"`
+}
 
+// ListReadyWorkParamsFields2 groups generated fields for ListReadyWorkParams.
+type ListReadyWorkParamsFields2 struct {
 	// IncludeDeferred Include issues whose `defer_until` is still in the future.
 	IncludeDeferred *bool `form:"include_deferred,omitempty" json:"include_deferred,omitempty"`
 

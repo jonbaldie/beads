@@ -23,11 +23,16 @@ func TestPushFieldsEqual(t *testing.T) {
 	}
 
 	base := &types.Issue{
-		Title:       "Fix the thing",
-		Description: "Some body text",
-		IssueType:   types.IssueType("task"),
-		Priority:    2, // -> priority::medium
-		Status:      types.StatusOpen,
+		IssueContent: types.IssueContent{
+			Title:       "Fix the thing",
+			Description: "Some body text",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.IssueType("task"),
+			Priority:  2,
+			// -> priority::medium
+			Status: types.StatusOpen,
+		},
 	}
 
 	tests := []struct {
@@ -83,24 +88,54 @@ func TestPushFieldsEqual(t *testing.T) {
 		},
 		{
 			name: "in_progress adds status label",
-			local: &types.Issue{Title: "T", Description: "B", IssueType: "task",
-				Priority: 2, Status: types.StatusInProgress},
+			local: &types.Issue{
+				IssueContent: types.IssueContent{
+					Title:       "T",
+					Description: "B",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: "task",
+					Priority:  2,
+					Status:    types.StatusInProgress,
+				},
+			},
 			remote: &Issue{Title: "T", Body: "B", State: "open",
 				Labels: ghLabels("type::task", "priority::medium", "status::in_progress")},
 			want: true,
 		},
 		{
 			name: "closed maps to state closed",
-			local: &types.Issue{Title: "T", Description: "B", IssueType: "task",
-				Priority: 2, Status: types.StatusClosed},
+			local: &types.Issue{
+				IssueContent: types.IssueContent{
+					Title:       "T",
+					Description: "B",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: "task",
+					Priority:  2,
+					Status:    types.StatusClosed,
+				},
+			},
 			remote: &Issue{Title: "T", Body: "B", State: "closed",
 				Labels: ghLabels("type::task", "priority::medium")},
 			want: true,
 		},
 		{
 			name: "non-scoped local labels preserved in comparison",
-			local: &types.Issue{Title: "T", Description: "B", IssueType: "task",
-				Priority: 2, Status: types.StatusOpen, Labels: []string{"backend"}},
+			local: &types.Issue{
+				IssueContent: types.IssueContent{
+					Title:       "T",
+					Description: "B",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: "task",
+					Priority:  2,
+					Status:    types.StatusOpen,
+				},
+				IssueGraph: types.IssueGraph{
+					Labels: []string{"backend"},
+				},
+			},
 			remote: &Issue{Title: "T", Body: "B", State: "open",
 				Labels: ghLabels("type::task", "priority::medium", "backend")},
 			want: true,
@@ -124,12 +159,18 @@ func TestPushContentHash(t *testing.T) {
 	config := DefaultMappingConfig()
 
 	base := &types.Issue{
-		Title:       "Fix the thing",
-		Description: "Some body text",
-		IssueType:   types.IssueType("task"),
-		Priority:    2,
-		Status:      types.StatusOpen,
-		Labels:      []string{"backend", "ops"},
+		IssueContent: types.IssueContent{
+			Title:       "Fix the thing",
+			Description: "Some body text",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.IssueType("task"),
+			Priority:  2,
+			Status:    types.StatusOpen,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"backend", "ops"},
+		},
 	}
 
 	h := func(i *types.Issue) string { return PushContentHash(i, config) }

@@ -17,11 +17,13 @@ func TestResolveLocalActiveDatabaseDir(t *testing.T) {
 		beadsDir := t.TempDir()
 		root := filepath.Join(beadsDir, "dolt")
 		cfg := &Config{
-			Path:       root,
-			BeadsDir:   beadsDir,
-			Database:   "active",
-			ServerHost: "127.0.0.1",
-			AutoStart:  true,
+			Path:     root,
+			BeadsDir: beadsDir,
+			Database: "active",
+			ServerOptions: ServerOptions{
+				ServerHost: "127.0.0.1",
+				AutoStart:  true,
+			},
 		}
 		want := filepath.Join(root, "active")
 		if got := resolveLocalActiveDatabaseDir(cfg); got != want {
@@ -35,10 +37,12 @@ func TestResolveLocalActiveDatabaseDir(t *testing.T) {
 		t.Setenv("BEADS_DOLT_SHARED_SERVER", "1")
 		t.Setenv("BEADS_SHARED_SERVER_DIR", sharedDir)
 		cfg := &Config{
-			Path:       filepath.Join(t.TempDir(), "dolt"),
-			BeadsDir:   t.TempDir(),
-			Database:   "shared_active",
-			ServerHost: "localhost",
+			Path:     filepath.Join(t.TempDir(), "dolt"),
+			BeadsDir: t.TempDir(),
+			Database: "shared_active",
+			ServerOptions: ServerOptions{
+				ServerHost: "localhost",
+			},
 		}
 		want := filepath.Join(sharedDir, "dolt", "shared_active")
 		if got := resolveLocalActiveDatabaseDir(cfg); got != want {
@@ -119,11 +123,13 @@ func TestResolveLocalActiveDatabaseDir(t *testing.T) {
 			clearSizingModeEnv(t)
 			beadsDir := t.TempDir()
 			cfg := &Config{
-				Path:       filepath.Join(beadsDir, "dolt"),
-				BeadsDir:   beadsDir,
-				Database:   "active",
-				ServerHost: "127.0.0.1",
-				AutoStart:  true,
+				Path:     filepath.Join(beadsDir, "dolt"),
+				BeadsDir: beadsDir,
+				Database: "active",
+				ServerOptions: ServerOptions{
+					ServerHost: "127.0.0.1",
+					AutoStart:  true,
+				},
 			}
 			tc.setup(t, cfg)
 			if got := resolveLocalActiveDatabaseDir(cfg); got != "" {
@@ -138,11 +144,11 @@ func TestDoltStoreActiveDatabaseSizeKeepsPerInstanceAuthorityAcrossModeChurn(t *
 
 	newSizingStore := func(cfg *Config) *DoltStore {
 		return &DoltStore{
-			dbPath:                 cfg.Path,
-			beadsDir:               cfg.BeadsDir,
-			database:               cfg.Database,
-			localActiveDatabaseDir: resolveLocalActiveDatabaseDir(cfg),
-			serverMode:             true,
+			dbPath:                       cfg.Path,
+			beadsDir:                     cfg.BeadsDir,
+			database:                     cfg.Database,
+			localActiveDatabaseDir:       resolveLocalActiveDatabaseDir(cfg),
+			doltStoreVersionControlState: doltStoreVersionControlState{serverMode: true},
 		}
 	}
 	requireSize := func(store *DoltStore, want int64) {
@@ -166,11 +172,13 @@ func TestDoltStoreActiveDatabaseSizeKeepsPerInstanceAuthorityAcrossModeChurn(t *
 
 	ownedBeadsDir := t.TempDir()
 	ownedConfig := &Config{
-		Path:       filepath.Join(ownedBeadsDir, "dolt"),
-		BeadsDir:   ownedBeadsDir,
-		Database:   "owned_active",
-		ServerHost: "127.0.0.1",
-		AutoStart:  true,
+		Path:     filepath.Join(ownedBeadsDir, "dolt"),
+		BeadsDir: ownedBeadsDir,
+		Database: "owned_active",
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			AutoStart:  true,
+		},
 	}
 	ownedDatabaseDir := filepath.Join(ownedConfig.Path, ownedConfig.Database)
 	if err := os.MkdirAll(ownedDatabaseDir, 0o700); err != nil {
@@ -188,11 +196,13 @@ func TestDoltStoreActiveDatabaseSizeKeepsPerInstanceAuthorityAcrossModeChurn(t *
 	t.Setenv("BEADS_DOLT_PORT", "44001")
 	externalBeadsDir := t.TempDir()
 	externalConfig := &Config{
-		Path:       filepath.Join(externalBeadsDir, "dolt"),
-		BeadsDir:   externalBeadsDir,
-		Database:   "external_active",
-		ServerHost: "127.0.0.1",
-		AutoStart:  true,
+		Path:     filepath.Join(externalBeadsDir, "dolt"),
+		BeadsDir: externalBeadsDir,
+		Database: "external_active",
+		ServerOptions: ServerOptions{
+			ServerHost: "127.0.0.1",
+			AutoStart:  true,
+		},
 	}
 	externalStore := newSizingStore(externalConfig)
 	if externalStore.localActiveDatabaseDir != "" {
@@ -209,10 +219,12 @@ func TestDoltStoreActiveDatabaseSizeKeepsPerInstanceAuthorityAcrossModeChurn(t *
 
 	t.Setenv("BEADS_DOLT_SERVER_PORT", "44002")
 	sharedConfig := &Config{
-		Path:       filepath.Join(t.TempDir(), "dolt"),
-		BeadsDir:   t.TempDir(),
-		Database:   "shared_explicit",
-		ServerHost: "localhost",
+		Path:     filepath.Join(t.TempDir(), "dolt"),
+		BeadsDir: t.TempDir(),
+		Database: "shared_explicit",
+		ServerOptions: ServerOptions{
+			ServerHost: "localhost",
+		},
 	}
 	if got := resolveLocalActiveDatabaseDir(sharedConfig); got != "" {
 		t.Fatalf("shared explicit-endpoint path = %q, want unsupported", got)

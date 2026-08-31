@@ -2,8 +2,11 @@ package molecules
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/jonbaldie/beads/internal/storage"
@@ -11,6 +14,112 @@ import (
 	"github.com/jonbaldie/beads/internal/testutil"
 	"github.com/jonbaldie/beads/internal/types"
 )
+
+type memoryMoleculeStore struct {
+	issues    map[string]*types.Issue
+	createErr error
+}
+
+func (s *memoryMoleculeStore) GetIssue(ctx context.Context, id string) (*types.Issue, error) {
+	if ctx == nil {
+		return nil, errors.New("nil context")
+	}
+	return s.issues[id], nil
+}
+
+func (s *memoryMoleculeStore) CreateIssuesWithFullOptions(ctx context.Context, issues []*types.Issue, _ string, _ storage.BatchCreateOptions) error {
+	if ctx == nil {
+		return errors.New("nil context")
+	}
+	if s.createErr != nil {
+		return s.createErr
+	}
+	for _, issue := range issues {
+		s.issues[issue.ID] = issue
+	}
+	return nil
+}
+
+func TestLoaderLoadAllFromProjectWithoutExternalDatabase(t *testing.T) {
+	townRoot := t.TempDir()
+	userHome := t.TempDir()
+	t.Setenv("GT_ROOT", townRoot)
+	t.Setenv("HOME", userHome)
+	beadsDir := t.TempDir()
+	paths := []string{
+		filepath.Join(townRoot, ".beads", MoleculeFileName),
+		filepath.Join(userHome, ".beads", MoleculeFileName),
+		filepath.Join(beadsDir, MoleculeFileName),
+	}
+	for i, path := range paths {
+		if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
+			t.Fatal(err)
+		}
+		content := fmt.Sprintf(`{"id":"mol-local-%d","title":"Local","issue_type":"molecule","status":"open"}`, i)
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	store := &memoryMoleculeStore{issues: make(map[string]*types.Issue)}
+	loader := &Loader{
+		store:    store,
+		builtins: []*types.Issue{{IssueID: types.IssueID{ID: "mol-built-in"}}},
+	}
+	result, err := loader.LoadAll(context.Background(), beadsDir)
+	if err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	wantSources := append([]string{"<built-in>"}, paths...)
+	if result.Loaded != 4 || result.BuiltinCount != 1 || !slices.Equal(result.Sources, wantSources) {
+		t.Fatalf("LoadAll result = %#v, want town, user, and project sources", result)
+	}
+	if issue := store.issues["mol-local-2"]; issue == nil || !issue.IsTemplate {
+		t.Fatalf("stored molecule = %#v, want template", issue)
+	}
+}
+
+func TestLoadBuiltinRecordsSuccessAndIgnoresStoreFailure(t *testing.T) {
+	ctx := context.Background()
+	molecule := func(id string) *types.Issue {
+		return &types.Issue{IssueID: types.IssueID{ID: id}}
+	}
+	empty := &LoadResult{}
+	(&Loader{store: &memoryMoleculeStore{issues: make(map[string]*types.Issue)}}).loadBuiltin(ctx, empty, nil)
+	if empty.BuiltinCount != 0 || empty.Loaded != 0 || len(empty.Sources) != 0 {
+		t.Fatalf("empty built-in load changed result: %#v", empty)
+	}
+
+	store := &memoryMoleculeStore{issues: make(map[string]*types.Issue)}
+	result := &LoadResult{}
+	(&Loader{store: store}).loadBuiltin(ctx, result, []*types.Issue{molecule("mol-built-in")})
+	if result.BuiltinCount != 1 || result.Loaded != 1 || !slices.Equal(result.Sources, []string{"<built-in>"}) {
+		t.Fatalf("successful built-in result = %#v", result)
+	}
+
+	store.createErr = errors.New("write failed")
+	failed := &LoadResult{}
+	(&Loader{store: store}).loadBuiltin(ctx, failed, []*types.Issue{molecule("mol-failed")})
+	if failed.BuiltinCount != 0 || failed.Loaded != 0 || len(failed.Sources) != 0 {
+		t.Fatalf("failed built-in load changed result: %#v", failed)
+	}
+}
+
+func TestLoadSourceIgnoresStoreFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), MoleculeFileName)
+	if err := os.WriteFile(path, []byte(`{"id":"mol-failed","title":"Failed"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	store := &memoryMoleculeStore{
+		issues:    make(map[string]*types.Issue),
+		createErr: errors.New("write failed"),
+	}
+	result := &LoadResult{}
+	(&Loader{store: store}).loadSource(context.Background(), result, path, "test")
+	if result.Loaded != 0 || len(result.Sources) != 0 {
+		t.Fatalf("failed source load changed result: %#v", result)
+	}
+}
 
 // newTestMoleculeStore creates a dolt store on the shared database with branch isolation.
 func newTestMoleculeStore(t *testing.T) *dolt.DoltStore {
@@ -20,11 +129,15 @@ func newTestMoleculeStore(t *testing.T) *dolt.DoltStore {
 	}
 	ctx := context.Background()
 	store, err := dolt.New(ctx, &dolt.Config{
-		Path:         t.TempDir(),
-		ServerHost:   "127.0.0.1",
-		ServerPort:   testServerPort,
-		Database:     testSharedDB,
-		MaxOpenConns: 1,
+		Path: t.TempDir(),
+		ServerOptions: dolt.ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: testServerPort,
+		},
+		Database: testSharedDB,
+		PoolOptions: dolt.PoolOptions{
+			MaxOpenConns: 1,
+		},
 	})
 	if err != nil {
 		t.Fatalf("Failed to create dolt store: %v", err)
@@ -157,11 +270,19 @@ func TestLoader_SkipExistingMolecules(t *testing.T) {
 
 	// Pre-create a molecule in the database (skip prefix validation for mol-* IDs)
 	existingMol := &types.Issue{
-		ID:         "mol-existing",
-		Title:      "Existing Molecule",
-		IssueType:  "molecule",
-		Status:     types.StatusOpen,
-		IsTemplate: true,
+		IssueID: types.IssueID{
+			ID: "mol-existing",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Existing Molecule",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: "molecule",
+			Status:    types.StatusOpen,
+		},
+		IssueWisp: types.IssueWisp{
+			IsTemplate: true,
+		},
 	}
 	opts := storage.BatchCreateOptions{SkipPrefixValidation: true}
 	if err := store.CreateIssuesWithFullOptions(ctx, []*types.Issue{existingMol}, "test", opts); err != nil {

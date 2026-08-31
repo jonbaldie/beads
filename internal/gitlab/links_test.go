@@ -460,10 +460,16 @@ func (s *gitLabLinkFakeStore) GetDependenciesWithMetadata(_ context.Context, iss
 
 func gitLabIssue(id, ref string, issueType types.IssueType) *types.Issue {
 	return &types.Issue{
-		ID:          id,
-		ExternalRef: &ref,
-		IssueType:   issueType,
-		Status:      types.StatusOpen,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: issueType,
+			Status:    types.StatusOpen,
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: &ref,
+		},
 	}
 }
 

@@ -8,29 +8,20 @@ package backendnames
 
 import "sync"
 
-var (
-	mu    sync.RWMutex
-	names = make(map[string]struct{})
-)
+var names sync.Map
 
 // Add records a registered backend name.
 func Add(name string) {
-	mu.Lock()
-	defer mu.Unlock()
-	names[name] = struct{}{}
+	names.Store(name, struct{}{})
 }
 
 // Remove drops a registered backend name.
 func Remove(name string) {
-	mu.Lock()
-	defer mu.Unlock()
-	delete(names, name)
+	names.Delete(name)
 }
 
 // Has reports whether name is registered.
 func Has(name string) bool {
-	mu.RLock()
-	defer mu.RUnlock()
-	_, ok := names[name]
+	_, ok := names.Load(name)
 	return ok
 }
