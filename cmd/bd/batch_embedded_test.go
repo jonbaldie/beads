@@ -36,11 +36,17 @@ func seedBatchTestIssues(t *testing.T, ctx context.Context, st storage.DoltStora
 	t.Helper()
 	for _, id := range ids {
 		issue := &types.Issue{
-			ID:        id,
-			Title:     "seed " + id,
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: "seed " + id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := st.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatalf("seed CreateIssue %s: %v", id, err)

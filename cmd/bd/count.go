@@ -51,7 +51,7 @@ Examples:
 		if err != nil {
 			return HandleErrorRespectJSON("%v", err)
 		}
-		return executeCount(rootCtx, counter, request, groupBy)
+		return executeCount(getRootContext(), counter, request, groupBy)
 	},
 }
 
@@ -62,7 +62,7 @@ func openCounter() (issueops.Counter, error) {
 	if usesProxiedServer() {
 		return proxiedCounter()
 	}
-	return store.Counter()
+	return getStore().Counter()
 }
 
 // parseCountRequest turns the flag set into the role's request. Normalization
@@ -90,20 +90,14 @@ func parseCountRequest(cmd *cobra.Command) (issueops.CountRequest, issueops.Coun
 	includeInfra, _ := cmd.Flags().GetBool("include-infra")
 
 	request := issueops.CountRequest{
-		Status:        status,
-		IssueType:     issueType,
-		Assignee:      assignee,
-		Labels:        labels,
-		LabelsAny:     labelsAny,
-		TitleSearch:   titleSearch,
-		IDFilter:      idFilter,
-		TitleContains: titleContains,
-		DescContains:  descContains,
-		NotesContains: notesContains,
-		EmptyDesc:     emptyDesc,
-		NoAssignee:    noAssignee,
-		NoLabels:      noLabels,
-		IncludeInfra:  includeInfra,
+		CountIdentityFilters: issueops.CountIdentityFilters{Status: status, IssueType: issueType, Assignee: assignee},
+		CountTextFilters: issueops.CountTextFilters{
+			Labels: labels, LabelsAny: labelsAny, TitleSearch: titleSearch, IDFilter: idFilter,
+			TitleContains: titleContains, DescContains: descContains, NotesContains: notesContains,
+		},
+		CountPresenceFilters: issueops.CountPresenceFilters{
+			EmptyDesc: emptyDesc, NoAssignee: noAssignee, NoLabels: noLabels, IncludeInfra: includeInfra,
+		},
 	}
 
 	if cmd.Flags().Changed("priority") {
@@ -178,7 +172,7 @@ func executeCount(ctx context.Context, counter issueops.Counter, request issueop
 		if err != nil {
 			return HandleErrorRespectJSON("%v", err)
 		}
-		if jsonOutput {
+		if isJSONOutput() {
 			return outputJSON(struct {
 				Count int64 `json:"count"`
 			}{Count: result.Total})
@@ -205,7 +199,7 @@ func executeCount(ctx context.Context, counter issueops.Counter, request issueop
 		return cmp.Compare(a.Group, b.Group)
 	})
 
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(struct {
 			Total  int64        `json:"total"`
 			Groups []GroupCount `json:"groups"`

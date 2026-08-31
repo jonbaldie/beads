@@ -39,11 +39,15 @@ func TestRelinkSeveredCloneLocalFKs_AfterHardReset(t *testing.T) {
 	h := sha256.Sum256([]byte(t.Name() + fmt.Sprintf("%d", time.Now().UnixNano())))
 	dbName := "fixtest_" + hex.EncodeToString(h[:6])
 	store, err := dolt.New(ctx, &dolt.Config{
-		Path:            filepath.Join(beadsDir, "beads.db"),
-		ServerHost:      "127.0.0.1",
-		ServerPort:      port,
-		Database:        dbName,
-		CreateIfMissing: true,
+		Path: filepath.Join(beadsDir, "beads.db"),
+		ServerOptions: dolt.ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: port,
+		},
+		Database: dbName,
+		RemoteOptions: dolt.RemoteOptions{
+			CreateIfMissing: true,
+		},
 	})
 	if err != nil {
 		t.Skipf("skipping: Dolt not available: %v", err)
@@ -56,7 +60,7 @@ func TestRelinkSeveredCloneLocalFKs_AfterHardReset(t *testing.T) {
 		t.Fatalf("failed to set issue_prefix: %v", err)
 	}
 
-	issue := &types.Issue{Title: "anchor", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	issue := &types.Issue{IssueContent: types.IssueContent{Title: "anchor"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
 	}
@@ -78,7 +82,7 @@ func TestRelinkSeveredCloneLocalFKs_AfterHardReset(t *testing.T) {
 
 	// A second commit that touches issues, so the reset below swaps its
 	// backing object (a no-op reset does not sever anything).
-	second := &types.Issue{Title: "swapped away", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	second := &types.Issue{IssueContent: types.IssueContent{Title: "swapped away"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := store.CreateIssue(ctx, second, "test"); err != nil {
 		t.Fatalf("failed to create second issue: %v", err)
 	}

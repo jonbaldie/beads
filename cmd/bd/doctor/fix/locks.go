@@ -17,70 +17,65 @@ func StaleLockFiles(path string) error {
 	if err != nil {
 		return nil
 	}
-
 	var removed []string
 	var errors []string
-
-	// Remove stale bootstrap lock
-	bootstrapLockPath := filepath.Join(beadsDir, "dolt.bootstrap.lock")
-	if info, err := os.Stat(bootstrapLockPath); err == nil {
-		age := time.Since(info.ModTime())
-		if age > 5*time.Minute {
-			if err := os.Remove(bootstrapLockPath); err != nil {
-				errors = append(errors, fmt.Sprintf("dolt.bootstrap.lock: %v", err))
-			} else {
-				removed = append(removed, "dolt.bootstrap.lock")
-			}
-		}
-	}
-
-	// Remove stale sync lock
-	syncLockPath := filepath.Join(beadsDir, ".sync.lock")
-	if info, err := os.Stat(syncLockPath); err == nil {
-		age := time.Since(info.ModTime())
-		if age > 1*time.Hour {
-			if err := os.Remove(syncLockPath); err != nil {
-				errors = append(errors, fmt.Sprintf(".sync.lock: %v", err))
-			} else {
-				removed = append(removed, ".sync.lock")
-			}
-		}
-	}
-
+	removeAgedLock(beadsDir, "dolt.bootstrap.lock", 5*time.Minute, &removed, &errors)
+	removeAgedLock(beadsDir, ".sync.lock", 1*time.Hour, &removed, &errors)
 	// WARNING: DO NOT remove, delete, or modify files inside Dolt's .dolt/
 	// directory — including noms/LOCK files. These are Dolt-internal files.
 	// Removing them WILL cause unrecoverable data corruption and data loss.
 	// Dolt manages these files itself; external interference is never safe.
+	removeStaleStartlocks(beadsDir, &removed, &errors)
+	return reportStaleLockCleanup(removed, errors)
+}
 
-	// Remove stale startup locks
-	entries, err := os.ReadDir(beadsDir)
-	if err == nil {
-		for _, entry := range entries {
-			if strings.HasSuffix(entry.Name(), ".startlock") {
-				info, err := entry.Info()
-				if err != nil {
-					continue
-				}
-				age := time.Since(info.ModTime())
-				if age > 30*time.Second {
-					lockPath := filepath.Join(beadsDir, entry.Name())
-					if err := os.Remove(lockPath); err != nil {
-						errors = append(errors, fmt.Sprintf("%s: %v", entry.Name(), err))
-					} else {
-						removed = append(removed, entry.Name())
-					}
-				}
-			}
-		}
+func removeAgedLock(beadsDir, name string, maxAge time.Duration, removed, errors *[]string) {
+	lockPath := filepath.Join(beadsDir, name)
+	info, err := os.Stat(lockPath)
+	if err != nil {
+		return
 	}
+	if time.Since(info.ModTime()) <= maxAge {
+		return
+	}
+	if err := os.Remove(lockPath); err != nil {
+		*errors = append(*errors, fmt.Sprintf("%s: %v", name, err))
+		return
+	}
+	*removed = append(*removed, name)
+}
 
+func removeStaleStartlocks(beadsDir string, removed, errors *[]string) {
+	entries, err := os.ReadDir(beadsDir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".startlock") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if time.Since(info.ModTime()) <= 30*time.Second {
+			continue
+		}
+		lockPath := filepath.Join(beadsDir, entry.Name())
+		if err := os.Remove(lockPath); err != nil {
+			*errors = append(*errors, fmt.Sprintf("%s: %v", entry.Name(), err))
+			continue
+		}
+		*removed = append(*removed, entry.Name())
+	}
+}
+
+func reportStaleLockCleanup(removed, errors []string) error {
 	if len(removed) > 0 {
 		fmt.Printf("  Removed stale lock files: %s\n", strings.Join(removed, ", "))
 	}
-
 	if len(errors) > 0 {
 		return fmt.Errorf("failed to remove some lock files: %s", strings.Join(errors, "; "))
 	}
-
 	return nil
 }

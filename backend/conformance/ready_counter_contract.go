@@ -306,15 +306,17 @@ func RunReadyCounterDoesNotMutateTheCallerRequest(t *testing.T, ctx context.Cont
 	build := func() publicops.ReadyRequest {
 		priority := 2
 		return publicops.ReadyRequest{
-			IssueType:      " Task ",
-			Labels:         []string{fixture.IssuePrefix + "-rcsnap ", fixture.IssuePrefix + "-rcsnap "},
-			LabelsAny:      []string{" " + fixture.IssuePrefix + "-rcsnap-any"},
-			ExcludeLabels:  []string{fixture.IssuePrefix + "-rcsnap-not "},
-			ExcludeTypes:   []string{"mr,epic", " chore "},
-			MetadataFields: map[string]string{"team": "conformance"},
-			HasMetadataKey: "team",
-			Priority:       &priority,
-			Sort:           readyCounterSort,
+			IssueType: " Task ",
+			ReadyRequestFilters: publicops.ReadyRequestFilters{
+				ExcludeLabels:  []string{fixture.IssuePrefix + "-rcsnap-not "},
+				ExcludeTypes:   []string{"mr,epic", " chore "},
+				MetadataFields: map[string]string{"team": "conformance"},
+				HasMetadataKey: "team",
+			},
+			Labels:    []string{fixture.IssuePrefix + "-rcsnap ", fixture.IssuePrefix + "-rcsnap "},
+			LabelsAny: []string{" " + fixture.IssuePrefix + "-rcsnap-any"},
+			Priority:  &priority,
+			Sort:      readyCounterSort,
 		}
 	}
 	request := build()
@@ -413,12 +415,20 @@ const readyCounterSort = "priority"
 
 func readyCounterIssue(id string, priority int, labels ...string) *types.Issue {
 	return &types.Issue{
-		ID:        id,
-		Title:     id,
-		Status:    types.StatusOpen,
-		Priority:  priority,
-		IssueType: types.TypeTask,
-		Labels:    labels,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  priority,
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: labels,
+		},
 	}
 }
 

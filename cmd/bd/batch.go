@@ -86,7 +86,9 @@ normal 'bd' subcommands for interactive/read operations.`,
 	SilenceUsage:  true,
 	SilenceErrors: false,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		CheckReadonly("batch")
+		if err := CheckReadonly("batch"); err != nil {
+			return err
+		}
 
 		evt := metrics.NewCommandEvent("batch")
 		defer func() {
@@ -96,7 +98,7 @@ normal 'bd' subcommands for interactive/read operations.`,
 		}()
 
 		proxied := usesProxiedServer()
-		if !proxied && store == nil {
+		if !proxied && getStore() == nil {
 			return fmt.Errorf("no database connection available (%s)", diagHint())
 		}
 
@@ -127,7 +129,7 @@ normal 'bd' subcommands for interactive/read operations.`,
 			for _, op := range ops {
 				fmt.Fprintf(cmd.OutOrStdout(), "line %d: %s\n", op.line, op.raw)
 			}
-			if jsonOutput {
+			if isJSONOutput() {
 				if err := outputJSON(map[string]interface{}{
 					"dry_run":    true,
 					"operations": len(ops),
@@ -143,7 +145,7 @@ normal 'bd' subcommands for interactive/read operations.`,
 		if len(ops) == 0 {
 			// Empty input is a no-op success, matching 'bd list | bd batch' on
 			// an empty list.
-			if jsonOutput {
+			if isJSONOutput() {
 				if err := outputJSON(map[string]interface{}{
 					"operations": 0,
 					"status":     "ok",
@@ -160,7 +162,7 @@ normal 'bd' subcommands for interactive/read operations.`,
 			commitMsg = fmt.Sprintf("bd: batch %d ops by %s", len(ops), getActor())
 		}
 
-		ctx := rootCtx
+		ctx := getRootContext()
 		if ctx == nil {
 			ctx = context.Background()
 		}
@@ -174,7 +176,7 @@ normal 'bd' subcommands for interactive/read operations.`,
 			results, err = runBatchProxiedServer(ctx, ops, commitMsg)
 		} else {
 			results = make([]batchOpResult, 0, len(ops))
-			err = transact(ctx, store, commitMsg, func(tx storage.Transaction) error {
+			err = transact(ctx, getStore(), commitMsg, func(tx storage.Transaction) error {
 				for _, op := range ops {
 					res, rerr := runBatchOp(ctx, tx, op)
 					if rerr != nil {
@@ -186,7 +188,7 @@ normal 'bd' subcommands for interactive/read operations.`,
 			})
 		}
 		if err != nil {
-			if jsonOutput {
+			if isJSONOutput() {
 				if jerr := outputJSONError(err, "batch_error"); jerr != nil {
 					return errors.Join(err, jerr)
 				}
@@ -196,7 +198,7 @@ normal 'bd' subcommands for interactive/read operations.`,
 
 		commandDidWrite.Store(true)
 
-		if jsonOutput {
+		if isJSONOutput() {
 			if err := outputJSON(map[string]interface{}{
 				"operations": len(results),
 				"status":     "ok",
@@ -248,51 +250,62 @@ func parseBatchScript(r io.Reader) ([]batchOp, error) {
 	lineNo := 0
 	for scanner.Scan() {
 		lineNo++
-		raw := scanner.Text()
-		trimmed := strings.TrimSpace(raw)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		tokens, err := tokenizeBatchLine(trimmed)
+		op, include, err := parseBatchLine(lineNo, scanner.Text())
 		if err != nil {
-			return nil, fmt.Errorf("line %d: %w", lineNo, err)
+			return nil, err
 		}
-		if len(tokens) == 0 {
-			continue
+		if include {
+			ops = append(ops, op)
 		}
-		op := batchOp{line: lineNo, raw: trimmed}
-		switch tokens[0] {
-		case "close":
-			op.cmd = "close"
-			op.args = tokens[1:]
-		case "update":
-			op.cmd = "update"
-			op.args = tokens[1:]
-		case "create":
-			op.cmd = "create"
-			op.args = tokens[1:]
-		case "dep":
-			if len(tokens) < 2 {
-				return nil, fmt.Errorf("line %d: 'dep' requires a subcommand (add|remove)", lineNo)
-			}
-			switch tokens[1] {
-			case "add":
-				op.cmd = "dep.add"
-			case "remove", "rm":
-				op.cmd = "dep.remove"
-			default:
-				return nil, fmt.Errorf("line %d: unknown dep subcommand %q (want add|remove)", lineNo, tokens[1])
-			}
-			op.args = tokens[2:]
-		default:
-			return nil, fmt.Errorf("line %d: unsupported batch command %q (supported: close, update, create, dep add, dep remove)", lineNo, tokens[0])
-		}
-		ops = append(ops, op)
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
 	return ops, nil
+}
+
+func parseBatchLine(lineNo int, raw string) (batchOp, bool, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		return batchOp{}, false, nil
+	}
+	tokens, err := tokenizeBatchLine(trimmed)
+	if err != nil {
+		return batchOp{}, false, fmt.Errorf("line %d: %w", lineNo, err)
+	}
+	if len(tokens) == 0 {
+		return batchOp{}, false, nil
+	}
+	command, args, err := parseBatchCommand(lineNo, tokens)
+	if err != nil {
+		return batchOp{}, false, err
+	}
+	return batchOp{line: lineNo, raw: trimmed, cmd: command, args: args}, true, nil
+}
+
+func parseBatchCommand(lineNo int, tokens []string) (string, []string, error) {
+	switch tokens[0] {
+	case "close", "update", "create":
+		return tokens[0], tokens[1:], nil
+	case "dep":
+		return parseBatchDependencyCommand(lineNo, tokens)
+	default:
+		return "", nil, fmt.Errorf("line %d: unsupported batch command %q (supported: close, update, create, dep add, dep remove)", lineNo, tokens[0])
+	}
+}
+
+func parseBatchDependencyCommand(lineNo int, tokens []string) (string, []string, error) {
+	if len(tokens) < 2 {
+		return "", nil, fmt.Errorf("line %d: 'dep' requires a subcommand (add|remove)", lineNo)
+	}
+	switch tokens[1] {
+	case "add":
+		return "dep.add", tokens[2:], nil
+	case "remove", "rm":
+		return "dep.remove", tokens[2:], nil
+	default:
+		return "", nil, fmt.Errorf("line %d: unknown dep subcommand %q (want add|remove)", lineNo, tokens[1])
+	}
 }
 
 // tokenizeBatchLine splits a line into whitespace-separated tokens with
@@ -303,24 +316,16 @@ func tokenizeBatchLine(s string) ([]string, error) {
 	var cur strings.Builder
 	inQuote := false
 	hasToken := false
-	for i := 0; i < len(s); i++ {
+	length := len(s)
+	for i := 0; i < length; i++ {
 		c := s[i]
 		if inQuote {
-			if c == '\\' && i+1 < len(s) {
-				next := s[i+1]
-				if next == '"' || next == '\\' {
-					cur.WriteByte(next)
-					i++
-					continue
-				}
-				cur.WriteByte(c)
+			var consumed bool
+			i, consumed = consumeQuotedBatchChar(s, i, &cur)
+			if consumed {
 				continue
 			}
-			if c == '"' {
-				inQuote = false
-				continue
-			}
-			cur.WriteByte(c)
+			inQuote = false
 			continue
 		}
 		if c == '"' {
@@ -329,11 +334,8 @@ func tokenizeBatchLine(s string) ([]string, error) {
 			continue
 		}
 		if c == ' ' || c == '\t' {
-			if hasToken {
-				tokens = append(tokens, cur.String())
-				cur.Reset()
-				hasToken = false
-			}
+			tokens = appendBatchToken(tokens, &cur, hasToken)
+			hasToken = false
 			continue
 		}
 		hasToken = true
@@ -348,6 +350,33 @@ func tokenizeBatchLine(s string) ([]string, error) {
 	return tokens, nil
 }
 
+func consumeQuotedBatchChar(s string, i int, cur *strings.Builder) (int, bool) {
+	c := s[i]
+	if c == '\\' && i+1 < len(s) {
+		next := s[i+1]
+		if next == '"' || next == '\\' {
+			cur.WriteByte(next)
+			return i + 1, true
+		}
+		cur.WriteByte(c)
+		return i, true
+	}
+	if c == '"' {
+		return i, false
+	}
+	cur.WriteByte(c)
+	return i, true
+}
+
+func appendBatchToken(tokens []string, cur *strings.Builder, hasToken bool) []string {
+	if !hasToken {
+		return tokens
+	}
+	tokens = append(tokens, cur.String())
+	cur.Reset()
+	return tokens
+}
+
 // runBatchOp dispatches a single parsed op against the shared transaction.
 // It intentionally does NOT call any of the non-tx cobra handlers; it talks
 // straight to storage.Transaction so everything joins the same SQL tx.
@@ -356,102 +385,118 @@ func runBatchOp(ctx context.Context, tx storage.Transaction, op batchOp) (batchO
 	result := batchOpResult{Line: op.line, Op: op.cmd}
 	switch op.cmd {
 	case "close":
-		if len(op.args) < 1 {
-			return result, fmt.Errorf("close requires <id>")
-		}
-		id := op.args[0]
-		reason := "Closed"
-		if len(op.args) > 1 {
-			reason = strings.Join(op.args[1:], " ")
-		}
-		if err := tx.CloseIssue(ctx, id, reason, actorName, ""); err != nil {
-			return result, err
-		}
-		result.Target = id
-		return result, nil
-
+		return runBatchClose(ctx, tx, actorName, result, op.args)
 	case "update":
-		if len(op.args) < 2 {
-			return result, fmt.Errorf("update requires <id> and at least one key=value")
-		}
-		id := op.args[0]
-		updates, err := parseUpdateKVs(op.args[1:])
-		if err != nil {
-			return result, err
-		}
-		if err := tx.UpdateIssue(ctx, id, updates, actorName); err != nil {
-			return result, err
-		}
-		result.Target = id
-		return result, nil
-
+		return runBatchUpdate(ctx, tx, actorName, result, op.args)
 	case "create":
-		if len(op.args) < 3 {
-			return result, fmt.Errorf("create requires <type> <priority> <title>")
-		}
-		issueType := types.IssueType(op.args[0])
-		// Accept common custom types too; fall back to type validation by the
-		// storage layer which knows about configured custom types. We only
-		// reject obviously-empty input here.
-		if strings.TrimSpace(op.args[0]) == "" {
-			return result, fmt.Errorf("create: type cannot be empty")
-		}
-		priority, err := strconv.Atoi(op.args[1])
-		if err != nil {
-			return result, fmt.Errorf("create: invalid priority %q: %w", op.args[1], err)
-		}
-		title := strings.Join(op.args[2:], " ")
-		if strings.TrimSpace(title) == "" {
-			return result, fmt.Errorf("create: title cannot be empty")
-		}
-		issue := &types.Issue{
-			Title:     title,
+		return runBatchCreate(ctx, tx, actorName, result, op.args)
+	case "dep.add":
+		return runBatchDependencyAdd(ctx, tx, actorName, result, op.args)
+	case "dep.remove":
+		return runBatchDependencyRemove(ctx, tx, actorName, result, op.args)
+	}
+	return result, fmt.Errorf("internal: unhandled batch op %q", op.cmd)
+}
+
+func runBatchClose(ctx context.Context, tx storage.Transaction, actorName string, result batchOpResult, args []string) (batchOpResult, error) {
+	if len(args) < 1 {
+		return result, fmt.Errorf("close requires <id>")
+	}
+	id := args[0]
+	reason := "Closed"
+	if len(args) > 1 {
+		reason = strings.Join(args[1:], " ")
+	}
+	if err := tx.CloseIssue(ctx, id, reason, actorName, ""); err != nil {
+		return result, err
+	}
+	result.Target = id
+	return result, nil
+}
+
+func runBatchUpdate(ctx context.Context, tx storage.Transaction, actorName string, result batchOpResult, args []string) (batchOpResult, error) {
+	if len(args) < 2 {
+		return result, fmt.Errorf("update requires <id> and at least one key=value")
+	}
+	id := args[0]
+	updates, err := parseUpdateKVs(args[1:])
+	if err != nil {
+		return result, err
+	}
+	if err := tx.UpdateIssue(ctx, id, updates, actorName); err != nil {
+		return result, err
+	}
+	result.Target = id
+	return result, nil
+}
+
+func runBatchCreate(ctx context.Context, tx storage.Transaction, actorName string, result batchOpResult, args []string) (batchOpResult, error) {
+	if len(args) < 3 {
+		return result, fmt.Errorf("create requires <type> <priority> <title>")
+	}
+	issueType := types.IssueType(args[0])
+	// Accept common custom types too; fall back to type validation by the
+	// storage layer which knows about configured custom types. We only
+	// reject obviously-empty input here.
+	if strings.TrimSpace(args[0]) == "" {
+		return result, fmt.Errorf("create: type cannot be empty")
+	}
+	priority, err := strconv.Atoi(args[1])
+	if err != nil {
+		return result, fmt.Errorf("create: invalid priority %q: %w", args[1], err)
+	}
+	title := strings.Join(args[2:], " ")
+	if strings.TrimSpace(title) == "" {
+		return result, fmt.Errorf("create: title cannot be empty")
+	}
+	issue := &types.Issue{
+		IssueContent: types.IssueContent{
+			Title: title,
+		},
+		IssueWorkflow: types.IssueWorkflow{
 			IssueType: issueType,
 			Status:    types.StatusOpen,
 			Priority:  priority,
-		}
-		if err := tx.CreateIssue(ctx, issue, actorName); err != nil {
-			return result, err
-		}
-		result.Target = issue.ID
-		return result, nil
-
-	case "dep.add":
-		if len(op.args) < 2 {
-			return result, fmt.Errorf("dep add requires <from-id> <to-id>")
-		}
-		from, to := op.args[0], op.args[1]
-		depType := "blocks"
-		if len(op.args) >= 3 {
-			depType = op.args[2]
-		}
-		dt := types.DependencyType(depType)
-		if !dt.IsValid() {
-			return result, fmt.Errorf("dep add: invalid dependency type %q", depType)
-		}
-		dep := &types.Dependency{
-			IssueID:     from,
-			DependsOnID: to,
-			Type:        dt,
-		}
-		if err := tx.AddDependency(ctx, dep, actorName); err != nil {
-			return result, err
-		}
-		result.Target = fmt.Sprintf("%s->%s", from, to)
-		return result, nil
-
-	case "dep.remove":
-		if len(op.args) < 2 {
-			return result, fmt.Errorf("dep remove requires <from-id> <to-id>")
-		}
-		from, to := op.args[0], op.args[1]
-		if err := tx.RemoveDependency(ctx, from, to, actorName); err != nil {
-			return result, err
-		}
-		result.Target = fmt.Sprintf("%s->%s", from, to)
-		return result, nil
+		},
 	}
-	return result, fmt.Errorf("internal: unhandled batch op %q", op.cmd)
+	if err := tx.CreateIssue(ctx, issue, actorName); err != nil {
+		return result, err
+	}
+	result.Target = issue.ID
+	return result, nil
+}
+
+func runBatchDependencyAdd(ctx context.Context, tx storage.Transaction, actorName string, result batchOpResult, args []string) (batchOpResult, error) {
+	if len(args) < 2 {
+		return result, fmt.Errorf("dep add requires <from-id> <to-id>")
+	}
+	from, to := args[0], args[1]
+	depType := "blocks"
+	if len(args) >= 3 {
+		depType = args[2]
+	}
+	dt := types.DependencyType(depType)
+	if !dt.IsValid() {
+		return result, fmt.Errorf("dep add: invalid dependency type %q", depType)
+	}
+	dep := &types.Dependency{IssueID: from, DependsOnID: to, Type: dt}
+	if err := tx.AddDependency(ctx, dep, actorName); err != nil {
+		return result, err
+	}
+	result.Target = fmt.Sprintf("%s->%s", from, to)
+	return result, nil
+}
+
+func runBatchDependencyRemove(ctx context.Context, tx storage.Transaction, actorName string, result batchOpResult, args []string) (batchOpResult, error) {
+	if len(args) < 2 {
+		return result, fmt.Errorf("dep remove requires <from-id> <to-id>")
+	}
+	from, to := args[0], args[1]
+	if err := tx.RemoveDependency(ctx, from, to, actorName); err != nil {
+		return result, err
+	}
+	result.Target = fmt.Sprintf("%s->%s", from, to)
+	return result, nil
 }
 
 // parseUpdateKVs walks a slice of "key=value" tokens and builds the updates
@@ -461,47 +506,74 @@ func runBatchOp(ctx context.Context, tx storage.Transaction, op batchOp) (batchO
 func parseUpdateKVs(kvs []string) (map[string]interface{}, error) {
 	updates := make(map[string]interface{}, len(kvs))
 	for _, kv := range kvs {
-		eq := strings.IndexByte(kv, '=')
-		if eq <= 0 {
-			return nil, fmt.Errorf("update: expected key=value, got %q", kv)
+		key, value, err := splitUpdateKV(kv)
+		if err != nil {
+			return nil, err
 		}
-		key := strings.TrimSpace(kv[:eq])
-		value := kv[eq+1:]
-		switch key {
-		case "status":
-			if !types.Status(value).IsValid() {
-				// IsValid excludes custom statuses; the transaction layer will
-				// re-validate. Still reject blatantly empty values here.
-				if strings.TrimSpace(value) == "" {
-					return nil, fmt.Errorf("update: status cannot be empty")
-				}
-			}
-			updates["status"] = value
-		case "priority":
-			p, err := strconv.Atoi(value)
-			if err != nil {
-				return nil, fmt.Errorf("update: invalid priority %q: %w", value, err)
-			}
-			updates["priority"] = p
-		case "title":
-			if strings.TrimSpace(value) == "" {
-				return nil, fmt.Errorf("update: title cannot be empty")
-			}
-			updates["title"] = value
-		case "assignee":
-			updates["assignee"] = value
-		case "force":
-			// Not a field: the override for close policy on a status that
-			// crosses into done, spelled as a token because a batch script has
-			// no flags. The write funnel pops it before validating fields.
-			force, err := strconv.ParseBool(value)
-			if err != nil {
-				return nil, fmt.Errorf("update: invalid force %q: %w", value, err)
-			}
-			updates[issueops.OpForceClosePolicy] = force
-		default:
-			return nil, fmt.Errorf("update: unsupported key %q (allowed: status, priority, title, assignee, force)", key)
+		update, err := parseUpdateKV(key, value)
+		if err != nil {
+			return nil, err
+		}
+		updates[key] = update
+		if key == "force" {
+			delete(updates, key)
+			updates[issueops.OpForceClosePolicy] = update
 		}
 	}
 	return updates, nil
+}
+
+func splitUpdateKV(kv string) (string, string, error) {
+	eq := strings.IndexByte(kv, '=')
+	if eq <= 0 {
+		return "", "", fmt.Errorf("update: expected key=value, got %q", kv)
+	}
+	return strings.TrimSpace(kv[:eq]), kv[eq+1:], nil
+}
+
+func parseUpdateKV(key, value string) (interface{}, error) {
+	switch key {
+	case "status":
+		return parseBatchStatus(value)
+	case "priority":
+		return parseBatchPriority(value)
+	case "title":
+		return parseBatchTitle(value)
+	case "assignee":
+		return value, nil
+	case "force":
+		return parseBatchForce(value)
+	default:
+		return nil, fmt.Errorf("update: unsupported key %q (allowed: status, priority, title, assignee, force)", key)
+	}
+}
+
+func parseBatchStatus(value string) (interface{}, error) {
+	if !types.Status(value).IsValid() && strings.TrimSpace(value) == "" {
+		return nil, fmt.Errorf("update: status cannot be empty")
+	}
+	return value, nil
+}
+
+func parseBatchPriority(value string) (interface{}, error) {
+	p, err := strconv.Atoi(value)
+	if err != nil {
+		return nil, fmt.Errorf("update: invalid priority %q: %w", value, err)
+	}
+	return p, nil
+}
+
+func parseBatchTitle(value string) (interface{}, error) {
+	if strings.TrimSpace(value) == "" {
+		return nil, fmt.Errorf("update: title cannot be empty")
+	}
+	return value, nil
+}
+
+func parseBatchForce(value string) (interface{}, error) {
+	force, err := strconv.ParseBool(value)
+	if err != nil {
+		return nil, fmt.Errorf("update: invalid force %q: %w", value, err)
+	}
+	return force, nil
 }

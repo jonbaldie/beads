@@ -157,53 +157,53 @@ func readTypesFromYAML(beadsDir string) ([]string, error) {
 
 // findUnknownTypesInHydratedIssues checks if any hydrated issues use types not found in any config
 func findUnknownTypesInHydratedIssues(repoPath string, multiRepo *config.MultiRepoConfig) []string {
-	beadsDir := ResolveBeadsDirForRepo(repoPath)
-
-	cfg, err := configfile.Load(beadsDir)
-	if err != nil || cfg == nil {
-		return nil
-	}
-	if cfg.GetBackend() != configfile.BackendDolt {
-		return nil
-	}
-
-	doltPath := getDatabasePath(beadsDir)
-	if _, err := os.Stat(doltPath); os.IsNotExist(err) {
-		return nil
-	}
-
 	ctx := context.Background()
-	store, err := dolt.NewFromConfigWithCLIOptions(ctx, beadsDir, &dolt.Config{ReadOnly: true})
-	if err != nil {
+	store := openHydratedTypeStore(repoPath)
+	if store == nil {
 		return nil
 	}
 	defer func() { _ = store.Close() }()
+	return scanUnknownIssueTypes(ctx, store, collectKnownCustomTypes(ctx, store, multiRepo))
+}
 
+func openHydratedTypeStore(repoPath string) *dolt.DoltStore {
+	beadsDir := ResolveBeadsDirForRepo(repoPath)
+	cfg, err := configfile.Load(beadsDir)
+	if err != nil || cfg == nil || cfg.GetBackend() != configfile.BackendDolt {
+		return nil
+	}
+	if _, err := os.Stat(getDatabasePath(beadsDir)); os.IsNotExist(err) {
+		return nil
+	}
+	store, err := dolt.NewFromConfigWithCLIOptions(context.Background(), beadsDir, &dolt.Config{ReadOnly: true})
+	if err != nil {
+		return nil
+	}
+	return store
+}
+
+func collectKnownCustomTypes(ctx context.Context, store *dolt.DoltStore, multiRepo *config.MultiRepoConfig) map[string]bool {
 	// Collect known custom types (parent custom + all child custom).
 	// Built-in types — including orchestrator types like gate, molecule,
 	// spike, story, and milestone — are recognized via IsBuiltIn below, so
 	// this map only needs the configured custom types.
 	knownTypes := make(map[string]bool)
-
-	// Add parent's custom types
 	parentTypes, err := store.GetConfig(ctx, "types.custom")
 	if err == nil && parentTypes != "" {
 		for _, t := range issueops.ParseTypesConfigValue(parentTypes) {
 			knownTypes[t] = true
 		}
 	}
-
-	// Add child types
 	for _, repoPathStr := range multiRepo.Additional {
-		childTypes := discoverChildTypes(repoPathStr)
-		for _, t := range childTypes {
+		for _, t := range discoverChildTypes(repoPathStr) {
 			knownTypes[t] = true
 		}
 	}
+	return knownTypes
+}
 
-	// Find issues with types not in knownTypes
-	db := store.UnderlyingDB()
-	rows, err := db.QueryContext(ctx, `
+func scanUnknownIssueTypes(ctx context.Context, store *dolt.DoltStore, knownTypes map[string]bool) []string {
+	rows, err := store.UnderlyingDB().QueryContext(ctx, `
 		SELECT DISTINCT issue_type FROM issues
 		WHERE source_repo != '' AND source_repo != '.'
 	`)
@@ -211,7 +211,6 @@ func findUnknownTypesInHydratedIssues(repoPath string, multiRepo *config.MultiRe
 		return nil
 	}
 	defer rows.Close()
-
 	var unknownTypes []string
 	seen := make(map[string]bool)
 	for rows.Next() {
@@ -224,8 +223,6 @@ func findUnknownTypesInHydratedIssues(repoPath string, multiRepo *config.MultiRe
 			seen[issueType] = true
 		}
 	}
-	// Best effort: rows.Err() ignored since partial results are acceptable for type discovery
 	_ = rows.Err()
-
 	return unknownTypes
 }

@@ -19,7 +19,6 @@ var staleLockThresholds = map[string]time.Duration{
 // Stale lock files can block bootstrap and sync operations.
 func CheckStaleLockFiles(path string) DoctorCheck {
 	beadsDir := ResolveBeadsDirForRepo(path)
-
 	if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
 		return DoctorCheck{
 			Name:     "Lock Files",
@@ -28,58 +27,58 @@ func CheckStaleLockFiles(path string) DoctorCheck {
 			Category: CategoryRuntime,
 		}
 	}
+	staleFiles, details := collectStaleLockFindings(beadsDir)
+	return reportStaleLockFiles(staleFiles, details)
+}
 
-	var staleFiles []string
-	var details []string
-
-	// Check bootstrap lock (dolt.bootstrap.lock)
-	bootstrapLockPath := filepath.Join(beadsDir, "dolt.bootstrap.lock")
-	if info, err := os.Stat(bootstrapLockPath); err == nil {
-		age := time.Since(info.ModTime())
-		if age > staleLockThresholds["bootstrap.lock"] {
-			staleFiles = append(staleFiles, "dolt.bootstrap.lock")
-			details = append(details, fmt.Sprintf("dolt.bootstrap.lock: age %s (threshold: %s)",
-				age.Round(time.Second), staleLockThresholds["bootstrap.lock"]))
-		}
-	}
-
-	// Check sync lock (.sync.lock)
-	syncLockPath := filepath.Join(beadsDir, ".sync.lock")
-	if info, err := os.Stat(syncLockPath); err == nil {
-		age := time.Since(info.ModTime())
-		if age > staleLockThresholds[".sync.lock"] {
-			staleFiles = append(staleFiles, ".sync.lock")
-			details = append(details, fmt.Sprintf(".sync.lock: age %s (threshold: %s)",
-				age.Round(time.Second), staleLockThresholds[".sync.lock"]))
-		}
-	}
-
+func collectStaleLockFindings(beadsDir string) (staleFiles, details []string) {
+	appendAgedNamedLock(beadsDir, "dolt.bootstrap.lock", "bootstrap.lock", &staleFiles, &details)
+	appendAgedNamedLock(beadsDir, ".sync.lock", ".sync.lock", &staleFiles, &details)
 	// WARNING: DO NOT remove, delete, or modify files inside Dolt's .dolt/
 	// directory — including noms/LOCK files. These are Dolt-internal files.
 	// Removing them WILL cause unrecoverable data corruption and data loss.
 	// Dolt manages these files itself; external interference is never safe.
+	appendStaleStartlocks(beadsDir, &staleFiles, &details)
+	return staleFiles, details
+}
 
-	// Check startup lock (bd.sock.startlock)
-	// Look for any .startlock files in beadsDir
-	entries, err := os.ReadDir(beadsDir)
-	if err == nil {
-		for _, entry := range entries {
-			if strings.HasSuffix(entry.Name(), ".startlock") {
-				info, err := entry.Info()
-				if err != nil {
-					continue
-				}
-				age := time.Since(info.ModTime())
-				// Startup locks should be very short-lived (< 30 seconds)
-				if age > 30*time.Second {
-					staleFiles = append(staleFiles, entry.Name())
-					details = append(details, fmt.Sprintf("%s: age %s (startup locks should be < 30s)",
-						entry.Name(), age.Round(time.Second)))
-				}
-			}
-		}
+func appendAgedNamedLock(beadsDir, filename, thresholdKey string, staleFiles, details *[]string) {
+	info, err := os.Stat(filepath.Join(beadsDir, filename))
+	if err != nil {
+		return
 	}
+	age := time.Since(info.ModTime())
+	threshold := staleLockThresholds[thresholdKey]
+	if age <= threshold {
+		return
+	}
+	*staleFiles = append(*staleFiles, filename)
+	*details = append(*details, fmt.Sprintf("%s: age %s (threshold: %s)", filename, age.Round(time.Second), threshold))
+}
 
+func appendStaleStartlocks(beadsDir string, staleFiles, details *[]string) {
+	entries, err := os.ReadDir(beadsDir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".startlock") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		age := time.Since(info.ModTime())
+		if age <= 30*time.Second {
+			continue
+		}
+		*staleFiles = append(*staleFiles, entry.Name())
+		*details = append(*details, fmt.Sprintf("%s: age %s (startup locks should be < 30s)", entry.Name(), age.Round(time.Second)))
+	}
+}
+
+func reportStaleLockFiles(staleFiles, details []string) DoctorCheck {
 	if len(staleFiles) == 0 {
 		return DoctorCheck{
 			Name:     "Lock Files",
@@ -88,7 +87,6 @@ func CheckStaleLockFiles(path string) DoctorCheck {
 			Category: CategoryRuntime,
 		}
 	}
-
 	return DoctorCheck{
 		Name:     "Lock Files",
 		Status:   StatusWarning,

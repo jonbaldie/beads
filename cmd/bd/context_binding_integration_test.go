@@ -71,12 +71,16 @@ func TestListExplicitDBPathRebindsTargetContext(t *testing.T) {
 
 	ctx := context.Background()
 	testStore, err := dolt.New(ctx, &dolt.Config{
-		Path:            filepath.Join(targetBeadsDir, "dolt"),
-		BeadsDir:        targetBeadsDir,
-		ServerHost:      "127.0.0.1",
-		ServerPort:      testDoltServerPort,
-		Database:        database,
-		CreateIfMissing: true,
+		Path:     filepath.Join(targetBeadsDir, "dolt"),
+		BeadsDir: targetBeadsDir,
+		ServerOptions: dolt.ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: testDoltServerPort,
+		},
+		Database: database,
+		RemoteOptions: dolt.RemoteOptions{
+			CreateIfMissing: true,
+		},
 	})
 	if err != nil {
 		t.Fatalf("create test store: %v", err)
@@ -90,14 +94,22 @@ func TestListExplicitDBPathRebindsTargetContext(t *testing.T) {
 	}
 	now := time.Now()
 	nowIssue := &types.Issue{
-		ID:          "ctx-1",
-		Title:       "Context binding proof",
-		Description: "Proves explicit --db commands use the target workspace config",
-		Status:      types.StatusOpen,
-		Priority:    1,
-		IssueType:   types.TypeTask,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		IssueID: types.IssueID{
+			ID: "ctx-1",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Context binding proof",
+			Description: "Proves explicit --db commands use the target workspace config",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
 	}
 	if err := testStore.CreateIssue(ctx, nowIssue, "test-user"); err != nil {
 		t.Fatalf("create issue: %v", err)

@@ -21,10 +21,8 @@ func TestDeletePreviewJSONIsPayloadBlind(t *testing.T) {
 	t.Cleanup(func() { quietFlag = oldQuiet })
 
 	issues := map[string]*types.Issue{
-		"test-delete-1": {
-			ID:          "test-delete-1",
-			Title:       "sensitive title must not appear",
-			Description: "sensitive payload must not appear",
+		"test-delete-1": {IssueID: types.IssueID{ID: "test-delete-1"}, IssueContent: types.IssueContent{Title: "sensitive title must not appear",
+			Description: "sensitive payload must not appear"},
 		},
 	}
 	result := &issueops.DeleteResult{Deleted: 1, Dependencies: 2}
@@ -58,8 +56,8 @@ func TestDeleteBatchDryRunHonorsForce(t *testing.T) {
 	s := newTestStore(t, filepath.Join(tmpDir, ".beads", "beads.db"))
 	ctx := context.Background()
 
-	parent := &types.Issue{Title: "parent", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
-	child := &types.Issue{Title: "child", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	parent := &types.Issue{IssueContent: types.IssueContent{Title: "parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
+	child := &types.Issue{IssueContent: types.IssueContent{Title: "child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := s.CreateIssue(ctx, parent, "test"); err != nil {
 		t.Fatalf("create parent: %v", err)
 	}
@@ -109,11 +107,15 @@ func TestBulkDeleteNoResurrection(t *testing.T) {
 
 	for i := 1; i <= totalIssues; i++ {
 		issue := &types.Issue{
-			Title:       "Issue " + string(rune('A'+i-1)),
-			Description: "Test issue",
-			Status:      types.StatusOpen,
-			Priority:    2,
-			IssueType:   "task",
+			IssueContent: types.IssueContent{
+				Title:       "Issue " + string(rune('A'+i-1)),
+				Description: "Test issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: "task",
+			},
 		}
 		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatalf("Failed to create issue %d: %v", i, err)
@@ -196,11 +198,15 @@ func TestDeleteIssueWrapper(t *testing.T) {
 
 	t.Run("successful issue deletion", func(t *testing.T) {
 		issue := &types.Issue{
-			Title:       "Issue to delete",
-			Description: "Will be permanently deleted",
-			Status:      types.StatusOpen,
-			Priority:    2,
-			IssueType:   "task",
+			IssueContent: types.IssueContent{
+				Title:       "Issue to delete",
+				Description: "Will be permanently deleted",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: "task",
+			},
 		}
 		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatalf("Failed to create issue: %v", err)
@@ -231,16 +237,24 @@ func TestDeleteIssueWrapper(t *testing.T) {
 	t.Run("verify dependencies are removed", func(t *testing.T) {
 		// Create two issues with a dependency
 		issue1 := &types.Issue{
-			Title:     "Blocker issue",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: "task",
+			IssueContent: types.IssueContent{
+				Title: "Blocker issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: "task",
+			},
 		}
 		issue2 := &types.Issue{
-			Title:     "Dependent issue",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: "task",
+			IssueContent: types.IssueContent{
+				Title: "Dependent issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: "task",
+			},
 		}
 		if err := s.CreateIssue(ctx, issue1, "test"); err != nil {
 			t.Fatalf("Failed to create issue1: %v", err)
@@ -277,10 +291,14 @@ func TestDeleteIssueWrapper(t *testing.T) {
 
 	t.Run("verify issue removed from database", func(t *testing.T) {
 		issue := &types.Issue{
-			Title:     "Verify removal",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: "task",
+			IssueContent: types.IssueContent{
+				Title: "Verify removal",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: "task",
+			},
 		}
 		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatalf("Failed to create issue: %v", err)

@@ -65,63 +65,98 @@ type closeProxiedPostClose struct {
 }
 
 func runCloseProxiedServer(cmd *cobra.Command, ctx context.Context, args []string) error {
-	if len(args) == 0 {
-		return HandleErrorRespectJSON("no issue ID provided")
+	reasons, args, in, err := prepareCloseProxied(cmd, args)
+	if err != nil {
+		return err
 	}
-
-	reasons, updatedArgs, err := resolveCloseReasons(cmd, args)
+	if getUOWProvider() == nil {
+		return HandleError("proxied-server UOW provider not initialized")
+	}
+	pre, err := closeProxiedRunPreflight(ctx, args, reasons, in)
 	if err != nil {
 		return HandleErrorRespectJSON("%v", err)
 	}
-	args = updatedArgs
-	if err := validateCloseReasons(reasons); err != nil {
-		return HandleErrorRespectJSON("%v", err)
+	result, err := closeProxiedRunBatch(ctx, pre, in)
+	if err != nil {
+		return err
 	}
+	outcomes, closeReasons := closeProxiedOutcomes(&pre, result)
+	post := closeProxiedRunPostClose(ctx, args, in, outcomes)
+	closeProxiedReport(in, pre, post, outcomes, closeReasons, result)
+	if len(args) > 0 && len(outcomes) == 0 {
+		return SilentExit()
+	}
+	return nil
+}
 
+func prepareCloseProxied(cmd *cobra.Command, args []string) ([]string, []string, closeProxiedInput, error) {
+	var zero closeProxiedInput
+	if len(args) == 0 {
+		return nil, nil, zero, HandleErrorRespectJSON("no issue ID provided")
+	}
+	reasons, updatedArgs, err := resolveCloseReasons(cmd, args)
+	if err != nil {
+		return nil, nil, zero, HandleErrorRespectJSON("%v", err)
+	}
+	if err := validateCloseReasons(reasons); err != nil {
+		return nil, nil, zero, HandleErrorRespectJSON("%v", err)
+	}
 	in := gatherCloseProxiedInput(cmd)
+	if err := validateCloseProxiedModes(in, updatedArgs); err != nil {
+		return nil, nil, zero, err
+	}
+	return reasons, updatedArgs, in, nil
+}
 
+func validateCloseProxiedModes(in closeProxiedInput, args []string) error {
 	if in.continueOn && len(args) > 1 {
 		return HandleErrorRespectJSON("--continue only works when closing a single issue")
 	}
 	if in.suggestNext && len(args) > 1 {
 		return HandleErrorRespectJSON("--suggest-next only works when closing a single issue")
 	}
+	return nil
+}
 
-	if uowProvider == nil {
-		return HandleError("proxied-server UOW provider not initialized")
-	}
-
-	pre, err := closeProxiedRunPreflight(ctx, args, reasons, in)
-	if err != nil {
-		return HandleErrorRespectJSON("%v", err)
-	}
-
+func closeProxiedRunBatch(ctx context.Context, pre closeProxiedPreflight, in closeProxiedInput) (issueops.CloseBatchResult, error) {
 	// THE BATCH. One request, one transaction, one Dolt commit over N ids —
 	// and the request is the only thing that says where the transaction ends,
 	// because the role hands out no handle to hold open. The commit message is
 	// the role's, and it names what LANDED, which is what this route's own
 	// message did: a skipped id stays out of the log.
 	var result issueops.CloseBatchResult
-	if len(pre.items) > 0 {
-		closer, cerr := proxiedBatchCloser()
-		if cerr != nil {
-			return HandleErrorRespectJSON("%v", cerr)
-		}
-		result, err = closer.CloseBatch(ctx, issueops.CloseBatchRequest{
-			Actor:     actor,
-			Items:     pre.items,
-			Session:   in.session,
-			Force:     in.force,
-			ClaimNext: closeClaimNextRequest(in.claimNext, in.continueOn),
-		})
-		if err != nil {
-			return HandleErrorRespectJSON("%v", err)
-		}
+	if len(pre.items) == 0 {
+		return result, nil
 	}
+	closer, err := proxiedBatchCloser()
+	if err != nil {
+		return result, HandleErrorRespectJSON("%v", err)
+	}
+	result, err = closer.CloseBatch(ctx, issueops.CloseBatchRequest{
+		Actor:     getActor(),
+		Items:     pre.items,
+		Session:   in.session,
+		Force:     in.force,
+		ClaimNext: closeClaimNextRequest(in.claimNext, in.continueOn),
+	})
+	if err != nil {
+		return result, HandleErrorRespectJSON("%v", err)
+	}
+	return result, nil
+}
 
-	outcomes, closeReasons := closeProxiedOutcomes(&pre, result)
-	post := closeProxiedRunPostClose(ctx, args, in, outcomes)
+func closeProxiedReport(in closeProxiedInput, pre closeProxiedPreflight, post closeProxiedPostClose, outcomes []closeProxiedOutcome, closeReasons []string, result issueops.CloseBatchResult) {
+	closeProxiedPrintErrors(pre, post)
+	closeProxiedAudit(outcomes)
+	claimedNext := closeProxiedClaimedNext(result)
+	if in.jsonOut {
+		closeProxiedPrintJSON(outcomes, post, claimedNext)
+		return
+	}
+	closeProxiedPrintHuman(outcomes, closeReasons, post, claimedNext, in)
+}
 
+func closeProxiedPrintErrors(pre closeProxiedPreflight, post closeProxiedPostClose) {
 	for _, e := range pre.errors {
 		if e != "" {
 			fmt.Fprintln(os.Stderr, e)
@@ -130,62 +165,76 @@ func runCloseProxiedServer(cmd *cobra.Command, ctx context.Context, args []strin
 	for _, w := range post.warnings {
 		fmt.Fprintf(os.Stderr, "Warning: %s\n", w)
 	}
+}
 
-	for i, o := range outcomes {
+func closeProxiedAudit(outcomes []closeProxiedOutcome) {
+	for _, o := range outcomes {
 		if o.closed {
-			audit.LogFieldChange(o.id, "status", o.auditOld, "closed", actor, o.auditReason)
-		}
-		if !in.jsonOut {
-			fmt.Printf("%s Closed %s: %s\n", ui.RenderPass("✓"), formatFeedbackID(o.after.ID, o.after.Title), closeReasons[i])
+			audit.LogFieldChange(o.id, "status", o.auditOld, "closed", getActor(), o.auditReason)
 		}
 	}
+}
 
-	var claimedNextIssue *types.Issue
-	if result.ClaimedNext != nil {
-		claimedNextIssue = result.ClaimedNext.Issue
+func closeProxiedClaimedNext(result issueops.CloseBatchResult) *types.Issue {
+	if result.ClaimedNext == nil {
+		return nil
 	}
+	return result.ClaimedNext.Issue
+}
 
-	if !in.jsonOut {
-		if post.autoClosedMol != nil {
-			fmt.Printf("%s Auto-closed completed molecule %s\n", ui.RenderPass("✓"), formatFeedbackID(post.autoClosedMol.ID, post.autoClosedMol.Title))
-		}
-		if len(post.unblocked) > 0 {
-			fmt.Printf("\nNewly unblocked:\n")
-			for _, issue := range post.unblocked {
-				fmt.Printf("  • %s (P%d)\n", formatFeedbackID(issue.ID, issue.Title), issue.Priority)
-			}
-		}
-		if post.continueResult != nil {
-			PrintContinueResult(post.continueResult)
-		}
-		if claimedNextIssue != nil {
-			fmt.Printf("%s Auto-claimed next ready issue: %s (P%d)\n", ui.RenderPass("✓"), formatFeedbackID(claimedNextIssue.ID, claimedNextIssue.Title), claimedNextIssue.Priority)
-		} else if in.claimNext && len(outcomes) > 0 && !in.continueOn {
-			fmt.Printf("\n%s No ready issues available to claim.\n", ui.RenderWarn("✨"))
+func closeProxiedPrintHuman(outcomes []closeProxiedOutcome, closeReasons []string, post closeProxiedPostClose, claimedNext *types.Issue, in closeProxiedInput) {
+	for i, o := range outcomes {
+		fmt.Printf("%s Closed %s: %s\n", ui.RenderPass("✓"), formatFeedbackID(o.after.ID, o.after.Title), closeReasons[i])
+	}
+	if post.autoClosedMol != nil {
+		fmt.Printf("%s Auto-closed completed molecule %s\n", ui.RenderPass("✓"), formatFeedbackID(post.autoClosedMol.ID, post.autoClosedMol.Title))
+	}
+	if len(post.unblocked) > 0 {
+		fmt.Printf("\nNewly unblocked:\n")
+		for _, issue := range post.unblocked {
+			fmt.Printf("  • %s (P%d)\n", formatFeedbackID(issue.ID, issue.Title), issue.Priority)
 		}
 	}
+	if post.continueResult != nil {
+		PrintContinueResult(post.continueResult)
+	}
+	closeProxiedPrintClaimedNext(claimedNext, in, len(outcomes))
+}
 
-	if in.jsonOut && len(outcomes) > 0 {
-		closedIssues := make([]*types.Issue, len(outcomes))
-		for i, o := range outcomes {
-			closedIssues[i] = o.after
-		}
-		switch {
-		case len(post.unblocked) > 0:
-			_ = outputJSON(map[string]interface{}{"closed": closedIssues, "unblocked": post.unblocked})
-		case post.continueResult != nil:
-			_ = outputJSON(map[string]interface{}{"closed": closedIssues, "continue": post.continueResult})
-		case claimedNextIssue != nil:
-			_ = outputJSON(map[string]interface{}{"closed": closedIssues, "claimed": claimedNextIssue})
-		default:
-			_ = outputJSON(closedIssues)
-		}
+func closeProxiedPrintClaimedNext(claimedNext *types.Issue, in closeProxiedInput, outcomeCount int) {
+	if claimedNext != nil {
+		fmt.Printf("%s Auto-claimed next ready issue: %s (P%d)\n", ui.RenderPass("✓"), formatFeedbackID(claimedNext.ID, claimedNext.Title), claimedNext.Priority)
+		return
 	}
+	if in.claimNext && outcomeCount > 0 && !in.continueOn {
+		fmt.Printf("\n%s No ready issues available to claim.\n", ui.RenderWarn("✨"))
+	}
+}
 
-	if len(args) > 0 && len(outcomes) == 0 {
-		return SilentExit()
+func closeProxiedPrintJSON(outcomes []closeProxiedOutcome, post closeProxiedPostClose, claimedNext *types.Issue) {
+	if len(outcomes) == 0 {
+		return
 	}
-	return nil
+	closedIssues := make([]*types.Issue, len(outcomes))
+	for i, o := range outcomes {
+		closedIssues[i] = o.after
+	}
+	switch {
+	case len(post.unblocked) > 0:
+		_ = outputJSON(map[string]interface{}{"closed": closedIssues, "unblocked": post.unblocked})
+	case post.continueResult != nil:
+		_ = outputJSON(map[string]interface{}{"closed": closedIssues, "continue": post.continueResult})
+	default:
+		closeProxiedPrintJSONDefault(closedIssues, claimedNext)
+	}
+}
+
+func closeProxiedPrintJSONDefault(closedIssues []*types.Issue, claimedNext *types.Issue) {
+	if claimedNext != nil {
+		_ = outputJSON(map[string]interface{}{"closed": closedIssues, "claimed": claimedNext})
+		return
+	}
+	_ = outputJSON(closedIssues)
 }
 
 func gatherCloseProxiedInput(cmd *cobra.Command) closeProxiedInput {
@@ -209,12 +258,12 @@ func gatherCloseProxiedInput(cmd *cobra.Command) closeProxiedInput {
 // accessor is where each layer is added, so a command that reached for the
 // constructor would get an unlayered closer.
 func proxiedBatchCloser() (issueops.BatchCloser, error) {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return nil, errors.New("proxied-server UOW provider not initialized")
 	}
-	src, ok := uowProvider.(uow.BatchCloserSource)
+	src, ok := getUOWProvider().(uow.BatchCloserSource)
 	if !ok {
-		return nil, fmt.Errorf("proxied-server provider %T does not offer the batch-close surface", uowProvider)
+		return nil, fmt.Errorf("proxied-server provider %T does not offer the batch-close surface", getUOWProvider())
 	}
 	return src.BatchCloser()
 }
@@ -226,7 +275,7 @@ func closeProxiedRunPreflight(ctx context.Context, args, reasons []string, in cl
 		errors: make([]string, len(args)),
 		before: make(map[string]*types.Issue, len(args)),
 	}
-	_, err := uow.RunTxRead(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (struct{}, error) {
+	_, err := uow.RunTxRead(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (struct{}, error) {
 		for i, id := range args {
 			refusal, current := closeProxiedCheckOne(ctx, uw, id, in)
 			if refusal != "" {
@@ -259,7 +308,7 @@ func closeProxiedCheckOne(ctx context.Context, uw uow.UnitOfWork, id string, in 
 	// always been. Both close paths must agree here — diverging is the defect
 	// class #5217 closed.
 	if current.Status != types.StatusClosed {
-		if err := validateIssueClosable(id, current, actor, in.force); err != nil {
+		if err := validateIssueClosable(id, current, getActor(), in.force); err != nil {
 			return err.Error(), nil
 		}
 	}
@@ -356,47 +405,66 @@ func closeProxiedRunPostClose(ctx context.Context, args []string, in closeProxie
 	if len(outcomes) == 0 {
 		return closeProxiedPostClose{}
 	}
-
-	post, err := uow.RunTxResult(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (closeProxiedPostClose, string, error) {
-		var out closeProxiedPostClose
-		var wrote []string
-
-		for _, o := range outcomes {
-			mol := autoCloseProxiedCompletedMolecule(ctx, uw, o.id, actor, in.session, &out.warnings)
-			if mol != nil {
-				out.autoClosedMol = mol
-				wrote = append(wrote, "auto-close "+mol.ID)
-			}
-		}
-
-		if in.suggestNext && len(args) == 1 {
-			unblocked, warn := closeProxiedSuggestNext(ctx, uw, args[0])
-			out.unblocked = unblocked
-			if warn != "" {
-				out.warnings = append(out.warnings, warn)
-			}
-		}
-
-		if in.continueOn && len(args) == 1 {
-			cont, warn := closeProxiedContinue(ctx, uw, args[0], !in.noAuto)
-			out.continueResult = cont
-			if warn != "" {
-				out.warnings = append(out.warnings, warn)
-			}
-			if cont != nil && cont.AutoAdvanced && cont.NextStep != nil {
-				wrote = append(wrote, "advance to "+cont.NextStep.ID)
-			}
-		}
-
-		if len(wrote) == 0 {
-			return out, "", nil
-		}
-		return out, "bd: " + strings.Join(wrote, "; "), nil
+	post, err := uow.RunTxResult(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (closeProxiedPostClose, string, error) {
+		return runCloseProxiedPostCloseTx(ctx, uw, args, in, outcomes)
 	})
 	if err != nil {
 		post.warnings = append(post.warnings, fmt.Sprintf("post-close work failed: %v", err))
 	}
 	return post
+}
+
+func runCloseProxiedPostCloseTx(ctx context.Context, uw uow.UnitOfWork, args []string, in closeProxiedInput, outcomes []closeProxiedOutcome) (closeProxiedPostClose, string, error) {
+	var out closeProxiedPostClose
+	wrote := closeProxiedAutoClose(ctx, uw, in, outcomes, &out)
+	closeProxiedApplySuggestNext(ctx, uw, args, in, &out)
+	wrote = append(wrote, closeProxiedApplyContinue(ctx, uw, args, in, &out)...)
+	if len(wrote) == 0 {
+		return out, "", nil
+	}
+	return out, "bd: " + strings.Join(wrote, "; "), nil
+}
+
+func closeProxiedAutoClose(ctx context.Context, uw uow.UnitOfWork, in closeProxiedInput, outcomes []closeProxiedOutcome, out *closeProxiedPostClose) []string {
+	var wrote []string
+	for _, o := range outcomes {
+		mol := autoCloseProxiedCompletedMolecule(ctx, uw, o.id, getActor(), in.session, &out.warnings)
+		if mol != nil {
+			out.autoClosedMol = mol
+			wrote = append(wrote, "auto-close "+mol.ID)
+		}
+	}
+	return wrote
+}
+
+func closeProxiedApplySuggestNext(ctx context.Context, uw uow.UnitOfWork, args []string, in closeProxiedInput, out *closeProxiedPostClose) {
+	if !in.suggestNext || len(args) != 1 {
+		return
+	}
+	unblocked, warn := closeProxiedSuggestNext(ctx, uw, args[0])
+	out.unblocked = unblocked
+	if warn != "" {
+		out.warnings = append(out.warnings, warn)
+	}
+}
+
+func closeProxiedApplyContinue(ctx context.Context, uw uow.UnitOfWork, args []string, in closeProxiedInput, out *closeProxiedPostClose) []string {
+	if !in.continueOn || len(args) != 1 {
+		return nil
+	}
+	cont, warn := closeProxiedContinue(ctx, uw, args[0], !in.noAuto)
+	out.continueResult = cont
+	if warn != "" {
+		out.warnings = append(out.warnings, warn)
+	}
+	if !closeProxiedContinued(cont) {
+		return nil
+	}
+	return []string{"advance to " + cont.NextStep.ID}
+}
+
+func closeProxiedContinued(cont *ContinueResult) bool {
+	return cont != nil && cont.AutoAdvanced && cont.NextStep != nil
 }
 
 func closeProxiedSuggestNext(ctx context.Context, uw uow.UnitOfWork, closedID string) ([]*types.Issue, string) {
@@ -408,7 +476,7 @@ func closeProxiedSuggestNext(ctx context.Context, uw uow.UnitOfWork, closedID st
 }
 
 func closeProxiedContinue(ctx context.Context, uw uow.UnitOfWork, closedID string, autoClaim bool) (*ContinueResult, string) {
-	result, err := AdvanceToNextStep(ctx, newUOWMolWriter(uw), closedID, autoClaim, actor)
+	result, err := AdvanceToNextStep(ctx, newUOWMolWriter(uw), closedID, autoClaim, getActor())
 	if err != nil {
 		return nil, fmt.Sprintf("could not advance to next step: %v", err)
 	}
@@ -416,14 +484,29 @@ func closeProxiedContinue(ctx context.Context, uw uow.UnitOfWork, closedID strin
 }
 
 func autoCloseProxiedCompletedMolecule(ctx context.Context, uw uow.UnitOfWork, closedStepID string, actorName, session string, warnings *[]string) *types.Issue {
-	moleculeID := proxiedFindParentMolecule(ctx, uw, closedStepID)
-	if moleculeID == "" {
+	root, moleculeID := proxiedAutoCloseRoot(ctx, uw, closedStepID)
+	if root == nil {
 		return nil
 	}
+	if !proxiedMoleculeFullyComplete(ctx, uw, moleculeID) {
+		return nil
+	}
+	params := domain.CloseIssueParams{Reason: "all steps complete", Session: session}
+	if _, err := uw.IssueUseCase().CloseIssue(ctx, moleculeID, params, actorName); err != nil {
+		*warnings = append(*warnings, fmt.Sprintf("could not auto-close completed molecule %s: %v", moleculeID, err))
+		return nil
+	}
+	return root
+}
 
+func proxiedAutoCloseRoot(ctx context.Context, uw uow.UnitOfWork, closedStepID string) (*types.Issue, string) {
+	moleculeID := proxiedFindParentMolecule(ctx, uw, closedStepID)
+	if moleculeID == "" {
+		return nil, ""
+	}
 	root, err := uw.IssueUseCase().GetIssue(ctx, moleculeID)
 	if err != nil || root == nil || root.Status == types.StatusClosed {
-		return nil
+		return nil, ""
 	}
 	// A READ, and one that has to see this transaction. The auto-close decision
 	// is made from labels written earlier in the same unit of work, and
@@ -434,23 +517,17 @@ func autoCloseProxiedCompletedMolecule(ctx context.Context, uw uow.UnitOfWork, c
 		root.Labels = labels
 	}
 	if !shouldAutoCloseCompletedRoot(root) {
-		return nil
+		return nil, ""
 	}
+	return root, moleculeID
+}
 
+func proxiedMoleculeFullyComplete(ctx context.Context, uw uow.UnitOfWork, moleculeID string) bool {
 	progress, err := getMoleculeProgress(ctx, uowMolReader{uw: uw}, moleculeID)
 	if err != nil {
-		return nil
+		return false
 	}
-	if progress.Completed < progress.Total {
-		return nil
-	}
-
-	params := domain.CloseIssueParams{Reason: "all steps complete", Session: session}
-	if _, err := uw.IssueUseCase().CloseIssue(ctx, moleculeID, params, actorName); err != nil {
-		*warnings = append(*warnings, fmt.Sprintf("could not auto-close completed molecule %s: %v", moleculeID, err))
-		return nil
-	}
-	return root
+	return progress.Completed >= progress.Total
 }
 
 func proxiedFindParentMolecule(ctx context.Context, uw uow.UnitOfWork, issueID string) string {

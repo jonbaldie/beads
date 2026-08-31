@@ -536,11 +536,17 @@ func assertStatsReporterDelta(t *testing.T, before, after types.Statistics, want
 func statsReporterSeed(fixture StatsReporterFixture, suffix string, status types.Status) *types.Issue {
 	id := fixture.IssuePrefix + "-" + suffix
 	return &types.Issue{
-		ID:        id,
-		Title:     id,
-		Status:    status,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    status,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 }
 

@@ -42,7 +42,7 @@ To initialize and restore in one step, use: bd init && bd backup restore`,
 			}
 		}()
 
-		ctx := rootCtx
+		ctx := getRootContext()
 
 		var dir string
 		if len(args) > 0 {
@@ -61,11 +61,11 @@ To initialize and restore in one step, use: bd init && bd backup restore`,
 
 		force, _ := cmd.Flags().GetBool("force")
 
-		if err := runBackupRestore(ctx, store, dir, force); err != nil {
+		if err := runBackupRestore(ctx, getStore(), dir, force); err != nil {
 			return err
 		}
 
-		if !jsonOutput {
+		if !isJSONOutput() {
 			fmt.Printf("%s Restore complete\n", ui.RenderPass("✓"))
 		}
 

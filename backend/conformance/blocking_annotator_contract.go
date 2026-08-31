@@ -475,12 +475,20 @@ func seedBlockingEdge(t *testing.T, ctx context.Context, fixture BlockingAnnotat
 
 func blockingSeed(id string, status types.Status, ephemeral bool) *types.Issue {
 	return &types.Issue{
-		ID:        id,
-		Title:     id,
-		Status:    status,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: ephemeral,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    status,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: ephemeral,
+		},
 	}
 }
 

@@ -34,101 +34,99 @@ func DatabaseVersionWithBdVersion(path string, bdVersion string) error {
 	if err != nil {
 		return err
 	}
-
-	// Load or create config
 	cfg, err := configfile.Load(beadsDir)
-	if err != nil {
+	if err != nil || cfg == nil {
 		cfg = configfile.DefaultConfig()
 	}
-	if cfg == nil {
-		cfg = configfile.DefaultConfig()
-	}
-
-	// Determine database path
 	dbPath := cfg.DatabasePath(beadsDir)
-
 	ctx := context.Background()
-
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
-		// No database - create a new Dolt store. Creation is this branch's
-		// explicit purpose, so opt out of the dolt.New create-guard
-		// (bd-kjfsq: without CreateIfMissing the guard fails the fix with
-		// "database not found" on exactly the fresh clones it exists for).
-		fmt.Println("  → No database found, creating Dolt store...")
-
-		// Bead-mutating: the branch below imports every issue in the JSONL, so
-		// it opens through the activating factory and those creates journal.
-		store, err := openBeadMutatingStoreCreating(ctx, beadsDir)
-		if err != nil {
-			return fmt.Errorf("failed to create database: %w", err)
-		}
-		defer func() { _ = store.Close() }()
-
-		// Create local marker directory so FindDatabasePath can discover the
-		// database. Server mode doesn't create it automatically (bd-u8rda).
-		if mkErr := os.MkdirAll(dbPath, 0o750); mkErr != nil {
-			fmt.Printf("  Warning: failed to create dolt marker dir: %v\n", mkErr)
-		}
-
-		// Set version metadata if provided
-		if bdVersion != "" {
-			if err := store.SetLocalMetadata(ctx, "bd_version", bdVersion); err != nil {
-				fmt.Printf("  Warning: failed to set bd_version: %v\n", err)
-			}
-		}
-
-		fmt.Println("  → Database created successfully")
-
-		// Import from JSONL if present (fresh clone with committed issues).
-		// This closes the chicken-and-egg gap where doctor --fix creates an
-		// empty Dolt store and then bd init refuses because the store exists.
-		jsonlPath := filepath.Join(beadsDir, "issues.jsonl")
-		if _, statErr := os.Stat(jsonlPath); statErr == nil {
-			count, importErr := importJSONLIntoStore(ctx, store, jsonlPath)
-			if importErr != nil {
-				fmt.Printf("  Warning: failed to import from JSONL: %v\n", importErr)
-			} else if count > 0 {
-				fmt.Printf("  → Imported %d issues from issues.jsonl\n", count)
-			}
-		}
-
-		return nil
+		return createFreshDatabase(ctx, beadsDir, dbPath, bdVersion)
 	}
+	return updateExistingDatabaseMetadata(ctx, beadsDir, bdVersion)
+}
 
-	// Database exists - update metadata in-process
+func createFreshDatabase(ctx context.Context, beadsDir, dbPath, bdVersion string) error {
+	// No database - create a new Dolt store. Creation is this branch's
+	// explicit purpose, so opt out of the dolt.New create-guard
+	// (bd-kjfsq: without CreateIfMissing the guard fails the fix with
+	// "database not found" on exactly the fresh clones it exists for).
+	fmt.Println("  → No database found, creating Dolt store...")
+	// Bead-mutating: the branch below imports every issue in the JSONL, so
+	// it opens through the activating factory and those creates journal.
+	store, err := openBeadMutatingStoreCreating(ctx, beadsDir)
+	if err != nil {
+		return fmt.Errorf("failed to create database: %w", err)
+	}
+	defer func() { _ = store.Close() }()
+	// Create local marker directory so FindDatabasePath can discover the
+	// database. Server mode doesn't create it automatically (bd-u8rda).
+	if mkErr := os.MkdirAll(dbPath, 0o750); mkErr != nil {
+		fmt.Printf("  Warning: failed to create dolt marker dir: %v\n", mkErr)
+	}
+	if bdVersion != "" {
+		if err := store.SetLocalMetadata(ctx, "bd_version", bdVersion); err != nil {
+			fmt.Printf("  Warning: failed to set bd_version: %v\n", err)
+		}
+	}
+	fmt.Println("  → Database created successfully")
+	maybeImportFreshCloneJSONL(ctx, store, beadsDir)
+	return nil
+}
+
+func maybeImportFreshCloneJSONL(ctx context.Context, store storage.DoltStorage, beadsDir string) {
+	// Import from JSONL if present (fresh clone with committed issues).
+	// This closes the chicken-and-egg gap where doctor --fix creates an
+	// empty Dolt store and then bd init refuses because the store exists.
+	jsonlPath := filepath.Join(beadsDir, "issues.jsonl")
+	if _, statErr := os.Stat(jsonlPath); statErr != nil {
+		return
+	}
+	count, importErr := importJSONLIntoStore(ctx, store, jsonlPath)
+	if importErr != nil {
+		fmt.Printf("  Warning: failed to import from JSONL: %v\n", importErr)
+		return
+	}
+	if count > 0 {
+		fmt.Printf("  → Imported %d issues from issues.jsonl\n", count)
+	}
+}
+
+func updateExistingDatabaseMetadata(ctx context.Context, beadsDir, bdVersion string) error {
 	fmt.Println("  → Updating database metadata...")
-
 	store, err := dolt.NewFromConfig(ctx, beadsDir)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 	defer func() { _ = store.Close() }()
-
-	// Update bd_version if provided (clone-local, dolt-ignored)
 	if bdVersion != "" {
 		if err := store.SetLocalMetadata(ctx, "bd_version", bdVersion); err != nil {
 			return fmt.Errorf("failed to set bd_version: %w", err)
 		}
 	}
-
-	// Detect and set issue_prefix if missing
-	prefix, err := store.GetConfig(ctx, "issue_prefix")
-	if err != nil || prefix == "" {
-		issues, err := store.SearchIssues(ctx, "", types.IssueFilter{})
-		if err == nil && len(issues) > 0 {
-			detectedPrefix := utils.ExtractIssuePrefix(issues[0].ID)
-			if detectedPrefix != "" {
-				if err := store.SetConfig(ctx, "issue_prefix", detectedPrefix); err != nil {
-					fmt.Printf("  Warning: failed to set issue prefix: %v\n", err)
-				} else {
-					fmt.Printf("  → Detected and set issue prefix: %s\n", detectedPrefix)
-				}
-			}
-		}
-	}
-
+	detectAndSetIssuePrefix(ctx, store)
 	fmt.Println("  → Metadata updated")
 	return nil
+}
+
+func detectAndSetIssuePrefix(ctx context.Context, store storage.DoltStorage) {
+	prefix, err := store.GetConfig(ctx, "issue_prefix")
+	if err == nil && prefix != "" {
+		return
+	}
+	issues, err := store.SearchIssues(ctx, "", types.IssueFilter{})
+	if err != nil || len(issues) == 0 {
+		return
+	}
+	detectedPrefix := utils.ExtractIssuePrefix(issues[0].ID)
+	if detectedPrefix == "" {
+		return
+	}
+	if err := store.SetConfig(ctx, "issue_prefix", detectedPrefix); err != nil {
+		fmt.Printf("  Warning: failed to set issue prefix: %v\n", err)
+		return
+	}
+	fmt.Printf("  → Detected and set issue prefix: %s\n", detectedPrefix)
 }
 
 // SchemaCompatibility fixes schema compatibility issues by updating database metadata
@@ -186,16 +184,32 @@ func FreshCloneImport(path string, bdVersion string) error {
 // importJSONLIntoStore reads a JSONL file and imports all issues into the Dolt store.
 // Used by both the Database fix (new store creation) and Fresh Clone fix (empty store).
 func importJSONLIntoStore(ctx context.Context, store storage.DoltStorage, jsonlPath string) (int, error) {
+	issues, err := readJSONLIssues(jsonlPath)
+	if err != nil {
+		return 0, err
+	}
+	if len(issues) == 0 {
+		return 0, nil
+	}
+	maybeSetImportPrefix(ctx, store, issues[0].ID)
+	err = store.CreateIssuesWithFullOptions(ctx, issues, detectActor(), storage.BatchCreateOptions{
+		SkipPrefixValidation: true,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return len(issues), nil
+}
+
+func readJSONLIssues(jsonlPath string) ([]*types.Issue, error) {
 	f, err := os.Open(jsonlPath) // #nosec G304 - workspace-controlled path
 	if err != nil {
-		return 0, fmt.Errorf("failed to open JSONL file: %w", err)
+		return nil, fmt.Errorf("failed to open JSONL file: %w", err)
 	}
 	defer f.Close()
-
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 64*1024*1024) // 64MB max line
 	var issues []*types.Issue
-
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line == "" {
@@ -203,43 +217,31 @@ func importJSONLIntoStore(ctx context.Context, store storage.DoltStorage, jsonlP
 		}
 		var issue types.Issue
 		if err := json.Unmarshal([]byte(line), &issue); err != nil {
-			return 0, fmt.Errorf("failed to parse issue: %w", err)
+			return nil, fmt.Errorf("failed to parse issue: %w", err)
 		}
 		issue.SetDefaults()
 		issues = append(issues, &issue)
 	}
 	if err := scanner.Err(); err != nil {
-		return 0, fmt.Errorf("failed to scan JSONL: %w", err)
+		return nil, fmt.Errorf("failed to scan JSONL: %w", err)
 	}
+	return issues, nil
+}
 
-	if len(issues) == 0 {
-		return 0, nil
-	}
-
-	// Auto-detect and set prefix from first issue
+func maybeSetImportPrefix(ctx context.Context, store storage.DoltStorage, firstID string) {
 	configuredPrefix, _ := store.GetConfig(ctx, "issue_prefix")
-	if strings.TrimSpace(configuredPrefix) == "" {
-		firstPrefix := utils.ExtractIssuePrefix(issues[0].ID)
-		if firstPrefix != "" {
-			if err := store.SetConfig(ctx, "issue_prefix", firstPrefix); err != nil {
-				fmt.Printf("  Warning: failed to set issue_prefix: %v\n", err)
-			} else {
-				fmt.Printf("  → Detected issue prefix: %s\n", firstPrefix)
-			}
-		}
+	if strings.TrimSpace(configuredPrefix) != "" {
+		return
 	}
-
-	// Determine actor for the import
-	actor := detectActor()
-
-	err = store.CreateIssuesWithFullOptions(ctx, issues, actor, storage.BatchCreateOptions{
-		SkipPrefixValidation: true,
-	})
-	if err != nil {
-		return 0, err
+	firstPrefix := utils.ExtractIssuePrefix(firstID)
+	if firstPrefix == "" {
+		return
 	}
-
-	return len(issues), nil
+	if err := store.SetConfig(ctx, "issue_prefix", firstPrefix); err != nil {
+		fmt.Printf("  Warning: failed to set issue_prefix: %v\n", err)
+		return
+	}
+	fmt.Printf("  → Detected issue prefix: %s\n", firstPrefix)
 }
 
 // detectActor returns the best available actor name for automated operations.

@@ -41,11 +41,15 @@ func newTestDoltStore(t *testing.T, prefix string) *dolt.DoltStore {
 
 	// Open store with MaxOpenConns=1 (required for DOLT_CHECKOUT session affinity)
 	store, err := dolt.New(ctx, &dolt.Config{
-		Path:         filepath.Join(t.TempDir(), "test.db"),
-		ServerHost:   "127.0.0.1",
-		ServerPort:   port,
-		Database:     testSharedDB,
-		MaxOpenConns: 1,
+		Path: filepath.Join(t.TempDir(), "test.db"),
+		ServerOptions: dolt.ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: port,
+		},
+		Database: testSharedDB,
+		PoolOptions: dolt.PoolOptions{
+			MaxOpenConns: 1,
+		},
 	})
 	if err != nil {
 		t.Skipf("skipping: Dolt not available: %v", err)
@@ -87,12 +91,20 @@ func dropDoctorTestDatabase(dbName string, port int) {
 // newTestIssue creates a minimal test issue with the given ID.
 func newTestIssue(id string) *types.Issue {
 	return &types.Issue{
-		ID:        id,
-		Title:     "Test issue " + id,
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		CreatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: "Test issue " + id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+		},
 	}
 }
 

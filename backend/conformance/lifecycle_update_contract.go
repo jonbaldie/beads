@@ -225,13 +225,11 @@ func RunLifecycleUpdatePersistsThePatchAndHydratesTheResult(t *testing.T, ctx co
 	}
 
 	result, err := fixture.Lifecycle.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: id, Patch: publicops.IssuePatch{
-		Title:              publicops.Field[string]{Set: true, Value: "patched title"},
-		Description:        publicops.Field[string]{Set: true, Value: "patched description"},
-		Design:             publicops.Field[string]{Set: true, Value: "patched design"},
-		AcceptanceCriteria: publicops.Field[string]{Set: true, Value: "patched acceptance"},
-		Notes:              publicops.Field[string]{Set: true, Value: "patched notes"},
-		Priority:           publicops.Field[int]{Set: true, Value: 0},
-		IssueType:          publicops.Field[publicops.IssueType]{Set: true, Value: types.TypeBug},
+		Title:       publicops.Field[string]{Set: true, Value: "patched title"},
+		Description: publicops.Field[string]{Set: true, Value: "patched description"}, IssuePatchDetails: publicops.IssuePatchDetails{Design: publicops.Field[string]{Set: true, Value: "patched design"},
+			AcceptanceCriteria: publicops.Field[string]{Set: true, Value: "patched acceptance"}}, Notes: publicops.Field[string]{Set: true, Value: "patched notes"},
+		Priority:  publicops.Field[int]{Set: true, Value: 0},
+		IssueType: publicops.Field[publicops.IssueType]{Set: true, Value: types.TypeBug},
 	}})
 	if err != nil {
 		t.Fatalf("update %s: %v", id, err)
@@ -293,6 +291,10 @@ func RunLifecycleUpdatePreservesTheCreationStamp(t *testing.T, ctx context.Conte
 	seeded.CreatedBy = "founder"
 	seedLifecycleUpdateIssue(t, ctx, fixture, seeded)
 
+}
+
+func assertLifecycleUpdateNotesExclusive(t *testing.T, ctx context.Context, fixture LifecycleUpdateFixture, id string) {
+	t.Helper()
 	before := lifecycleUpdateRow(t, ctx, fixture, id)
 	if !before.CreatedAt.Equal(lifecycleUpdateSeededCreatedAt) {
 		t.Fatalf("seeded %s carries created_at %v, want the preset %v — a seed that stamps its own creation time leaves this case unable to tell a preserved stamp from a rewritten one",
@@ -421,10 +423,16 @@ func RunLifecycleUpdateAppendsNotesWithoutReplacingThem(t *testing.T, ctx contex
 	seeded := lifecycleUpdateIssue(id)
 	seeded.Notes = "first"
 	seedLifecycleUpdateIssue(t, ctx, fixture, seeded)
+	assertLifecycleUpdateNotesAppend(t, ctx, fixture, id)
+	assertLifecycleUpdateNotesReplace(t, ctx, fixture, id)
+	assertLifecycleUpdateNotesExclusive(t, ctx, fixture, id)
+	assertLifecycleUpdateNotesEmpty(t, ctx, fixture)
+}
 
-	appended, err := fixture.Lifecycle.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: id, Patch: publicops.IssuePatch{
-		AppendNotes: publicops.Field[string]{Set: true, Value: "second"},
-	}})
+func assertLifecycleUpdateNotesAppend(t *testing.T, ctx context.Context, fixture LifecycleUpdateFixture, id string) {
+	t.Helper()
+
+	appended, err := fixture.Lifecycle.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: id, Patch: publicops.IssuePatch{IssuePatchDetails: publicops.IssuePatchDetails{AppendNotes: publicops.Field[string]{Set: true, Value: "second"}}}})
 	if err != nil {
 		t.Fatalf("append notes on %s: %v", id, err)
 	}
@@ -435,6 +443,10 @@ func RunLifecycleUpdateAppendsNotesWithoutReplacingThem(t *testing.T, ctx contex
 		t.Errorf("notes after the append = %q, want %q — the append must keep what was there", got, "first\nsecond")
 	}
 
+}
+
+func assertLifecycleUpdateNotesReplace(t *testing.T, ctx context.Context, fixture LifecycleUpdateFixture, id string) {
+	t.Helper()
 	replaced, err := fixture.Lifecycle.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: id, Patch: publicops.IssuePatch{
 		Notes: publicops.Field[string]{Set: true, Value: "replaced"},
 	}})
@@ -450,18 +462,19 @@ func RunLifecycleUpdateAppendsNotesWithoutReplacingThem(t *testing.T, ctx contex
 
 	before := lifecycleUpdateRow(t, ctx, fixture, id)
 	if _, err := fixture.Lifecycle.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: id, Patch: publicops.IssuePatch{
-		Notes:       publicops.Field[string]{Set: true, Value: "both"},
-		AppendNotes: publicops.Field[string]{Set: true, Value: "both"},
+		Notes: publicops.Field[string]{Set: true, Value: "both"}, IssuePatchDetails: publicops.IssuePatchDetails{AppendNotes: publicops.Field[string]{Set: true, Value: "both"}},
 	}}); !errors.Is(err, storage.ErrValidation) {
 		t.Errorf("a patch setting Notes and AppendNotes together = %v, want ErrValidation — the two are mutually exclusive", err)
 	}
 	assertLifecycleUpdateRowUnchanged(t, ctx, fixture, id, "after the mutually-exclusive refusal", before)
 
+}
+
+func assertLifecycleUpdateNotesEmpty(t *testing.T, ctx context.Context, fixture LifecycleUpdateFixture) {
+	t.Helper()
 	empty := fixture.IssuePrefix + "-lup-notes-empty"
 	seedLifecycleUpdateIssue(t, ctx, fixture, lifecycleUpdateIssue(empty))
-	if _, err := fixture.Lifecycle.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: empty, Patch: publicops.IssuePatch{
-		AppendNotes: publicops.Field[string]{Set: true, Value: "only"},
-	}}); err != nil {
+	if _, err := fixture.Lifecycle.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: empty, Patch: publicops.IssuePatch{IssuePatchDetails: publicops.IssuePatchDetails{AppendNotes: publicops.Field[string]{Set: true, Value: "only"}}}}); err != nil {
 		t.Fatalf("append notes on empty %s: %v", empty, err)
 	}
 	if got := lifecycleUpdateRow(t, ctx, fixture, empty).Notes; got != "only" {
@@ -505,11 +518,9 @@ func RunLifecycleUpdateClearsTheNullableMembers(t *testing.T, ctx context.Contex
 			id, before.EstimatedMinutes, before.ExternalRef, before.DueAt, before.DeferUntil)
 	}
 
-	clear := publicops.UpdateRequest{Actor: "writer", IssueID: id, Patch: publicops.IssuePatch{
-		EstimatedMinutes: publicops.Field[*int]{Set: true},
-		ExternalRef:      publicops.Field[*string]{Set: true},
-		DueAt:            publicops.Field[*time.Time]{Set: true},
-		DeferUntil:       publicops.Field[*time.Time]{Set: true},
+	clear := publicops.UpdateRequest{Actor: "writer", IssueID: id, Patch: publicops.IssuePatch{IssuePatchDetails: publicops.IssuePatchDetails{EstimatedMinutes: publicops.Field[*int]{Set: true}}, ExternalRef: publicops.Field[*string]{Set: true},
+		DueAt:      publicops.Field[*time.Time]{Set: true},
+		DeferUntil: publicops.Field[*time.Time]{Set: true},
 	}}
 	cleared, err := fixture.Lifecycle.Update(ctx, clear)
 	if err != nil {
@@ -779,6 +790,13 @@ func RunLifecycleUpdateConditionalGuardsGateOrdinaryEdits(t *testing.T, ctx cont
 
 	id := fixture.IssuePrefix + "-lup-guardgate"
 	seedLifecycleUpdateIssue(t, ctx, fixture, lifecycleUpdateIssue(id))
+	assertLifecycleUpdateInitialGuards(t, ctx, fixture, id)
+	assertLifecycleUpdateVersionGuards(t, ctx, fixture, id)
+	assertLifecycleUpdateAssigneeGuards(t, ctx, fixture, id)
+}
+
+func assertLifecycleUpdateInitialGuards(t *testing.T, ctx context.Context, fixture LifecycleUpdateFixture, id string) {
+	t.Helper()
 	events := newLifecycleUpdateEventCounter(t, ctx, fixture, id)
 
 	priorityEdit := func(priority int) publicops.UpdateRequest {
@@ -830,6 +848,22 @@ func RunLifecycleUpdateConditionalGuardsGateOrdinaryEdits(t *testing.T, ctx cont
 	assertPriority("priority after a stale assignee guard", 1)
 	events.assert(t, "stale assignee guard", 0)
 
+}
+
+func assertLifecycleUpdateVersionGuards(t *testing.T, ctx context.Context, fixture LifecycleUpdateFixture, id string) {
+	t.Helper()
+	events := newLifecycleUpdateEventCounter(t, ctx, fixture, id)
+	priorityEdit := func(priority int) publicops.UpdateRequest {
+		return publicops.UpdateRequest{Actor: "writer", IssueID: id, Patch: publicops.IssuePatch{
+			Priority: publicops.Field[int]{Set: true, Value: priority},
+		}}
+	}
+	assertPriority := func(label string, want int) {
+		t.Helper()
+		if got := lifecycleUpdateRow(t, ctx, fixture, id).Priority; got != want {
+			t.Errorf("%s = %d, want %d", label, got, want)
+		}
+	}
 	// THE VERSION GUARD, both directions. The satisfied leg reads the row's own
 	// token and hands it straight back, which is the compare-and-set a caller
 	// that already read the row performs; the stale leg is the same request one
@@ -856,6 +890,25 @@ func RunLifecycleUpdateConditionalGuardsGateOrdinaryEdits(t *testing.T, ctx cont
 	}
 	assertLifecycleUpdateRowUnchanged(t, ctx, fixture, id, "after the stale version guard", before)
 	events.assert(t, "stale version guard", 0)
+
+}
+
+func assertLifecycleUpdateAssigneeGuards(t *testing.T, ctx context.Context, fixture LifecycleUpdateFixture, id string) {
+	t.Helper()
+	unassigned := ""
+	staleStatus := types.StatusInProgress
+	events := newLifecycleUpdateEventCounter(t, ctx, fixture, id)
+	priorityEdit := func(priority int) publicops.UpdateRequest {
+		return publicops.UpdateRequest{Actor: "writer", IssueID: id, Patch: publicops.IssuePatch{
+			Priority: publicops.Field[int]{Set: true, Value: priority},
+		}}
+	}
+	assertPriority := func(label string, want int) {
+		t.Helper()
+		if got := lifecycleUpdateRow(t, ctx, fixture, id).Priority; got != want {
+			t.Errorf("%s = %d, want %d", label, got, want)
+		}
+	}
 
 	// The guard tracks the row rather than the request that set it: once an
 	// assignee lands, the empty-string guard that just held is the stale one.
@@ -1091,7 +1144,13 @@ func RunLifecycleUpdateClosePolicy(t *testing.T, ctx context.Context, fixture Li
 	}
 	seedLifecycleUpdateEdge(t, ctx, fixture, childID, parentID, types.DepParentChild)
 	seedLifecycleUpdateEdge(t, ctx, fixture, blockedID, blockerID, types.DepBlocks)
+	assertLifecycleUpdateOpenChildCloseRefusal(t, ctx, fixture, parentID)
+	assertLifecycleUpdateBlockerCloseRefusal(t, ctx, fixture, blockedID)
+	assertLifecycleUpdateForcedClosePolicy(t, ctx, fixture, parentID, blockedID)
+}
 
+func assertLifecycleUpdateOpenChildCloseRefusal(t *testing.T, ctx context.Context, fixture LifecycleUpdateFixture, parentID string) {
+	t.Helper()
 	// An open child refuses, with the typed error and its count, and writes
 	// nothing — not the row, not an event.
 	events := newLifecycleUpdateEventCounter(t, ctx, fixture, parentID)
@@ -1123,13 +1182,21 @@ func RunLifecycleUpdateClosePolicy(t *testing.T, ctx context.Context, fixture Li
 	assertLifecycleUpdateRowUnchanged(t, ctx, fixture, parentID, "after the compound refusal", before)
 	events.assert(t, "refused claiming crossing", 0)
 
+}
+
+func assertLifecycleUpdateBlockerCloseRefusal(t *testing.T, ctx context.Context, fixture LifecycleUpdateFixture, blockedID string) {
+	t.Helper()
 	// A live direct blocker refuses too.
-	_, err = fixture.Lifecycle.Update(ctx, lifecycleUpdateClosingRequest(blockedID, false))
+	_, err := fixture.Lifecycle.Update(ctx, lifecycleUpdateClosingRequest(blockedID, false))
 	if !errors.Is(err, storage.ErrCloseBlocked) {
 		t.Fatalf("update %s into done with a live blocker: err = %v, want ErrCloseBlocked", blockedID, err)
 	}
 	assertLifecycleUpdateStatus(t, ctx, fixture, blockedID, types.StatusOpen)
 
+}
+
+func assertLifecycleUpdateForcedClosePolicy(t *testing.T, ctx context.Context, fixture LifecycleUpdateFixture, parentID, blockedID string) {
+	t.Helper()
 	// Force bypasses close policy and nothing else. A stale ExpectedVersion is
 	// an orthogonal precondition, checked ahead of the policy and never waived
 	// by it — the same ordering a checked close applies.
@@ -1195,7 +1262,14 @@ func RunLifecycleUpdateAssigneeTransferFence(t *testing.T, ctx context.Context, 
 		t.Fatalf("claiming %s reported Changed = false, want a committed claim", heldID)
 	}
 	assertLifecycleUpdateLiveAssignee(t, ctx, fixture, heldID, "holder")
+	assertLifecycleUpdateTransferFence(t, ctx, fixture, heldID)
+	assertLifecycleUpdateTransferCAS(t, ctx, fixture, heldID)
+	assertLifecycleUpdateForcedTransfer(t, ctx, fixture, heldID)
+	assertLifecycleUpdatePoolTransfer(t, ctx, fixture)
+}
 
+func assertLifecycleUpdateTransferFence(t *testing.T, ctx context.Context, fixture LifecycleUpdateFixture, heldID string) {
+	t.Helper()
 	// The fence itself: an unforced transfer away from the live holder is
 	// refused, and the refusal writes nothing — not the row, not an event.
 	events := newLifecycleUpdateEventCounter(t, ctx, fixture, heldID)
@@ -1232,6 +1306,10 @@ func RunLifecycleUpdateAssigneeTransferFence(t *testing.T, ctx context.Context, 
 		t.Errorf("reasserting %s's current assignee reported Changed = true, want a no-op", heldID)
 	}
 
+}
+
+func assertLifecycleUpdateTransferCAS(t *testing.T, ctx context.Context, fixture LifecycleUpdateFixture, heldID string) {
+	t.Helper()
 	// An ExpectedAssignee compare-and-set naming the holder replaces the fence:
 	// the caller proved its view of the claim is current.
 	casRequest := lifecycleUpdateTransferRequest(heldID, "rival", "rival")
@@ -1246,6 +1324,10 @@ func RunLifecycleUpdateAssigneeTransferFence(t *testing.T, ctx context.Context, 
 	}
 	assertLifecycleUpdateLiveAssignee(t, ctx, fixture, heldID, "rival")
 
+}
+
+func assertLifecycleUpdateForcedTransfer(t *testing.T, ctx context.Context, fixture LifecycleUpdateFixture, heldID string) {
+	t.Helper()
 	// ForceAssigneeTransfer is the unconditional override.
 	forcedRequest := lifecycleUpdateTransferRequest(heldID, "usurper", "usurper")
 	forcedRequest.ForceAssigneeTransfer = true
@@ -1258,6 +1340,10 @@ func RunLifecycleUpdateAssigneeTransferFence(t *testing.T, ctx context.Context, 
 	}
 	assertLifecycleUpdateLiveAssignee(t, ctx, fixture, heldID, "usurper")
 
+}
+
+func assertLifecycleUpdatePoolTransfer(t *testing.T, ctx context.Context, fixture LifecycleUpdateFixture) {
+	t.Helper()
 	// A holder that is a configured claim.pools alias is a group placeholder,
 	// not an owner, so taking work from the pool needs no force.
 	if err := fixture.SetConfig(ctx, "claim.pools", "lup-pool-crew"); err != nil {
@@ -1349,7 +1435,13 @@ func RunLifecycleUpdateClaimIsAMutationWhenThePatchRestoresTheRow(t *testing.T, 
 	}
 	restoringBystanders := lifecycleUpdateRow(t, ctx, fixture, restoringID)
 	restatingBystanders := lifecycleUpdateRow(t, ctx, fixture, restatingID)
+	assertLifecycleUpdateRestoringClaim(t, ctx, fixture, restoringID, restoringBystanders)
+	assertLifecycleUpdateRestatingClaim(t, ctx, fixture, restatingID, restatingBystanders)
+	assertLifecycleUpdateIdempotentClaim(t, ctx, fixture, restoringID, restoringBystanders)
+}
 
+func assertLifecycleUpdateRestoringClaim(t *testing.T, ctx context.Context, fixture LifecycleUpdateFixture, restoringID string, restoringBystanders *types.Issue) {
+	t.Helper()
 	// Open and unassigned is the seeded state, so this patch restores it.
 	restoring := publicops.IssuePatch{
 		Status:   publicops.Field[publicops.Status]{Set: true, Value: types.StatusOpen},
@@ -1382,6 +1474,10 @@ func RunLifecycleUpdateClaimIsAMutationWhenThePatchRestoresTheRow(t *testing.T, 
 	assertLifecycleUpdateAssigneeAndStatus(t, ctx, fixture, restoringID, "", types.StatusOpen)
 	assertLifecycleUpdateBystandersUnmoved(t, ctx, fixture, restoringID, "after the restoring claim", restoringBystanders)
 
+}
+
+func assertLifecycleUpdateRestatingClaim(t *testing.T, ctx context.Context, fixture LifecycleUpdateFixture, restatingID string, restatingBystanders *types.Issue) {
+	t.Helper()
 	// The mirror shape. There is no control for it — the same patch without a
 	// claim moves an unclaimed row for real — so it leans on the control above
 	// for the "reports Changed for everything" direction and carries only the
@@ -1402,6 +1498,10 @@ func RunLifecycleUpdateClaimIsAMutationWhenThePatchRestoresTheRow(t *testing.T, 
 	assertLifecycleUpdateAssigneeAndStatus(t, ctx, fixture, restatingID, "claimant", types.StatusInProgress)
 	assertLifecycleUpdateBystandersUnmoved(t, ctx, fixture, restatingID, "after the restating claim", restatingBystanders)
 
+}
+
+func assertLifecycleUpdateIdempotentClaim(t *testing.T, ctx context.Context, fixture LifecycleUpdateFixture, restoringID string, restoringBystanders *types.Issue) {
+	t.Helper()
 	// The other edge, on the row the first shape left open and unassigned. A
 	// first claim grants the lease and counts.
 	granted, err := fixture.Lifecycle.Update(ctx, publicops.UpdateRequest{Actor: "claimant", IssueID: restoringID, Claim: true})
@@ -1452,7 +1552,12 @@ func RunLifecycleUpdateParentIDReplacesTheParentEdge(t *testing.T, ctx context.C
 	seedLifecycleUpdateIssue(t, ctx, fixture, lifecycleUpdateIssue(childID))
 	seedLifecycleUpdateEdge(t, ctx, fixture, childID, oldParentID, types.DepParentChild)
 	assertLifecycleUpdateParents(t, ctx, fixture, childID, "seeded", oldParentID)
+	assertLifecycleUpdateParentReparent(t, ctx, fixture, childID, newParentID)
+	assertLifecycleUpdateParentClear(t, ctx, fixture, childID, newParentID)
+}
 
+func assertLifecycleUpdateParentReparent(t *testing.T, ctx context.Context, fixture LifecycleUpdateFixture, childID, newParentID string) {
+	t.Helper()
 	reparented, err := fixture.Lifecycle.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: childID, Patch: publicops.IssuePatch{
 		ParentID: publicops.Field[string]{Set: true, Value: newParentID},
 	}})
@@ -1466,6 +1571,10 @@ func RunLifecycleUpdateParentIDReplacesTheParentEdge(t *testing.T, ctx context.C
 	assertLifecycleUpdateLabels(t, "reparent result", reparented.Issue)
 	assertLifecycleUpdateLabels(t, "stored row after reparent", lifecycleUpdateRow(t, ctx, fixture, childID))
 
+}
+
+func assertLifecycleUpdateParentClear(t *testing.T, ctx context.Context, fixture LifecycleUpdateFixture, childID, newParentID string) {
+	t.Helper()
 	restated, err := fixture.Lifecycle.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: childID, Patch: publicops.IssuePatch{
 		ParentID: publicops.Field[string]{Set: true, Value: newParentID},
 	}})
@@ -1561,9 +1670,7 @@ func RunLifecycleUpdatePersistentPreservesUnversionedClass(t *testing.T, ctx con
 		t.Fatalf("seeded storage class for %s = %q, want %q — the clause has nothing to preserve otherwise", id, got, types.StorageClassUnversioned)
 	}
 
-	restated, err := fixture.Lifecycle.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: id, Patch: publicops.IssuePatch{
-		Persistence: publicops.Field[publicops.PersistenceMode]{Set: true, Value: publicops.PersistenceModePersistent},
-	}})
+	restated, err := fixture.Lifecycle.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: id, Patch: publicops.IssuePatch{IssuePatchDetails: publicops.IssuePatchDetails{Persistence: publicops.Field[publicops.PersistenceMode]{Set: true, Value: publicops.PersistenceModePersistent}}}})
 	if err != nil {
 		t.Fatalf("restate %s as persistent: %v", id, err)
 	}
@@ -1652,12 +1759,20 @@ const lifecycleUpdateInvalidPriority = 9
 
 func lifecycleUpdateIssue(id string, labels ...string) *types.Issue {
 	return &types.Issue{
-		ID:        id,
-		Title:     id,
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Labels:    labels,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: labels,
+		},
 	}
 }
 

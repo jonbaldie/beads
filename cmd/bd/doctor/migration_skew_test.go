@@ -16,10 +16,13 @@ func TestCheckMigrationContentSkew_NoDatabase(t *testing.T) {
 	}
 }
 
-func expectRemoteAndBranch(mock sqlmock.Sqlmock, branch string) {
+func expectRemote(mock sqlmock.Sqlmock) {
 	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM dolt_remotes WHERE name = \?`).
 		WithArgs("origin").
 		WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(1))
+}
+
+func expectBranch(mock sqlmock.Sqlmock, branch string) {
 	mock.ExpectQuery(`SELECT active_branch\(\)`).
 		WillReturnRows(sqlmock.NewRows([]string{"b"}).AddRow(branch))
 }
@@ -62,10 +65,9 @@ func TestCheckMigrationContentSkew_UsesConfiguredRemote(t *testing.T) {
 	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM dolt_remotes WHERE name = \?`).
 		WithArgs("upstream").
 		WillReturnRows(sqlmock.NewRows([]string{"c"}).AddRow(1))
-	mock.ExpectQuery(`SELECT active_branch\(\)`).
-		WillReturnRows(sqlmock.NewRows([]string{"b"}).AddRow("main"))
 	mock.ExpectQuery(`SELECT version, content_hash FROM schema_migrations$`).
 		WillReturnRows(sqlmock.NewRows([]string{"version", "content_hash"}).AddRow(1, "a"))
+	expectBranch(mock, "main")
 	expectRemoteMigrationShape(mock, "remotes/upstream/main")
 	mock.ExpectQuery(`AS OF 'remotes/upstream/main'`).
 		WillReturnRows(sqlmock.NewRows([]string{"version", "content_hash"}).AddRow(1, "a"))
@@ -85,9 +87,10 @@ func TestCheckMigrationContentSkew_NoCachedRemoteRef(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	expectRemoteAndBranch(mock, "main")
+	expectRemote(mock)
 	mock.ExpectQuery(`SELECT version, content_hash FROM schema_migrations$`).
 		WillReturnRows(sqlmock.NewRows([]string{"version", "content_hash"}).AddRow(1, "a"))
+	expectBranch(mock, "main")
 	// Real Dolt phrasing for an AS OF ref that is not cached locally.
 	mock.ExpectQuery(`SHOW TABLES AS OF 'remotes/origin/main'`).
 		WillReturnError(errors.New("branch not found: remotes/origin/main"))
@@ -104,9 +107,10 @@ func TestCheckMigrationContentSkew_CachedRemotePredatesContentHashes(t *testing.
 		t.Fatal(err)
 	}
 	defer db.Close()
-	expectRemoteAndBranch(mock, "main")
+	expectRemote(mock)
 	mock.ExpectQuery(`SELECT version, content_hash FROM schema_migrations$`).
 		WillReturnRows(sqlmock.NewRows([]string{"version", "content_hash"}).AddRow(1, "a"))
+	expectBranch(mock, "main")
 	mock.ExpectQuery(`SHOW TABLES AS OF 'remotes/origin/main' LIKE 'schema_migrations'`).
 		WillReturnRows(sqlmock.NewRows([]string{"Tables_in_beads"}).AddRow("schema_migrations"))
 	mock.ExpectQuery(`SHOW COLUMNS FROM schema_migrations AS OF 'remotes/origin/main' LIKE 'content_hash'`).
@@ -133,9 +137,10 @@ func TestCheckMigrationContentSkew_UnexpectedErrorWarns(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	expectRemoteAndBranch(mock, "main")
+	expectRemote(mock)
 	mock.ExpectQuery(`SELECT version, content_hash FROM schema_migrations$`).
 		WillReturnRows(sqlmock.NewRows([]string{"version", "content_hash"}).AddRow(1, "a"))
+	expectBranch(mock, "main")
 	expectRemoteMigrationShape(mock, "remotes/origin/main")
 	mock.ExpectQuery(`AS OF 'remotes/origin/main'`).
 		WillReturnError(errors.New(`unbound variable "v1" in query`))
@@ -155,7 +160,7 @@ func TestCheckMigrationContentSkew_NoLocalHashes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	expectRemoteAndBranch(mock, "main")
+	expectRemote(mock)
 	// Old database: rows exist but content_hash is all NULL.
 	mock.ExpectQuery(`SELECT version, content_hash FROM schema_migrations$`).
 		WillReturnRows(sqlmock.NewRows([]string{"version", "content_hash"}).AddRow(1, nil))
@@ -175,9 +180,10 @@ func TestCheckMigrationContentSkew_Matches(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	expectRemoteAndBranch(mock, "main")
+	expectRemote(mock)
 	mock.ExpectQuery(`SELECT version, content_hash FROM schema_migrations$`).
 		WillReturnRows(sqlmock.NewRows([]string{"version", "content_hash"}).AddRow(1, "a").AddRow(2, "b"))
+	expectBranch(mock, "main")
 	expectRemoteMigrationShape(mock, "remotes/origin/main")
 	mock.ExpectQuery(`AS OF 'remotes/origin/main'`).
 		WillReturnRows(sqlmock.NewRows([]string{"version", "content_hash"}).AddRow(1, "a").AddRow(2, "b"))
@@ -194,9 +200,10 @@ func TestCheckMigrationContentSkew_Diverges(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	expectRemoteAndBranch(mock, "main")
+	expectRemote(mock)
 	mock.ExpectQuery(`SELECT version, content_hash FROM schema_migrations$`).
 		WillReturnRows(sqlmock.NewRows([]string{"version", "content_hash"}).AddRow(1, "a").AddRow(2, "b"))
+	expectBranch(mock, "main")
 	expectRemoteMigrationShape(mock, "remotes/origin/main")
 	mock.ExpectQuery(`AS OF 'remotes/origin/main'`).
 		WillReturnRows(sqlmock.NewRows([]string{"version", "content_hash"}).AddRow(1, "a").AddRow(2, "DIFFERENT"))

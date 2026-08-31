@@ -65,7 +65,7 @@ Examples:
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		results := runApply(dryRun)
 
-		if jsonOutput {
+		if isJSONOutput() {
 			if err := outputJSON(results); err != nil {
 				return err
 			}
@@ -160,8 +160,10 @@ func skippedRemoteApplyResult(item DriftItem) ApplyResult {
 
 func remoteApplyStoreConfig(dryRun bool) *dolt.Config {
 	return &dolt.Config{
-		ReadOnly:         dryRun,
-		DisableAutoStart: true,
+		ReadOnly: dryRun,
+		ServerOptions: dolt.ServerOptions{
+			DisableAutoStart: true,
+		},
 	}
 }
 
@@ -225,6 +227,11 @@ func applyHooks(drifted bool, dryRun bool) ApplyResult {
 type originRemoteEvidence interface {
 	ListRemotes(ctx context.Context) ([]storage.RemoteInfo, error)
 	PersistedRemoteInfos() []storage.RemoteInfo
+}
+
+type originRemoteMutator interface {
+	AddRemote(ctx context.Context, name, url string) error
+	RemoveRemote(ctx context.Context, name string) error
 }
 
 // currentOriginRemoteURL resolves the origin remote's URL from evidence, not
@@ -307,30 +314,37 @@ func applyRemote(drifted bool, dryRun bool) ApplyResult {
 	}
 
 	if dryRun {
-		if currentURL == "" {
-			return ApplyResult{
-				Check:   "remote",
-				Action:  "add_remote",
-				Status:  applyStatusDryRun,
-				Message: fmt.Sprintf("Would add Dolt origin remote: %s", federationRemote),
-			}
-		}
-		if remoteURLMatchesConfig(currentURL, federationRemote) {
-			return ApplyResult{
-				Check:   "remote",
-				Action:  "none",
-				Status:  applyStatusOK,
-				Message: "Dolt remote configuration is consistent",
-			}
-		}
+		return applyRemoteDryRun(currentURL, federationRemote)
+	}
+	return applyRemoteWrite(ctx, st, currentURL, federationRemote)
+}
+
+func applyRemoteDryRun(currentURL, federationRemote string) ApplyResult {
+	if currentURL == "" {
 		return ApplyResult{
 			Check:   "remote",
-			Action:  "update_remote",
+			Action:  "add_remote",
 			Status:  applyStatusDryRun,
-			Message: fmt.Sprintf("Would update Dolt origin remote from %s to %s", currentURL, federationRemote),
+			Message: fmt.Sprintf("Would add Dolt origin remote: %s", federationRemote),
 		}
 	}
+	if remoteURLMatchesConfig(currentURL, federationRemote) {
+		return ApplyResult{
+			Check:   "remote",
+			Action:  "none",
+			Status:  applyStatusOK,
+			Message: "Dolt remote configuration is consistent",
+		}
+	}
+	return ApplyResult{
+		Check:   "remote",
+		Action:  "update_remote",
+		Status:  applyStatusDryRun,
+		Message: fmt.Sprintf("Would update Dolt origin remote from %s to %s", currentURL, federationRemote),
+	}
+}
 
+func applyRemoteWrite(ctx context.Context, st originRemoteMutator, currentURL, federationRemote string) ApplyResult {
 	if currentURL == "" {
 		if err := st.AddRemote(ctx, "origin", federationRemote); err != nil {
 			return ApplyResult{

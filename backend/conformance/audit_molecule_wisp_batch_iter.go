@@ -67,10 +67,10 @@ func auditHasRenamedEvent(events []*types.Event, oldID, newID string) bool {
 func testAuditMoleculeProgressTiebrokenCurrentStep(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-m", Title: "Mol", IssueType: types.TypeEpic}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-c1", Title: "c1", Status: types.StatusInProgress}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-c2", Title: "c2", Status: types.StatusInProgress}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-c3", Title: "c3", Status: types.StatusInProgress}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-m"}, IssueContent: types.IssueContent{Title: "Mol"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeEpic}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-c1"}, IssueContent: types.IssueContent{Title: "c1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-c2"}, IssueContent: types.IssueContent{Title: "c2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-c3"}, IssueContent: types.IssueContent{Title: "c3"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress}}), "a"))
 	parentChild(t, s, "test-c1", "test-m")
 	parentChild(t, s, "test-c2", "test-m")
 	parentChild(t, s, "test-c3", "test-m")
@@ -94,9 +94,9 @@ func testAuditMoleculeLastActivityStepClosed(t *testing.T, f Factory) {
 	y2022 := time.Date(2022, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	// Case 1: closed_at (2022) strictly after every updated_at (2021) => step_closed.
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-m1", Title: "M1", IssueType: types.TypeEpic}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-a", Title: "a", Status: types.StatusOpen, CreatedAt: y2021, UpdatedAt: y2021}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-b", Title: "b", Status: types.StatusClosed, CreatedAt: y2021, UpdatedAt: y2021, ClosedAt: &y2022}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-m1"}, IssueContent: types.IssueContent{Title: "M1"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeEpic}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-a"}, IssueContent: types.IssueContent{Title: "a"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueTimes: types.IssueTimes{CreatedAt: y2021, UpdatedAt: y2021}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-b"}, IssueContent: types.IssueContent{Title: "b"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}, IssueTimes: types.IssueTimes{CreatedAt: y2021, UpdatedAt: y2021, ClosedAt: &y2022}}), "a"))
 	parentChild(t, s, "test-a", "test-m1")
 	parentChild(t, s, "test-b", "test-m1")
 	la, err := s.GetMoleculeLastActivity(c, "test-m1")
@@ -106,8 +106,8 @@ func testAuditMoleculeLastActivityStepClosed(t *testing.T, f Factory) {
 	}
 
 	// Case 2: closed_at == max updated_at (both 2022) => strict After false => step_updated.
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-m2", Title: "M2", IssueType: types.TypeEpic}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-c", Title: "c", Status: types.StatusClosed, CreatedAt: y2021, UpdatedAt: y2022, ClosedAt: &y2022}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-m2"}, IssueContent: types.IssueContent{Title: "M2"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeEpic}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-c"}, IssueContent: types.IssueContent{Title: "c"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}, IssueTimes: types.IssueTimes{CreatedAt: y2021, UpdatedAt: y2022, ClosedAt: &y2022}}), "a"))
 	parentChild(t, s, "test-c", "test-m2")
 	la, err = s.GetMoleculeLastActivity(c, "test-m2")
 	must(t, err)
@@ -125,8 +125,8 @@ func testAuditMoleculeLastActivityWispRouting(t *testing.T, f Factory) {
 	y2024 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	// Wisp molecule with a wisp child: step_updated from the child.
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-wm", Title: "WM", Ephemeral: true}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-wc", Title: "wc", Status: types.StatusOpen, Ephemeral: true, CreatedAt: y2023, UpdatedAt: y2023}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-wm"}, IssueContent: types.IssueContent{Title: "WM"}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-wc"}, IssueContent: types.IssueContent{Title: "wc"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueTimes: types.IssueTimes{CreatedAt: y2023, UpdatedAt: y2023}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
 	parentChild(t, s, "test-wc", "test-wm")
 	la, err := s.GetMoleculeLastActivity(c, "test-wm")
 	must(t, err)
@@ -135,7 +135,7 @@ func testAuditMoleculeLastActivityWispRouting(t *testing.T, f Factory) {
 	}
 
 	// Childless wisp molecule: molecule_updated from its own updated_at.
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-wm0", Title: "WM0", Ephemeral: true, CreatedAt: y2024, UpdatedAt: y2024}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-wm0"}, IssueContent: types.IssueContent{Title: "WM0"}, IssueTimes: types.IssueTimes{CreatedAt: y2024, UpdatedAt: y2024}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
 	la, err = s.GetMoleculeLastActivity(c, "test-wm0")
 	must(t, err)
 	if la.Source != "molecule_updated" || !la.LastActivity.Equal(y2024) || la.SourceStepID != "" {
@@ -150,8 +150,8 @@ func testAuditMoleculeLastActivityWispRouting(t *testing.T, f Factory) {
 func testAuditPromoteAuxMigration(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-t", Title: "target"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-w", Title: "Wisp", Ephemeral: true, Labels: []string{"x"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-t"}, IssueContent: types.IssueContent{Title: "target"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-w"}, IssueContent: types.IssueContent{Title: "Wisp"}, IssueGraph: types.IssueGraph{Labels: []string{"x"}}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
 	if _, err := s.AddIssueComment(c, "test-w", "alice", "hello wisp"); err != nil {
 		t.Fatalf("AddIssueComment on wisp: %v", err)
 	}
@@ -185,8 +185,8 @@ func testAuditPromoteAuxMigration(t *testing.T, f Factory) {
 func testAuditPromoteInboundWispRetarget(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-w", Title: "W", Ephemeral: true}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-w2", Title: "W2", Ephemeral: true}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-w"}, IssueContent: types.IssueContent{Title: "W"}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-w2"}, IssueContent: types.IssueContent{Title: "W2"}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
 	must(t, s.AddDependency(c, &types.Dependency{IssueID: "test-w2", DependsOnID: "test-w", Type: types.DepBlocks}, "a"))
 
 	must(t, s.PromoteFromEphemeral(c, "test-w", "a"))
@@ -209,10 +209,10 @@ func testAuditUpdateIssueIDWispRename(t *testing.T, f Factory) {
 	c := ctx()
 
 	// Part A: rename a wisp that is a dependency TARGET.
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-wa1", Title: "WA1", Ephemeral: true}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-wa2", Title: "WA2", Ephemeral: true}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-wa1"}, IssueContent: types.IssueContent{Title: "WA1"}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-wa2"}, IssueContent: types.IssueContent{Title: "WA2"}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
 	must(t, s.AddDependency(c, &types.Dependency{IssueID: "test-wa2", DependsOnID: "test-wa1", Type: types.DepBlocks}, "a"))
-	must(t, s.UpdateIssueID(c, "test-wa1", "test-wa9", &types.Issue{Title: "WA9"}, "a"))
+	must(t, s.UpdateIssueID(c, "test-wa1", "test-wa9", &types.Issue{IssueContent: types.IssueContent{Title: "WA9"}}, "a"))
 	if got, err := s.GetIssue(c, "test-wa9"); err != nil || !got.Ephemeral {
 		t.Fatalf("test-wa9 after rename = (%+v,%v), want ephemeral", got, err)
 	}
@@ -225,10 +225,10 @@ func testAuditUpdateIssueIDWispRename(t *testing.T, f Factory) {
 	}
 
 	// Part B: rename a wisp that is a dependency SOURCE.
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-wb1", Title: "WB1", Ephemeral: true}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-wb2", Title: "WB2", Ephemeral: true}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-wb1"}, IssueContent: types.IssueContent{Title: "WB1"}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-wb2"}, IssueContent: types.IssueContent{Title: "WB2"}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
 	must(t, s.AddDependency(c, &types.Dependency{IssueID: "test-wb2", DependsOnID: "test-wb1", Type: types.DepBlocks}, "a"))
-	must(t, s.UpdateIssueID(c, "test-wb2", "test-wb8", &types.Issue{Title: "WB8"}, "a"))
+	must(t, s.UpdateIssueID(c, "test-wb2", "test-wb8", &types.Issue{IssueContent: types.IssueContent{Title: "WB8"}}, "a"))
 	recs, _ = s.GetAllDependencyRecords(c)
 	if got := auditDepTargets(recs["test-wb8"]); !slices.Equal(got, []string{"test-wb1"}) {
 		t.Errorf("wisp source rename: dep = %v, want [test-wb1]", got)
@@ -243,11 +243,11 @@ func testAuditUpdateIssueIDWispRename(t *testing.T, f Factory) {
 func testAuditUpdateIssueIDDurableSourceRename(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-0", Title: "Zero"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-1", Title: "One"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-0"}, IssueContent: types.IssueContent{Title: "Zero"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-1"}, IssueContent: types.IssueContent{Title: "One"}}), "a"))
 	must(t, s.AddDependency(c, &types.Dependency{IssueID: "test-1", DependsOnID: "test-0", Type: types.DepBlocks}, "a"))
 
-	must(t, s.UpdateIssueID(c, "test-1", "test-9", &types.Issue{Title: "One"}, "a"))
+	must(t, s.UpdateIssueID(c, "test-1", "test-9", &types.Issue{IssueContent: types.IssueContent{Title: "One"}}, "a"))
 
 	if _, err := s.GetIssue(c, "test-1"); !errors.Is(err, storage.ErrNotFound) {
 		t.Errorf("old id = %v, want ErrNotFound", err)
@@ -266,10 +266,10 @@ func testAuditUpdateIssueIDDurableSourceRename(t *testing.T, f Factory) {
 func testAuditUpdateIssueIDCollision(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-1", Title: "One"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-2", Title: "Two"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-1"}, IssueContent: types.IssueContent{Title: "One"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-2"}, IssueContent: types.IssueContent{Title: "Two"}}), "a"))
 
-	if err := s.UpdateIssueID(c, "test-1", "test-2", &types.Issue{Title: "One"}, "a"); err == nil {
+	if err := s.UpdateIssueID(c, "test-1", "test-2", &types.Issue{IssueContent: types.IssueContent{Title: "One"}}, "a"); err == nil {
 		t.Fatal("rename onto existing id: want error, got nil")
 	}
 	if got, err := s.GetIssue(c, "test-1"); err != nil || got.Title != "One" {
@@ -286,9 +286,9 @@ func testAuditUpdateIssueIDCollision(t *testing.T, f Factory) {
 func testAuditUpdateIssueIDColumnSubset(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-1", Title: "Old", Description: "olddesc", Priority: 3, Status: types.StatusInProgress}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-1"}, IssueContent: types.IssueContent{Title: "Old", Description: "olddesc"}, IssueWorkflow: types.IssueWorkflow{Priority: 3, Status: types.StatusInProgress}}), "a"))
 
-	must(t, s.UpdateIssueID(c, "test-1", "test-9", &types.Issue{Title: "New", Description: "D", Priority: 0, Status: types.StatusOpen}, "a"))
+	must(t, s.UpdateIssueID(c, "test-1", "test-9", &types.Issue{IssueContent: types.IssueContent{Title: "New", Description: "D"}, IssueWorkflow: types.IssueWorkflow{Priority: 0, Status: types.StatusOpen}}, "a"))
 
 	got, err := s.GetIssue(c, "test-9")
 	must(t, err)
@@ -315,10 +315,10 @@ func testAuditUpdateIssueIDColumnSubset(t *testing.T, f Factory) {
 func testAuditDeleteBySourceRepoEmptyString(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-1", Title: "A"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-2", Title: "B"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-3", Title: "C", SourceRepo: "repoY"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-w", Title: "W", Ephemeral: true}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-1"}, IssueContent: types.IssueContent{Title: "A"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-2"}, IssueContent: types.IssueContent{Title: "B"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-3"}, IssueContent: types.IssueContent{Title: "C"}, IssueGraph: types.IssueGraph{SourceRepo: "repoY"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-w"}, IssueContent: types.IssueContent{Title: "W"}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
 
 	n, err := s.DeleteIssuesBySourceRepo(c, "")
 	must(t, err)
@@ -347,9 +347,9 @@ func testAuditDeleteBySourceRepoDependencyCascade(t *testing.T, f Factory) {
 	// test-del is both a dependency TARGET (of test-keep) and a SOURCE (of
 	// test-other); both edges must cascade-delete with test-del. Distinct
 	// targets avoid a blocks-cycle rejection at AddDependency time.
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-keep", Title: "keep", SourceRepo: "repoY"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-other", Title: "other", SourceRepo: "repoY"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-del", Title: "del", SourceRepo: "repoX"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-keep"}, IssueContent: types.IssueContent{Title: "keep"}, IssueGraph: types.IssueGraph{SourceRepo: "repoY"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-other"}, IssueContent: types.IssueContent{Title: "other"}, IssueGraph: types.IssueGraph{SourceRepo: "repoY"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-del"}, IssueContent: types.IssueContent{Title: "del"}, IssueGraph: types.IssueGraph{SourceRepo: "repoX"}}), "a"))
 	must(t, s.AddDependency(c, &types.Dependency{IssueID: "test-keep", DependsOnID: "test-del", Type: types.DepBlocks}, "a"))
 	must(t, s.AddDependency(c, &types.Dependency{IssueID: "test-del", DependsOnID: "test-other", Type: types.DepBlocks}, "a"))
 
@@ -388,11 +388,11 @@ func testAuditCreateRejectStaleUpserts(t *testing.T, f Factory) {
 	y2022 := time.Date(2022, 1, 1, 0, 0, 0, 0, time.UTC)
 	opts := storage.BatchCreateOptions{SkipPrefixValidation: true, RejectStaleUpserts: true}
 
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-r", Title: "Orig", CreatedAt: y2021, UpdatedAt: y2021}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-r"}, IssueContent: types.IssueContent{Title: "Orig"}, IssueTimes: types.IssueTimes{CreatedAt: y2021, UpdatedAt: y2021}}), "a"))
 
 	// (a) Older incoming row rejected: stored 'Orig' kept.
 	must(t, s.CreateIssuesWithFullOptions(c, []*types.Issue{
-		withDefaults(&types.Issue{ID: "test-r", Title: "Stale", CreatedAt: y2020, UpdatedAt: y2020}),
+		withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-r"}, IssueContent: types.IssueContent{Title: "Stale"}, IssueTimes: types.IssueTimes{CreatedAt: y2020, UpdatedAt: y2020}}),
 	}, "a", opts))
 	if got, _ := s.GetIssue(c, "test-r"); got.Title != "Orig" {
 		t.Errorf("(a) title = %q, want Orig (older rejected)", got.Title)
@@ -400,7 +400,7 @@ func testAuditCreateRejectStaleUpserts(t *testing.T, f Factory) {
 
 	// (b) Newer incoming row overwrites.
 	must(t, s.CreateIssuesWithFullOptions(c, []*types.Issue{
-		withDefaults(&types.Issue{ID: "test-r", Title: "Fresh", CreatedAt: y2022, UpdatedAt: y2022}),
+		withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-r"}, IssueContent: types.IssueContent{Title: "Fresh"}, IssueTimes: types.IssueTimes{CreatedAt: y2022, UpdatedAt: y2022}}),
 	}, "a", opts))
 	if got, _ := s.GetIssue(c, "test-r"); got.Title != "Fresh" {
 		t.Errorf("(b) title = %q, want Fresh (newer overwrites)", got.Title)
@@ -408,7 +408,7 @@ func testAuditCreateRejectStaleUpserts(t *testing.T, f Factory) {
 
 	// (c) Equal timestamp: stored column kept (local wins the same-second tie).
 	must(t, s.CreateIssuesWithFullOptions(c, []*types.Issue{
-		withDefaults(&types.Issue{ID: "test-r", Title: "Tie", CreatedAt: y2022, UpdatedAt: y2022}),
+		withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-r"}, IssueContent: types.IssueContent{Title: "Tie"}, IssueTimes: types.IssueTimes{CreatedAt: y2022, UpdatedAt: y2022}}),
 	}, "a", opts))
 	if got, _ := s.GetIssue(c, "test-r"); got.Title != "Fresh" {
 		t.Errorf("(c) title = %q, want Fresh (equal ts => stored column kept)", got.Title)
@@ -421,8 +421,8 @@ func testAuditCreateAllWispsFastPath(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
 	must(t, s.CreateIssuesWithFullOptions(c, []*types.Issue{
-		withDefaults(&types.Issue{ID: "test-w1", Title: "W1", Ephemeral: true}),
-		withDefaults(&types.Issue{ID: "test-w2", Title: "W2", Ephemeral: true, Labels: []string{"x"}}),
+		withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-w1"}, IssueContent: types.IssueContent{Title: "W1"}, IssueWisp: types.IssueWisp{Ephemeral: true}}),
+		withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-w2"}, IssueContent: types.IssueContent{Title: "W2"}, IssueGraph: types.IssueGraph{Labels: []string{"x"}}, IssueWisp: types.IssueWisp{Ephemeral: true}}),
 	}, "a", storage.BatchCreateOptions{SkipPrefixValidation: true}))
 
 	for _, id := range []string{"test-w1", "test-w2"} {
@@ -467,11 +467,24 @@ func testAuditCreateAllWispsInlineDependencies(t *testing.T, f Factory) {
 	// before the dependency pass, so it resolves to the wisp bucket). test-w2 ->
 	// test-missing targets a nonexistent issue and must be reported skipped.
 	must(t, s.CreateIssuesWithFullOptions(c, []*types.Issue{
-		withDefaults(&types.Issue{ID: "test-w1", Title: "W1", Ephemeral: true}),
-		withDefaults(&types.Issue{ID: "test-w2", Title: "W2", Ephemeral: true, Dependencies: []*types.Dependency{
-			{IssueID: "test-w2", DependsOnID: "test-w1", Type: types.DepBlocks},
-			{IssueID: "test-w2", DependsOnID: "test-missing", Type: types.DepBlocks},
-		}}),
+		withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-w1"}, IssueContent: types.IssueContent{Title: "W1"}, IssueWisp: types.IssueWisp{Ephemeral: true}}),
+		withDefaults(&types.Issue{
+			IssueID: types.IssueID{
+				ID: "test-w2",
+			},
+			IssueContent: types.IssueContent{
+				Title: "W2",
+			},
+			IssueGraph: types.IssueGraph{
+				Dependencies: []*types.Dependency{
+					{IssueID: "test-w2", DependsOnID: "test-w1", Type: types.DepBlocks},
+					{IssueID: "test-w2", DependsOnID: "test-missing", Type: types.DepBlocks},
+				},
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
+		}),
 	}, "a", opts))
 
 	// Both wisps persisted to the wisp bucket.
@@ -510,8 +523,8 @@ func testAuditCreateCrossBucketDependency(t *testing.T, f Factory) {
 
 	// (a) Rejected: neither issue persists.
 	err := s.CreateIssuesWithFullOptions(c, []*types.Issue{
-		withDefaults(&types.Issue{ID: "test-a", Title: "A"}),
-		withDefaults(&types.Issue{ID: "test-b", Title: "B", Ephemeral: true, Dependencies: []*types.Dependency{{IssueID: "test-b", DependsOnID: "test-a", Type: types.DepBlocks}}}),
+		withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-a"}, IssueContent: types.IssueContent{Title: "A"}}),
+		withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-b"}, IssueContent: types.IssueContent{Title: "B"}, IssueGraph: types.IssueGraph{Dependencies: []*types.Dependency{{IssueID: "test-b", DependsOnID: "test-a", Type: types.DepBlocks}}}, IssueWisp: types.IssueWisp{Ephemeral: true}}),
 	}, "a", storage.BatchCreateOptions{SkipPrefixValidation: true})
 	if err == nil {
 		t.Fatal("(a) cross-bucket batch: want error, got nil")
@@ -522,8 +535,8 @@ func testAuditCreateCrossBucketDependency(t *testing.T, f Factory) {
 
 	// (b) With skip: both persist, edge dropped.
 	must(t, s.CreateIssuesWithFullOptions(c, []*types.Issue{
-		withDefaults(&types.Issue{ID: "test-c", Title: "C"}),
-		withDefaults(&types.Issue{ID: "test-d", Title: "D", Ephemeral: true, Dependencies: []*types.Dependency{{IssueID: "test-d", DependsOnID: "test-c", Type: types.DepBlocks}}}),
+		withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-c"}, IssueContent: types.IssueContent{Title: "C"}}),
+		withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-d"}, IssueContent: types.IssueContent{Title: "D"}, IssueGraph: types.IssueGraph{Dependencies: []*types.Dependency{{IssueID: "test-d", DependsOnID: "test-c", Type: types.DepBlocks}}}, IssueWisp: types.IssueWisp{Ephemeral: true}}),
 	}, "a", storage.BatchCreateOptions{SkipPrefixValidation: true, SkipDependencyValidationErrors: true}))
 	if _, err := s.GetIssue(c, "test-c"); err != nil {
 		t.Errorf("(b) test-c missing: %v", err)
@@ -545,8 +558,8 @@ func testAuditCreateInBatchCycle(t *testing.T, f Factory) {
 
 	// (a) Rejected.
 	err := s.CreateIssuesWithFullOptions(c, []*types.Issue{
-		withDefaults(&types.Issue{ID: "test-a", Title: "A", Dependencies: []*types.Dependency{{IssueID: "test-a", DependsOnID: "test-b", Type: types.DepBlocks}}}),
-		withDefaults(&types.Issue{ID: "test-b", Title: "B", Dependencies: []*types.Dependency{{IssueID: "test-b", DependsOnID: "test-a", Type: types.DepBlocks}}}),
+		withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-a"}, IssueContent: types.IssueContent{Title: "A"}, IssueGraph: types.IssueGraph{Dependencies: []*types.Dependency{{IssueID: "test-a", DependsOnID: "test-b", Type: types.DepBlocks}}}}),
+		withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-b"}, IssueContent: types.IssueContent{Title: "B"}, IssueGraph: types.IssueGraph{Dependencies: []*types.Dependency{{IssueID: "test-b", DependsOnID: "test-a", Type: types.DepBlocks}}}}),
 	}, "a", storage.BatchCreateOptions{SkipPrefixValidation: true})
 	if err == nil {
 		t.Fatal("(a) cyclic batch: want error, got nil")
@@ -558,8 +571,8 @@ func testAuditCreateInBatchCycle(t *testing.T, f Factory) {
 
 	// (b) With skip: both persist, cyclic edge dropped.
 	must(t, s.CreateIssuesWithFullOptions(c, []*types.Issue{
-		withDefaults(&types.Issue{ID: "test-c", Title: "C", Dependencies: []*types.Dependency{{IssueID: "test-c", DependsOnID: "test-d", Type: types.DepBlocks}}}),
-		withDefaults(&types.Issue{ID: "test-d", Title: "D", Dependencies: []*types.Dependency{{IssueID: "test-d", DependsOnID: "test-c", Type: types.DepBlocks}}}),
+		withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-c"}, IssueContent: types.IssueContent{Title: "C"}, IssueGraph: types.IssueGraph{Dependencies: []*types.Dependency{{IssueID: "test-c", DependsOnID: "test-d", Type: types.DepBlocks}}}}),
+		withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-d"}, IssueContent: types.IssueContent{Title: "D"}, IssueGraph: types.IssueGraph{Dependencies: []*types.Dependency{{IssueID: "test-d", DependsOnID: "test-c", Type: types.DepBlocks}}}}),
 	}, "a", storage.BatchCreateOptions{SkipPrefixValidation: true, SkipDependencyValidationErrors: true}))
 	if _, err := s.GetIssue(c, "test-c"); err != nil {
 		t.Errorf("(b) test-c missing: %v", err)
@@ -576,11 +589,11 @@ func testAuditCreateInBatchCycle(t *testing.T, f Factory) {
 func testAuditListWisps(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-whi", Title: "hi", Priority: 0, Ephemeral: true}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-wlo", Title: "lo", Priority: 4, Ephemeral: true}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-wmid", Title: "mid", Priority: 2, Ephemeral: true}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-wclosed", Title: "closed", Priority: 1, Status: types.StatusClosed, Ephemeral: true}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-d1", Title: "durable"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-whi"}, IssueContent: types.IssueContent{Title: "hi"}, IssueWorkflow: types.IssueWorkflow{Priority: 0}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-wlo"}, IssueContent: types.IssueContent{Title: "lo"}, IssueWorkflow: types.IssueWorkflow{Priority: 4}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-wmid"}, IssueContent: types.IssueContent{Title: "mid"}, IssueWorkflow: types.IssueWorkflow{Priority: 2}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-wclosed"}, IssueContent: types.IssueContent{Title: "closed"}, IssueWorkflow: types.IssueWorkflow{Priority: 1, Status: types.StatusClosed}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-d1"}, IssueContent: types.IssueContent{Title: "durable"}}), "a"))
 
 	def, err := s.ListWisps(c, types.WispFilter{})
 	must(t, err)
@@ -609,7 +622,7 @@ func testAuditListWisps(t *testing.T, f Factory) {
 func testAuditGetNextChildID(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-p", Title: "P"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-p"}, IssueContent: types.IssueContent{Title: "P"}}), "a"))
 
 	id1, err := s.GetNextChildID(c, "test-p")
 	must(t, err)
@@ -624,8 +637,8 @@ func testAuditGetNextChildID(t *testing.T, f Factory) {
 
 	// Seed a direct child (5) and a grandchild (5.1); the scan self-heals to 5,
 	// excluding the grandchild.
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-p.5", Title: "c5"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-p.5.1", Title: "gc"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-p.5"}, IssueContent: types.IssueContent{Title: "c5"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-p.5.1"}, IssueContent: types.IssueContent{Title: "gc"}}), "a"))
 	id3, err := s.GetNextChildID(c, "test-p")
 	must(t, err)
 	if id3 != "test-p.6" {
@@ -633,7 +646,7 @@ func testAuditGetNextChildID(t *testing.T, f Factory) {
 	}
 
 	// Wisp parent routes to wisp tables.
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-wp", Title: "WP", Ephemeral: true}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-wp"}, IssueContent: types.IssueContent{Title: "WP"}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
 	wid, err := s.GetNextChildID(c, "test-wp")
 	must(t, err)
 	if wid != "test-wp.1" {
@@ -647,9 +660,9 @@ func testAuditGetNextChildID(t *testing.T, f Factory) {
 func testAuditGetNextChildIDCaseSensitive(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-q", Title: "lower parent"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-Q", Title: "upper parent"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-Q.7", Title: "upper child"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-q"}, IssueContent: types.IssueContent{Title: "lower parent"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-Q"}, IssueContent: types.IssueContent{Title: "upper parent"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-Q.7"}, IssueContent: types.IssueContent{Title: "upper child"}}), "a"))
 
 	id, err := s.GetNextChildID(c, "test-q")
 	must(t, err)

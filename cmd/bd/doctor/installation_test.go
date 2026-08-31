@@ -69,7 +69,7 @@ func TestCheckPermissions(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		ss := &SharedStore{beadsDir: bareBeadsDir}
+		ss := &SharedStore{state: sharedStoreState{beadsDir: bareBeadsDir}}
 		check := CheckPermissionsWithStore(worktreeDir, ss)
 
 		if check.Status != StatusOK {

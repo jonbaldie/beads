@@ -94,11 +94,7 @@ func CheckPermissions(path string) DoctorCheck {
 // If the shared store was opened successfully, the database is accessible.
 func CheckPermissionsWithStore(path string, ss *SharedStore) DoctorCheck {
 	beadsDir := beadsDirFromSharedStore(path, ss)
-	store := ss.Store()
-
-	// Check if .beads/ is writable
-	testFile := filepath.Join(beadsDir, ".doctor-test-write")
-	if err := os.WriteFile(testFile, []byte("test"), 0600); err != nil {
+	if err := probeBeadsWritable(beadsDir); err != nil {
 		return DoctorCheck{
 			Name:    "Permissions",
 			Status:  StatusError,
@@ -106,50 +102,69 @@ func CheckPermissionsWithStore(path string, ss *SharedStore) DoctorCheck {
 			Fix:     "Run 'bd doctor --fix' to fix permissions",
 		}
 	}
+	if check, done := checkDoltPermissions(beadsDir, ss); done {
+		return check
+	}
+	return okPermissions()
+}
+
+func probeBeadsWritable(beadsDir string) error {
+	testFile := filepath.Join(beadsDir, ".doctor-test-write")
+	if err := os.WriteFile(testFile, []byte("test"), 0600); err != nil {
+		return err
+	}
 	_ = os.Remove(testFile)
+	return nil
+}
 
-	// Check Dolt database directory permissions
+func checkDoltPermissions(beadsDir string, ss *SharedStore) (DoctorCheck, bool) {
 	cfg, err := configfile.Load(beadsDir)
-	if err == nil && cfg != nil && cfg.GetBackend() == configfile.BackendDolt {
-		if cfg.IsDoltServerMode() {
-			if store == nil {
-				return DoctorCheck{
-					Name:    "Permissions",
-					Status:  StatusError,
-					Message: "Unable to verify Dolt server-backed database permissions",
-					Fix:     "Check 'bd dolt status' for server availability, then re-run 'bd doctor'",
-				}
-			}
-			return DoctorCheck{
-				Name:    "Permissions",
-				Status:  StatusOK,
-				Message: "All permissions OK",
-			}
-		}
+	if err != nil || cfg == nil || cfg.GetBackend() != configfile.BackendDolt {
+		return DoctorCheck{}, false
+	}
+	if cfg.IsDoltServerMode() {
+		return doltServerPermissions(ss.Store()), true
+	}
+	return doltDirPermissions(beadsDir, ss.Store())
+}
 
-		doltPath := getDatabasePath(beadsDir)
-		if info, err := os.Stat(doltPath); err == nil {
-			if !info.IsDir() {
-				return DoctorCheck{
-					Name:    "Permissions",
-					Status:  StatusError,
-					Message: "dolt/ is not a directory",
-					Fix:     "Run 'bd doctor --fix' to fix permissions",
-				}
-			}
-			// If shared store is nil, the database could not be opened
-			if store == nil {
-				return DoctorCheck{
-					Name:    "Permissions",
-					Status:  StatusError,
-					Message: "Dolt database exists but cannot be opened",
-					Fix:     "Run 'bd doctor --fix' to fix permissions",
-				}
-			}
-			// Shared store was opened successfully — database is accessible
+func doltServerPermissions(store *dolt.DoltStore) DoctorCheck {
+	if store == nil {
+		return DoctorCheck{
+			Name:    "Permissions",
+			Status:  StatusError,
+			Message: "Unable to verify Dolt server-backed database permissions",
+			Fix:     "Check 'bd dolt status' for server availability, then re-run 'bd doctor'",
 		}
 	}
+	return okPermissions()
+}
 
+func doltDirPermissions(beadsDir string, store *dolt.DoltStore) (DoctorCheck, bool) {
+	info, err := os.Stat(getDatabasePath(beadsDir))
+	if err != nil {
+		return DoctorCheck{}, false
+	}
+	if !info.IsDir() {
+		return DoctorCheck{
+			Name:    "Permissions",
+			Status:  StatusError,
+			Message: "dolt/ is not a directory",
+			Fix:     "Run 'bd doctor --fix' to fix permissions",
+		}, true
+	}
+	if store == nil {
+		return DoctorCheck{
+			Name:    "Permissions",
+			Status:  StatusError,
+			Message: "Dolt database exists but cannot be opened",
+			Fix:     "Run 'bd doctor --fix' to fix permissions",
+		}, true
+	}
+	return DoctorCheck{}, false
+}
+
+func okPermissions() DoctorCheck {
 	return DoctorCheck{
 		Name:    "Permissions",
 		Status:  StatusOK,
@@ -162,69 +177,73 @@ func CheckPermissionsWithStore(path string, ss *SharedStore) DoctorCheck {
 // In sync-branch mode, JSONL files are intentionally untracked in working branches
 // and only committed to the dedicated sync branch (GH#858).
 func CheckUntrackedBeadsFiles(path string) DoctorCheck {
-	backend, _ := getBackendAndBeadsDir(path)
+	if check, skip := skipUntrackedBeadsCheck(path); skip {
+		return check
+	}
+	untrackedJSONL, check, ok := listUntrackedJSONL(resolvedBeadsRepoRoot(path))
+	if !ok {
+		return check
+	}
+	return reportUntrackedJSONL(untrackedJSONL)
+}
 
-	// Dolt backends store data on the server, not in JSONL files
+func skipUntrackedBeadsCheck(path string) (DoctorCheck, bool) {
+	backend, _ := getBackendAndBeadsDir(path)
 	if backend == configfile.BackendDolt {
 		return DoctorCheck{
 			Name:    "Untracked Files",
 			Status:  StatusOK,
 			Message: "N/A (Dolt backend stores data on server)",
-		}
+		}, true
 	}
-
-	beadsDir := ResolveBeadsDirForRepo(path)
-	repoRoot := resolvedBeadsRepoRoot(path)
-
-	// Skip if .beads doesn't exist
-	if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
+	if _, err := os.Stat(ResolveBeadsDirForRepo(path)); os.IsNotExist(err) {
 		return DoctorCheck{
 			Name:    "Untracked Files",
 			Status:  StatusOK,
 			Message: "N/A (no .beads directory)",
-		}
+		}, true
 	}
-
-	// Check if we're in a git repository using worktree-aware detection
-	_, err := git.GetGitDir()
-	if err != nil {
+	if _, err := git.GetGitDir(); err != nil {
 		return DoctorCheck{
 			Name:    "Untracked Files",
 			Status:  StatusOK,
 			Message: "N/A (not a git repository)",
-		}
+		}, true
 	}
+	return DoctorCheck{}, false
+}
 
-	// Run git status --porcelain to find untracked files in .beads/
+func listUntrackedJSONL(repoRoot string) ([]string, DoctorCheck, bool) {
 	cmd := exec.Command("git", "status", "--porcelain", ".beads/")
 	cmd.Dir = repoRoot
 	output, err := cmd.Output()
 	if err != nil {
-		return DoctorCheck{
+		return nil, DoctorCheck{
 			Name:    "Untracked Files",
 			Status:  StatusWarning,
 			Message: "Unable to check git status",
 			Detail:  err.Error(),
-		}
+		}, false
 	}
+	return parseUntrackedJSONL(string(output)), DoctorCheck{}, true
+}
 
-	// Parse output for untracked JSONL files (lines starting with "??")
+func parseUntrackedJSONL(output string) []string {
 	var untrackedJSONL []string
-	for _, line := range strings.Split(string(output), "\n") {
+	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" {
+		if !strings.HasPrefix(line, "?? ") {
 			continue
 		}
-		// Untracked files start with "?? "
-		if strings.HasPrefix(line, "?? ") {
-			file := strings.TrimPrefix(line, "?? ")
-			// Only care about .jsonl files
-			if strings.HasSuffix(file, ".jsonl") {
-				untrackedJSONL = append(untrackedJSONL, filepath.Base(file))
-			}
+		file := strings.TrimPrefix(line, "?? ")
+		if strings.HasSuffix(file, ".jsonl") {
+			untrackedJSONL = append(untrackedJSONL, filepath.Base(file))
 		}
 	}
+	return untrackedJSONL
+}
 
+func reportUntrackedJSONL(untrackedJSONL []string) DoctorCheck {
 	if len(untrackedJSONL) == 0 {
 		return DoctorCheck{
 			Name:    "Untracked Files",
@@ -232,7 +251,6 @@ func CheckUntrackedBeadsFiles(path string) DoctorCheck {
 			Message: "All .beads/*.jsonl files are tracked",
 		}
 	}
-
 	return DoctorCheck{
 		Name:    "Untracked Files",
 		Status:  StatusWarning,

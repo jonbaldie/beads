@@ -21,55 +21,81 @@ func TestIsMachineCheckableGate(t *testing.T) {
 		{
 			name: "non-gate issue",
 			issue: &types.Issue{
-				IssueType: "task",
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: "task",
+				},
 			},
 			want: false,
 		},
 		{
 			name: "gate with human await type",
 			issue: &types.Issue{
-				IssueType: "gate",
-				AwaitType: "human",
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: "gate",
+				},
+				IssueCoord: types.IssueCoord{
+					AwaitType: "human",
+				},
 			},
 			want: false,
 		},
 		{
 			name: "gate with gh:pr await type",
 			issue: &types.Issue{
-				IssueType: "gate",
-				AwaitType: "gh:pr",
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: "gate",
+				},
+				IssueCoord: types.IssueCoord{
+					AwaitType: "gh:pr",
+				},
 			},
 			want: true,
 		},
 		{
 			name: "gate with gh:run await type",
 			issue: &types.Issue{
-				IssueType: "gate",
-				AwaitType: "gh:run",
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: "gate",
+				},
+				IssueCoord: types.IssueCoord{
+					AwaitType: "gh:run",
+				},
 			},
 			want: true,
 		},
 		{
 			name: "gate with timer await type",
 			issue: &types.Issue{
-				IssueType: "gate",
-				AwaitType: "timer",
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: "gate",
+				},
+				IssueCoord: types.IssueCoord{
+					AwaitType: "timer",
+				},
 			},
 			want: true,
 		},
 		{
 			name: "gate with bead await type",
 			issue: &types.Issue{
-				IssueType: "gate",
-				AwaitType: "bead",
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: "gate",
+				},
+				IssueCoord: types.IssueCoord{
+					AwaitType: "bead",
+				},
 			},
 			want: true,
 		},
 		{
 			name: "gate with empty await type",
 			issue: &types.Issue{
-				IssueType: "gate",
-				AwaitType: "",
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: "gate",
+				},
+				IssueCoord: types.IssueCoord{
+					AwaitType: "",
+				},
 			},
 			want: false,
 		},
@@ -98,23 +124,37 @@ func TestCheckGateSatisfaction_NonGateIssues(t *testing.T) {
 		{
 			name: "task issue",
 			issue: &types.Issue{
-				IssueType: "task",
-				Title:     "Regular task",
+				IssueContent: types.IssueContent{
+					Title: "Regular task",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: "task",
+				},
 			},
 		},
 		{
 			name: "bug issue",
 			issue: &types.Issue{
-				IssueType: "bug",
-				Title:     "A bug",
+				IssueContent: types.IssueContent{
+					Title: "A bug",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: "bug",
+				},
 			},
 		},
 		{
 			name: "gate with human await (not machine-checkable)",
 			issue: &types.Issue{
-				IssueType: "gate",
-				AwaitType: "human",
-				Title:     "Human gate",
+				IssueContent: types.IssueContent{
+					Title: "Human gate",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: "gate",
+				},
+				IssueCoord: types.IssueCoord{
+					AwaitType: "human",
+				},
 			},
 		},
 	}
@@ -132,10 +172,16 @@ func TestCheckGateSatisfaction_NonGateIssues(t *testing.T) {
 func TestCheckGateSatisfaction_GHPRWithoutAwaitID(t *testing.T) {
 	// gh:pr gate without an await_id is unsatisfied (no PR to check)
 	issue := &types.Issue{
-		IssueType: "gate",
-		AwaitType: "gh:pr",
-		AwaitID:   "",
-		Title:     "PR gate without ID",
+		IssueContent: types.IssueContent{
+			Title: "PR gate without ID",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: "gate",
+		},
+		IssueCoord: types.IssueCoord{
+			AwaitType: "gh:pr",
+			AwaitID:   "",
+		},
 	}
 
 	err := checkGateSatisfaction(issue)
@@ -150,10 +196,16 @@ func TestCheckGateSatisfaction_GHPRWithoutAwaitID(t *testing.T) {
 func TestCheckGateSatisfaction_GHRunWithoutAwaitID(t *testing.T) {
 	// gh:run gate without an await_id is unsatisfied (no run to check)
 	issue := &types.Issue{
-		IssueType: "gate",
-		AwaitType: "gh:run",
-		AwaitID:   "",
-		Title:     "Run gate without ID",
+		IssueContent: types.IssueContent{
+			Title: "Run gate without ID",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: "gate",
+		},
+		IssueCoord: types.IssueCoord{
+			AwaitType: "gh:run",
+			AwaitID:   "",
+		},
 	}
 
 	err := checkGateSatisfaction(issue)
@@ -168,10 +220,16 @@ func TestCheckGateSatisfaction_GHRunWithoutAwaitID(t *testing.T) {
 func TestCheckGateSatisfaction_BeadGateInvalidFormat(t *testing.T) {
 	// bead gate with invalid await_id should return an error
 	issue := &types.Issue{
-		IssueType: "gate",
-		AwaitType: "bead",
-		AwaitID:   "invalid-no-colon",
-		Title:     "Bead gate with bad format",
+		IssueContent: types.IssueContent{
+			Title: "Bead gate with bad format",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: "gate",
+		},
+		IssueCoord: types.IssueCoord{
+			AwaitType: "bead",
+			AwaitID:   "invalid-no-colon",
+		},
 	}
 
 	err := checkGateSatisfaction(issue)
@@ -183,10 +241,16 @@ func TestCheckGateSatisfaction_BeadGateInvalidFormat(t *testing.T) {
 func TestCheckGateSatisfaction_ErrorMessageFormat(t *testing.T) {
 	// Verify error messages contain the force override hint
 	issue := &types.Issue{
-		IssueType: "gate",
-		AwaitType: "bead",
-		AwaitID:   "invalid-no-colon",
-		Title:     "Test gate",
+		IssueContent: types.IssueContent{
+			Title: "Test gate",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: "gate",
+		},
+		IssueCoord: types.IssueCoord{
+			AwaitType: "bead",
+			AwaitID:   "invalid-no-colon",
+		},
 	}
 
 	err := checkGateSatisfaction(issue)

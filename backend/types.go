@@ -23,10 +23,25 @@ type (
 	Event                       = types.Event
 	EventType                   = types.EventType
 	Issue                       = types.Issue
+	IssueContent                = types.IssueContent
+	IssueCoord                  = types.IssueCoord
 	IssueDetails                = types.IssueDetails
+	IssueEvent                  = types.IssueEvent
 	IssueFilter                 = types.IssueFilter
+	IssueFilterCore             = types.IssueFilterCore
+	IssueFilterFlags            = types.IssueFilterFlags
+	IssueFilterHydrate          = types.IssueFilterHydrate
+	IssueFilterMatch            = types.IssueFilterMatch
+	IssueFilterPage             = types.IssueFilterPage
+	IssueGraph                  = types.IssueGraph
+	IssueID                     = types.IssueID
+	IssueLease                  = types.IssueLease
+	IssueMeta                   = types.IssueMeta
 	IssueSnapshot               = types.IssueSnapshot
+	IssueTimes                  = types.IssueTimes
 	IssueType                   = types.IssueType
+	IssueWisp                   = types.IssueWisp
+	IssueWorkflow               = types.IssueWorkflow
 	IssueWithCounts             = types.IssueWithCounts
 	IssueWithDependencyMetadata = types.IssueWithDependencyMetadata
 	Label                       = types.Label
@@ -48,6 +63,8 @@ type (
 	WispFilter                  = types.WispFilter
 	WispType                    = types.WispType
 	WorkFilter                  = types.WorkFilter
+	WorkFilterCore              = types.WorkFilterCore
+	WorkFilterExtra             = types.WorkFilterExtra
 	WorkType                    = types.WorkType
 )
 

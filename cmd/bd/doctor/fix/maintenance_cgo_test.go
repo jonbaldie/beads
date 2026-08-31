@@ -39,7 +39,11 @@ func TestPatrolPollution_DeletesFromDoltWithoutJSONL(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	store, err := dolt.NewFromConfigWithOptions(ctx, beadsDir, &dolt.Config{CreateIfMissing: true})
+	store, err := dolt.NewFromConfigWithOptions(ctx, beadsDir, &dolt.Config{
+		RemoteOptions: dolt.RemoteOptions{
+			CreateIfMissing: true,
+		},
+	})
 	if err != nil {
 		t.Fatalf("dolt.NewFromConfigWithOptions against running test container: %v", err)
 	}
@@ -51,10 +55,14 @@ func TestPatrolPollution_DeletesFromDoltWithoutJSONL(t *testing.T) {
 	createIssue := func(title string) {
 		t.Helper()
 		issue := &types.Issue{
-			Title:     title,
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueContent: types.IssueContent{
+				Title: title,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatalf("failed to create issue %q: %v", title, err)
@@ -64,11 +72,17 @@ func TestPatrolPollution_DeletesFromDoltWithoutJSONL(t *testing.T) {
 	createEphemeralIssue := func(title string) {
 		t.Helper()
 		issue := &types.Issue{
-			Title:     title,
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Ephemeral: true,
+			IssueContent: types.IssueContent{
+				Title: title,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatalf("failed to create ephemeral issue %q: %v", title, err)
@@ -99,7 +113,7 @@ func TestPatrolPollution_DeletesFromDoltWithoutJSONL(t *testing.T) {
 	defer func() { _ = verifyStore.Close() }()
 
 	ephemeralFalse := false
-	remaining, err := verifyStore.SearchIssues(ctx, "", types.IssueFilter{Ephemeral: &ephemeralFalse})
+	remaining, err := verifyStore.SearchIssues(ctx, "", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{Ephemeral: &ephemeralFalse}})
 	if err != nil {
 		t.Fatalf("failed to query remaining issues: %v", err)
 	}
@@ -111,7 +125,7 @@ func TestPatrolPollution_DeletesFromDoltWithoutJSONL(t *testing.T) {
 	}
 
 	ephemeralTrue := true
-	wisps, err := verifyStore.SearchIssues(ctx, "", types.IssueFilter{Ephemeral: &ephemeralTrue})
+	wisps, err := verifyStore.SearchIssues(ctx, "", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{Ephemeral: &ephemeralTrue}})
 	if err != nil {
 		t.Fatalf("failed to query remaining wisps: %v", err)
 	}

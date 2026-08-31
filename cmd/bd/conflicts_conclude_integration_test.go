@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -58,8 +59,17 @@ func wedgeResolvedConcludeMerge(t *testing.T) storage.DoltStorage {
 
 	const issueID = "conclude-command-1"
 	if err := raw.CreateIssue(ctx, &types.Issue{
-		ID: issueID, Title: "base", Status: types.StatusOpen,
-		Priority: 2, IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: issueID,
+		},
+		IssueContent: types.IssueContent{
+			Title: "base",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}, "test"); err != nil {
 		t.Fatalf("create seed issue: %v", err)
 	}
@@ -125,7 +135,7 @@ func runConcludeCommand(t *testing.T, commandStore storage.DoltStorage, asJSON b
 
 	oldStdout, oldStderr := os.Stdout, os.Stderr
 	oldStore, oldRootCtx, oldJSON := store, rootCtx, jsonOutput
-	oldConclude := conflictsConclude
+	oldConclude, _ := conflictsResolveCmd.Flags().GetBool("conclude")
 	rOut, wOut, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -136,7 +146,7 @@ func runConcludeCommand(t *testing.T, commandStore storage.DoltStorage, asJSON b
 	}
 	os.Stdout, os.Stderr = wOut, wErr
 	store, rootCtx, jsonOutput = commandStore, context.Background(), asJSON
-	conflictsConclude = true
+	_ = conflictsResolveCmd.Flags().Set("conclude", "true")
 
 	commandErr := conflictsResolveCmd.RunE(conflictsResolveCmd, nil)
 
@@ -144,7 +154,7 @@ func runConcludeCommand(t *testing.T, commandStore storage.DoltStorage, asJSON b
 	_ = wErr.Close()
 	os.Stdout, os.Stderr = oldStdout, oldStderr
 	store, rootCtx, jsonOutput = oldStore, oldRootCtx, oldJSON
-	conflictsConclude = oldConclude
+	_ = conflictsResolveCmd.Flags().Set("conclude", strconv.FormatBool(oldConclude))
 
 	var stdout, stderr bytes.Buffer
 	_, _ = stdout.ReadFrom(rOut)

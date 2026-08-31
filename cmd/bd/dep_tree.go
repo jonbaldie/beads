@@ -38,7 +38,7 @@ func resolveTreeTarget(ctx context.Context, arg string) (treeTarget, error) {
 	if usesProxiedServer() {
 		return proxiedTreeTarget(ctx, arg)
 	}
-	rootID, treeStore, cleanup, err := resolveIDWithRouting(ctx, store, arg)
+	rootID, treeStore, cleanup, err := resolveIDWithRouting(ctx, getStore(), arg)
 	if err != nil {
 		return treeTarget{}, err
 	}
@@ -66,12 +66,12 @@ func proxiedTreeTarget(ctx context.Context, arg string) (treeTarget, error) {
 	if err != nil {
 		return treeTarget{}, fmt.Errorf("resolving issue ID %s: %w", arg, err)
 	}
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return treeTarget{}, errors.New("proxied-server UOW provider not initialized")
 	}
-	src, ok := uowProvider.(uow.TreeWalkerSource)
+	src, ok := getUOWProvider().(uow.TreeWalkerSource)
 	if !ok {
-		return treeTarget{}, fmt.Errorf("proxied-server provider %T does not offer the dependency-tree surface", uowProvider)
+		return treeTarget{}, fmt.Errorf("proxied-server provider %T does not offer the dependency-tree surface", getUOWProvider())
 	}
 	walker, err := src.TreeWalker()
 	if err != nil {
@@ -82,104 +82,118 @@ func proxiedTreeTarget(ctx context.Context, arg string) (treeTarget, error) {
 
 // runDepTree is the whole of `bd dep tree` on both routes.
 func runDepTree(cmd *cobra.Command, ctx context.Context, args []string) error {
+	opts, err := gatherDepTreeOptions(cmd)
+	if err != nil {
+		return err
+	}
+	maxRows, maxRowsSource, err := resolveMaxRows(cmd)
+	if err != nil {
+		return err
+	}
+	target, err := resolveTreeTarget(ctx, args[0])
+	if err != nil {
+		return HandleErrorRespectJSON("%v", err)
+	}
+	defer target.cleanup()
+	tree, err := walkDepTree(ctx, target, opts, maxRows, maxRowsSource)
+	if err != nil {
+		return err
+	}
+	return printDepTree(tree, args[0], target.rootID, opts)
+}
+
+type depTreeOptions struct {
+	maxDepth  int
+	direction issueops.TreeDirection
+	status    string
+	formatStr string
+}
+
+func gatherDepTreeOptions(cmd *cobra.Command) (depTreeOptions, error) {
 	maxDepth, _ := cmd.Flags().GetInt("max-depth")
 	reverse, _ := cmd.Flags().GetBool("reverse")
 	directionFlag, _ := cmd.Flags().GetString("direction")
 	statusFilter, _ := cmd.Flags().GetString("status")
 	formatStr, _ := cmd.Flags().GetString("format")
 	if strings.EqualFold(formatStr, "json") {
-		jsonOutput = true
+		setJSONOutput(true)
 		formatStr = ""
 	}
-
 	// --reverse is the deprecated spelling of --direction=up, and it loses to an
 	// explicit --direction exactly as it did before.
-	if directionFlag == "" && reverse {
+	switch {
+	case directionFlag != "":
+	case reverse:
 		directionFlag = string(issueops.TreeUp)
-	} else if directionFlag == "" {
+	default:
 		directionFlag = string(issueops.TreeDown)
 	}
-
-	// The flag vocabulary is checked HERE rather than left to the role: these
-	// refusals name a FLAG and are worded for the person who typed one, while
-	// the role's name a request field. The role refuses the same two things
-	// independently.
 	direction := issueops.TreeDirection(directionFlag)
 	switch direction {
 	case issueops.TreeDown, issueops.TreeUp, issueops.TreeBoth:
 	default:
-		return HandleErrorRespectJSON("--direction must be 'down', 'up', or 'both'")
+		return depTreeOptions{}, HandleErrorRespectJSON("--direction must be 'down', 'up', or 'both'")
 	}
 	if maxDepth < 1 {
-		return HandleErrorRespectJSON("--max-depth must be >= 1")
+		return depTreeOptions{}, HandleErrorRespectJSON("--max-depth must be >= 1")
 	}
+	return depTreeOptions{maxDepth: maxDepth, direction: direction, status: statusFilter, formatStr: formatStr}, nil
+}
 
-	// The cap is resolved here and CARRIED ON THE REQUEST: the proxied route
-	// used to refuse --max-rows outright because it threaded no cap. It threads
-	// one now, so the flag means the same thing wherever the command runs.
-	maxRows, maxRowsSource, err := resolveMaxRows(cmd)
-	if err != nil {
-		return err
-	}
-
-	target, err := resolveTreeTarget(ctx, args[0])
-	if err != nil {
-		return HandleErrorRespectJSON("%v", err)
-	}
-	defer target.cleanup()
-
+func walkDepTree(ctx context.Context, target treeTarget, opts depTreeOptions, maxRows int, maxRowsSource string) ([]*types.TreeNode, error) {
 	result, err := target.walker.WalkTree(ctx, issueops.WalkTreeRequest{
 		RootID:        target.rootID,
-		Direction:     direction,
-		MaxDepth:      maxDepth,
-		Status:        types.Status(statusFilter),
+		Direction:     opts.direction,
+		MaxDepth:      opts.maxDepth,
+		Status:        types.Status(opts.status),
 		MaxRows:       maxRows,
 		MaxRowsSource: maxRowsSource,
 	})
 	if err != nil {
 		if capErr := handleMaxRowsError(err); capErr != nil {
-			return capErr
+			return nil, capErr
 		}
-		return HandleErrorRespectJSON("%v", err)
+		return nil, HandleErrorRespectJSON("%v", err)
 	}
-	tree := result.Nodes
+	return result.Nodes, nil
+}
 
-	// Handle format presets (json handled earlier, near the flag read).
-	if formatStr == "mermaid" {
-		// The raw argument, not the resolved id: this is only read when the tree
-		// is empty.
-		outputMermaidTree(tree, args[0])
+func printDepTree(tree []*types.TreeNode, rawID, rootID string, opts depTreeOptions) error {
+	if opts.formatStr == "mermaid" {
+		outputMermaidTree(tree, rawID)
 		return nil
 	}
-
-	if jsonOutput {
-		// The role's slice is empty rather than nil for a successful call, so
-		// this is `[]` and never `null` without a guard here.
+	if isJSONOutput() {
 		return outputJSON(tree)
 	}
-
 	if len(tree) == 0 {
-		switch direction {
-		case issueops.TreeUp:
-			fmt.Printf("\n%s has no dependents\n", target.rootID)
-		case issueops.TreeBoth:
-			fmt.Printf("\n%s has no dependencies or dependents\n", target.rootID)
-		default:
-			fmt.Printf("\n%s has no dependencies\n", target.rootID)
-		}
+		printEmptyDepTree(rootID, opts.direction)
 		return nil
 	}
-
-	switch direction {
-	case issueops.TreeUp:
-		fmt.Printf("\n%s Dependent tree for %s:\n\n", ui.RenderAccent("🌲"), target.rootID)
-	case issueops.TreeBoth:
-		fmt.Printf("\n%s Full dependency graph for %s:\n\n", ui.RenderAccent("🌲"), target.rootID)
-	default:
-		fmt.Printf("\n%s Dependency tree for %s:\n\n", ui.RenderAccent("🌲"), target.rootID)
-	}
-
-	renderTree(tree, maxDepth, string(direction))
+	printDepTreeHeader(rootID, opts.direction)
+	renderTree(tree, opts.maxDepth, string(opts.direction))
 	fmt.Println()
 	return nil
+}
+
+func printEmptyDepTree(rootID string, direction issueops.TreeDirection) {
+	switch direction {
+	case issueops.TreeUp:
+		fmt.Printf("\n%s has no dependents\n", rootID)
+	case issueops.TreeBoth:
+		fmt.Printf("\n%s has no dependencies or dependents\n", rootID)
+	default:
+		fmt.Printf("\n%s has no dependencies\n", rootID)
+	}
+}
+
+func printDepTreeHeader(rootID string, direction issueops.TreeDirection) {
+	switch direction {
+	case issueops.TreeUp:
+		fmt.Printf("\n%s Dependent tree for %s:\n\n", ui.RenderAccent("🌲"), rootID)
+	case issueops.TreeBoth:
+		fmt.Printf("\n%s Full dependency graph for %s:\n\n", ui.RenderAccent("🌲"), rootID)
+	default:
+		fmt.Printf("\n%s Dependency tree for %s:\n\n", ui.RenderAccent("🌲"), rootID)
+	}
 }

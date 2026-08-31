@@ -55,11 +55,12 @@ To add a comment:
 See: bd comments --help`)
 }
 
-var commentsCmd = &cobra.Command{
-	Use:     "comments [issue-id]",
-	GroupID: "issues",
-	Short:   "View or manage comments on an issue",
-	Long: `View or manage comments on an issue.
+func newCommentsCmd() *cobra.Command {
+	commentsCmd := &cobra.Command{
+		Use:     "comments [issue-id]",
+		GroupID: "issues",
+		Short:   "View or manage comments on an issue",
+		Long: `View or manage comments on an issue.
 
 Examples:
   # List all comments on an issue (issue id is required — there is no "comments list")
@@ -73,87 +74,19 @@ Examples:
 
   # Add a comment from a file
   bd comments add bd-123 -f notes.txt`,
-	Args:          validateCommentsArgs,
-	SilenceUsage:  true,
-	SilenceErrors: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		evt := metrics.NewCommandEvent("comments")
-		defer func() {
-			if c := metrics.Global(); c != nil {
-				c.CloseEventAndAdd(evt)
-			}
-		}()
+		Args:          validateCommentsArgs,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE:          runComments,
+	}
 
-		if usesProxiedServer() {
-			return runCommentsProxiedServer(cmd, rootCtx, args)
-		}
-
-		localTime, _ := cmd.Flags().GetBool("local-time")
-		issueID := args[0]
-
-		if err := ensureStoreActive(); err != nil {
-			return HandleErrorRespectJSON("getting comments: %v", err)
-		}
-		ctx := rootCtx
-
-		result, err := resolveAndGetIssueWithRouting(ctx, store, issueID)
-		if err != nil {
-			if result != nil {
-				result.Close()
-			}
-			return HandleErrorRespectJSON("resolving %s: %v", issueID, err)
-		}
-		if result == nil || result.Issue == nil {
-			if result != nil {
-				result.Close()
-			}
-			return HandleErrorRespectJSON("issue %s not found", issueID)
-		}
-		defer result.Close()
-		issueID = result.ResolvedID
-
-		comments, err := result.Store.GetIssueComments(ctx, issueID)
-		if err != nil {
-			return HandleErrorRespectJSON("getting comments: %v", err)
-		}
-
-		if comments == nil {
-			comments = make([]*types.Comment, 0)
-		}
-
-		if jsonOutput {
-			return outputJSON(comments)
-		}
-
-		if len(comments) == 0 {
-			fmt.Printf("No comments on %s\n", issueID)
-			return nil
-		}
-
-		fmt.Printf("\nComments on %s:\n\n", issueID)
-		for _, comment := range comments {
-			ts := comment.CreatedAt
-			if localTime {
-				ts = ts.Local()
-			}
-			fmt.Printf("[%s] at %s\n", comment.Author, ts.Format("2006-01-02 15:04"))
-			rendered := uimd.RenderMarkdown(comment.Text)
-			for _, line := range strings.Split(strings.TrimRight(rendered, "\n"), "\n") {
-				fmt.Printf("  %s\n", line)
-			}
-			fmt.Println()
-		}
-		return nil
-	},
-}
-
-var commentsMisplacedListCmd = &cobra.Command{
-	Use:           "list",
-	Short:         "Invalid — use bd comments <issue-id> to list comments",
-	SilenceUsage:  true,
-	SilenceErrors: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return HandleErrorRespectJSON(`"bd comments list" is not valid.
+	commentsMisplacedListCmd := &cobra.Command{
+		Use:           "list",
+		Short:         "Invalid — use bd comments <issue-id> to list comments",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return HandleErrorRespectJSON(`"bd comments list" is not valid.
 
 To list comments on an issue, run:
   bd comments <issue-id>
@@ -162,13 +95,13 @@ Example:
   bd comments bd-123
 
 See: bd comments --help`)
-	},
-}
+		},
+	}
 
-var commentsAddCmd = &cobra.Command{
-	Use:   "add [issue-id] [text...]",
-	Short: "Add a comment to an issue",
-	Long: `Add a comment to an issue.
+	commentsAddCmd := &cobra.Command{
+		Use:   "add [issue-id] [text...]",
+		Short: "Add a comment to an issue",
+		Long: `Add a comment to an issue.
 
 Examples:
   # Add a comment
@@ -176,77 +109,145 @@ Examples:
 
   # Add a comment from a file
   bd comments add bd-123 -f notes.txt`,
-	Args:          cobra.MinimumNArgs(1),
-	SilenceUsage:  true,
-	SilenceErrors: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		CheckReadonly("comment add")
+		Args:          cobra.MinimumNArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE:          runCommentsAdd,
+	}
 
-		evt := metrics.NewCommandEvent("comments-add")
-		defer func() {
-			if c := metrics.Global(); c != nil {
-				c.CloseEventAndAdd(evt)
-			}
-		}()
+	commentsCmd.AddCommand(commentsMisplacedListCmd)
+	commentsCmd.AddCommand(commentsAddCmd)
+	commentsCmd.Flags().Bool("local-time", false, "Show timestamps in local time instead of UTC")
+	commentsAddCmd.Flags().StringP("file", "f", "", "Read comment text from file")
+	commentsAddCmd.Flags().StringP("author", "a", "", "Add author to comment")
+	commentsCmd.ValidArgsFunction = issueIDCompletion
+	commentsAddCmd.ValidArgsFunction = issueIDCompletion
+	return commentsCmd
+}
 
-		issueID := args[0]
-
-		commentText, err := requireTextFromSources("comment text", "use positional args or -f to read from file",
-			cmdTextSources(cmd, args[1:]))
-		if err != nil {
-			return HandleErrorRespectJSON("%v", err)
+func runComments(cmd *cobra.Command, args []string) error {
+	evt := metrics.NewCommandEvent("comments")
+	defer func() {
+		if c := metrics.Global(); c != nil {
+			c.CloseEventAndAdd(evt)
 		}
+	}()
+	if usesProxiedServer() {
+		return runCommentsProxiedServer(cmd, getRootContext(), args)
+	}
+	localTime, _ := cmd.Flags().GetBool("local-time")
+	return runCommentsDirect(args[0], localTime)
+}
 
-		author, _ := cmd.Flags().GetString("author")
-		if author == "" {
-			author = getActorWithGit()
-		}
+func runCommentsDirect(issueID string, localTime bool) error {
+	if err := ensureStoreActive(); err != nil {
+		return HandleErrorRespectJSON("getting comments: %v", err)
+	}
+	result, err := resolveCommentsIssue(issueID)
+	if err != nil {
+		return err
+	}
+	defer result.Close()
+	comments, err := result.Store.GetIssueComments(getRootContext(), result.ResolvedID)
+	if err != nil {
+		return HandleErrorRespectJSON("getting comments: %v", err)
+	}
+	if comments == nil {
+		comments = make([]*types.Comment, 0)
+	}
+	return reportComments(result.ResolvedID, comments, localTime)
+}
 
-		// Dispatched after the text is resolved so both backends read the
-		// same sources and report the same conflicts.
-		if usesProxiedServer() {
-			return runCommentsAddProxiedServer(rootCtx, issueID, author, commentText)
+func resolveCommentsIssue(issueID string) (*RoutedResult, error) {
+	result, err := resolveAndGetIssueWithRouting(getRootContext(), getStore(), issueID)
+	if err != nil {
+		if result != nil {
+			result.Close()
 		}
+		return nil, HandleErrorRespectJSON("resolving %s: %v", issueID, err)
+	}
+	if result == nil || result.Issue == nil {
+		if result != nil {
+			result.Close()
+		}
+		return nil, HandleErrorRespectJSON("issue %s not found", issueID)
+	}
+	return result, nil
+}
 
-		if err := ensureStoreActive(); err != nil {
-			return HandleErrorRespectJSON("adding comment: %v", err)
-		}
-		ctx := rootCtx
-
-		result, err := resolveAndGetIssueForMutation(ctx, store, issueID)
-		if err != nil {
-			if result != nil {
-				result.Close()
-			}
-			return HandleErrorRespectJSON("resolving %s: %v", issueID, err)
-		}
-		if result == nil || result.Issue == nil {
-			if result != nil {
-				result.Close()
-			}
-			return HandleErrorRespectJSON("issue %s not found", issueID)
-		}
-		defer result.Close()
-		issueID = result.ResolvedID
-
-		comment, err := addCommentDirect(ctx, result.Store, issueID, author, commentText)
-		if err != nil {
-			return HandleErrorRespectJSON("adding comment: %v", err)
-		}
-		if err := commitPendingIfEmbedded(ctx, result.Store, actor, doltAutoCommitParams{
-			Command:  "comments add",
-			IssueIDs: []string{issueID},
-		}); err != nil {
-			return HandleErrorRespectJSON("failed to commit: %v", err)
-		}
-
-		if jsonOutput {
-			return outputJSON(comment)
-		}
-
-		fmt.Printf("Comment added to %s\n", issueID)
+func reportComments(issueID string, comments []*types.Comment, localTime bool) error {
+	if isJSONOutput() {
+		return outputJSON(comments)
+	}
+	if len(comments) == 0 {
+		fmt.Printf("No comments on %s\n", issueID)
 		return nil
-	},
+	}
+	fmt.Printf("\nComments on %s:\n\n", issueID)
+	for _, comment := range comments {
+		ts := comment.CreatedAt
+		if localTime {
+			ts = ts.Local()
+		}
+		fmt.Printf("[%s] at %s\n", comment.Author, ts.Format("2006-01-02 15:04"))
+		rendered := uimd.RenderMarkdown(comment.Text)
+		for _, line := range strings.Split(strings.TrimRight(rendered, "\n"), "\n") {
+			fmt.Printf("  %s\n", line)
+		}
+		fmt.Println()
+	}
+	return nil
+}
+
+func runCommentsAdd(cmd *cobra.Command, args []string) error {
+	if err := CheckReadonly("comment add"); err != nil {
+		return err
+	}
+	evt := metrics.NewCommandEvent("comments-add")
+	defer func() {
+		if c := metrics.Global(); c != nil {
+			c.CloseEventAndAdd(evt)
+		}
+	}()
+	commentText, err := requireTextFromSources("comment text", "use positional args or -f to read from file",
+		cmdTextSources(cmd, args[1:]))
+	if err != nil {
+		return HandleErrorRespectJSON("%v", err)
+	}
+	author, _ := cmd.Flags().GetString("author")
+	if author == "" {
+		author = getActorWithGit()
+	}
+	if usesProxiedServer() {
+		return runCommentsAddProxiedServer(getRootContext(), args[0], author, commentText)
+	}
+	return runCommentsAddDirect(args[0], author, commentText)
+}
+
+func runCommentsAddDirect(issueID, author, commentText string) error {
+	if err := ensureStoreActive(); err != nil {
+		return HandleErrorRespectJSON("adding comment: %v", err)
+	}
+	result, err := resolveIssueMutationForCommand(issueID)
+	if err != nil {
+		return err
+	}
+	defer result.Close()
+	comment, err := addCommentDirect(getRootContext(), result.Store, result.ResolvedID, author, commentText)
+	if err != nil {
+		return HandleErrorRespectJSON("adding comment: %v", err)
+	}
+	if err := commitPendingIfEmbedded(getRootContext(), result.Store, getActor(), doltAutoCommitParams{
+		Command:  "comments add",
+		IssueIDs: []string{result.ResolvedID},
+	}); err != nil {
+		return HandleErrorRespectJSON("failed to commit: %v", err)
+	}
+	if isJSONOutput() {
+		return outputJSON(comment)
+	}
+	fmt.Printf("Comment added to %s\n", result.ResolvedID)
+	return nil
 }
 
 // addCommentDirect appends one comment through the Commenter role and returns
@@ -294,17 +295,7 @@ func addCommentDirect(ctx context.Context, st storage.DoltStorage, issueID, auth
 }
 
 func init() {
-	commentsCmd.AddCommand(commentsMisplacedListCmd)
-	commentsCmd.AddCommand(commentsAddCmd)
-	commentsCmd.Flags().Bool("local-time", false, "Show timestamps in local time instead of UTC")
-	commentsAddCmd.Flags().StringP("file", "f", "", "Read comment text from file")
-	commentsAddCmd.Flags().StringP("author", "a", "", "Add author to comment")
-
-	// Issue ID completions
-	commentsCmd.ValidArgsFunction = issueIDCompletion
-	commentsAddCmd.ValidArgsFunction = issueIDCompletion
-
-	rootCmd.AddCommand(commentsCmd)
+	rootCmd.AddCommand(newCommentsCmd())
 }
 
 func isUnknownOperationError(err error) bool {

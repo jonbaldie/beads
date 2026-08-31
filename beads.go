@@ -274,15 +274,26 @@ type (
 // This always opens in embedded mode. Use OpenFromConfig to respect
 // server mode settings from metadata.json.
 func Open(ctx context.Context, dbPath string) (Storage, error) {
-	return dolt.New(ctx, &dolt.Config{Path: dbPath, CreateIfMissing: true})
+	return dolt.New(ctx, &dolt.Config{
+		Path: dbPath,
+		RemoteOptions: dolt.RemoteOptions{
+			CreateIfMissing: true,
+		},
+	})
 }
+
+var openFromConfigWithOptions = dolt.NewFromConfigWithOptions
 
 // OpenFromConfig opens the Dolt implementation using configuration from
 // metadata.json. Unlike Open, this respects Dolt server mode settings and database
 // name configuration.
 // beadsDir is the path to the .beads directory.
 func OpenFromConfig(ctx context.Context, beadsDir string) (Storage, error) {
-	return dolt.NewFromConfigWithOptions(ctx, beadsDir, &dolt.Config{CreateIfMissing: true})
+	return openFromConfigWithOptions(ctx, beadsDir, &dolt.Config{
+		RemoteOptions: dolt.RemoteOptions{
+			CreateIfMissing: true,
+		},
+	})
 }
 
 // OpenGated is OpenFromConfig plus participation in the workspace
@@ -352,7 +363,11 @@ func OpenGated(ctx context.Context, beadsDir string, wait time.Duration) (Storag
 	if err != nil {
 		return nil, err
 	}
-	st, err := dolt.NewFromConfigWithOptions(ctx, beadsDir, &dolt.Config{CreateIfMissing: true})
+	st, err := dolt.NewFromConfigWithOptions(ctx, beadsDir, &dolt.Config{
+		RemoteOptions: dolt.RemoteOptions{
+			CreateIfMissing: true,
+		},
+	})
 	if err != nil {
 		rerr := h.Release()
 		return nil, errors.Join(err, rerr)

@@ -1,6 +1,7 @@
 package conformance
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -96,40 +97,54 @@ func testGetMoleculeProgress(t *testing.T, f Factory) {
 	// Missing molecule: a zeroed struct (with the id echoed), never ErrNotFound.
 	got, err := s.GetMoleculeProgress(c, "test-nope")
 	must(t, err)
-	if got == nil || got.MoleculeID != "test-nope" || got.Total != 0 || got.MoleculeTitle != "" {
-		t.Fatalf("missing molecule = %+v, want zeroed with id echoed", got)
-	}
+	assertMoleculeProgressMissing(t, got)
 
 	// Molecule with a mix of child statuses.
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-m", Title: "Mol", IssueType: types.TypeEpic}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-c1", Title: "c1", Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-c2", Title: "c2", Status: types.StatusInProgress}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-c3", Title: "c3", Status: types.StatusClosed}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-m"}, IssueContent: types.IssueContent{Title: "Mol"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeEpic}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-c1"}, IssueContent: types.IssueContent{Title: "c1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-c2"}, IssueContent: types.IssueContent{Title: "c2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-c3"}, IssueContent: types.IssueContent{Title: "c3"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}}), "a"))
 	parentChild(t, s, "test-c1", "test-m")
 	parentChild(t, s, "test-c2", "test-m")
 	parentChild(t, s, "test-c3", "test-m")
 
 	got, err = s.GetMoleculeProgress(c, "test-m")
 	must(t, err)
+	assertMoleculeProgressDurable(t, got)
+
+	// Wisp molecule routes to the wisp tables and rolls up identically.
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-wm"}, IssueContent: types.IssueContent{Title: "WMol"}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-wc1"}, IssueContent: types.IssueContent{Title: "wc1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
+	parentChild(t, s, "test-wc1", "test-wm")
+	wgot, err := s.GetMoleculeProgress(c, "test-wm")
+	must(t, err)
+	assertMoleculeProgressWisp(t, wgot)
+}
+
+func assertMoleculeProgressMissing(t *testing.T, got *types.MoleculeProgressStats) {
+	t.Helper()
+	if got == nil || got.MoleculeID != "test-nope" || got.Total != 0 || got.MoleculeTitle != "" {
+		t.Fatalf("missing molecule = %+v, want zeroed with id echoed", got)
+	}
+}
+
+func assertMoleculeProgressDurable(t *testing.T, got *types.MoleculeProgressStats) {
+	t.Helper()
 	if got.MoleculeTitle != "Mol" || got.Total != 3 || got.Completed != 1 || got.InProgress != 1 {
 		t.Fatalf("progress = %+v, want title=Mol total=3 completed=1 inprogress=1", got)
 	}
 	if got.CurrentStepID != "test-c2" {
 		t.Errorf("CurrentStepID = %q, want test-c2 (the single in_progress child)", got.CurrentStepID)
 	}
-	// FirstClosed/LastClosed are never populated by this implementation.
 	if got.FirstClosed != nil || got.LastClosed != nil {
 		t.Errorf("FirstClosed/LastClosed = %v/%v, want nil/nil", got.FirstClosed, got.LastClosed)
 	}
+}
 
-	// Wisp molecule routes to the wisp tables and rolls up identically.
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-wm", Title: "WMol", Ephemeral: true}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-wc1", Title: "wc1", Status: types.StatusClosed, Ephemeral: true}), "a"))
-	parentChild(t, s, "test-wc1", "test-wm")
-	wgot, err := s.GetMoleculeProgress(c, "test-wm")
-	must(t, err)
-	if wgot.Total != 1 || wgot.Completed != 1 {
-		t.Fatalf("wisp progress = %+v, want total=1 completed=1", wgot)
+func assertMoleculeProgressWisp(t *testing.T, got *types.MoleculeProgressStats) {
+	t.Helper()
+	if got.Total != 1 || got.Completed != 1 {
+		t.Fatalf("wisp progress = %+v, want total=1 completed=1", got)
 	}
 }
 
@@ -144,7 +159,7 @@ func testGetMoleculeLastActivity(t *testing.T, f Factory) {
 
 	// Childless molecule reports its own updated_at as molecule_updated.
 	updated := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-m", Title: "Mol", CreatedAt: updated, UpdatedAt: updated}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-m"}, IssueContent: types.IssueContent{Title: "Mol"}, IssueTimes: types.IssueTimes{CreatedAt: updated, UpdatedAt: updated}}), "a"))
 	la, err := s.GetMoleculeLastActivity(c, "test-m")
 	must(t, err)
 	if la.Source != "molecule_updated" || !la.LastActivity.Equal(updated) || la.SourceStepID != "" {
@@ -154,8 +169,8 @@ func testGetMoleculeLastActivity(t *testing.T, f Factory) {
 	// Children, none closed: step_updated at the max child updated_at.
 	old := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 	newer := time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC)
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-a", Title: "a", Status: types.StatusOpen, CreatedAt: old, UpdatedAt: old}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-b", Title: "b", Status: types.StatusOpen, CreatedAt: newer, UpdatedAt: newer}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-a"}, IssueContent: types.IssueContent{Title: "a"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueTimes: types.IssueTimes{CreatedAt: old, UpdatedAt: old}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-b"}, IssueContent: types.IssueContent{Title: "b"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueTimes: types.IssueTimes{CreatedAt: newer, UpdatedAt: newer}}), "a"))
 	parentChild(t, s, "test-a", "test-m")
 	parentChild(t, s, "test-b", "test-m")
 	la, err = s.GetMoleculeLastActivity(c, "test-m")
@@ -219,8 +234,8 @@ func testGetAllEventsSince(t *testing.T, f Factory) {
 	}
 
 	past := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-1", Title: "one"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-w", Title: "wisp", Ephemeral: true}), "a")) // routes to wisp_events
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-1"}, IssueContent: types.IssueContent{Title: "one"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-w"}, IssueContent: types.IssueContent{Title: "wisp"}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a")) // routes to wisp_events
 
 	evs, err := s.GetAllEventsSince(c, past)
 	must(t, err)
@@ -232,7 +247,8 @@ func testGetAllEventsSince(t *testing.T, f Factory) {
 		t.Errorf("wisp created event missing (UNION ALL wisp_events); types=%v", eventTypes(evs, "test-w"))
 	}
 	// Non-decreasing created_at.
-	for i := 1; i < len(evs); i++ {
+	eventCount := len(evs)
+	for i := 1; i < eventCount; i++ {
 		if evs[i].CreatedAt.Before(evs[i-1].CreatedAt) {
 			t.Errorf("events not ascending at %d: %v < %v", i, evs[i].CreatedAt, evs[i-1].CreatedAt)
 		}
@@ -247,7 +263,7 @@ func testGetAllEventsSince(t *testing.T, f Factory) {
 func testIterAllEventsSince(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-1", Title: "one"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-1"}, IssueContent: types.IssueContent{Title: "one"}}), "a"))
 
 	it, err := s.IterAllEventsSince(c, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC))
 	must(t, err)
@@ -280,11 +296,11 @@ func testGetAllDependencyRecords(t *testing.T, f Factory) {
 		t.Fatalf("empty = %v, want non-nil empty map", m)
 	}
 
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-a", Title: "a"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-b", Title: "b"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-w", Title: "w", Ephemeral: true}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-epic", Title: "e", IssueType: types.TypeEpic}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-child", Title: "ch"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-a"}, IssueContent: types.IssueContent{Title: "a"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-b"}, IssueContent: types.IssueContent{Title: "b"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-w"}, IssueContent: types.IssueContent{Title: "w"}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-epic"}, IssueContent: types.IssueContent{Title: "e"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeEpic}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-child"}, IssueContent: types.IssueContent{Title: "ch"}}), "a"))
 	// Durable blocks edge, a wisp-source edge, and a parent-child edge (no type filter).
 	must(t, s.AddDependency(c, &types.Dependency{IssueID: "test-b", DependsOnID: "test-a", Type: types.DepBlocks}, "actor"))
 	must(t, s.AddDependency(c, &types.Dependency{IssueID: "test-w", DependsOnID: "test-a", Type: types.DepBlocks}, "actor"))
@@ -326,9 +342,9 @@ func testIterAllDependencyRecords(t *testing.T, f Factory) {
 		t.Fatalf("empty stream = (%d,%v), want (0,nil)", len(empty), err)
 	}
 
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-a", Title: "a"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-b", Title: "b"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-w", Title: "w", Ephemeral: true}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-a"}, IssueContent: types.IssueContent{Title: "a"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-b"}, IssueContent: types.IssueContent{Title: "b"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-w"}, IssueContent: types.IssueContent{Title: "w"}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
 	must(t, s.AddDependency(c, &types.Dependency{IssueID: "test-b", DependsOnID: "test-a", Type: types.DepBlocks}, "actor"))
 	must(t, s.AddDependency(c, &types.Dependency{IssueID: "test-w", DependsOnID: "test-a", Type: types.DepBlocks}, "actor"))
 
@@ -358,9 +374,9 @@ func testCountDependentsByStatus(t *testing.T, f Factory) {
 		t.Fatalf("missing target = (%d,%v), want (0,nil)", n, err)
 	}
 
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-t", Title: "target"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-d", Title: "dep", Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-wd", Title: "wisp dep", Status: types.StatusOpen, Ephemeral: true}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-t"}, IssueContent: types.IssueContent{Title: "target"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-d"}, IssueContent: types.IssueContent{Title: "dep"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-wd"}, IssueContent: types.IssueContent{Title: "wisp dep"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
 	must(t, s.AddDependency(c, &types.Dependency{IssueID: "test-d", DependsOnID: "test-t", Type: types.DepBlocks}, "a"))
 	must(t, s.AddDependency(c, &types.Dependency{IssueID: "test-wd", DependsOnID: "test-t", Type: types.DepBlocks}, "a"))
 
@@ -374,8 +390,8 @@ func testCountDependentsByStatus(t *testing.T, f Factory) {
 	}
 
 	// No type filter: a parent-child dependent still counts.
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-e", Title: "epic", IssueType: types.TypeEpic, Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-ch", Title: "child", Status: types.StatusOpen}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-e"}, IssueContent: types.IssueContent{Title: "epic"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeEpic, Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-ch"}, IssueContent: types.IssueContent{Title: "child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
 	parentChild(t, s, "test-ch", "test-e")
 	if n, err := s.CountDependentsByStatus(c, "test-e", types.StatusOpen); err != nil || n != 1 {
 		t.Fatalf("parent-child dependent count = (%d,%v), want (1,nil) — no type filter", n, err)
@@ -392,16 +408,16 @@ func testFindWispDependentsRecursive(t *testing.T, f Factory) {
 	}
 
 	// Seed with no wisp dependents -> non-nil empty map.
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-x", Title: "x"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-x"}, IssueContent: types.IssueContent{Title: "x"}}), "a"))
 	if m, err := s.FindWispDependentsRecursive(c, []string{"test-x"}); err != nil || m == nil || len(m) != 0 {
 		t.Fatalf("no wisp deps = (%v,%v), want non-nil empty map", m, err)
 	}
 
 	// Transitive wisp chain; only wisp_dependencies is walked (durable dependent excluded).
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-p", Title: "p", Ephemeral: true}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-c1", Title: "c1", Ephemeral: true}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-gc", Title: "gc", Ephemeral: true}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-dd", Title: "durable dep"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-p"}, IssueContent: types.IssueContent{Title: "p"}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-c1"}, IssueContent: types.IssueContent{Title: "c1"}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-gc"}, IssueContent: types.IssueContent{Title: "gc"}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-dd"}, IssueContent: types.IssueContent{Title: "durable dep"}}), "a"))
 	must(t, s.AddDependency(c, &types.Dependency{IssueID: "test-c1", DependsOnID: "test-p", Type: types.DepBlocks}, "a"))
 	must(t, s.AddDependency(c, &types.Dependency{IssueID: "test-gc", DependsOnID: "test-c1", Type: types.DepBlocks}, "a"))
 	must(t, s.AddDependency(c, &types.Dependency{IssueID: "test-dd", DependsOnID: "test-p", Type: types.DepBlocks}, "a")) // durable, must be skipped
@@ -418,7 +434,7 @@ func testFindWispDependentsRecursive(t *testing.T, f Factory) {
 func testAddComment(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-ac", Title: "T"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-ac"}, IssueContent: types.IssueContent{Title: "T"}}), "a"))
 
 	// AddComment records an audit EVENT, not a structured comment.
 	must(t, s.AddComment(c, "test-ac", "alice", "hello"))
@@ -448,33 +464,54 @@ func testAddComment(t *testing.T, f Factory) {
 func testImportIssueComment(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-ic", Title: "T"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-ic"}, IssueContent: types.IssueContent{Title: "T"}}), "a"))
 
 	// Structured comment preserving a caller-supplied (whole-second UTC) timestamp.
 	ts := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
+	assertImportedCommentRoundTrip(t, s, c, ts)
+	assertImportedCommentMissing(t, s, c, ts)
+	assertImportedCommentOrdering(t, s, c)
+}
+
+func assertImportedCommentRoundTrip(t *testing.T, s storage.DoltStorage, c context.Context, ts time.Time) {
+	t.Helper()
 	got, err := s.ImportIssueComment(c, "test-ic", "alice", "imported", ts)
 	must(t, err)
+	assertImportedCommentValue(t, got, ts)
+	comments, err := s.GetIssueComments(c, "test-ic")
+	must(t, err)
+	assertImportedCommentReadback(t, s, c, comments, ts)
+}
+
+func assertImportedCommentValue(t *testing.T, got *types.Comment, ts time.Time) {
+	t.Helper()
 	if got == nil || got.Author != "alice" || got.Text != "imported" || !got.CreatedAt.Equal(ts) || got.ID == "" {
 		t.Fatalf("import returned %+v, want author=alice text=imported at %v with an id", got, ts)
 	}
-	comments, err := s.GetIssueComments(c, "test-ic")
-	must(t, err)
+}
+
+func assertImportedCommentReadback(t *testing.T, s storage.DoltStorage, c context.Context, comments []*types.Comment, ts time.Time) {
+	t.Helper()
 	if len(comments) != 1 || comments[0].Text != "imported" || !comments[0].CreatedAt.Equal(ts) {
 		t.Fatalf("GetIssueComments = %+v, want the imported comment at %v", comments, ts)
 	}
 	if n, _ := s.CountIssueComments(c, "test-ic"); n != 1 {
 		t.Errorf("CountIssueComments = %d, want 1", n)
 	}
+}
 
-	// Non-existent issue is rejected before insert.
+func assertImportedCommentMissing(t *testing.T, s storage.DoltStorage, c context.Context, ts time.Time) {
+	t.Helper()
 	if _, err := s.ImportIssueComment(c, "test-missing", "a", "x", ts); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Errorf("import to missing issue err = %v, want a 'not found' error", err)
 	}
+}
 
-	// Two imports at distinct timestamps read back in created_at ASC order.
+func assertImportedCommentOrdering(t *testing.T, s storage.DoltStorage, c context.Context) {
+	t.Helper()
 	t1 := time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC)
 	t2 := time.Date(2022, 1, 1, 0, 0, 0, 0, time.UTC)
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-ic2", Title: "T2"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-ic2"}, IssueContent: types.IssueContent{Title: "T2"}}), "a"))
 	if _, err := s.ImportIssueComment(c, "test-ic2", "a", "second", t2); err != nil {
 		t.Fatal(err)
 	}
@@ -497,7 +534,7 @@ func testImportIssueComment(t *testing.T, f Factory) {
 func testAddIssueCommentBurstOrder(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-order", Title: "T"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-order"}, IssueContent: types.IssueContent{Title: "T"}}), "a"))
 
 	// A burst: fast enough to share a wall-clock second on any runner.
 	want := []string{"one", "two", "three", "four", "five"}
@@ -512,7 +549,8 @@ func testAddIssueCommentBurstOrder(t *testing.T, f Factory) {
 		t.Errorf("burst comment order = %v, want %v", commentTexts(got), want)
 	}
 	// The stamps are what carry the order, so they must be strictly increasing.
-	for i := 1; i < len(got); i++ {
+	commentCount := len(got)
+	for i := 1; i < commentCount; i++ {
 		if !got[i].CreatedAt.After(got[i-1].CreatedAt) {
 			t.Errorf("comment %d created_at %v not after %v — same-second tie is back",
 				i, got[i].CreatedAt, got[i-1].CreatedAt)
@@ -523,7 +561,7 @@ func testAddIssueCommentBurstOrder(t *testing.T, f Factory) {
 	// clock, then a live add must land exactly one second past it rather than
 	// sorting in front of it.
 	ahead := time.Now().UTC().Truncate(time.Second).Add(time.Hour)
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-order2", Title: "T2"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-order2"}, IssueContent: types.IssueContent{Title: "T2"}}), "a"))
 	if _, err := s.ImportIssueComment(c, "test-order2", "a", "seeded", ahead); err != nil {
 		t.Fatal(err)
 	}
@@ -544,7 +582,7 @@ func testPromoteFromEphemeral(t *testing.T, f Factory) {
 	c := ctx()
 
 	// Promote a non-wisp / missing id is rejected.
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-dur", Title: "durable"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-dur"}, IssueContent: types.IssueContent{Title: "durable"}}), "a"))
 	if err := s.PromoteFromEphemeral(c, "test-dur", "a"); err == nil {
 		t.Error("promote of durable issue: want error, got nil")
 	}
@@ -553,8 +591,8 @@ func testPromoteFromEphemeral(t *testing.T, f Factory) {
 	}
 
 	// Happy path: wisp with a label and an inbound dependent.
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-w", Title: "Wisp", Priority: 1, Ephemeral: true, Labels: []string{"x"}}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-dep", Title: "dep", Status: types.StatusOpen}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-w"}, IssueContent: types.IssueContent{Title: "Wisp"}, IssueWorkflow: types.IssueWorkflow{Priority: 1}, IssueGraph: types.IssueGraph{Labels: []string{"x"}}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-dep"}, IssueContent: types.IssueContent{Title: "dep"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
 	must(t, s.AddDependency(c, &types.Dependency{IssueID: "test-dep", DependsOnID: "test-w", Type: types.DepBlocks}, "a"))
 
 	must(t, s.PromoteFromEphemeral(c, "test-w", "a"))
@@ -582,12 +620,12 @@ func testPromoteFromEphemeral(t *testing.T, f Factory) {
 func testUpdateIssueID(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-1", Title: "One"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-2", Title: "Two"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-1"}, IssueContent: types.IssueContent{Title: "One"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-2"}, IssueContent: types.IssueContent{Title: "Two"}}), "a"))
 	must(t, s.AddDependency(c, &types.Dependency{IssueID: "test-2", DependsOnID: "test-1", Type: types.DepBlocks}, "a"))
 
 	// Rename test-1 -> test-9; dependents follow.
-	must(t, s.UpdateIssueID(c, "test-1", "test-9", &types.Issue{Title: "One"}, "a"))
+	must(t, s.UpdateIssueID(c, "test-1", "test-9", &types.Issue{IssueContent: types.IssueContent{Title: "One"}}, "a"))
 	if _, err := s.GetIssue(c, "test-9"); err != nil {
 		t.Fatalf("renamed issue not retrievable: %v", err)
 	}
@@ -608,10 +646,10 @@ func testUpdateIssueID(t *testing.T, f Factory) {
 func testDeleteIssuesBySourceRepo(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-1", Title: "A", SourceRepo: "repoX"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-2", Title: "B", SourceRepo: "repoX"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-3", Title: "C", SourceRepo: "repoY"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-w", Title: "W", SourceRepo: "repoX", Ephemeral: true}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-1"}, IssueContent: types.IssueContent{Title: "A"}, IssueGraph: types.IssueGraph{SourceRepo: "repoX"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-2"}, IssueContent: types.IssueContent{Title: "B"}, IssueGraph: types.IssueGraph{SourceRepo: "repoX"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-3"}, IssueContent: types.IssueContent{Title: "C"}, IssueGraph: types.IssueGraph{SourceRepo: "repoY"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-w"}, IssueContent: types.IssueContent{Title: "W"}, IssueGraph: types.IssueGraph{SourceRepo: "repoX"}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
 	must(t, s.AddLabel(c, "test-1", "bug", "a"))
 
 	// Deletes only the matching durable issues; wisps are never touched.
@@ -648,8 +686,8 @@ func testCreateIssuesWithFullOptions(t *testing.T, f Factory) {
 
 	// Durable batch: both created with a 'created' event each.
 	must(t, s.CreateIssuesWithFullOptions(c, []*types.Issue{
-		withDefaults(&types.Issue{ID: "test-a", Title: "A"}),
-		withDefaults(&types.Issue{ID: "test-b", Title: "B"}),
+		withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-a"}, IssueContent: types.IssueContent{Title: "A"}}),
+		withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-b"}, IssueContent: types.IssueContent{Title: "B"}}),
 	}, "a", storage.BatchCreateOptions{SkipPrefixValidation: true}))
 	if _, err := s.GetIssue(c, "test-a"); err != nil {
 		t.Fatalf("batch issue test-a missing: %v", err)
@@ -657,9 +695,9 @@ func testCreateIssuesWithFullOptions(t *testing.T, f Factory) {
 
 	// Same-batch dependency edge is created; a missing-target edge is silently skipped.
 	must(t, s.CreateIssuesWithFullOptions(c, []*types.Issue{
-		withDefaults(&types.Issue{ID: "test-x", Title: "X"}),
-		withDefaults(&types.Issue{ID: "test-y", Title: "Y", Dependencies: []*types.Dependency{{IssueID: "test-y", DependsOnID: "test-x", Type: types.DepBlocks}}}),
-		withDefaults(&types.Issue{ID: "test-z", Title: "Z", Dependencies: []*types.Dependency{{IssueID: "test-z", DependsOnID: "test-absent", Type: types.DepBlocks}}}),
+		withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-x"}, IssueContent: types.IssueContent{Title: "X"}}),
+		withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-y"}, IssueContent: types.IssueContent{Title: "Y"}, IssueGraph: types.IssueGraph{Dependencies: []*types.Dependency{{IssueID: "test-y", DependsOnID: "test-x", Type: types.DepBlocks}}}}),
+		withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-z"}, IssueContent: types.IssueContent{Title: "Z"}, IssueGraph: types.IssueGraph{Dependencies: []*types.Dependency{{IssueID: "test-z", DependsOnID: "test-absent", Type: types.DepBlocks}}}}),
 	}, "a", storage.BatchCreateOptions{SkipPrefixValidation: true}))
 	recs, _ := s.GetAllDependencyRecords(c)
 	if got := depTargets(recs["test-y"]); !slices.Equal(got, []string{"test-x"}) {
@@ -670,8 +708,8 @@ func testCreateIssuesWithFullOptions(t *testing.T, f Factory) {
 	}
 
 	// ConflictSkip leaves an existing row untouched.
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-keep", Title: "Original"}), "a"))
-	must(t, s.CreateIssuesWithFullOptions(c, []*types.Issue{withDefaults(&types.Issue{ID: "test-keep", Title: "Replacement"})},
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-keep"}, IssueContent: types.IssueContent{Title: "Original"}}), "a"))
+	must(t, s.CreateIssuesWithFullOptions(c, []*types.Issue{withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-keep"}, IssueContent: types.IssueContent{Title: "Replacement"}})},
 		"a", storage.BatchCreateOptions{SkipPrefixValidation: true, ConflictSkip: true}))
 	if got, _ := s.GetIssue(c, "test-keep"); got.Title != "Original" {
 		t.Errorf("ConflictSkip overwrote title to %q, want Original", got.Title)
@@ -690,13 +728,13 @@ func testReconcileHierarchicalChildIDs(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
 
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "x-1", Title: "parent", IssueType: types.TypeEpic}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "x-1"}, IssueContent: types.IssueContent{Title: "parent"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeEpic}}), "a"))
 
 	// Two dotted children in one batch: this is the create that runs the GREATEST
 	// upsert. On a backend that cannot translate GREATEST the whole batch aborts.
 	must(t, s.CreateIssuesWithFullOptions(c, []*types.Issue{
-		withDefaults(&types.Issue{ID: "x-1.1", Title: "child one"}),
-		withDefaults(&types.Issue{ID: "x-1.2", Title: "child two"}),
+		withDefaults(&types.Issue{IssueID: types.IssueID{ID: "x-1.1"}, IssueContent: types.IssueContent{Title: "child one"}}),
+		withDefaults(&types.Issue{IssueID: types.IssueID{ID: "x-1.2"}, IssueContent: types.IssueContent{Title: "child two"}}),
 	}, "a", storage.BatchCreateOptions{SkipPrefixValidation: true}))
 
 	for _, id := range []string{"x-1.1", "x-1.2"} {
@@ -708,7 +746,7 @@ func testReconcileHierarchicalChildIDs(t *testing.T, f Factory) {
 	// A grandchild (x-1.2.1) reconciles x-1.2's counter — the same GREATEST upsert
 	// one level deeper — and, being a grandchild, must not advance the x-1 counter.
 	must(t, s.CreateIssuesWithFullOptions(c, []*types.Issue{
-		withDefaults(&types.Issue{ID: "x-1.2.1", Title: "grandchild"}),
+		withDefaults(&types.Issue{IssueID: types.IssueID{ID: "x-1.2.1"}, IssueContent: types.IssueContent{Title: "grandchild"}}),
 	}, "a", storage.BatchCreateOptions{SkipPrefixValidation: true}))
 
 	// GetNextChildID reserves-and-advances, so call it once per parent. x-1 was
@@ -755,11 +793,11 @@ func testReconcileSkipsMissingParentCounter(t *testing.T, f Factory) {
 
 	// Neither y-1 nor z-1 exists at this point: these ARE the orphan creates.
 	if err := s.CreateIssuesWithFullOptions(c, []*types.Issue{
-		withDefaults(&types.Issue{ID: "y-1.1", Title: "batch orphan"}),
+		withDefaults(&types.Issue{IssueID: types.IssueID{ID: "y-1.1"}, IssueContent: types.IssueContent{Title: "batch orphan"}}),
 	}, "a", storage.BatchCreateOptions{SkipPrefixValidation: true}); err != nil {
 		t.Fatalf("batch create of orphan y-1.1 = %v, want nil — the missing-parent skip is what keeps the counter foreign key from failing the create", err)
 	}
-	if err := s.CreateIssue(c, withDefaults(&types.Issue{ID: "z-1.1", Title: "singular orphan"}), "a"); err != nil {
+	if err := s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "z-1.1"}, IssueContent: types.IssueContent{Title: "singular orphan"}}), "a"); err != nil {
 		t.Fatalf("singular create of orphan z-1.1 = %v, want nil — same skip, per-issue call site", err)
 	}
 
@@ -769,7 +807,7 @@ func testReconcileSkipsMissingParentCounter(t *testing.T, f Factory) {
 			t.Fatalf("orphan hierarchical child %s not created: %v", child, err)
 		}
 		must(t, s.DeleteIssue(c, child))
-		must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: parent, Title: "late parent"}), "a"))
+		must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: parent}, IssueContent: types.IssueContent{Title: "late parent"}}), "a"))
 		if next, err := s.GetNextChildID(c, parent); err != nil || next != child {
 			t.Errorf("GetNextChildID(%s) = (%q,%v), want (%s,nil) — a counter row was minted for %s while it did not exist",
 				parent, next, err, child, parent)
@@ -782,9 +820,13 @@ func testReconcileSkipsMissingParentCounter(t *testing.T, f Factory) {
 func testSlots(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-sl", Title: "T"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-sl"}, IssueContent: types.IssueContent{Title: "T"}}), "a"))
+	assertSlotLifecycle(t, s, c)
+	assertSlotMetadataMerge(t, s, c)
+}
 
-	// Get before set is an error (no such slot).
+func assertSlotLifecycle(t *testing.T, s storage.DoltStorage, c context.Context) {
+	t.Helper()
 	if _, err := s.SlotGet(c, "test-sl", "k"); err == nil {
 		t.Error("SlotGet on an unset key: want error, got nil")
 	}
@@ -817,11 +859,10 @@ func testSlots(t *testing.T, f Factory) {
 	if err := s.SlotSet(c, "test-missing", "k", "v", "a"); err == nil {
 		t.Error("SlotSet on a missing issue: want error, got nil")
 	}
+}
 
-	// MergeMetadata stores a raw JSON value, so nested objects/arrays are
-	// preserved rather than stringified, and independent keys coexist. (At this
-	// point "test-sl" metadata is {"k2":"other"}.) Backends canonicalize JSON
-	// whitespace differently (compact vs. spaced), so assert values semantically.
+func assertSlotMetadataMerge(t *testing.T, s storage.DoltStorage, c context.Context) {
+	t.Helper()
 	must(t, s.MergeMetadata(c, "test-sl", "nested", json.RawMessage(`{"pr":7}`), "a"))
 	must(t, s.MergeMetadata(c, "test-sl", "flag", json.RawMessage(`true`), "a"))
 	meta := readMetadata(t, s, "test-sl")

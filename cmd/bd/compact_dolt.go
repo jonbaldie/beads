@@ -9,11 +9,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	compactDoltDryRun bool
-	compactDoltForce  bool
-	compactDoltDays   int
-)
+type compactDoltOptions struct {
+	dryRun bool
+	force  bool
+	days   int
+}
+
+func compactDoltOptionsFromCommand(cmd *cobra.Command) compactDoltOptions {
+	return compactDoltOptions{
+		dryRun: compactFlagBool(cmd, "dry-run"),
+		force:  compactFlagBool(cmd, "force"),
+		days:   compactFlagInt(cmd, "days"),
+	}
+}
 
 var compactDoltCmd = &cobra.Command{
 	Use:     "compact",
@@ -44,9 +52,10 @@ Examples:
   bd compact --days 90 --force       # Conservative: squash 90+ day old commits`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
-	RunE: func(_ *cobra.Command, _ []string) error {
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		opts := compactDoltOptionsFromCommand(cmd)
 		if usesProxiedServer() {
-			return runCompactProxiedServer(rootCtx)
+			return runCompactProxiedServer(getRootContext(), opts)
 		}
 		evt := metrics.NewCommandEvent("compact")
 		defer func() {
@@ -55,24 +64,26 @@ Examples:
 			}
 		}()
 
-		if !compactDoltDryRun {
-			CheckReadonly("compact")
+		if !opts.dryRun {
+			if err := CheckReadonly("compact"); err != nil {
+				return err
+			}
 		}
-		ctx := rootCtx
+		ctx := getRootContext()
 		start := time.Now()
 
-		if compactDoltDays < 0 {
+		if opts.days < 0 {
 			return HandleError("--days must be non-negative")
 		}
 
-		logEntries, logErr := store.Log(ctx, 0)
+		logEntries, logErr := getStore().Log(ctx, 0)
 		if logErr != nil {
 			return HandleError("failed to read commit log: %v", logErr)
 		}
 
 		totalCommits := len(logEntries)
 		if totalCommits <= 1 {
-			if jsonOutput {
+			if isJSONOutput() {
 				return outputJSON(map[string]interface{}{
 					"success":       true,
 					"message":       "nothing to compact",
@@ -83,7 +94,7 @@ Examples:
 			return nil
 		}
 
-		cutoff := time.Now().AddDate(0, 0, -compactDoltDays)
+		cutoff := time.Now().AddDate(0, 0, -opts.days)
 
 		var oldCommits int
 		var recentHashes []string
@@ -112,14 +123,14 @@ Examples:
 
 		recentCommits := len(recentHashes)
 
-		if compactDoltDryRun {
-			if jsonOutput {
+		if opts.dryRun {
+			if isJSONOutput() {
 				return outputJSON(map[string]interface{}{
 					"dry_run":        true,
 					"total_commits":  totalCommits,
 					"old_commits":    oldCommits,
 					"recent_commits": recentCommits,
-					"cutoff_days":    compactDoltDays,
+					"cutoff_days":    opts.days,
 					"cutoff_date":    cutoff.Format("2006-01-02"),
 					"initial_hash":   initialHash,
 					"boundary_hash":  boundaryHash,
@@ -127,7 +138,7 @@ Examples:
 			}
 			fmt.Printf("DRY RUN — Compact preview\n\n")
 			fmt.Printf("  Total commits:  %d\n", totalCommits)
-			fmt.Printf("  Old (>%d days): %d (would be squashed into 1)\n", compactDoltDays, oldCommits)
+			fmt.Printf("  Old (>%d days): %d (would be squashed into 1)\n", opts.days, oldCommits)
 			fmt.Printf("  Recent:         %d (preserved)\n", recentCommits)
 			fmt.Printf("  Cutoff date:    %s\n", cutoff.Format("2006-01-02"))
 			if oldCommits <= 1 {
@@ -140,7 +151,7 @@ Examples:
 		}
 
 		if oldCommits <= 1 {
-			if jsonOutput {
+			if isJSONOutput() {
 				return outputJSON(map[string]interface{}{
 					"success":       true,
 					"message":       "nothing to compact",
@@ -156,19 +167,19 @@ Examples:
 			return HandleError("could not find boundary commit for compaction")
 		}
 
-		if !compactDoltForce {
+		if !opts.force {
 			return HandleErrorWithHint(
 				fmt.Sprintf("would squash %d old commits into 1, preserving %d recent commits",
 					oldCommits, recentCommits),
 				"Use --force to confirm or --dry-run to preview.")
 		}
 
-		if !jsonOutput {
+		if !isJSONOutput() {
 			fmt.Printf("Compacting: %d old commits → 1, preserving %d recent\n",
 				oldCommits, len(recentHashes))
 		}
 
-		compactor, ok := storage.UnwrapStore(store).(storage.Compactor)
+		compactor, ok := storage.UnwrapStore(getStore()).(storage.Compactor)
 		if !ok {
 			return HandleError("storage backend does not support compact")
 		}
@@ -182,12 +193,12 @@ Examples:
 		// workspace that has ever pushed or fetched (bd-agctw).
 		sizeBefore := storeSizeBytes(ctx)
 		pruned, tags := pruneRemoteRefsForGC(ctx)
-		if !jsonOutput {
+		if !isJSONOutput() {
 			printPruneReport(pruned, tags)
 		}
 
 		// Reclaim disk space from orphaned old history
-		if gc, ok := storage.UnwrapStore(store).(storage.GarbageCollector); ok {
+		if gc, ok := storage.UnwrapStore(getStore()).(storage.GarbageCollector); ok {
 			if err := gc.DoltGC(ctx); err != nil {
 				WarnError("dolt gc after compact failed: %v", err)
 			}
@@ -197,7 +208,7 @@ Examples:
 		elapsed := time.Since(start)
 		resultCommits := len(recentHashes) + 1
 
-		if jsonOutput {
+		if isJSONOutput() {
 			result := map[string]interface{}{
 				"success":            true,
 				"commits_before":     totalCommits,
@@ -223,9 +234,9 @@ Examples:
 }
 
 func init() {
-	compactDoltCmd.Flags().BoolVar(&compactDoltDryRun, "dry-run", false, "Preview without making changes")
-	compactDoltCmd.Flags().BoolVarP(&compactDoltForce, "force", "f", false, "Confirm commit squash")
-	compactDoltCmd.Flags().IntVar(&compactDoltDays, "days", 30, "Keep commits newer than N days")
+	compactDoltCmd.Flags().Bool("dry-run", false, "Preview without making changes")
+	compactDoltCmd.Flags().BoolP("force", "f", false, "Confirm commit squash")
+	compactDoltCmd.Flags().Int("days", 30, "Keep commits newer than N days")
 
 	rootCmd.AddCommand(compactDoltCmd)
 }

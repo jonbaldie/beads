@@ -96,42 +96,46 @@ func CheckClassicArtifacts(path string) DoctorCheck {
 // Individual unreadable subdirectories are skipped without error.
 func ScanForArtifacts(rootPath string) (ArtifactReport, error) {
 	var report ArtifactReport
-
-	// Walk the directory tree looking for .beads/ directories
-	walkErr := filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // Skip directories we can't read
-		}
-
-		base := filepath.Base(path)
-		if base == ".git" && info.IsDir() {
-			scanGitWorktreeArtifacts(path, &report)
-			return filepath.SkipDir
-		}
-
-		// Skip node_modules and similar
-		if info.IsDir() && (base == "node_modules" || base == "vendor" || base == "__pycache__") {
-			return filepath.SkipDir
-		}
-
-		// We only care about directories named ".beads"
-		if !info.IsDir() || base != ".beads" {
-			return nil
-		}
-
-		// Found a .beads directory - scan it
-		scanBeadsDir(path, &report)
-
-		// Don't descend into .beads/ itself (we've scanned it)
-		return filepath.SkipDir
-	})
+	walkErr := filepath.Walk(rootPath, walkArtifactPath(&report))
 	if walkErr != nil {
 		return report, fmt.Errorf("scanning artifacts at %s: %w", rootPath, walkErr)
 	}
+	tallyArtifactReport(&report)
+	return report, nil
+}
 
+func walkArtifactPath(report *ArtifactReport) filepath.WalkFunc {
+	return func(path string, info os.FileInfo, err error) error {
+		return visitArtifactPath(report, path, info, err)
+	}
+}
+
+func visitArtifactPath(report *ArtifactReport, path string, info os.FileInfo, err error) error {
+	if err != nil {
+		return nil // Skip directories we can't read
+	}
+	base := filepath.Base(path)
+	if base == ".git" && info.IsDir() {
+		scanGitWorktreeArtifacts(path, report)
+		return filepath.SkipDir
+	}
+	if skipArtifactWalkDir(info, base) {
+		return filepath.SkipDir
+	}
+	if !info.IsDir() || base != ".beads" {
+		return nil
+	}
+	scanBeadsDir(path, report)
+	return filepath.SkipDir
+}
+
+func skipArtifactWalkDir(info os.FileInfo, base string) bool {
+	return info.IsDir() && (base == "node_modules" || base == "vendor" || base == "__pycache__")
+}
+
+func tallyArtifactReport(report *ArtifactReport) {
 	report.TotalCount = len(report.SQLiteArtifacts) +
 		len(report.CruftBeadsDirs) + len(report.RedirectIssues)
-
 	for _, findings := range [][]ArtifactFinding{
 		report.SQLiteArtifacts,
 		report.CruftBeadsDirs, report.RedirectIssues,
@@ -142,8 +146,6 @@ func ScanForArtifacts(rootPath string) (ArtifactReport, error) {
 			}
 		}
 	}
-
-	return report, nil
 }
 
 // scanGitWorktreeArtifacts scans the git-managed worktree area only.
@@ -258,39 +260,39 @@ func scanSQLiteArtifacts(beadsDir string, report *ArtifactReport) {
 	if !IsDoltBackend(beadsDir) {
 		return
 	}
-
 	entries, err := os.ReadDir(beadsDir)
 	if err != nil {
 		return
 	}
-
 	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-
-		// beads.db and its WAL/SHM files
-		if name == "beads.db" || name == "beads.db-shm" || name == "beads.db-wal" {
-			report.SQLiteArtifacts = append(report.SQLiteArtifacts, ArtifactFinding{
-				Path:        filepath.Join(beadsDir, name),
-				Type:        "sqlite",
-				Description: "SQLite database file (Dolt is active backend)",
-				SafeDelete:  name == "beads.db-shm" || name == "beads.db-wal",
-			})
-			continue
-		}
-
-		// beads.backup-*.db pre-migration backups
-		if strings.HasPrefix(name, "beads.backup-") && strings.HasSuffix(name, ".db") {
-			report.SQLiteArtifacts = append(report.SQLiteArtifacts, ArtifactFinding{
-				Path:        filepath.Join(beadsDir, name),
-				Type:        "sqlite",
-				Description: "pre-migration backup",
-				SafeDelete:  true,
-			})
+		if finding, ok := sqliteArtifactFinding(beadsDir, entry); ok {
+			report.SQLiteArtifacts = append(report.SQLiteArtifacts, finding)
 		}
 	}
+}
+
+func sqliteArtifactFinding(beadsDir string, entry os.DirEntry) (ArtifactFinding, bool) {
+	if entry.IsDir() {
+		return ArtifactFinding{}, false
+	}
+	name := entry.Name()
+	if name == "beads.db" || name == "beads.db-shm" || name == "beads.db-wal" {
+		return ArtifactFinding{
+			Path:        filepath.Join(beadsDir, name),
+			Type:        "sqlite",
+			Description: "SQLite database file (Dolt is active backend)",
+			SafeDelete:  name == "beads.db-shm" || name == "beads.db-wal",
+		}, true
+	}
+	if strings.HasPrefix(name, "beads.backup-") && strings.HasSuffix(name, ".db") {
+		return ArtifactFinding{
+			Path:        filepath.Join(beadsDir, name),
+			Type:        "sqlite",
+			Description: "pre-migration backup",
+			SafeDelete:  true,
+		}, true
+	}
+	return ArtifactFinding{}, false
 }
 
 // scanCruftBeadsDir checks if a .beads directory that should be redirect-only
@@ -336,69 +338,52 @@ func scanCruftBeadsDir(beadsDir string, report *ArtifactReport) {
 // validateRedirect checks that a redirect file points to a valid target.
 func validateRedirect(beadsDir string, report *ArtifactReport) {
 	redirectPath := filepath.Join(beadsDir, "redirect")
+	target, ok := readRedirectTarget(redirectPath, report)
+	if !ok {
+		return
+	}
+	checkRedirectTarget(redirectPath, beadsDir, target, report)
+}
+
+func appendRedirectIssue(report *ArtifactReport, redirectPath, description string) {
+	report.RedirectIssues = append(report.RedirectIssues, ArtifactFinding{
+		Path:        redirectPath,
+		Type:        "redirect",
+		Description: description,
+		SafeDelete:  false,
+	})
+}
+
+func readRedirectTarget(redirectPath string, report *ArtifactReport) (string, bool) {
 	data, err := os.ReadFile(redirectPath) // #nosec G304 - path constructed from walked dir
 	if err != nil {
-		report.RedirectIssues = append(report.RedirectIssues, ArtifactFinding{
-			Path:        redirectPath,
-			Type:        "redirect",
-			Description: "redirect file unreadable",
-			SafeDelete:  false,
-		})
-		return
+		appendRedirectIssue(report, redirectPath, "redirect file unreadable")
+		return "", false
 	}
-
-	target := strings.TrimSpace(string(data))
-
-	// Skip comments, find first path line
-	lines := strings.Split(target, "\n")
-	target = ""
-	for _, line := range lines {
+	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" && !strings.HasPrefix(line, "#") {
-			target = line
-			break
+			return line, true
 		}
 	}
+	appendRedirectIssue(report, redirectPath, "redirect file is empty")
+	return "", false
+}
 
-	if target == "" {
-		report.RedirectIssues = append(report.RedirectIssues, ArtifactFinding{
-			Path:        redirectPath,
-			Type:        "redirect",
-			Description: "redirect file is empty",
-			SafeDelete:  false,
-		})
-		return
-	}
-
-	// Resolve relative paths
+func checkRedirectTarget(redirectPath, beadsDir, target string, report *ArtifactReport) {
 	resolvedTarget := target
 	if !filepath.IsAbs(target) {
-		projectRoot := filepath.Dir(beadsDir)
-		resolvedTarget = filepath.Join(projectRoot, target)
+		resolvedTarget = filepath.Join(filepath.Dir(beadsDir), target)
 	}
-
-	// Check target exists
 	info, err := os.Stat(resolvedTarget)
 	if err != nil {
-		report.RedirectIssues = append(report.RedirectIssues, ArtifactFinding{
-			Path:        redirectPath,
-			Type:        "redirect",
-			Description: fmt.Sprintf("redirect target does not exist: %s", target),
-			SafeDelete:  false,
-		})
+		appendRedirectIssue(report, redirectPath, fmt.Sprintf("redirect target does not exist: %s", target))
 		return
 	}
-
 	if !info.IsDir() {
-		report.RedirectIssues = append(report.RedirectIssues, ArtifactFinding{
-			Path:        redirectPath,
-			Type:        "redirect",
-			Description: fmt.Sprintf("redirect target is not a directory: %s", target),
-			SafeDelete:  false,
-		})
+		appendRedirectIssue(report, redirectPath, fmt.Sprintf("redirect target is not a directory: %s", target))
 		return
 	}
-
 	// gastownhall/beads#4692: FollowRedirect ignores a redirect whose target
 	// has no metadata.json and no recognizable database (a stray
 	// worktree-depth redirect, e.g. a relic of the "bd worktree create"
@@ -407,12 +392,7 @@ func validateRedirect(beadsDir string, report *ArtifactReport) {
 	// SafeDelete cruft -- the fix is to correct or remove the redirect file,
 	// not to delete anything automatically.
 	if !hasDatabaseOrMetadata(resolvedTarget) {
-		report.RedirectIssues = append(report.RedirectIssues, ArtifactFinding{
-			Path:        redirectPath,
-			Type:        "redirect",
-			Description: fmt.Sprintf("redirect target has no database or metadata.json (ignored by bd): %s", target),
-			SafeDelete:  false,
-		})
+		appendRedirectIssue(report, redirectPath, fmt.Sprintf("redirect target has no database or metadata.json (ignored by bd): %s", target))
 	}
 }
 

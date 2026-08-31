@@ -29,45 +29,66 @@ type DepKeyAnomalies struct {
 func ScanDependencyKeys(ctx context.Context, db *sql.DB) ([]DepKeyAnomalies, error) {
 	var out []DepKeyAnomalies
 	for _, table := range depKeyTables {
-		hasID, err := depKeyColumnExists(ctx, db, table, "id")
+		a, ok, err := scanDependencyKeyTable(ctx, db, table)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", table, err)
+			return nil, err
 		}
-		if !hasID {
-			continue
-		}
-
-		a := DepKeyAnomalies{Table: table}
-		//nolint:gosec // G201: table is a hardcoded constant, never user input.
-		rows, err := db.QueryContext(ctx, fmt.Sprintf(
-			`SELECT id, issue_id, %s FROM %s`, fixDependencyTargetExpr, table))
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", table, err)
-		}
-		for rows.Next() {
-			var id, issueID string
-			var target sql.NullString
-			if err := rows.Scan(&id, &issueID, &target); err != nil {
-				_ = rows.Close()
-				return nil, fmt.Errorf("%s: %w", table, err)
-			}
-			if !target.Valid {
-				a.NullTarget = append(a.NullTarget, id)
-				continue
-			}
-			if want := depid.New(issueID, target.String); want != id {
-				a.MisKeyed = append(a.MisKeyed, [2]string{id, want})
-			}
-		}
-		_ = rows.Close()
-		if err := rows.Err(); err != nil {
-			return nil, fmt.Errorf("%s: %w", table, err)
-		}
-		if len(a.MisKeyed)+len(a.NullTarget) > 0 {
+		if ok {
 			out = append(out, a)
 		}
 	}
 	return out, nil
+}
+
+func scanDependencyKeyTable(ctx context.Context, db *sql.DB, table string) (DepKeyAnomalies, bool, error) {
+	hasID, err := depKeyColumnExists(ctx, db, table, "id")
+	if err != nil {
+		return DepKeyAnomalies{}, false, fmt.Errorf("%s: %w", table, err)
+	}
+	if !hasID {
+		return DepKeyAnomalies{}, false, nil
+	}
+	a, err := collectDependencyKeyAnomalies(ctx, db, table)
+	if err != nil {
+		return DepKeyAnomalies{}, false, err
+	}
+	if len(a.MisKeyed)+len(a.NullTarget) == 0 {
+		return DepKeyAnomalies{}, false, nil
+	}
+	return a, true, nil
+}
+
+func collectDependencyKeyAnomalies(ctx context.Context, db *sql.DB, table string) (DepKeyAnomalies, error) {
+	a := DepKeyAnomalies{Table: table}
+	//nolint:gosec // G201: table is a hardcoded constant, never user input.
+	rows, err := db.QueryContext(ctx, fmt.Sprintf(
+		`SELECT id, issue_id, %s FROM %s`, fixDependencyTargetExpr, table))
+	if err != nil {
+		return DepKeyAnomalies{}, fmt.Errorf("%s: %w", table, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, issueID string
+		var target sql.NullString
+		if err := rows.Scan(&id, &issueID, &target); err != nil {
+			return DepKeyAnomalies{}, fmt.Errorf("%s: %w", table, err)
+		}
+		recordDependencyKeyRow(&a, id, issueID, target)
+	}
+	if err := rows.Err(); err != nil {
+		return DepKeyAnomalies{}, fmt.Errorf("%s: %w", table, err)
+	}
+	return a, nil
+}
+
+func recordDependencyKeyRow(a *DepKeyAnomalies, id, issueID string, target sql.NullString) {
+	if !target.Valid {
+		a.NullTarget = append(a.NullTarget, id)
+		return
+	}
+	if want := depid.New(issueID, target.String); want != id {
+		a.MisKeyed = append(a.MisKeyed, [2]string{id, want})
+	}
 }
 
 // DependencyKeys repairs rekey-backfill leftovers (bd-6dnrw.17): mis-keyed
@@ -108,65 +129,81 @@ func repairDependencyKeys(ctx context.Context, db *sql.DB, verbose bool) error {
 		fmt.Println("  No dependency key anomalies to fix")
 		return nil
 	}
-
-	// Uses explicit transaction so writes persist when @@autocommit is OFF
-	// (e.g. Dolt server started with --no-auto-commit).
 	tx, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	var rekeyed, removed, failed int
-	repairedTables := make(map[string]bool)
-	for _, a := range anomalies {
-		showIndividual := verbose || len(a.MisKeyed)+len(a.NullTarget) < 20
-		for _, mk := range a.MisKeyed {
-			//nolint:gosec // G201: table is a hardcoded constant, never user input.
-			if _, err := tx.Exec(fmt.Sprintf(`UPDATE %s SET id = ? WHERE id = ?`, a.Table), mk[1], mk[0]); err != nil {
-				fmt.Printf("  Warning: failed to re-key %s row %s (row keeps its old id): %v\n", a.Table, mk[0], err)
-				failed++
-				continue
-			}
-			rekeyed++
-			repairedTables[a.Table] = true
-			if showIndividual {
-				fmt.Printf("  Re-keyed %s row %s → %s\n", a.Table, mk[0], mk[1])
-			}
-		}
-		for _, id := range a.NullTarget {
-			//nolint:gosec // G201: table is a hardcoded constant, never user input.
-			if _, err := tx.Exec(fmt.Sprintf(`DELETE FROM %s WHERE id = ?`, a.Table), id); err != nil {
-				fmt.Printf("  Warning: failed to remove %s row %s: %v\n", a.Table, id, err)
-				failed++
-				continue
-			}
-			removed++
-			repairedTables[a.Table] = true
-			if showIndividual {
-				fmt.Printf("  Removed %s row %s (no dependency target)\n", a.Table, id)
-			}
-		}
-	}
+	rekeyed, removed, failed, repairedTables := applyDependencyKeyRepairs(tx, anomalies, verbose)
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit dependency key repairs: %w", err)
 	}
+	commitRepairedDependencyTables(db, repairedTables)
+	reportDependencyKeyRepairs(rekeyed, removed, failed)
+	return nil
+}
 
-	// Commit changes in Dolt, staging only the repaired tables so an unrelated
-	// dirty working set is not swept under this message. Best effort: commit
-	// advisory; repair already applied.
-	if len(repairedTables) > 0 {
-		for table := range repairedTables {
-			_, _ = db.Exec("CALL DOLT_ADD(?)", table)
-		}
-		_, _ = db.Exec("CALL DOLT_COMMIT('-m', 'doctor: re-key dependency ids to deterministic values')")
+type depKeyRepairCounts struct {
+	rekeyed int
+	removed int
+	failed  int
+}
+
+func applyDependencyKeyRepairs(tx *sql.Tx, anomalies []DepKeyAnomalies, verbose bool) (rekeyed, removed, failed int, repairedTables map[string]bool) {
+	repairedTables = make(map[string]bool)
+	var counts depKeyRepairCounts
+	for _, a := range anomalies {
+		applyOneTableKeyRepairs(tx, a, verbose, &counts, repairedTables)
 	}
+	return counts.rekeyed, counts.removed, counts.failed, repairedTables
+}
 
+func applyOneTableKeyRepairs(tx *sql.Tx, a DepKeyAnomalies, verbose bool, counts *depKeyRepairCounts, repairedTables map[string]bool) {
+	showIndividual := verbose || len(a.MisKeyed)+len(a.NullTarget) < 20
+	for _, mk := range a.MisKeyed {
+		//nolint:gosec // G201: table is a hardcoded constant, never user input.
+		if _, err := tx.Exec(fmt.Sprintf(`UPDATE %s SET id = ? WHERE id = ?`, a.Table), mk[1], mk[0]); err != nil {
+			fmt.Printf("  Warning: failed to re-key %s row %s (row keeps its old id): %v\n", a.Table, mk[0], err)
+			counts.failed++
+			continue
+		}
+		counts.rekeyed++
+		repairedTables[a.Table] = true
+		if showIndividual {
+			fmt.Printf("  Re-keyed %s row %s → %s\n", a.Table, mk[0], mk[1])
+		}
+	}
+	for _, id := range a.NullTarget {
+		//nolint:gosec // G201: table is a hardcoded constant, never user input.
+		if _, err := tx.Exec(fmt.Sprintf(`DELETE FROM %s WHERE id = ?`, a.Table), id); err != nil {
+			fmt.Printf("  Warning: failed to remove %s row %s: %v\n", a.Table, id, err)
+			counts.failed++
+			continue
+		}
+		counts.removed++
+		repairedTables[a.Table] = true
+		if showIndividual {
+			fmt.Printf("  Removed %s row %s (no dependency target)\n", a.Table, id)
+		}
+	}
+}
+
+func commitRepairedDependencyTables(db *sql.DB, repairedTables map[string]bool) {
+	if len(repairedTables) == 0 {
+		return
+	}
+	for table := range repairedTables {
+		_, _ = db.Exec("CALL DOLT_ADD(?)", table)
+	}
+	_, _ = db.Exec("CALL DOLT_COMMIT('-m', 'doctor: re-key dependency ids to deterministic values')")
+}
+
+func reportDependencyKeyRepairs(rekeyed, removed, failed int) {
 	if failed > 0 {
 		fmt.Printf("  Dependency keys: %d re-keyed, %d removed, %d FAILED — failed rows keep their old keys; resolve the warnings above and re-run bd doctor\n",
 			rekeyed, removed, failed)
-		return nil
+		return
 	}
 	fmt.Printf("  Fixed dependency keys: %d re-keyed, %d removed\n", rekeyed, removed)
-	return nil
 }
 
 // depKeyColumnExists reports whether table.column is present in the current schema.

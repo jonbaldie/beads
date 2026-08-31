@@ -70,13 +70,21 @@ func pagingSecond(offset int) time.Time {
 func seedPagingIssue(t *testing.T, s storage.DoltStorage, id string, at time.Time, status types.Status) {
 	t.Helper()
 	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{
-		ID:        id,
-		Title:     id,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Status:    status,
-		CreatedAt: at,
-		UpdatedAt: at,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Priority:  2,
+			IssueType: types.TypeTask,
+			Status:    status,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: at,
+			UpdatedAt: at,
+		},
 	}), "actor"))
 }
 
@@ -97,7 +105,7 @@ func seedKeysetOverflow(t *testing.T, s storage.DoltStorage) {
 }
 
 func keysetOverflowFilter() types.IssueFilter {
-	return types.IssueFilter{IDPrefix: "ks-", SkipWisps: true, SortBy: "created", Limit: 100}
+	return types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "ks-", Limit: 100}, IssueFilterHydrate: types.IssueFilterHydrate{SkipWisps: true}, IssueFilterPage: types.IssueFilterPage{SortBy: "created"}}
 }
 
 // --- cases ---
@@ -125,7 +133,8 @@ func testSearchPagingKeysetWalk(t *testing.T, f Factory) {
 	seen := make(map[string]bool, len(keysetOverflowOrder))
 	var afterCreatedAt *time.Time
 	afterID := ""
-	for page := 0; page <= len(keysetOverflowOrder); page++ {
+	overflowCount := len(keysetOverflowOrder)
+	for page := 0; page <= overflowCount; page++ {
 		filter := keysetOverflowFilter()
 		filter.Limit = pageSize
 		filter.AfterCreatedAt = afterCreatedAt
@@ -224,7 +233,7 @@ func testSearchPagingKeysetComposes(t *testing.T, f Factory) {
 	seedPagingIssue(t, s, "kd-d1", oldest, types.StatusOpen)
 
 	open := types.StatusOpen
-	unpositioned := types.IssueFilter{IDPrefix: "kc-", SkipWisps: true, SortBy: "created", Limit: 100, Status: &open}
+	unpositioned := types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "kc-", Limit: 100, Status: &open}, IssueFilterHydrate: types.IssueFilterHydrate{SkipWisps: true}, IssueFilterPage: types.IssueFilterPage{SortBy: "created"}}
 
 	rows, err := s.SearchIssues(c, "", unpositioned)
 	must(t, err)
@@ -273,7 +282,7 @@ func seedPagingCapFixture(t *testing.T, s storage.DoltStorage) []string {
 }
 
 func pagingCapFilter(maxRows int, source string) types.IssueFilter {
-	return types.IssueFilter{IDPrefix: "mr-", SkipWisps: true, MaxRows: maxRows, MaxRowsSource: source}
+	return types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "mr-"}, IssueFilterHydrate: types.IssueFilterHydrate{SkipWisps: true}, IssueFilterPage: types.IssueFilterPage{MaxRows: maxRows, MaxRowsSource: source}}
 }
 
 // testSearchPagingMaxRows (B4): a search whose matching rows exceed
@@ -299,6 +308,15 @@ func pagingCapFilter(maxRows int, source string) types.IssueFilter {
 // "stricter than the reader role" is stale: the reader case is strict now, and
 // strictness was never the reason.
 func testSearchPagingMaxRows(t *testing.T, f Factory) {
+	t.Helper()
+	testSearchPagingUnderCap(t, f)
+	testSearchPagingOverCap(t, f)
+	testSearchPagingZeroCap(t, f)
+	testSearchPagingBoundedLimit(t, f)
+	testSearchPagingLimitOverCap(t, f)
+}
+
+func testSearchPagingUnderCap(t *testing.T, f Factory) {
 	t.Run("UnderTheCapIsAnOrdinaryResult", func(t *testing.T) {
 		s := f(t)
 		ids := seedPagingCapFixture(t, s)
@@ -312,7 +330,9 @@ func testSearchPagingMaxRows(t *testing.T, f Factory) {
 			}
 		}
 	})
+}
 
+func testSearchPagingOverCap(t *testing.T, f Factory) {
 	t.Run("OverTheCapAnswersTheTypedRefusal", func(t *testing.T) {
 		for _, leg := range []struct {
 			maxRows int
@@ -346,7 +366,9 @@ func testSearchPagingMaxRows(t *testing.T, f Factory) {
 			})
 		}
 	})
+}
 
+func testSearchPagingZeroCap(t *testing.T, f Factory) {
 	t.Run("ZeroDisablesTheCap", func(t *testing.T) {
 		s := f(t)
 		ids := seedPagingCapFixture(t, s)
@@ -358,7 +380,9 @@ func testSearchPagingMaxRows(t *testing.T, f Factory) {
 			t.Errorf("MaxRows=0 answered %v, want the whole matching set %v", got, ids)
 		}
 	})
+}
 
+func testSearchPagingBoundedLimit(t *testing.T, f Factory) {
 	// The effective query bound is min(Limit, MaxRows+1) (types.go:1894-1895), so
 	// a page the caller already bounded at or under the cap is an ordinary page:
 	// the cap has nothing left to detect. A Limit ABOVE the cap still fires it.
@@ -383,7 +407,9 @@ func testSearchPagingMaxRows(t *testing.T, f Factory) {
 			})
 		}
 	})
+}
 
+func testSearchPagingLimitOverCap(t *testing.T, f Factory) {
 	t.Run("ALimitOverTheCapStillFiresIt", func(t *testing.T) {
 		s := f(t)
 		seedPagingCapFixture(t, s)

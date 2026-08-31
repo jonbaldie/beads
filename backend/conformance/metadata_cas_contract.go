@@ -730,12 +730,20 @@ func metadataCASValue(raw string) *json.RawMessage {
 func metadataCASSeedIssue(t *testing.T, ctx context.Context, fixture MetadataCASFixture, tag string, ephemeral bool) string {
 	t.Helper()
 	issue := &types.Issue{
-		ID:        fmt.Sprintf("%s-cas-%s", fixture.IssuePrefix, tag),
-		Title:     "metadata cas " + tag,
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: ephemeral,
+		IssueID: types.IssueID{
+			ID: fmt.Sprintf("%s-cas-%s", fixture.IssuePrefix, tag),
+		},
+		IssueContent: types.IssueContent{
+			Title: "metadata cas " + tag,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: ephemeral,
+		},
 	}
 	create := fixture.CreateIssue
 	if ephemeral {

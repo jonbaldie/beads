@@ -35,18 +35,30 @@ func RunIssueOperationsCreateReverseNonBlockingStagesConcreteTables(t *testing.T
 	t.Helper()
 
 	source := &types.Issue{
-		ID:        fixture.IssuePrefix + "-create-relates-source",
-		Title:     "source",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: fixture.IssuePrefix + "-create-relates-source",
+		},
+		IssueContent: types.IssueContent{
+			Title: "source",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	dirty := &types.Issue{
-		ID:        fixture.IssuePrefix + "-create-relates-dirty",
-		Title:     "committed title",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: fixture.IssuePrefix + "-create-relates-dirty",
+		},
+		IssueContent: types.IssueContent{
+			Title: "committed title",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	for _, issue := range []*types.Issue{source, dirty} {
 		if err := fixture.CreateIssue(ctx, issue, "seed"); err != nil {
@@ -68,11 +80,17 @@ func RunIssueOperationsCreateReverseNonBlockingStagesConcreteTables(t *testing.T
 		Actor:         "writer",
 		ForceIDPrefix: true,
 		Issue: &types.Issue{
-			Title:     "generated wisp",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Ephemeral: true,
+			IssueContent: types.IssueContent{
+				Title: "generated wisp",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		},
 		Dependencies: []publicops.CreateDependency{{
 			TargetID: source.ID,
@@ -107,18 +125,30 @@ func RunIssueOperationsCreateParentChildRecomputesWaitsForClosure(t *testing.T, 
 	t.Helper()
 
 	spawner := &types.Issue{
-		ID:        fixture.IssuePrefix + "-create-spawner",
-		Title:     "spawner",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: fixture.IssuePrefix + "-create-spawner",
+		},
+		IssueContent: types.IssueContent{
+			Title: "spawner",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	waiter := &types.Issue{
-		ID:        fixture.IssuePrefix + "-create-waiter",
-		Title:     "waiter",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: fixture.IssuePrefix + "-create-waiter",
+		},
+		IssueContent: types.IssueContent{
+			Title: "waiter",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	for _, issue := range []*types.Issue{spawner, waiter} {
 		if err := fixture.CreateIssue(ctx, issue, "seed"); err != nil {
@@ -145,10 +175,14 @@ func RunIssueOperationsCreateParentChildRecomputesWaitsForClosure(t *testing.T, 
 		Actor:         "writer",
 		ForceIDPrefix: true,
 		Issue: &types.Issue{
-			Title:     "open child",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueContent: types.IssueContent{
+				Title: "open child",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		},
 		ParentID: spawner.ID,
 	})

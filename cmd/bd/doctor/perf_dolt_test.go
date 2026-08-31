@@ -47,7 +47,7 @@ func TestRunDoltPerformanceDiagnosticsDeclineNonDoltBackend(t *testing.T) {
 	if err := os.MkdirAll(beadsDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	cfg := &configfile.Config{Backend: configfile.BackendSQLite, SQLitePath: "beads.db"}
+	cfg := &configfile.Config{Backend: configfile.BackendSQLite, ConfigCompatibilityFields: configfile.ConfigCompatibilityFields{SQLitePath: "beads.db"}}
 	if err := cfg.Save(beadsDir); err != nil {
 		t.Fatalf("save SQLite config: %v", err)
 	}

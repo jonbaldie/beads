@@ -547,27 +547,9 @@ func RunMemoriesForgetOfAnAbsentKeyIsNotFoundAndDeletesNothing(t *testing.T, ctx
 		t.Fatalf("seed an empty memory row out of band: %v", err)
 	}
 
-	var before int
-	if err := fixture.QueryScalar(ctx, "SELECT COUNT(*) FROM config", nil, &before); err != nil {
-		t.Fatalf("count config rows before: %v", err)
-	}
-
-	for attempt := 1; attempt <= 2; attempt++ {
-		for _, miss := range []string{key, emptied} {
-			result, err := fixture.Memories.Forget(ctx, memoryops.ForgetRequest{Key: miss})
-			if err != nil {
-				t.Fatalf("Forget(%q) attempt %d = %v, want success with Found false", miss, attempt, err)
-			}
-			if result.Found || result.Value != "" {
-				t.Fatalf("Forget(%q) attempt %d = %+v, want Found false and no value", miss, attempt, result)
-			}
-		}
-	}
-
-	var after int
-	if err := fixture.QueryScalar(ctx, "SELECT COUNT(*) FROM config", nil, &after); err != nil {
-		t.Fatalf("count config rows after: %v", err)
-	}
+	before := countMemoryConfigRows(t, ctx, fixture, "before")
+	forgetAbsentMemoryKeys(t, ctx, fixture, key, emptied)
+	after := countMemoryConfigRows(t, ctx, fixture, "after")
 	if after != before {
 		t.Fatalf("config rows went %d -> %d across four forgets that found nothing, want no change", before, after)
 	}
@@ -577,6 +559,39 @@ func RunMemoriesForgetOfAnAbsentKeyIsNotFoundAndDeletesNothing(t *testing.T, ctx
 	assertMemoriesNeighborsSurvived(t, ctx, fixture, neighbors)
 
 	// The empty key is a refusal, not a miss.
+	assertBlankMemoryKeysRefused(t, ctx, fixture)
+}
+
+func countMemoryConfigRows(t *testing.T, ctx context.Context, fixture MemoriesFixture, phase string) int {
+	t.Helper()
+	var count int
+	if err := fixture.QueryScalar(ctx, "SELECT COUNT(*) FROM config", nil, &count); err != nil {
+		t.Fatalf("count config rows %s: %v", phase, err)
+	}
+	return count
+}
+
+func forgetAbsentMemoryKeys(t *testing.T, ctx context.Context, fixture MemoriesFixture, key, emptied string) {
+	t.Helper()
+	for attempt := 1; attempt <= 2; attempt++ {
+		forgetAbsentMemoryKey(t, ctx, fixture, key, attempt)
+		forgetAbsentMemoryKey(t, ctx, fixture, emptied, attempt)
+	}
+}
+
+func forgetAbsentMemoryKey(t *testing.T, ctx context.Context, fixture MemoriesFixture, key string, attempt int) {
+	t.Helper()
+	result, err := fixture.Memories.Forget(ctx, memoryops.ForgetRequest{Key: key})
+	if err != nil {
+		t.Fatalf("Forget(%q) attempt %d = %v, want success with Found false", key, attempt, err)
+	}
+	if result.Found || result.Value != "" {
+		t.Fatalf("Forget(%q) attempt %d = %+v, want Found false and no value", key, attempt, result)
+	}
+}
+
+func assertBlankMemoryKeysRefused(t *testing.T, ctx context.Context, fixture MemoriesFixture) {
+	t.Helper()
 	for _, blank := range []string{"", "   "} {
 		if _, err := fixture.Memories.Forget(ctx, memoryops.ForgetRequest{Key: blank}); !errors.Is(err, memoryops.ErrValidation) {
 			t.Fatalf("Forget(%q) error = %v, want ErrValidation", blank, err)

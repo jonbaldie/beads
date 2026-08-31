@@ -8,15 +8,7 @@ import (
 
 func strp(s string) *string { return &s }
 
-func resetConflictResolveFlags() {
-	conflictsResolveOurs = false
-	conflictsResolveTheirs = false
-	conflictsResolveStrat = ""
-}
-
 func TestResolveStrategy(t *testing.T) {
-	t.Cleanup(resetConflictResolveFlags)
-
 	cases := []struct {
 		name    string
 		ours    bool
@@ -36,11 +28,9 @@ func TestResolveStrategy(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			resetConflictResolveFlags()
-			conflictsResolveOurs = c.ours
-			conflictsResolveTheirs = c.theirs
-			conflictsResolveStrat = c.strat
-			got, err := resolveStrategy()
+			got, err := resolveStrategy(conflictsResolveOptions{
+				ours: c.ours, theirs: c.theirs, strategy: c.strat,
+			})
 			if c.wantErr {
 				if err == nil {
 					t.Fatalf("resolveStrategy() = %q, want an error", got)

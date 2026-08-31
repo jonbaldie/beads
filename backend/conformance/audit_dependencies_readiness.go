@@ -98,7 +98,7 @@ func auditMetaN(t *testing.T, raw string) int {
 
 func testAuditSelfDependencyRejected(t *testing.T, f Factory) {
 	s := f(t)
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "sd-a", Title: "A"}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "sd-a"}, IssueContent: types.IssueContent{Title: "A"}}), "a"))
 
 	errBlocks := s.AddDependency(ctx(), &types.Dependency{IssueID: "sd-a", DependsOnID: "sd-a", Type: types.DepBlocks}, "a")
 	if errBlocks == nil || !strings.Contains(errBlocks.Error(), "self-dependency") {
@@ -120,7 +120,7 @@ func testAuditSelfDependencyRejected(t *testing.T, f Factory) {
 func testAuditCycleRejection(t *testing.T, f Factory) {
 	s := f(t)
 	for _, id := range []string{"c1", "c2", "c3"} {
-		must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: id, Title: id}), "a"))
+		must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}}), "a"))
 	}
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "c1", DependsOnID: "c2", Type: types.DepBlocks}, "a"))
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "c2", DependsOnID: "c3", Type: types.DepBlocks}, "a"))
@@ -138,7 +138,7 @@ func testAuditCycleRejection(t *testing.T, f Factory) {
 
 	// A diamond must NOT be misreported as a cycle (UNION-distinct termination).
 	for _, id := range []string{"d1", "d2", "d3", "d4"} {
-		must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: id, Title: id}), "a"))
+		must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}}), "a"))
 	}
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "d1", DependsOnID: "d2", Type: types.DepBlocks}, "a"))
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "d1", DependsOnID: "d3", Type: types.DepBlocks}, "a"))
@@ -149,7 +149,7 @@ func testAuditCycleRejection(t *testing.T, f Factory) {
 func testAuditCycleScopeByDependencyType(t *testing.T, f Factory) {
 	s := f(t)
 	for _, id := range []string{"ra", "rb", "pa", "pb"} {
-		must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: id, Title: id}), "a"))
+		must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}}), "a"))
 	}
 	// Related edges remain outside scheduling-cycle validation.
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "ra", DependsOnID: "rb", Type: types.DepRelatesTo}, "a"))
@@ -178,8 +178,8 @@ func testAuditCycleScopeByDependencyType(t *testing.T, f Factory) {
 
 func testAuditIdempotencyVsTypeConflict(t *testing.T, f Factory) {
 	s := f(t)
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "ia", Title: "A"}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "ib", Title: "B"}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "ia"}, IssueContent: types.IssueContent{Title: "A"}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "ib"}, IssueContent: types.IssueContent{Title: "B"}}), "a"))
 
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "ib", DependsOnID: "ia", Type: types.DepBlocks, Metadata: `{"n":1}`}, "a"))
 	// Re-adding the same pair+type is idempotent: metadata is updated, no new row.
@@ -205,9 +205,16 @@ func testAuditIdempotencyVsTypeConflict(t *testing.T, f Factory) {
 
 func testAuditCrossTypeEpicTaskBlocking(t *testing.T, f Factory) {
 	s := f(t)
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "ep", Title: "Epic", IssueType: types.TypeEpic}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "tk", Title: "Task", IssueType: types.TypeTask}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "tk2", Title: "Task 2", IssueType: types.TypeTask}), "a"))
+	auditCrossTypeUnrelated(t, s)
+	auditCrossTypeHierarchy(t, s)
+	auditCrossTypeSibling(t, s)
+}
+
+func auditCrossTypeUnrelated(t *testing.T, s storage.DoltStorage) {
+	t.Helper()
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "ep"}, IssueContent: types.IssueContent{Title: "Epic"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeEpic}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "tk"}, IssueContent: types.IssueContent{Title: "Task"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "tk2"}, IssueContent: types.IssueContent{Title: "Task 2"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask}}), "a"))
 
 	// Cross-type blocking is allowed between unrelated issues (bd-wg7ve):
 	// gating a task on an epic closing, or an epic on a task closing.
@@ -228,12 +235,15 @@ func testAuditCrossTypeEpicTaskBlocking(t *testing.T, f Factory) {
 	if blocked, _, err := s.IsBlocked(ctx(), "tk2"); err != nil || blocked {
 		t.Errorf("IsBlocked(tk2) = %v, %v; want unblocked after gating epic closed", blocked, err)
 	}
+}
 
+func auditCrossTypeHierarchy(t *testing.T, s storage.DoltStorage) {
+	t.Helper()
 	// Blocking deps within a hierarchy line are rejected in both directions:
 	// gating on an ancestor deadlocks, gating on a descendant livelocks. The
 	// guard covers conditional-blocks too.
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "hep", Title: "Parent epic", IssueType: types.TypeEpic}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "hch", Title: "Child task", IssueType: types.TypeTask}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "hep"}, IssueContent: types.IssueContent{Title: "Parent epic"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeEpic}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "hch"}, IssueContent: types.IssueContent{Title: "Child task"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask}}), "a"))
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "hch", DependsOnID: "hep", Type: types.DepParentChild}, "a"))
 	if err := s.AddDependency(ctx(), &types.Dependency{IssueID: "hch", DependsOnID: "hep", Type: types.DepBlocks}, "a"); err == nil || !strings.Contains(err.Error(), "ancestor") {
 		t.Errorf("child gated on ancestor err = %v, want an 'ancestor' error", err)
@@ -244,11 +254,14 @@ func testAuditCrossTypeEpicTaskBlocking(t *testing.T, f Factory) {
 	if err := s.AddDependency(ctx(), &types.Dependency{IssueID: "hch", DependsOnID: "hep", Type: types.DepConditionalBlocks}, "a"); err == nil || !strings.Contains(err.Error(), "ancestor") {
 		t.Errorf("child conditionally gated on ancestor err = %v, want an 'ancestor' error", err)
 	}
+}
 
+func auditCrossTypeSibling(t *testing.T, s storage.DoltStorage) {
+	t.Helper()
 	// Siblings share a hierarchy component but not a hierarchy line: ordering
 	// blocks edges between children of the same parent stay allowed (the
 	// ancestry walk goes child -> parent only, never back down).
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "hch2", Title: "Sibling task", IssueType: types.TypeTask}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "hch2"}, IssueContent: types.IssueContent{Title: "Sibling task"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask}}), "a"))
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "hch2", DependsOnID: "hep", Type: types.DepParentChild}, "a"))
 	if err := s.AddDependency(ctx(), &types.Dependency{IssueID: "hch2", DependsOnID: "hch", Type: types.DepBlocks}, "a"); err != nil {
 		t.Errorf("sibling ordering blocks edge err = %v, want nil", err)
@@ -258,7 +271,7 @@ func testAuditCrossTypeEpicTaskBlocking(t *testing.T, f Factory) {
 func testAuditDependencyCountsBlocksOnly(t *testing.T, f Factory) {
 	s := f(t)
 	for _, id := range []string{"t", "c", "r", "b"} {
-		must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: id, Title: id}), "a"))
+		must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}}), "a"))
 	}
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "c", DependsOnID: "t", Type: types.DepParentChild}, "a"))
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "r", DependsOnID: "t", Type: types.DepRelatesTo}, "a"))
@@ -288,14 +301,14 @@ func testAuditDetectCyclesBlocksOnly(t *testing.T, f Factory) {
 	s := f(t)
 	// An acyclic blocks chain a->b->c yields no cycles.
 	for _, id := range []string{"a", "b", "c"} {
-		must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: id, Title: id}), "a"))
+		must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}}), "a"))
 	}
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "a", DependsOnID: "b", Type: types.DepBlocks}, "a"))
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "b", DependsOnID: "c", Type: types.DepBlocks}, "a"))
 
 	// A relates-to 2-cycle is invisible to DetectCycles (only blocks/cond-blocks form the graph).
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "x", Title: "x"}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "y", Title: "y"}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "x"}, IssueContent: types.IssueContent{Title: "x"}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "y"}, IssueContent: types.IssueContent{Title: "y"}}), "a"))
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "x", DependsOnID: "y", Type: types.DepRelatesTo}, "a"))
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "y", DependsOnID: "x", Type: types.DepRelatesTo}, "a"))
 
@@ -316,7 +329,7 @@ func testAuditDetectCyclesBlocksOnly(t *testing.T, f Factory) {
 func testAuditDependencyTree(t *testing.T, f Factory) {
 	s := f(t)
 	for _, id := range []string{"g1", "g2", "g3", "g4"} {
-		must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: id, Title: id}), "a"))
+		must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}}), "a"))
 	}
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "g1", DependsOnID: "g2", Type: types.DepBlocks}, "a"))
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "g2", DependsOnID: "g3", Type: types.DepBlocks}, "a"))
@@ -324,11 +337,23 @@ func testAuditDependencyTree(t *testing.T, f Factory) {
 
 	nodes, err := s.GetDependencyTree(ctx(), "g1", 10, false, false)
 	must(t, err)
+	assertAuditDependencyTreeShape(t, nodes)
+	assertAuditDependencyTreeDepthLimit(t, s)
+}
+
+func assertAuditDependencyTreeShape(t *testing.T, nodes []*types.TreeNode) {
+	t.Helper()
 	byID := make(map[string]*types.TreeNode, len(nodes))
 	for _, n := range nodes {
 		byID[n.ID] = n
 	}
-	ids := make([]string, 0, len(nodes))
+	assertAuditDependencyTreeIDs(t, byID)
+	assertAuditDependencyTreeDepths(t, byID)
+}
+
+func assertAuditDependencyTreeIDs(t *testing.T, byID map[string]*types.TreeNode) {
+	t.Helper()
+	ids := make([]string, 0, len(byID))
 	for id := range byID {
 		ids = append(ids, id)
 	}
@@ -336,6 +361,10 @@ func testAuditDependencyTree(t *testing.T, f Factory) {
 	if !slices.Equal(ids, []string{"g1", "g2", "g3"}) {
 		t.Errorf("tree ids = %v, want [g1 g2 g3] (relates-to g4 excluded)", ids)
 	}
+}
+
+func assertAuditDependencyTreeDepths(t *testing.T, byID map[string]*types.TreeNode) {
+	t.Helper()
 	if byID["g1"] == nil || byID["g1"].Depth != 0 {
 		t.Errorf("g1 depth = %v, want 0", byID["g1"])
 	}
@@ -345,7 +374,10 @@ func testAuditDependencyTree(t *testing.T, f Factory) {
 	if byID["g3"] == nil || byID["g3"].Depth != 2 {
 		t.Errorf("g3 depth = %v, want 2", byID["g3"])
 	}
+}
 
+func assertAuditDependencyTreeDepthLimit(t *testing.T, s storage.DoltStorage) {
+	t.Helper()
 	// maxDepth=1 stops before expanding g1's children.
 	shallow, err := s.GetDependencyTree(ctx(), "g1", 1, false, false)
 	must(t, err)
@@ -368,10 +400,10 @@ func treeIssues(nodes []*types.TreeNode) []*types.Issue {
 
 func testAuditReadyTypeAndPinnedExclusions(t *testing.T, f Factory) {
 	s := f(t)
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "rk1", Title: "task", IssueType: types.TypeTask, Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "rk2", Title: "gate", IssueType: types.TypeGate, Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "rk3", Title: "mol", IssueType: types.TypeMolecule, Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "rk4", Title: "pinned", IssueType: types.TypeTask, Status: types.StatusOpen, Pinned: true}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "rk1"}, IssueContent: types.IssueContent{Title: "task"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "rk2"}, IssueContent: types.IssueContent{Title: "gate"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeGate, Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "rk3"}, IssueContent: types.IssueContent{Title: "mol"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeMolecule, Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "rk4"}, IssueContent: types.IssueContent{Title: "pinned"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}, IssueWisp: types.IssueWisp{Pinned: true}}), "a"))
 
 	ready, _ := s.GetReadyWork(ctx(), types.WorkFilter{})
 	if got := issueIDs(ready); !slices.Equal(got, []string{"rk1"}) {
@@ -413,34 +445,34 @@ func testAuditReadyMultiStatusFilter(t *testing.T, f Factory) {
 	// "soaking" is a custom status; registering it up front lets the create
 	// path validate msf-soak directly into it.
 	must(t, s.SetConfig(c, "status.custom", "soaking"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "msf-open", Title: "open", Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "msf-prog", Title: "in progress", Status: types.StatusInProgress}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "msf-block", Title: "status blocked", Status: types.StatusBlocked}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "msf-soak", Title: "custom status", Status: types.Status("soaking")}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "msf-open"}, IssueContent: types.IssueContent{Title: "open"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "msf-prog"}, IssueContent: types.IssueContent{Title: "in progress"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "msf-block"}, IssueContent: types.IssueContent{Title: "status blocked"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusBlocked}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "msf-soak"}, IssueContent: types.IssueContent{Title: "custom status"}, IssueWorkflow: types.IssueWorkflow{Status: types.Status("soaking")}}), "a"))
 	// One wisp on each side of the multi-status filter, so the wisp arm of
 	// the ready union is asserted alongside the issues arm. Wisps are
 	// ephemeral, so they only surface under IncludeEphemeral.
 	must(t, s.CreateIssuesWithFullOptions(c, []*types.Issue{
-		withDefaults(&types.Issue{ID: "msf-w-block", Title: "wisp blocked", Status: types.StatusBlocked, Ephemeral: true}),
-		withDefaults(&types.Issue{ID: "msf-w-prog", Title: "wisp in progress", Status: types.StatusInProgress, Ephemeral: true}),
+		withDefaults(&types.Issue{IssueID: types.IssueID{ID: "msf-w-block"}, IssueContent: types.IssueContent{Title: "wisp blocked"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusBlocked}, IssueWisp: types.IssueWisp{Ephemeral: true}}),
+		withDefaults(&types.Issue{IssueID: types.IssueID{ID: "msf-w-prog"}, IssueContent: types.IssueContent{Title: "wisp in progress"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress}, IssueWisp: types.IssueWisp{Ephemeral: true}}),
 	}, "a", storage.BatchCreateOptions{SkipPrefixValidation: true}))
 
 	// Statuses ORs across issues and wisps in a single call.
-	multi, err := s.GetReadyWork(c, types.WorkFilter{Statuses: []types.Status{types.StatusOpen, types.StatusBlocked}, IncludeEphemeral: true})
+	multi, err := s.GetReadyWork(c, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Statuses: []types.Status{types.StatusOpen, types.StatusBlocked}}, WorkFilterExtra: types.WorkFilterExtra{IncludeEphemeral: true}})
 	must(t, err)
 	if got := issueIDs(multi); !slices.Equal(got, []string{"msf-block", "msf-open", "msf-w-block"}) {
 		t.Errorf("ready(Statuses open+blocked, IncludeEphemeral) = %v, want [msf-block msf-open msf-w-block]", got)
 	}
 
 	// A custom status participates in the OR like any built-in.
-	custom, err := s.GetReadyWork(c, types.WorkFilter{Statuses: []types.Status{"soaking", types.StatusInProgress}, IncludeEphemeral: true})
+	custom, err := s.GetReadyWork(c, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Statuses: []types.Status{"soaking", types.StatusInProgress}}, WorkFilterExtra: types.WorkFilterExtra{IncludeEphemeral: true}})
 	must(t, err)
 	if got := issueIDs(custom); !slices.Equal(got, []string{"msf-prog", "msf-soak", "msf-w-prog"}) {
 		t.Errorf("ready(Statuses soaking+in_progress, IncludeEphemeral) = %v, want [msf-prog msf-soak msf-w-prog]", got)
 	}
 
 	// Singular Status takes precedence: Statuses is ignored when both are set.
-	single, err := s.GetReadyWork(c, types.WorkFilter{Status: types.StatusOpen, Statuses: []types.Status{types.StatusBlocked}})
+	single, err := s.GetReadyWork(c, types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Status: types.StatusOpen, Statuses: []types.Status{types.StatusBlocked}}})
 	must(t, err)
 	if got := issueIDs(single); !slices.Equal(got, []string{"msf-open"}) {
 		t.Errorf("ready(Status=open, Statuses=[blocked]) = %v, want [msf-open] (Status must win)", got)
@@ -460,9 +492,9 @@ func testAuditReadyHybridSortAndOldest(t *testing.T, f Factory) {
 	// Three recent (<48h) tasks created in this wall order, with distinct
 	// whole-second created_at so the oldest policy has an unambiguous order.
 	base := time.Now().UTC().Truncate(time.Second).Add(-1 * time.Hour)
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "so_p2", Title: "p2", Priority: 2, Status: types.StatusOpen, CreatedAt: base, UpdatedAt: base}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "so_p0", Title: "p0", Priority: 0, Status: types.StatusOpen, CreatedAt: base.Add(time.Second), UpdatedAt: base.Add(time.Second)}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "so_p1", Title: "p1", Priority: 1, Status: types.StatusOpen, CreatedAt: base.Add(2 * time.Second), UpdatedAt: base.Add(2 * time.Second)}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "so_p2"}, IssueContent: types.IssueContent{Title: "p2"}, IssueWorkflow: types.IssueWorkflow{Priority: 2, Status: types.StatusOpen}, IssueTimes: types.IssueTimes{CreatedAt: base, UpdatedAt: base}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "so_p0"}, IssueContent: types.IssueContent{Title: "p0"}, IssueWorkflow: types.IssueWorkflow{Priority: 0, Status: types.StatusOpen}, IssueTimes: types.IssueTimes{CreatedAt: base.Add(time.Second), UpdatedAt: base.Add(time.Second)}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "so_p1"}, IssueContent: types.IssueContent{Title: "p1"}, IssueWorkflow: types.IssueWorkflow{Priority: 1, Status: types.StatusOpen}, IssueTimes: types.IssueTimes{CreatedAt: base.Add(2 * time.Second), UpdatedAt: base.Add(2 * time.Second)}}), "a"))
 
 	// Hybrid: all recent -> priority ASC.
 	hybrid, _ := s.GetReadyWork(ctx(), types.WorkFilter{})
@@ -470,7 +502,7 @@ func testAuditReadyHybridSortAndOldest(t *testing.T, f Factory) {
 		t.Errorf("hybrid order = %v, want [so_p0 so_p1 so_p2]", got)
 	}
 	// Oldest: created_at ASC -> creation order.
-	oldest, _ := s.GetReadyWork(ctx(), types.WorkFilter{SortPolicy: types.SortPolicyOldest})
+	oldest, _ := s.GetReadyWork(ctx(), types.WorkFilter{WorkFilterCore: types.WorkFilterCore{SortPolicy: types.SortPolicyOldest}})
 	if got := orderedIDs(oldest); !slices.Equal(got, []string{"so_p2", "so_p0", "so_p1"}) {
 		t.Errorf("oldest order = %v, want [so_p2 so_p0 so_p1]", got)
 	}
@@ -479,15 +511,15 @@ func testAuditReadyHybridSortAndOldest(t *testing.T, f Factory) {
 func testAuditReadyParentTransitiveDescendants(t *testing.T, f Factory) {
 	s := f(t)
 	// Dotted ids satisfy both the recursive-CTE and the id-LIKE descendant paths.
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "pp-1", Title: "parent", Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "pp-1.1", Title: "child", Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "pp-1.1.1", Title: "grandchild", Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "pu-1", Title: "unrelated", Status: types.StatusOpen}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "pp-1"}, IssueContent: types.IssueContent{Title: "parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "pp-1.1"}, IssueContent: types.IssueContent{Title: "child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "pp-1.1.1"}, IssueContent: types.IssueContent{Title: "grandchild"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "pu-1"}, IssueContent: types.IssueContent{Title: "unrelated"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "pp-1.1", DependsOnID: "pp-1", Type: types.DepParentChild}, "a"))
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "pp-1.1.1", DependsOnID: "pp-1.1", Type: types.DepParentChild}, "a"))
 
 	parent := "pp-1"
-	ready, _ := s.GetReadyWork(ctx(), types.WorkFilter{ParentID: &parent})
+	ready, _ := s.GetReadyWork(ctx(), types.WorkFilter{WorkFilterCore: types.WorkFilterCore{ParentID: &parent}})
 	ids := issueIDs(ready)
 	if !contains(ids, "pp-1.1") || !contains(ids, "pp-1.1.1") {
 		t.Errorf("ready(ParentID) = %v, want to include child and grandchild", ids)
@@ -503,10 +535,10 @@ func testAuditBlockedInheritedParent(t *testing.T, f Factory) {
 	// the child has no direct active blocker, so GetBlockedIssues substitutes the
 	// parent epic as the inherited blocker. Order of the two adds matters: the epic
 	// must already be is_blocked when the parent-child edge is added.
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "bblk", Title: "epic blocker", IssueType: types.TypeEpic, Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "bep", Title: "epic", IssueType: types.TypeEpic, Status: types.StatusOpen}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "bblk"}, IssueContent: types.IssueContent{Title: "epic blocker"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeEpic, Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "bep"}, IssueContent: types.IssueContent{Title: "epic"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeEpic, Status: types.StatusOpen}}), "a"))
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "bep", DependsOnID: "bblk", Type: types.DepBlocks}, "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "bch", Title: "child", Status: types.StatusOpen}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "bch"}, IssueContent: types.IssueContent{Title: "child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "bch", DependsOnID: "bep", Type: types.DepParentChild}, "a"))
 
 	blocked, err := s.GetBlockedIssues(ctx(), types.WorkFilter{})
@@ -522,11 +554,11 @@ func testAuditBlockedInheritedParent(t *testing.T, f Factory) {
 
 func testAuditIsBlockedTypedDescriptions(t *testing.T, f Factory) {
 	s := f(t)
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "ib_t", Title: "target", Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "ib_s", Title: "source", Status: types.StatusOpen}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "ib_t"}, IssueContent: types.IssueContent{Title: "target"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "ib_s"}, IssueContent: types.IssueContent{Title: "source"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "ib_s", DependsOnID: "ib_t", Type: types.DepConditionalBlocks}, "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "jb_t", Title: "btarget", Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "jb_s", Title: "bsource", Status: types.StatusOpen}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "jb_t"}, IssueContent: types.IssueContent{Title: "btarget"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "jb_s"}, IssueContent: types.IssueContent{Title: "bsource"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "jb_s", DependsOnID: "jb_t", Type: types.DepBlocks}, "a"))
 
 	// conditional-blocks blocker renders as "<id> (<type>)".
@@ -552,7 +584,7 @@ func testAuditIsBlockedTypedDescriptions(t *testing.T, f Factory) {
 func testAuditNewlyUnblockedByClose(t *testing.T, f Factory) {
 	s := f(t)
 	for _, id := range []string{"nt", "other", "w1", "w2", "cb"} {
-		must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: id, Title: id, Status: types.StatusOpen}), "a"))
+		must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
 	}
 	// w1 depends on nt AND other (both blocks); w2 depends only on nt (blocks);
 	// cb depends on nt via conditional-blocks (not counted).
@@ -572,9 +604,9 @@ func testAuditNewlyUnblockedByClose(t *testing.T, f Factory) {
 
 func testAuditReadyWorkWithCounts(t *testing.T, f Factory) {
 	s := f(t)
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "rc_t", Title: "target", Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "rc_a", Title: "a", Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "rc_b", Title: "b", Status: types.StatusOpen}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "rc_t"}, IssueContent: types.IssueContent{Title: "target"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "rc_a"}, IssueContent: types.IssueContent{Title: "a"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "rc_b"}, IssueContent: types.IssueContent{Title: "b"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "rc_a", DependsOnID: "rc_t", Type: types.DepBlocks}, "a"))
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "rc_b", DependsOnID: "rc_t", Type: types.DepBlocks}, "a"))
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "rc_a", DependsOnID: "rc_b", Type: types.DepRelatesTo}, "a"))
@@ -602,8 +634,8 @@ func testAuditReadyWorkWithCounts(t *testing.T, f Factory) {
 
 func testAuditRelatesToDoesNotBlock(t *testing.T, f Factory) {
 	s := f(t)
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "re_a", Title: "A", Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "re_b", Title: "B", Status: types.StatusOpen}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "re_a"}, IssueContent: types.IssueContent{Title: "A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "re_b"}, IssueContent: types.IssueContent{Title: "B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "re_a", DependsOnID: "re_b", Type: types.DepRelatesTo}, "a"))
 
 	ready, _ := s.GetReadyWork(ctx(), types.WorkFilter{})

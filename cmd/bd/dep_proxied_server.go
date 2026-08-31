@@ -27,12 +27,12 @@ type depAddResult struct {
 // for the same reason: the accessor is where each layer is added, so a command
 // that reached for the constructor would get an unlayered editor.
 func proxiedDependencyEditor() (issueops.DependencyEditor, error) {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return nil, errors.New("proxied-server UOW provider not initialized")
 	}
-	src, ok := uowProvider.(uow.DependencyEditorSource)
+	src, ok := getUOWProvider().(uow.DependencyEditorSource)
 	if !ok {
-		return nil, fmt.Errorf("proxied-server provider %T does not offer the dependency-edge surface", uowProvider)
+		return nil, fmt.Errorf("proxied-server provider %T does not offer the dependency-edge surface", getUOWProvider())
 	}
 	return src.DependencyEditor()
 }
@@ -40,12 +40,12 @@ func proxiedDependencyEditor() (issueops.DependencyEditor, error) {
 // proxiedIssueRelations hands back the guarded neighbor-query surface for the
 // proxied-server provider, through the provider's own capability accessor.
 func proxiedIssueRelations() (issueops.Relations, error) {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return nil, errors.New("proxied-server UOW provider not initialized")
 	}
-	src, ok := uowProvider.(uow.RelationsSource)
+	src, ok := getUOWProvider().(uow.RelationsSource)
 	if !ok {
-		return nil, fmt.Errorf("proxied-server provider %T does not offer the neighbor-query surface", uowProvider)
+		return nil, fmt.Errorf("proxied-server provider %T does not offer the neighbor-query surface", getUOWProvider())
 	}
 	return src.IssueRelations()
 }
@@ -53,12 +53,12 @@ func proxiedIssueRelations() (issueops.Relations, error) {
 // proxiedEdgeReader hands back the guarded stored-edge surface for the
 // proxied-server provider, through the provider's own capability accessor.
 func proxiedEdgeReader() (issueops.EdgeReader, error) {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return nil, errors.New("proxied-server UOW provider not initialized")
 	}
-	src, ok := uowProvider.(uow.EdgeReaderSource)
+	src, ok := getUOWProvider().(uow.EdgeReaderSource)
 	if !ok {
-		return nil, fmt.Errorf("proxied-server provider %T does not offer the stored-edge surface", uowProvider)
+		return nil, fmt.Errorf("proxied-server provider %T does not offer the stored-edge surface", getUOWProvider())
 	}
 	return src.EdgeReader()
 }
@@ -76,7 +76,7 @@ func addDependencyEdgesProxied(ctx context.Context, edges []issueops.DependencyE
 		return err
 	}
 	_, err = editor.AddDependencies(ctx, issueops.AddDependenciesRequest{
-		Actor:                 actor,
+		Actor:                 getActor(),
 		Edges:                 edges,
 		SkipPerEdgeCycleCheck: skipPerEdgeCycleCheck,
 	})
@@ -96,9 +96,6 @@ func addDependencyEdgesProxied(ctx context.Context, edges []issueops.DependencyE
 // sweep it was asked for, not on the two lookups beside it.
 func depEdgeFeedback(ctx context.Context, fromID, toID string, checkCycles bool) depAddResult {
 	var res depAddResult
-	if fromID == "" && toID == "" && !checkCycles {
-		return res
-	}
 	if checkCycles {
 		res.cycles, res.cycleErr = proxiedCycleReport(ctx)
 	}
@@ -106,28 +103,36 @@ func depEdgeFeedback(ctx context.Context, fromID, toID string, checkCycles bool)
 		return res
 	}
 
-	if uowProvider == nil {
+	fromTitle, toTitle, err := proxiedEdgeTitles(ctx, fromID, toID)
+	if err != nil {
 		if res.cycleErr == nil {
-			res.cycleErr = errors.New("proxied-server UOW provider not initialized")
+			res.cycleErr = err
 		}
 		return res
 	}
-	uw, err := uowProvider.NewUOW(ctx)
+	res.fromTitle = fromTitle
+	res.toTitle = toTitle
+	return res
+}
+
+func proxiedEdgeTitles(ctx context.Context, fromID, toID string) (string, string, error) {
+	if getUOWProvider() == nil {
+		return "", "", errors.New("proxied-server UOW provider not initialized")
+	}
+	uw, err := getUOWProvider().NewUOW(ctx)
 	if err != nil {
-		if res.cycleErr == nil {
-			res.cycleErr = fmt.Errorf("open unit of work: %w", err)
-		}
-		return res
+		return "", "", fmt.Errorf("open unit of work: %w", err)
 	}
 	defer uw.Close(ctx)
 
+	var fromTitle, toTitle string
 	if fromID != "" {
-		res.fromTitle = proxiedLookupTitle(ctx, uw, fromID)
+		fromTitle = proxiedLookupTitle(ctx, uw, fromID)
 	}
 	if toID != "" {
-		res.toTitle = proxiedLookupTitle(ctx, uw, toID)
+		toTitle = proxiedLookupTitle(ctx, uw, toID)
 	}
-	return res
+	return fromTitle, toTitle, nil
 }
 
 // proxiedCycleReport runs the post-write sweep on the proxied route through the
@@ -175,7 +180,7 @@ func runDepBlocksProxiedServer(cmd *cobra.Command, ctx context.Context, blockerI
 	printCycleDetectionError(res.cycleErr)
 	printCycleWarnings(res.cycles)
 
-	if jsonOutput {
+	if isJSONOutput() {
 		_ = outputJSON(map[string]interface{}{
 			"status":     "added",
 			"blocker_id": blockerID,
@@ -200,28 +205,10 @@ func runDepAddProxiedServer(cmd *cobra.Command, ctx context.Context, args []stri
 		return runDepAddBulkProxied(cmd, ctx, file, depType)
 	}
 
-	blockedBy, _ := cmd.Flags().GetString("blocked-by")
-	dependsOn, _ := cmd.Flags().GetString("depends-on")
-
-	var dependsOnArg string
-	switch {
-	case blockedBy != "":
-		dependsOnArg = blockedBy
-	case dependsOn != "":
-		dependsOnArg = dependsOn
-	default:
-		dependsOnArg = args[1]
-	}
-
 	fromID := args[0]
-	var toID string
-	if strings.HasPrefix(dependsOnArg, "external:") {
-		if err := validateExternalRef(dependsOnArg); err != nil {
-			return HandleErrorRespectJSON("%v", err)
-		}
-		toID = dependsOnArg
-	} else {
-		toID = dependsOnArg
+	toID, err := proxiedDependencyTarget(cmd, args)
+	if err != nil {
+		return HandleErrorRespectJSON("%v", err)
 	}
 
 	dt := canonicalDependencyType(types.DependencyType(depType))
@@ -243,8 +230,28 @@ func runDepAddProxiedServer(cmd *cobra.Command, ctx context.Context, args []stri
 
 	printCycleDetectionError(res.cycleErr)
 	printCycleWarnings(res.cycles)
+	return reportDepAddProxied(fromID, toID, dt, res)
+}
 
-	if jsonOutput {
+func proxiedDependencyTarget(cmd *cobra.Command, args []string) (string, error) {
+	blockedBy, _ := cmd.Flags().GetString("blocked-by")
+	dependsOn, _ := cmd.Flags().GetString("depends-on")
+	dependsOnArg := args[1]
+	if blockedBy != "" {
+		dependsOnArg = blockedBy
+	} else if dependsOn != "" {
+		dependsOnArg = dependsOn
+	}
+	if strings.HasPrefix(dependsOnArg, "external:") {
+		if err := validateExternalRef(dependsOnArg); err != nil {
+			return "", err
+		}
+	}
+	return dependsOnArg, nil
+}
+
+func reportDepAddProxied(fromID, toID string, dt types.DependencyType, res depAddResult) error {
+	if isJSONOutput() {
 		_ = outputJSON(map[string]interface{}{
 			"status":        "added",
 			"issue_id":      fromID,
@@ -272,21 +279,9 @@ func runDepAddBulkProxied(cmd *cobra.Command, ctx context.Context, file, default
 		return HandleErrorRespectJSON("no dependency edges found")
 	}
 
-	depEdges := make([]issueops.DependencyEdge, 0, len(edges))
-	for _, edge := range edges {
-		if isDisallowedHierarchicalDependency(edge.IssueID, edge.DependsOnID, edge.Type) {
-			return HandleErrorRespectJSON("line %d: cannot add dependency: %s is already a child of %s", edge.Line, edge.IssueID, edge.DependsOnID)
-		}
-		if strings.HasPrefix(edge.DependsOnID, "external:") {
-			if err := validateExternalRef(edge.DependsOnID); err != nil {
-				return HandleErrorRespectJSON("line %d: %v", edge.Line, err)
-			}
-		}
-		depEdges = append(depEdges, issueops.DependencyEdge{
-			IssueID:     edge.IssueID,
-			DependsOnID: edge.DependsOnID,
-			Type:        edge.Type,
-		})
+	depEdges, err := buildProxiedBulkEdges(edges)
+	if err != nil {
+		return HandleErrorRespectJSON("%v", err)
 	}
 
 	noCycleCheck, _ := cmd.Flags().GetBool("no-cycle-check")
@@ -298,8 +293,31 @@ func runDepAddBulkProxied(cmd *cobra.Command, ctx context.Context, file, default
 
 	printCycleDetectionError(res.cycleErr)
 	printCycleWarnings(res.cycles)
+	return reportBulkDepAddProxied(depEdges)
+}
 
-	if jsonOutput {
+func buildProxiedBulkEdges(edges []bulkDepEdge) ([]issueops.DependencyEdge, error) {
+	depEdges := make([]issueops.DependencyEdge, 0, len(edges))
+	for _, edge := range edges {
+		if isDisallowedHierarchicalDependency(edge.IssueID, edge.DependsOnID, edge.Type) {
+			return nil, fmt.Errorf("line %d: cannot add dependency: %s is already a child of %s", edge.Line, edge.IssueID, edge.DependsOnID)
+		}
+		if strings.HasPrefix(edge.DependsOnID, "external:") {
+			if err := validateExternalRef(edge.DependsOnID); err != nil {
+				return nil, fmt.Errorf("line %d: %v", edge.Line, err)
+			}
+		}
+		depEdges = append(depEdges, issueops.DependencyEdge{
+			IssueID:     edge.IssueID,
+			DependsOnID: edge.DependsOnID,
+			Type:        edge.Type,
+		})
+	}
+	return depEdges, nil
+}
+
+func reportBulkDepAddProxied(depEdges []issueops.DependencyEdge) error {
+	if isJSONOutput() {
 		out := make([]map[string]interface{}, 0, len(depEdges))
 		for _, edge := range depEdges {
 			out = append(out, map[string]interface{}{
@@ -337,7 +355,7 @@ func runDepRemoveProxiedServer(_ *cobra.Command, ctx context.Context, args []str
 	// confirmed the same way whether or not an edge was there, and reporting
 	// the difference now would change what every existing script reads.
 	if _, err := editor.RemoveDependency(ctx, issueops.RemoveDependencyRequest{
-		Actor:       actor,
+		Actor:       getActor(),
 		IssueID:     fromID,
 		DependsOnID: toID,
 	}); err != nil {
@@ -345,7 +363,7 @@ func runDepRemoveProxiedServer(_ *cobra.Command, ctx context.Context, args []str
 	}
 	res := depEdgeFeedback(ctx, fromID, toID, false)
 
-	if jsonOutput {
+	if isJSONOutput() {
 		_ = outputJSON(map[string]interface{}{
 			"status":        "removed",
 			"issue_id":      fromID,
@@ -375,12 +393,20 @@ func runDepListProxiedServer(cmd *cobra.Command, ctx context.Context, args []str
 		return runDepListRecordsProxiedServer(ctx, args, typeFilter)
 	}
 
+	allIssues, err := loadProxiedRelatedIssues(ctx, args, direction, typeFilter)
+	if err != nil {
+		return HandleErrorRespectJSON("%v", err)
+	}
+	return renderProxiedRelatedIssues(args, direction, allIssues)
+}
+
+func loadProxiedRelatedIssues(ctx context.Context, args []string, direction, typeFilter string) ([]*issueops.RelatedIssue, error) {
 	// Everything else is the neighbor query, and it is on the Relations role:
 	// one call per anchor, each with an explicit direction, because the role
 	// refuses to guess one.
 	rel, err := proxiedIssueRelations()
 	if err != nil {
-		return HandleErrorRespectJSON("%v", err)
+		return nil, err
 	}
 	request := issueops.RelatedRequest{Direction: issueops.RelationOut}
 	if direction == "up" {
@@ -395,12 +421,15 @@ func runDepListProxiedServer(cmd *cobra.Command, ctx context.Context, args []str
 		request.ID = id
 		issues, err := rel.Related(ctx, request)
 		if err != nil {
-			return HandleErrorRespectJSON("%v", err)
+			return nil, err
 		}
 		allIssues = append(allIssues, issues...)
 	}
+	return allIssues, nil
+}
 
-	if jsonOutput {
+func renderProxiedRelatedIssues(args []string, direction string, allIssues []*issueops.RelatedIssue) error {
+	if isJSONOutput() {
 		if allIssues == nil {
 			allIssues = []*issueops.RelatedIssue{}
 		}
@@ -422,24 +451,27 @@ func runDepListProxiedServer(cmd *cobra.Command, ctx context.Context, args []str
 	}
 
 	for _, iss := range allIssues {
-		var idStr string
-		switch iss.Status {
-		case types.StatusOpen:
-			idStr = ui.StatusOpenStyle.Render(iss.ID)
-		case types.StatusInProgress:
-			idStr = ui.StatusInProgressStyle.Render(iss.ID)
-		case types.StatusBlocked:
-			idStr = ui.StatusBlockedStyle.Render(iss.ID)
-		case types.StatusClosed:
-			idStr = ui.StatusClosedStyle.Render(iss.ID)
-		default:
-			idStr = iss.ID
-		}
+		idStr := formatProxiedRelatedID(iss)
 		fmt.Printf("  %s: %s [P%d] (%s) via %s\n",
 			idStr, iss.Title, iss.Priority, iss.Status, iss.DependencyType)
 	}
 	fmt.Println()
 	return nil
+}
+
+func formatProxiedRelatedID(issue *issueops.RelatedIssue) string {
+	switch issue.Status {
+	case types.StatusOpen:
+		return ui.StatusOpenStyle().Render(issue.ID)
+	case types.StatusInProgress:
+		return ui.StatusInProgressStyle().Render(issue.ID)
+	case types.StatusBlocked:
+		return ui.StatusBlockedStyle().Render(issue.ID)
+	case types.StatusClosed:
+		return ui.StatusClosedStyle().Render(issue.ID)
+	default:
+		return issue.ID
+	}
 }
 
 // runDepListRecordsProxiedServer answers `bd dep list a b c` with raw edge

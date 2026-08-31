@@ -39,33 +39,59 @@ func TestIssueIDCompletion(t *testing.T) {
 	now := time.Now()
 	testIssues := []*types.Issue{
 		{
-			ID:        "bd-abc1",
-			Title:     "Test issue 1",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "bd-abc1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Test issue 1",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
 		},
 		{
-			ID:        "bd-abc2",
-			Title:     "Test issue 2",
-			Status:    types.StatusInProgress,
-			Priority:  2,
-			IssueType: types.TypeBug,
+			IssueID: types.IssueID{
+				ID: "bd-abc2",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Test issue 2",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusInProgress,
+				Priority:  2,
+				IssueType: types.TypeBug,
+			},
 		},
 		{
-			ID:        "bd-xyz1",
-			Title:     "Another test issue",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeFeature,
+			IssueID: types.IssueID{
+				ID: "bd-xyz1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Another test issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeFeature,
+			},
 		},
 		{
-			ID:        "bd-xyz2",
-			Title:     "Yet another test",
-			Status:    types.StatusClosed,
-			Priority:  3,
-			IssueType: types.TypeTask,
-			ClosedAt:  &now,
+			IssueID: types.IssueID{
+				ID: "bd-xyz2",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Yet another test",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusClosed,
+				Priority:  3,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				ClosedAt: &now,
+			},
 		},
 	}
 
@@ -270,11 +296,17 @@ func TestIssueIDCompletion_UsesWorktreeFallbackWhenStoreNil(t *testing.T) {
 	testDB := filepath.Join(mainRepoDir, ".beads", "beads.db")
 	testStore := newTestStoreWithPrefix(t, testDB, "wt")
 	if err := testStore.CreateIssue(ctx, &types.Issue{
-		ID:        "wt-abc1",
-		Title:     "Worktree completion target",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "wt-abc1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Worktree completion target",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}, "test"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}

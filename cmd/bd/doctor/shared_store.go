@@ -21,9 +21,13 @@ import (
 // Check functions that accept a *dolt.DoltStore parameter should use the
 // shared store when available, falling back to opening their own store when
 // called standalone (e.g., from tests or one-off checks).
-type SharedStore struct {
+type sharedStoreState struct {
 	store    *dolt.DoltStore
 	beadsDir string
+}
+
+type SharedStore struct {
+	state sharedStoreState
 }
 
 func beadsDirFromSharedStore(path string, ss *SharedStore) string {
@@ -50,7 +54,7 @@ func sharedStoreNeedsLocalDoltDir(beadsDir string) bool {
 // The caller MUST call Close() when done (typically via defer).
 func NewSharedStore(path string) *SharedStore {
 	beadsDir := ResolveBeadsDirForRepo(path)
-	ss := &SharedStore{beadsDir: beadsDir}
+	ss := &SharedStore{state: sharedStoreState{beadsDir: beadsDir}}
 
 	if sharedStoreNeedsLocalDoltDir(beadsDir) {
 		doltPath := getDatabasePath(beadsDir)
@@ -65,7 +69,7 @@ func NewSharedStore(path string) *SharedStore {
 		return ss // Can't open, store stays nil
 	}
 
-	ss.store = store
+	ss.state.store = store
 	return ss
 }
 
@@ -74,7 +78,7 @@ func (ss *SharedStore) Store() *dolt.DoltStore {
 	if ss == nil {
 		return nil
 	}
-	return ss.store
+	return ss.state.store
 }
 
 // BeadsDir returns the resolved .beads directory path.
@@ -82,14 +86,14 @@ func (ss *SharedStore) BeadsDir() string {
 	if ss == nil {
 		return ""
 	}
-	return ss.beadsDir
+	return ss.state.beadsDir
 }
 
 // Close closes the underlying DoltStore. Safe to call multiple times.
 func (ss *SharedStore) Close() {
-	if ss == nil || ss.store == nil {
+	if ss == nil || ss.state.store == nil {
 		return
 	}
-	_ = ss.store.Close()
-	ss.store = nil
+	_ = ss.state.store.Close()
+	ss.state.store = nil
 }

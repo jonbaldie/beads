@@ -276,11 +276,17 @@ func TestCoverage_TemplateAndPinnedProtections(t *testing.T) {
 	}
 	ctx := context.Background()
 	template := &types.Issue{
-		Title:      "Template issue",
-		Status:     types.StatusOpen,
-		Priority:   2,
-		IssueType:  types.TypeTask,
-		IsTemplate: true,
+		IssueContent: types.IssueContent{
+			Title: "Template issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			IsTemplate: true,
+		},
 	}
 	if err := s.CreateIssue(ctx, template, "test-user"); err != nil {
 		s.Close()
@@ -349,9 +355,9 @@ func TestCoverage_ShowThread(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	root := &types.Issue{Title: "Root message", IssueType: "message", Status: types.StatusOpen, Sender: "alice", Assignee: "bob"}
-	reply1 := &types.Issue{Title: "Re: Root", IssueType: "message", Status: types.StatusOpen, Sender: "bob", Assignee: "alice"}
-	reply2 := &types.Issue{Title: "Re: Re: Root", IssueType: "message", Status: types.StatusOpen, Sender: "alice", Assignee: "bob"}
+	root := &types.Issue{IssueContent: types.IssueContent{Title: "Root message"}, IssueWorkflow: types.IssueWorkflow{IssueType: "message", Status: types.StatusOpen, Assignee: "bob"}, IssueWisp: types.IssueWisp{Sender: "alice"}}
+	reply1 := &types.Issue{IssueContent: types.IssueContent{Title: "Re: Root"}, IssueWorkflow: types.IssueWorkflow{IssueType: "message", Status: types.StatusOpen, Assignee: "alice"}, IssueWisp: types.IssueWisp{Sender: "bob"}}
+	reply2 := &types.Issue{IssueContent: types.IssueContent{Title: "Re: Re: Root"}, IssueWorkflow: types.IssueWorkflow{IssueType: "message", Status: types.StatusOpen, Assignee: "bob"}, IssueWisp: types.IssueWisp{Sender: "alice"}}
 	if err := s.CreateIssue(ctx, root, "test-user"); err != nil {
 		s.Close()
 		t.Fatalf("CreateIssue root: %v", err)

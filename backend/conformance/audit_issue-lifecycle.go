@@ -60,10 +60,15 @@ func RunAudit_issue_lifecycle(t *testing.T, f Factory) {
 // reports the orphaned dependents.
 func testAuditDeleteIssuesBatchModes(t *testing.T, f Factory) {
 	s := f(t)
+	testAuditDeleteOrphanGuard(t, s)
+	testAuditDeleteCascade(t, s)
+	testAuditDeleteForce(t, s)
+}
 
+func testAuditDeleteOrphanGuard(t *testing.T, s storage.DoltStorage) {
 	// Case 1: orphan guard. B depends-on A (blocks), so A has an external dependent.
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "d1-a", Title: "A"}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "d1-b", Title: "B"}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "d1-a"}, IssueContent: types.IssueContent{Title: "A"}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "d1-b"}, IssueContent: types.IssueContent{Title: "B"}}), "a"))
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "d1-b", DependsOnID: "d1-a", Type: types.DepBlocks}, "a"))
 	res1, err := s.DeleteIssues(ctx(), []string{"d1-a"}, false, false, false)
 	if err == nil {
@@ -75,10 +80,12 @@ func testAuditDeleteIssuesBatchModes(t *testing.T, f Factory) {
 	if _, err := s.GetIssue(ctx(), "d1-a"); err != nil {
 		t.Errorf("Case1: A should still exist (nothing deleted), got %v", err)
 	}
+}
 
+func testAuditDeleteCascade(t *testing.T, s storage.DoltStorage) {
 	// Case 2: cascade removes A and its dependent B.
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "d2-a", Title: "A"}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "d2-b", Title: "B"}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "d2-a"}, IssueContent: types.IssueContent{Title: "A"}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "d2-b"}, IssueContent: types.IssueContent{Title: "B"}}), "a"))
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "d2-b", DependsOnID: "d2-a", Type: types.DepBlocks}, "a"))
 	if _, err := s.DeleteIssues(ctx(), []string{"d2-a"}, true, false, false); err != nil {
 		t.Fatalf("Case2: cascade delete: %v", err)
@@ -89,10 +96,12 @@ func testAuditDeleteIssuesBatchModes(t *testing.T, f Factory) {
 	if _, err := s.GetIssue(ctx(), "d2-b"); !errors.Is(err, storage.ErrNotFound) {
 		t.Errorf("Case2: B after cascade = %v, want ErrNotFound", err)
 	}
+}
 
+func testAuditDeleteForce(t *testing.T, s storage.DoltStorage) {
 	// Case 3: force deletes A, leaves B orphaned and reports it.
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "d3-a", Title: "A"}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "d3-b", Title: "B"}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "d3-a"}, IssueContent: types.IssueContent{Title: "A"}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "d3-b"}, IssueContent: types.IssueContent{Title: "B"}}), "a"))
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "d3-b", DependsOnID: "d3-a", Type: types.DepBlocks}, "a"))
 	res3, err := s.DeleteIssues(ctx(), []string{"d3-a"}, false, true, false)
 	if err != nil {
@@ -120,8 +129,8 @@ func orphaned(r *types.DeleteIssuesResult) []string {
 // dryRun counts child rows without mutating anything.
 func testAuditDeleteIssuesDryRunCounts(t *testing.T, f Factory) {
 	s := f(t)
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "dry-a", Title: "A"}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "dry-b", Title: "B"}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "dry-a"}, IssueContent: types.IssueContent{Title: "A"}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "dry-b"}, IssueContent: types.IssueContent{Title: "B"}}), "a"))
 	must(t, s.AddLabel(ctx(), "dry-a", "l1", "a"))
 	must(t, s.AddLabel(ctx(), "dry-a", "l2", "a"))
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "dry-b", DependsOnID: "dry-a", Type: types.DepBlocks}, "a"))
@@ -146,8 +155,8 @@ func testAuditDeleteIssuesDryRunCounts(t *testing.T, f Factory) {
 // DeleteIssue relies on FK ON DELETE CASCADE to clean up child dependency/label rows.
 func testAuditDeleteIssueCascadesChildRows(t *testing.T, f Factory) {
 	s := f(t)
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "cc-a", Title: "A"}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "cc-b", Title: "B"}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "cc-a"}, IssueContent: types.IssueContent{Title: "A"}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "cc-b"}, IssueContent: types.IssueContent{Title: "B"}}), "a"))
 	must(t, s.AddDependency(ctx(), &types.Dependency{IssueID: "cc-a", DependsOnID: "cc-b", Type: types.DepBlocks}, "a"))
 	must(t, s.AddLabel(ctx(), "cc-a", "x", "a"))
 
@@ -171,11 +180,19 @@ func testAuditCreateClosedDerivesClosedAt(t *testing.T, f Factory) {
 	s := f(t)
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{
-		ID:        "clx-1",
-		Title:     "T",
-		Status:    types.StatusClosed,
-		CreatedAt: base,
-		UpdatedAt: base,
+		IssueID: types.IssueID{
+			ID: "clx-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "T",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status: types.StatusClosed,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: base,
+			UpdatedAt: base,
+		},
 	}), "a"))
 
 	got, err := s.GetIssue(ctx(), "clx-1")
@@ -194,9 +211,15 @@ func testAuditCreateClosedDerivesClosedAt(t *testing.T, f Factory) {
 func testAuditMetadataJSONRoundTrip(t *testing.T, f Factory) {
 	s := f(t)
 	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{
-		ID:       "md-1",
-		Title:    "T",
-		Metadata: json.RawMessage(`{"team":"eng"}`),
+		IssueID: types.IssueID{
+			ID: "md-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "T",
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"team":"eng"}`),
+		},
 	}), "a"))
 
 	got, err := s.GetIssue(ctx(), "md-1")
@@ -230,7 +253,7 @@ func auditParseMeta(t *testing.T, raw json.RawMessage) map[string]any {
 // preserves the original stamp.
 func testAuditStartedAtStampedOnceOnInProgress(t *testing.T, f Factory) {
 	s := f(t)
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "st-1", Title: "T", Status: types.StatusOpen}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "st-1"}, IssueContent: types.IssueContent{Title: "T"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
 
 	must(t, s.UpdateIssue(ctx(), "st-1", map[string]interface{}{"status": string(types.StatusInProgress)}, "a"))
 	got, err := s.GetIssue(ctx(), "st-1")
@@ -253,7 +276,7 @@ func testAuditStartedAtStampedOnceOnInProgress(t *testing.T, f Factory) {
 func testAuditExternalRefResolvesWispTier(t *testing.T, f Factory) {
 	s := f(t)
 	ref := "gh-77"
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "wr-1", Title: "Wisp", Ephemeral: true, ExternalRef: &ref}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "wr-1"}, IssueContent: types.IssueContent{Title: "Wisp"}, IssueMeta: types.IssueMeta{ExternalRef: &ref}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
 
 	got, err := s.GetIssueByExternalRef(ctx(), "gh-77")
 	if err != nil {

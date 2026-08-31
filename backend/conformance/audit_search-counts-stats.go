@@ -73,10 +73,10 @@ func auditWholeSec(y int) time.Time {
 func testAuditSearchIssuesWithCounts(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "swc-e", Title: "Epic", IssueType: types.TypeEpic}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "swc-c1", Title: "Child"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "swc-a", Title: "A"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "swc-b", Title: "B"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "swc-e"}, IssueContent: types.IssueContent{Title: "Epic"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeEpic}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "swc-c1"}, IssueContent: types.IssueContent{Title: "Child"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "swc-a"}, IssueContent: types.IssueContent{Title: "A"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "swc-b"}, IssueContent: types.IssueContent{Title: "B"}}), "a"))
 	// swc-a depends_on swc-b (blocks); swc-b depends_on swc-c1 (blocks); swc-c1 parent-child swc-e.
 	must(t, s.AddDependency(c, &types.Dependency{IssueID: "swc-a", DependsOnID: "swc-b", Type: types.DepBlocks}, "a"))
 	must(t, s.AddDependency(c, &types.Dependency{IssueID: "swc-b", DependsOnID: "swc-c1", Type: types.DepBlocks}, "a"))
@@ -90,8 +90,13 @@ func testAuditSearchIssuesWithCounts(t *testing.T, f Factory) {
 	items, err := s.SearchIssuesWithCounts(c, "", types.IssueFilter{})
 	must(t, err)
 	byID := auditCountsByID(items)
+	assertAuditSearchCountsA(t, byID["swc-a"])
+	assertAuditSearchCountsB(t, byID["swc-b"])
+	assertAuditSearchCountsChild(t, byID["swc-c1"])
+}
 
-	a := byID["swc-a"]
+func assertAuditSearchCountsA(t *testing.T, a *types.IssueWithCounts) {
+	t.Helper()
 	if a == nil {
 		t.Fatal("swc-a missing from counts result")
 	}
@@ -110,8 +115,10 @@ func testAuditSearchIssuesWithCounts(t *testing.T, f Factory) {
 	if !contains(a.Labels, "bug") {
 		t.Errorf("swc-a Labels = %v, want to include bug", a.Labels)
 	}
+}
 
-	b := byID["swc-b"]
+func assertAuditSearchCountsB(t *testing.T, b *types.IssueWithCounts) {
+	t.Helper()
 	if b == nil {
 		t.Fatal("swc-b missing from counts result")
 	}
@@ -121,8 +128,10 @@ func testAuditSearchIssuesWithCounts(t *testing.T, f Factory) {
 	if b.DependentCount != 1 {
 		t.Errorf("swc-b DependentCount = %d, want 1 (swc-a depends on it)", b.DependentCount)
 	}
+}
 
-	c1 := byID["swc-c1"]
+func assertAuditSearchCountsChild(t *testing.T, c1 *types.IssueWithCounts) {
+	t.Helper()
 	if c1 == nil {
 		t.Fatal("swc-c1 missing from counts result")
 	}
@@ -151,13 +160,19 @@ func testAuditReadyWorkDepCreatedAtParity(t *testing.T, f Factory) {
 	// A fixed non-zero past timestamp, whole-second to match DATE_FORMAT's granularity.
 	depCreatedAt := time.Date(2023, 5, 15, 10, 20, 30, 0, time.UTC)
 
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "dca-t", Title: "target"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "dca-t"}, IssueContent: types.IssueContent{Title: "target"}}), "a"))
 	must(t, s.CreateIssuesWithFullOptions(c, []*types.Issue{
 		withDefaults(&types.Issue{
-			ID:    "dca-s",
-			Title: "source",
-			Dependencies: []*types.Dependency{
-				{IssueID: "dca-s", DependsOnID: "dca-t", Type: types.DepBlocks, CreatedAt: depCreatedAt},
+			IssueID: types.IssueID{
+				ID: "dca-s",
+			},
+			IssueContent: types.IssueContent{
+				Title: "source",
+			},
+			IssueGraph: types.IssueGraph{
+				Dependencies: []*types.Dependency{
+					{IssueID: "dca-s", DependsOnID: "dca-t", Type: types.DepBlocks, CreatedAt: depCreatedAt},
+				},
 			},
 		}),
 	}, "a", storage.BatchCreateOptions{SkipPrefixValidation: true}))
@@ -192,10 +207,10 @@ func testAuditCountByPriority(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
 	must(t, s.SetConfig(c, "issue_prefix", "test"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "cp-1", Title: "a", Priority: 0}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "cp-2", Title: "b", Priority: 1}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "cp-3", Title: "c", Priority: 1}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "cp-4", Title: "d", Priority: 2}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "cp-1"}, IssueContent: types.IssueContent{Title: "a"}, IssueWorkflow: types.IssueWorkflow{Priority: 0}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "cp-2"}, IssueContent: types.IssueContent{Title: "b"}, IssueWorkflow: types.IssueWorkflow{Priority: 1}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "cp-3"}, IssueContent: types.IssueContent{Title: "c"}, IssueWorkflow: types.IssueWorkflow{Priority: 1}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "cp-4"}, IssueContent: types.IssueContent{Title: "d"}, IssueWorkflow: types.IssueWorkflow{Priority: 2}}), "a"))
 
 	got, err := s.CountIssuesByGroup(c, types.IssueFilter{}, "priority")
 	must(t, err)
@@ -211,9 +226,9 @@ func testAuditCountByPriority(t *testing.T, f Factory) {
 func testAuditCountByLabel(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "cl-1", Title: "a"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "cl-2", Title: "b"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "cl-3", Title: "c"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "cl-1"}, IssueContent: types.IssueContent{Title: "a"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "cl-2"}, IssueContent: types.IssueContent{Title: "b"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "cl-3"}, IssueContent: types.IssueContent{Title: "c"}}), "a"))
 	must(t, s.AddLabel(c, "cl-1", "bug", "a"))
 	must(t, s.AddLabel(c, "cl-1", "urgent", "a"))
 	must(t, s.AddLabel(c, "cl-2", "bug", "a"))
@@ -242,9 +257,9 @@ func testAuditCountByLabel(t *testing.T, f Factory) {
 func testAuditCountByAssigneeAndType(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "ca-1", Title: "a", Assignee: "alice", IssueType: "bug"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "ca-2", Title: "b", Assignee: "alice", IssueType: "bug"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "ca-3", Title: "c", IssueType: "task"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "ca-1"}, IssueContent: types.IssueContent{Title: "a"}, IssueWorkflow: types.IssueWorkflow{Assignee: "alice", IssueType: "bug"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "ca-2"}, IssueContent: types.IssueContent{Title: "b"}, IssueWorkflow: types.IssueWorkflow{Assignee: "alice", IssueType: "bug"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "ca-3"}, IssueContent: types.IssueContent{Title: "c"}, IssueWorkflow: types.IssueWorkflow{IssueType: "task"}}), "a"))
 
 	gotA, err := s.CountIssuesByGroup(c, types.IssueFilter{}, "assignee")
 	must(t, err)
@@ -267,18 +282,29 @@ func testAuditCountByAssigneeAndType(t *testing.T, f Factory) {
 func testAuditStatistics(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "st-o1", Title: "o1", Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "st-o2", Title: "o2", Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "st-p1", Title: "p1", Status: types.StatusInProgress}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "st-c1", Title: "c1", Status: types.StatusClosed}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "st-d1", Title: "d1", Status: types.StatusDeferred}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "st-o1"}, IssueContent: types.IssueContent{Title: "o1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "st-o2"}, IssueContent: types.IssueContent{Title: "o2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "st-p1"}, IssueContent: types.IssueContent{Title: "p1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "st-c1"}, IssueContent: types.IssueContent{Title: "c1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "st-d1"}, IssueContent: types.IssueContent{Title: "d1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusDeferred}}), "a"))
 	// pinned=1 column flag, with a non-open/closed status so it isolates PinnedIssues.
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "st-pin", Title: "pin", Status: types.StatusPinned, Pinned: true}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "st-pin"}, IssueContent: types.IssueContent{Title: "pin"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusPinned}, IssueWisp: types.IssueWisp{Pinned: true}}), "a"))
 	// st-p1 (in_progress) blocked by an open issue -> is_blocked=1, counted in BlockedIssues.
 	must(t, s.AddDependency(c, &types.Dependency{IssueID: "st-p1", DependsOnID: "st-o1", Type: types.DepBlocks}, "a"))
 
 	stats, err := s.GetStatistics(c)
 	must(t, err)
+	assertAuditStatistics(t, stats)
+}
+
+func assertAuditStatistics(t *testing.T, stats *types.Statistics) {
+	t.Helper()
+	assertAuditStatisticCounts(t, stats)
+	assertAuditOptionalCounts(t, stats)
+}
+
+func assertAuditStatisticCounts(t *testing.T, stats *types.Statistics) {
+	t.Helper()
 	if stats.TotalIssues != 6 {
 		t.Errorf("TotalIssues = %d, want 6", stats.TotalIssues)
 	}
@@ -297,6 +323,10 @@ func testAuditStatistics(t *testing.T, f Factory) {
 	if stats.PinnedIssues != 1 {
 		t.Errorf("PinnedIssues = %d, want 1", stats.PinnedIssues)
 	}
+}
+
+func assertAuditOptionalCounts(t *testing.T, stats *types.Statistics) {
+	t.Helper()
 	if stats.BlockedIssues == nil || *stats.BlockedIssues != 1 {
 		got := -1
 		if stats.BlockedIssues != nil {
@@ -320,9 +350,9 @@ func testAuditStatisticsReadyClamp(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
 	// A blocker plus two in_progress issues blocked by it: zero OPEN issues, two blocked.
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "rc-blk", Title: "blk", Status: types.StatusInProgress}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "rc-1", Title: "b1", Status: types.StatusInProgress}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "rc-2", Title: "b2", Status: types.StatusInProgress}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "rc-blk"}, IssueContent: types.IssueContent{Title: "blk"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "rc-1"}, IssueContent: types.IssueContent{Title: "b1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "rc-2"}, IssueContent: types.IssueContent{Title: "b2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress}}), "a"))
 	must(t, s.AddDependency(c, &types.Dependency{IssueID: "rc-1", DependsOnID: "rc-blk", Type: types.DepBlocks}, "a"))
 	must(t, s.AddDependency(c, &types.Dependency{IssueID: "rc-2", DependsOnID: "rc-blk", Type: types.DepBlocks}, "a"))
 
@@ -355,10 +385,10 @@ func testAuditSearchDefaultOrderTieBreak(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
 	t1, t2, t3 := auditWholeSec(2020), auditWholeSec(2021), auditWholeSec(2022)
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "so-p0", Title: "p0", Priority: 0, CreatedAt: t1, UpdatedAt: t1}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "so-old", Title: "old", Priority: 1, CreatedAt: t1, UpdatedAt: t1}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "so-mid", Title: "mid", Priority: 1, CreatedAt: t2, UpdatedAt: t2}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "so-new", Title: "new", Priority: 1, CreatedAt: t3, UpdatedAt: t3}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "so-p0"}, IssueContent: types.IssueContent{Title: "p0"}, IssueWorkflow: types.IssueWorkflow{Priority: 0}, IssueTimes: types.IssueTimes{CreatedAt: t1, UpdatedAt: t1}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "so-old"}, IssueContent: types.IssueContent{Title: "old"}, IssueWorkflow: types.IssueWorkflow{Priority: 1}, IssueTimes: types.IssueTimes{CreatedAt: t1, UpdatedAt: t1}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "so-mid"}, IssueContent: types.IssueContent{Title: "mid"}, IssueWorkflow: types.IssueWorkflow{Priority: 1}, IssueTimes: types.IssueTimes{CreatedAt: t2, UpdatedAt: t2}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "so-new"}, IssueContent: types.IssueContent{Title: "new"}, IssueWorkflow: types.IssueWorkflow{Priority: 1}, IssueTimes: types.IssueTimes{CreatedAt: t3, UpdatedAt: t3}}), "a"))
 
 	results, err := s.SearchIssues(c, "", types.IssueFilter{})
 	must(t, err)
@@ -374,8 +404,8 @@ func testAuditSearchIdenticalTimestampIDOrder(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
 	tie := auditWholeSec(2020)
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "tie-b", Title: "b", Priority: 1, CreatedAt: tie, UpdatedAt: tie}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "tie-a", Title: "a", Priority: 1, CreatedAt: tie, UpdatedAt: tie}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "tie-b"}, IssueContent: types.IssueContent{Title: "b"}, IssueWorkflow: types.IssueWorkflow{Priority: 1}, IssueTimes: types.IssueTimes{CreatedAt: tie, UpdatedAt: tie}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "tie-a"}, IssueContent: types.IssueContent{Title: "a"}, IssueWorkflow: types.IssueWorkflow{Priority: 1}, IssueTimes: types.IssueTimes{CreatedAt: tie, UpdatedAt: tie}}), "a"))
 
 	results, err := s.SearchIssues(c, "", types.IssueFilter{})
 	must(t, err)
@@ -392,12 +422,12 @@ func testAuditSearchSortByClosedNullsLast(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
 	tNew, tOld := auditWholeSec(2022), auditWholeSec(2021)
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "cs-open-a", Title: "oa", Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "cs-open-b", Title: "ob", Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "cs-closed-new", Title: "cn", Status: types.StatusClosed, ClosedAt: &tNew}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "cs-closed-old", Title: "co", Status: types.StatusClosed, ClosedAt: &tOld}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "cs-open-a"}, IssueContent: types.IssueContent{Title: "oa"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "cs-open-b"}, IssueContent: types.IssueContent{Title: "ob"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "cs-closed-new"}, IssueContent: types.IssueContent{Title: "cn"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}, IssueTimes: types.IssueTimes{ClosedAt: &tNew}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "cs-closed-old"}, IssueContent: types.IssueContent{Title: "co"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}, IssueTimes: types.IssueTimes{ClosedAt: &tOld}}), "a"))
 
-	results, err := s.SearchIssues(c, "", types.IssueFilter{SortBy: "closed"})
+	results, err := s.SearchIssues(c, "", types.IssueFilter{IssueFilterPage: types.IssueFilterPage{SortBy: "closed"}})
 	must(t, err)
 	want := []string{"cs-closed-new", "cs-closed-old", "cs-open-a", "cs-open-b"}
 	if got := orderedIDs(results); !reflect.DeepEqual(got, want) {
@@ -417,21 +447,21 @@ func testAuditSearchSortByTitleCaseFolded(t *testing.T, f Factory) {
 	c := ctx()
 	// Byte order (APPLE2, Apple, Zebra, apple, banana) and priority order both
 	// disagree with the case-folded order asserted below.
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "ti-1", Title: "Zebra", Priority: 0}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "ti-2", Title: "apple", Priority: 3}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "ti-3", Title: "APPLE2", Priority: 2}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "ti-4", Title: "banana", Priority: 1}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "ti-5", Title: "Apple", Priority: 3}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "ti-1"}, IssueContent: types.IssueContent{Title: "Zebra"}, IssueWorkflow: types.IssueWorkflow{Priority: 0}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "ti-2"}, IssueContent: types.IssueContent{Title: "apple"}, IssueWorkflow: types.IssueWorkflow{Priority: 3}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "ti-3"}, IssueContent: types.IssueContent{Title: "APPLE2"}, IssueWorkflow: types.IssueWorkflow{Priority: 2}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "ti-4"}, IssueContent: types.IssueContent{Title: "banana"}, IssueWorkflow: types.IssueWorkflow{Priority: 1}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "ti-5"}, IssueContent: types.IssueContent{Title: "Apple"}, IssueWorkflow: types.IssueWorkflow{Priority: 3}}), "a"))
 
 	// ti-2/ti-5 fold to the same title, so they pin the id-ASC tie leg.
 	want := []string{"ti-2", "ti-5", "ti-3", "ti-4", "ti-1"}
-	results, err := s.SearchIssues(c, "", types.IssueFilter{SortBy: "title"})
+	results, err := s.SearchIssues(c, "", types.IssueFilter{IssueFilterPage: types.IssueFilterPage{SortBy: "title"}})
 	must(t, err)
 	if got := orderedIDs(results); !reflect.DeepEqual(got, want) {
 		t.Errorf("title-sort order = %v, want %v (LOWER(title) ASC, id ASC)", got, want)
 	}
 
-	page, err := s.SearchIssues(c, "", types.IssueFilter{SortBy: "title", Limit: 2})
+	page, err := s.SearchIssues(c, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 2}, IssueFilterPage: types.IssueFilterPage{SortBy: "title"}})
 	must(t, err)
 	if got := orderedIDs(page); !reflect.DeepEqual(got, want[:2]) {
 		t.Errorf("title-sort page = %v, want %v (first 2 rows of the case-folded order)", got, want[:2])
@@ -448,33 +478,33 @@ func testAuditSearchSortTieBreakSurvivesReversal(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
 	tied, newer := auditWholeSec(2020), auditWholeSec(2022)
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "tb-a", Title: "a", Status: types.StatusOpen, CreatedAt: tied, UpdatedAt: tied}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "tb-b", Title: "b", Status: types.StatusOpen, CreatedAt: tied, UpdatedAt: tied}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "tb-c", Title: "c", Status: types.StatusClosed, CreatedAt: tied, UpdatedAt: tied}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "tb-new", Title: "n", Status: types.StatusInProgress, CreatedAt: newer, UpdatedAt: newer}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "tb-a"}, IssueContent: types.IssueContent{Title: "a"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueTimes: types.IssueTimes{CreatedAt: tied, UpdatedAt: tied}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "tb-b"}, IssueContent: types.IssueContent{Title: "b"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueTimes: types.IssueTimes{CreatedAt: tied, UpdatedAt: tied}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "tb-c"}, IssueContent: types.IssueContent{Title: "c"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}, IssueTimes: types.IssueTimes{CreatedAt: tied, UpdatedAt: tied}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "tb-new"}, IssueContent: types.IssueContent{Title: "n"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress}, IssueTimes: types.IssueTimes{CreatedAt: newer, UpdatedAt: newer}}), "a"))
 
-	results, err := s.SearchIssues(c, "", types.IssueFilter{SortBy: "updated"})
+	results, err := s.SearchIssues(c, "", types.IssueFilter{IssueFilterPage: types.IssueFilterPage{SortBy: "updated"}})
 	must(t, err)
 	want := []string{"tb-new", "tb-a", "tb-b", "tb-c"}
 	if got := orderedIDs(results); !reflect.DeepEqual(got, want) {
 		t.Errorf("updated-sort order = %v, want %v (updated_at DESC, id ASC)", got, want)
 	}
 
-	results, err = s.SearchIssues(c, "", types.IssueFilter{SortBy: "updated", SortDesc: true})
+	results, err = s.SearchIssues(c, "", types.IssueFilter{IssueFilterPage: types.IssueFilterPage{SortBy: "updated", SortDesc: true}})
 	must(t, err)
 	want = []string{"tb-a", "tb-b", "tb-c", "tb-new"}
 	if got := orderedIDs(results); !reflect.DeepEqual(got, want) {
 		t.Errorf("reversed updated-sort order = %v, want %v (oldest first; the tied group is STILL id ASC)", got, want)
 	}
 
-	results, err = s.SearchIssues(c, "", types.IssueFilter{SortBy: "status"})
+	results, err = s.SearchIssues(c, "", types.IssueFilter{IssueFilterPage: types.IssueFilterPage{SortBy: "status"}})
 	must(t, err)
 	want = []string{"tb-c", "tb-new", "tb-a", "tb-b"}
 	if got := orderedIDs(results); !reflect.DeepEqual(got, want) {
 		t.Errorf("status-sort order = %v, want %v (status ASC, id ASC)", got, want)
 	}
 
-	results, err = s.SearchIssues(c, "", types.IssueFilter{SortBy: "status", SortDesc: true})
+	results, err = s.SearchIssues(c, "", types.IssueFilter{IssueFilterPage: types.IssueFilterPage{SortBy: "status", SortDesc: true}})
 	must(t, err)
 	want = []string{"tb-a", "tb-b", "tb-new", "tb-c"}
 	if got := orderedIDs(results); !reflect.DeepEqual(got, want) {
@@ -493,26 +523,26 @@ func testAuditSearchSortNullsDirectional(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
 	tNew, tOld := auditWholeSec(2022), auditWholeSec(2021)
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "nl-open-a", Title: "oa", Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "nl-open-b", Title: "ob", Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "nl-closed-new", Title: "cn", Status: types.StatusClosed, ClosedAt: &tNew, Assignee: "alice"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "nl-closed-old", Title: "co", Status: types.StatusClosed, ClosedAt: &tOld, Assignee: "bob"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "nl-open-a"}, IssueContent: types.IssueContent{Title: "oa"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "nl-open-b"}, IssueContent: types.IssueContent{Title: "ob"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "nl-closed-new"}, IssueContent: types.IssueContent{Title: "cn"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed, Assignee: "alice"}, IssueTimes: types.IssueTimes{ClosedAt: &tNew}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "nl-closed-old"}, IssueContent: types.IssueContent{Title: "co"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed, Assignee: "bob"}, IssueTimes: types.IssueTimes{ClosedAt: &tOld}}), "a"))
 
-	results, err := s.SearchIssues(c, "", types.IssueFilter{SortBy: "closed", SortDesc: true})
+	results, err := s.SearchIssues(c, "", types.IssueFilter{IssueFilterPage: types.IssueFilterPage{SortBy: "closed", SortDesc: true}})
 	must(t, err)
 	want := []string{"nl-open-a", "nl-open-b", "nl-closed-old", "nl-closed-new"}
 	if got := orderedIDs(results); !reflect.DeepEqual(got, want) {
 		t.Errorf("reversed closed-sort order = %v, want %v (NULLs first on ASC, then oldest closed)", got, want)
 	}
 
-	results, err = s.SearchIssues(c, "", types.IssueFilter{SortBy: "assignee"})
+	results, err = s.SearchIssues(c, "", types.IssueFilter{IssueFilterPage: types.IssueFilterPage{SortBy: "assignee"}})
 	must(t, err)
 	want = []string{"nl-open-a", "nl-open-b", "nl-closed-new", "nl-closed-old"}
 	if got := orderedIDs(results); !reflect.DeepEqual(got, want) {
 		t.Errorf("assignee-sort order = %v, want %v (unassigned first on ASC, id ASC among them)", got, want)
 	}
 
-	results, err = s.SearchIssues(c, "", types.IssueFilter{SortBy: "assignee", SortDesc: true})
+	results, err = s.SearchIssues(c, "", types.IssueFilter{IssueFilterPage: types.IssueFilterPage{SortBy: "assignee", SortDesc: true}})
 	must(t, err)
 	want = []string{"nl-closed-old", "nl-closed-new", "nl-open-a", "nl-open-b"}
 	if got := orderedIDs(results); !reflect.DeepEqual(got, want) {
@@ -539,11 +569,11 @@ func testAuditSearchSortByIDCompleteSet(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
 	// Natural order (test-2, test-9, test-10) and byte order (test-10, test-2, test-9) differ.
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-9", Title: "nine"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-10", Title: "ten"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-2", Title: "two"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-9"}, IssueContent: types.IssueContent{Title: "nine"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-10"}, IssueContent: types.IssueContent{Title: "ten"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-2"}, IssueContent: types.IssueContent{Title: "two"}}), "a"))
 
-	results, err := s.SearchIssues(c, "", types.IssueFilter{SortBy: "id", Limit: 0})
+	results, err := s.SearchIssues(c, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 0}, IssueFilterPage: types.IssueFilterPage{SortBy: "id"}})
 	must(t, err)
 	want := []string{"test-10", "test-2", "test-9"}
 	if got := issueIDs(results); !reflect.DeepEqual(got, want) {
@@ -557,8 +587,8 @@ func testAuditSearchTextIDBranchExternalRef(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
 	ref := "JIRA-1234"
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-9", Title: "Zulu", ExternalRef: &ref}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-8", Title: "Yankee"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-9"}, IssueContent: types.IssueContent{Title: "Zulu"}, IssueMeta: types.IssueMeta{ExternalRef: &ref}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-8"}, IssueContent: types.IssueContent{Title: "Yankee"}}), "a"))
 
 	// ID-shaped token hits the external_ref branch (LOWER(external_ref) LIKE).
 	got, err := s.SearchIssues(c, "jira-12", types.IssueFilter{})
@@ -583,16 +613,16 @@ func testAuditSearchTextIDBranchExternalRef(t *testing.T, f Factory) {
 func testAuditSearchIDPrefixCaseSensitive(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-AB1", Title: "Upper"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-ab2", Title: "Lower"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-AB1"}, IssueContent: types.IssueContent{Title: "Upper"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-ab2"}, IssueContent: types.IssueContent{Title: "Lower"}}), "a"))
 
-	got, err := s.SearchIssues(c, "", types.IssueFilter{IDPrefix: "test-AB"})
+	got, err := s.SearchIssues(c, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "test-AB"}})
 	must(t, err)
 	if ids := issueIDs(got); !reflect.DeepEqual(ids, []string{"test-AB1"}) {
 		t.Errorf("IDPrefix test-AB = %v, want [test-AB1] (LIKE must be case-sensitive)", ids)
 	}
 
-	got, err = s.SearchIssues(c, "", types.IssueFilter{IDPrefix: "test-ab"})
+	got, err = s.SearchIssues(c, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDPrefix: "test-ab"}})
 	must(t, err)
 	if ids := issueIDs(got); !reflect.DeepEqual(ids, []string{"test-ab2"}) {
 		t.Errorf("IDPrefix test-ab = %v, want [test-ab2] (LIKE must be case-sensitive)", ids)
@@ -606,20 +636,20 @@ func testAuditSearchIDPrefixCaseSensitive(t *testing.T, f Factory) {
 func testAuditSearchParentDescendantCaseSensitive(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-pc", Title: "lower parent"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-PC", Title: "upper parent"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-pc.1", Title: "lower child"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-PC.1", Title: "upper child"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-pc"}, IssueContent: types.IssueContent{Title: "lower parent"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-PC"}, IssueContent: types.IssueContent{Title: "upper parent"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-pc.1"}, IssueContent: types.IssueContent{Title: "lower child"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-PC.1"}, IssueContent: types.IssueContent{Title: "upper child"}}), "a"))
 
 	parent := "test-pc"
-	got, err := s.SearchIssues(c, "", types.IssueFilter{ParentID: &parent})
+	got, err := s.SearchIssues(c, "", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{ParentID: &parent}})
 	must(t, err)
 	if ids := issueIDs(got); !reflect.DeepEqual(ids, []string{"test-pc.1"}) {
 		t.Errorf("ParentID test-pc = %v, want [test-pc.1] (different-cased sibling's child must be excluded)", ids)
 	}
 
 	upper := "test-PC"
-	got, err = s.SearchIssues(c, "", types.IssueFilter{ParentID: &upper})
+	got, err = s.SearchIssues(c, "", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{ParentID: &upper}})
 	must(t, err)
 	if ids := issueIDs(got); !reflect.DeepEqual(ids, []string{"test-PC.1"}) {
 		t.Errorf("ParentID test-PC = %v, want [test-PC.1] (different-cased sibling's child must be excluded)", ids)
@@ -633,9 +663,9 @@ func testAuditStaleStatusOverride(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
 	y2020 := auditWholeSec(2020)
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "sa-open", Title: "aged open", Status: types.StatusOpen, CreatedAt: y2020, UpdatedAt: y2020}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "sa-closed", Title: "aged closed", Status: types.StatusClosed, CreatedAt: y2020, UpdatedAt: y2020}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "sa-eph", Title: "aged ephemeral", Status: types.StatusOpen, Ephemeral: true, CreatedAt: y2020, UpdatedAt: y2020}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "sa-open"}, IssueContent: types.IssueContent{Title: "aged open"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueTimes: types.IssueTimes{CreatedAt: y2020, UpdatedAt: y2020}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "sa-closed"}, IssueContent: types.IssueContent{Title: "aged closed"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}, IssueTimes: types.IssueTimes{CreatedAt: y2020, UpdatedAt: y2020}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "sa-eph"}, IssueContent: types.IssueContent{Title: "aged ephemeral"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueTimes: types.IssueTimes{CreatedAt: y2020, UpdatedAt: y2020}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
 
 	// Status override: the normally-excluded closed issue is returned.
 	closed, err := s.GetStaleIssues(c, types.StaleFilter{Days: 30, Status: "closed"})
@@ -657,18 +687,23 @@ func testAuditStaleStatusOverride(t *testing.T, f Factory) {
 func testAuditEpicsEligiblePartial(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "ee-1", Title: "E1", IssueType: types.TypeEpic, Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "ee-1a", Title: "c", Status: types.StatusClosed}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "ee-1b", Title: "o", Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "ee-2", Title: "E2", IssueType: types.TypeEpic, Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "ee-2a", Title: "c", Status: types.StatusClosed}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "ee-3", Title: "E3", IssueType: types.TypeEpic, Status: types.StatusOpen}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "ee-1"}, IssueContent: types.IssueContent{Title: "E1"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeEpic, Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "ee-1a"}, IssueContent: types.IssueContent{Title: "c"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "ee-1b"}, IssueContent: types.IssueContent{Title: "o"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "ee-2"}, IssueContent: types.IssueContent{Title: "E2"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeEpic, Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "ee-2a"}, IssueContent: types.IssueContent{Title: "c"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "ee-3"}, IssueContent: types.IssueContent{Title: "E3"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeEpic, Status: types.StatusOpen}}), "a"))
 	must(t, s.AddDependency(c, &types.Dependency{IssueID: "ee-1a", DependsOnID: "ee-1", Type: types.DepParentChild}, "a"))
 	must(t, s.AddDependency(c, &types.Dependency{IssueID: "ee-1b", DependsOnID: "ee-1", Type: types.DepParentChild}, "a"))
 	must(t, s.AddDependency(c, &types.Dependency{IssueID: "ee-2a", DependsOnID: "ee-2", Type: types.DepParentChild}, "a"))
 
 	epics, err := s.GetEpicsEligibleForClosure(c)
 	must(t, err)
+	assertAuditEpicsEligible(t, epics)
+}
+
+func assertAuditEpicsEligible(t *testing.T, epics []*types.EpicStatus) {
+	t.Helper()
 	byID := make(map[string]*types.EpicStatus, len(epics))
 	for _, e := range epics {
 		if e != nil && e.Epic != nil {
@@ -676,24 +711,21 @@ func testAuditEpicsEligiblePartial(t *testing.T, f Factory) {
 		}
 	}
 
-	e1 := byID["ee-1"]
-	if e1 == nil {
-		t.Fatal("ee-1 missing (has children, must be returned)")
-	}
-	if e1.TotalChildren != 2 || e1.ClosedChildren != 1 || e1.EligibleForClose {
-		t.Errorf("ee-1 = {Total:%d Closed:%d Eligible:%v}, want {2 1 false}", e1.TotalChildren, e1.ClosedChildren, e1.EligibleForClose)
-	}
-
-	e2 := byID["ee-2"]
-	if e2 == nil {
-		t.Fatal("ee-2 missing (has children, must be returned)")
-	}
-	if e2.TotalChildren != 1 || e2.ClosedChildren != 1 || !e2.EligibleForClose {
-		t.Errorf("ee-2 = {Total:%d Closed:%d Eligible:%v}, want {1 1 true}", e2.TotalChildren, e2.ClosedChildren, e2.EligibleForClose)
-	}
-
+	assertAuditEpicStatus(t, byID["ee-1"], 2, 1, false)
+	assertAuditEpicStatus(t, byID["ee-2"], 1, 1, true)
 	if _, present := byID["ee-3"]; present {
 		t.Error("ee-3 (zero children) must be ABSENT (silent skip)")
+	}
+}
+
+func assertAuditEpicStatus(t *testing.T, status *types.EpicStatus, total, closed int, eligible bool) {
+	t.Helper()
+	if status == nil {
+		t.Fatalf("epic status missing (has children, must be returned)")
+	}
+	if status.TotalChildren != total || status.ClosedChildren != closed || status.EligibleForClose != eligible {
+		t.Errorf("epic status = {Total:%d Closed:%d Eligible:%v}, want {%d %d %v}",
+			status.TotalChildren, status.ClosedChildren, status.EligibleForClose, total, closed, eligible)
 	}
 }
 
@@ -702,9 +734,9 @@ func testAuditEpicsEligiblePartial(t *testing.T, f Factory) {
 func testAuditGetIssuesByLabelWithWisp(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "gil-d1", Title: "d1"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "gil-d2", Title: "d2"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "gil-w1", Title: "w1", Ephemeral: true}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "gil-d1"}, IssueContent: types.IssueContent{Title: "d1"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "gil-d2"}, IssueContent: types.IssueContent{Title: "d2"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "gil-w1"}, IssueContent: types.IssueContent{Title: "w1"}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
 	must(t, s.AddLabel(c, "gil-d1", "shared", "a"))
 	must(t, s.AddLabel(c, "gil-d2", "other", "a"))
 	must(t, s.AddLabel(c, "gil-w1", "shared", "a"))
@@ -722,8 +754,8 @@ func testAuditGetIssuesByLabelWithWisp(t *testing.T, f Factory) {
 func testAuditWispMergeSearchCount(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "wm-d1", Title: "D1", Status: types.StatusOpen}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "wm-w1", Title: "W1", Status: types.StatusOpen, Ephemeral: true}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "wm-d1"}, IssueContent: types.IssueContent{Title: "D1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "wm-w1"}, IssueContent: types.IssueContent{Title: "W1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
 
 	total, err := s.CountIssues(c, "", types.IssueFilter{})
 	must(t, err)
@@ -731,7 +763,7 @@ func testAuditWispMergeSearchCount(t *testing.T, f Factory) {
 		t.Errorf("CountIssues (merged) = %d, want 2", total)
 	}
 
-	durOnly, err := s.CountIssues(c, "", types.IssueFilter{SkipWisps: true})
+	durOnly, err := s.CountIssues(c, "", types.IssueFilter{IssueFilterHydrate: types.IssueFilterHydrate{SkipWisps: true}})
 	must(t, err)
 	if durOnly != 1 {
 		t.Errorf("CountIssues(SkipWisps) = %d, want 1", durOnly)
@@ -744,14 +776,14 @@ func testAuditWispMergeSearchCount(t *testing.T, f Factory) {
 	}
 
 	yes := true
-	onlyWisp, err := s.SearchIssues(c, "", types.IssueFilter{Ephemeral: &yes})
+	onlyWisp, err := s.SearchIssues(c, "", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{Ephemeral: &yes}})
 	must(t, err)
 	if got := issueIDs(onlyWisp); !reflect.DeepEqual(got, []string{"wm-w1"}) {
 		t.Errorf("SearchIssues(Ephemeral=true) = %v, want [wm-w1]", got)
 	}
 
 	no := false
-	onlyDur, err := s.SearchIssues(c, "", types.IssueFilter{Ephemeral: &no})
+	onlyDur, err := s.SearchIssues(c, "", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{Ephemeral: &no}})
 	must(t, err)
 	if got := issueIDs(onlyDur); !reflect.DeepEqual(got, []string{"wm-d1"}) {
 		t.Errorf("SearchIssues(Ephemeral=false) = %v, want [wm-d1]", got)

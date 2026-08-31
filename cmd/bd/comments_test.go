@@ -23,11 +23,15 @@ func TestCommentsSuite(t *testing.T) {
 	t.Run("CommentsCommand", func(t *testing.T) {
 		// Create test issue
 		issue := &types.Issue{
-			Title:       "Test Issue",
-			Description: "Test description",
-			Priority:    1,
-			IssueType:   types.TypeBug,
-			Status:      types.StatusOpen,
+			IssueContent: types.IssueContent{
+				Title:       "Test Issue",
+				Description: "Test description",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				IssueType: types.TypeBug,
+				Status:    types.StatusOpen,
+			},
 		}
 
 		if err := s.CreateIssue(ctx, issue, "test-user"); err != nil {
@@ -96,11 +100,15 @@ func TestCommentsSuite(t *testing.T) {
 
 	t.Run("AddComment", func(t *testing.T) {
 		issue := &types.Issue{
-			Title:       "Test Issue for Comment",
-			Description: "Test description",
-			Priority:    1,
-			IssueType:   types.TypeBug,
-			Status:      types.StatusOpen,
+			IssueContent: types.IssueContent{
+				Title:       "Test Issue for Comment",
+				Description: "Test description",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				IssueType: types.TypeBug,
+				Status:    types.StatusOpen,
+			},
 		}
 
 		if err := s.CreateIssue(ctx, issue, "test-user"); err != nil {

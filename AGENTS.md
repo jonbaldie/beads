@@ -17,6 +17,13 @@ scripts/dev-docker.sh go test ./test/constitution
 The default build is `CGO_ENABLED=0` (pure Go, server-mode Dolt). Embedded
 Dolt still needs `CGO_ENABLED=1` and still runs through the same script.
 
+After any Docker-backed Go build, test, or lint session, check whether the
+`beads-gobuild` Docker volume grew during the session. Before handoff, delete
+only files created during the session from that volume, preserve older reusable
+cache entries, and verify host disk availability with `df -h`. Also remove
+large generated binaries such as `bd` and transient reports such as
+`/tmp/beads-messgo-*` when they were created by the session.
+
 ## Key Sections
 
 - **Issue Tracking** - How to use bd for work management

@@ -184,7 +184,7 @@ func (p *blockedStateProbe) directBlockerEdges(t *testing.T, row blockedStateRow
 // in its own plane's table and ABSENT from the other. The second half is the
 // half that catches a cross-plane routing regression, because a wisp that
 // leaked a durable row would still read is_blocked correctly from one of them.
-func (p *blockedStateProbe) requirePlaneResidency(t *testing.T, row blockedStateRow) {
+func requirePlaneResidency(p *blockedStateProbe, t *testing.T, row blockedStateRow) {
 	t.Helper()
 	other := blockedStateIssues
 	if row.Plane.rows == blockedStateIssues.rows {
@@ -211,7 +211,7 @@ func (p *blockedStateProbe) requirePlaneResidency(t *testing.T, row blockedState
 // its REASON — the flag, the edge, and the blocker's own open status. Asserting
 // the flag alone is the shape of the retired defect: a row carrying 1 with no
 // live blocker behind it means the case is testing a value nothing produced.
-func (p *blockedStateProbe) requireBlockedByOpenBlocker(t *testing.T, row, blocker blockedStateRow, why string) {
+func requireBlockedByOpenBlocker(p *blockedStateProbe, t *testing.T, row, blocker blockedStateRow, why string) {
 	t.Helper()
 	if got := p.rawBlocked(t, row); got != 1 {
 		t.Fatalf("%s raw is_blocked = %d, want 1 (%s)", row, got, why)
@@ -239,7 +239,7 @@ func (p *blockedStateProbe) requireBlockedByOpenBlocker(t *testing.T, row, block
 // says the block cannot be its own, so what is under test is the transitive
 // propagation and nothing else. This is the exact pair the retired
 // fixture-defect case lacked.
-func (p *blockedStateProbe) requireBlockedWithNoDirectBlockerEdges(t *testing.T, row blockedStateRow, why string) {
+func requireBlockedWithNoDirectBlockerEdges(p *blockedStateProbe, t *testing.T, row blockedStateRow, why string) {
 	t.Helper()
 	if got := p.rawBlocked(t, row); got != 1 {
 		t.Fatalf("%s raw is_blocked = %d, want 1 (%s)", row, got, why)
@@ -250,7 +250,7 @@ func (p *blockedStateProbe) requireBlockedWithNoDirectBlockerEdges(t *testing.T,
 	}
 }
 
-func (p *blockedStateProbe) requireUnblocked(t *testing.T, row blockedStateRow, why string) {
+func requireUnblocked(p *blockedStateProbe, t *testing.T, row blockedStateRow, why string) {
 	t.Helper()
 	if got := p.rawBlocked(t, row); got != 0 {
 		t.Fatalf("%s raw is_blocked = %d, want 0 (%s)", row, got, why)
@@ -277,7 +277,7 @@ type blockedStateFlip struct {
 // cause the verb did not remove, so it proves the reader and the seed observe
 // the database the subject assertion thinks they do — the pattern
 // RunBatchCloserClaimNextSeesAnUnblockingFromItsOwnBatch already uses.
-func (p *blockedStateProbe) watchFlip(t *testing.T, subjects, controls []blockedStateRow) *blockedStateFlip {
+func watchFlip(p *blockedStateProbe, t *testing.T, subjects, controls []blockedStateRow) *blockedStateFlip {
 	t.Helper()
 	if len(subjects) == 0 {
 		t.Fatal("watchFlip needs at least one subject row")
@@ -305,7 +305,7 @@ func (p *blockedStateProbe) watchFlip(t *testing.T, subjects, controls []blocked
 // blocked state at all. Such a case still has to be falsifiable, and it is —
 // but on a different column, so the case itself asserts a flip the verb DID
 // make (a claimed row's status) and names that as its must-flip term.
-func (p *blockedStateProbe) watchControls(t *testing.T, controls ...blockedStateRow) *blockedStateFlip {
+func watchControls(p *blockedStateProbe, t *testing.T, controls ...blockedStateRow) *blockedStateFlip {
 	t.Helper()
 	if len(controls) == 0 {
 		t.Fatal("watchControls needs at least one control row")
@@ -339,7 +339,7 @@ func (p *blockedStateProbe) watchControls(t *testing.T, controls ...blockedState
 //     alsoWrites is exempt from THIS half and no other, because the verb writes
 //     that row for its own reasons.
 //   - every control still reads what it read, with its timestamp intact.
-func (f *blockedStateFlip) requireFlippedTo(t *testing.T, want int, why string) {
+func requireFlippedTo(f *blockedStateFlip, t *testing.T, want int, why string) {
 	t.Helper()
 	for _, row := range f.subjects {
 		key := row.String()
@@ -375,7 +375,7 @@ func (f *blockedStateFlip) requireFlippedTo(t *testing.T, want int, why string) 
 // property that made an updated_at comparison useless as a detector elsewhere
 // in this suite, and here it produced a case that passed locally and failed in
 // CI on a second boundary.
-func (f *blockedStateFlip) alsoWrites(rows ...blockedStateRow) *blockedStateFlip {
+func alsoWrites(f *blockedStateFlip, rows ...blockedStateRow) *blockedStateFlip {
 	for _, row := range rows {
 		f.written[row.String()] = true
 	}

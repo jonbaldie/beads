@@ -48,11 +48,12 @@ See: bd comment --help`)
 	return nil
 }
 
-var commentCmd = &cobra.Command{
-	Use:     "comment <id> [text...]",
-	GroupID: "issues",
-	Short:   "Add a comment to an issue",
-	Long: `Add a comment to an issue.
+func newCommentCmd() *cobra.Command {
+	commentCmd := &cobra.Command{
+		Use:     "comment <id> [text...]",
+		GroupID: "issues",
+		Short:   "Add a comment to an issue",
+		Long: `Add a comment to an issue.
 
 Shorthand for 'bd comments add <id> "text"'.
 
@@ -64,82 +65,83 @@ Examples:
 
 Note: "comment" (singular) only adds a comment — it has no "list" subcommand.
 To list comments on an issue, use the plural form: bd comments <id>`,
-	Args:          validateCommentArgs,
-	SilenceUsage:  true,
-	SilenceErrors: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		CheckReadonly("comment")
+		Args:          validateCommentArgs,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE:          runComment,
+	}
+	registerTextSourceFlags(commentCmd, "comment text")
+	commentCmd.ValidArgsFunction = issueIDCompletion
+	return commentCmd
+}
 
-		evt := metrics.NewCommandEvent("comment")
-		defer func() {
-			if c := metrics.Global(); c != nil {
-				c.CloseEventAndAdd(evt)
-			}
-		}()
-
-		id := args[0]
-		textArgs := args[1:]
-
-		commentText, err := requireTextFromSources("comment text", "use positional args, --stdin, or --file",
-			cmdTextSources(cmd, textArgs))
-		if err != nil {
-			return HandleErrorRespectJSON("%v", err)
+func runComment(cmd *cobra.Command, args []string) error {
+	if err := CheckReadonly("comment"); err != nil {
+		return err
+	}
+	evt := metrics.NewCommandEvent("comment")
+	defer func() {
+		if c := metrics.Global(); c != nil {
+			c.CloseEventAndAdd(evt)
 		}
+	}()
+	id := args[0]
+	commentText, err := requireTextFromSources("comment text", "use positional args, --stdin, or --file",
+		cmdTextSources(cmd, args[1:]))
+	if err != nil {
+		return HandleErrorRespectJSON("%v", err)
+	}
+	author := getActorWithGit()
+	if usesProxiedServer() {
+		return runCommentProxiedServer(getRootContext(), id, author, commentText)
+	}
+	return runCommentDirect(id, author, commentText)
+}
 
-		author := getActorWithGit()
+func runCommentDirect(id, author, commentText string) error {
+	result, err := resolveIssueMutationForCommand(id)
+	if err != nil {
+		return err
+	}
+	defer result.Close()
+	if err := validateIssueUpdatable(id, result.Issue); err != nil {
+		return HandleErrorRespectJSON("%s", err)
+	}
+	comment, err := addCommentDirect(getRootContext(), result.Store, result.ResolvedID, author, commentText)
+	if err != nil {
+		return HandleErrorRespectJSON("adding comment: %v", err)
+	}
+	if err := commitPendingIfEmbedded(getRootContext(), result.Store, getActor(), doltAutoCommitParams{
+		Command:  "comment",
+		IssueIDs: []string{result.ResolvedID},
+	}); err != nil {
+		return HandleErrorRespectJSON("failed to commit: %v", err)
+	}
+	SetLastTouchedID(result.ResolvedID)
+	if isJSONOutput() {
+		return outputJSON(comment)
+	}
+	fmt.Printf("%s Comment added to %s\n", ui.RenderPass("✓"), formatFeedbackID(result.ResolvedID, result.Issue.Title))
+	return nil
+}
 
-		// Dispatched after the text is resolved so both backends read the
-		// same sources and report the same conflicts.
-		if usesProxiedServer() {
-			return runCommentProxiedServer(rootCtx, id, author, commentText)
+func resolveIssueMutationForCommand(id string) (*RoutedResult, error) {
+	result, err := resolveAndGetIssueForMutation(getRootContext(), getStore(), id)
+	if err != nil {
+		if result != nil {
+			result.Close()
 		}
-
-		ctx := rootCtx
-
-		result, err := resolveAndGetIssueForMutation(ctx, store, id)
-		if err != nil {
-			if result != nil {
-				result.Close()
-			}
-			return HandleErrorRespectJSON("resolving %s: %v", id, err)
+		return nil, HandleErrorRespectJSON("resolving %s: %v", id, err)
+	}
+	if result == nil || result.Issue == nil {
+		if result != nil {
+			result.Close()
 		}
-		if result == nil || result.Issue == nil {
-			if result != nil {
-				result.Close()
-			}
-			return HandleErrorRespectJSON("issue %s not found", id)
-		}
-		defer result.Close()
-
-		issueStore := result.Store
-
-		if err := validateIssueUpdatable(id, result.Issue); err != nil {
-			return HandleErrorRespectJSON("%s", err)
-		}
-
-		comment, err := addCommentDirect(ctx, issueStore, result.ResolvedID, author, commentText)
-		if err != nil {
-			return HandleErrorRespectJSON("adding comment: %v", err)
-		}
-		if err := commitPendingIfEmbedded(ctx, issueStore, actor, doltAutoCommitParams{
-			Command:  "comment",
-			IssueIDs: []string{result.ResolvedID},
-		}); err != nil {
-			return HandleErrorRespectJSON("failed to commit: %v", err)
-		}
-
-		SetLastTouchedID(result.ResolvedID)
-
-		if jsonOutput {
-			return outputJSON(comment)
-		}
-		fmt.Printf("%s Comment added to %s\n", ui.RenderPass("✓"), formatFeedbackID(result.ResolvedID, result.Issue.Title))
-		return nil
-	},
+		return nil, HandleErrorRespectJSON("issue %s not found", id)
+	}
+	return result, nil
 }
 
 func init() {
-	registerTextSourceFlags(commentCmd, "comment text")
-	commentCmd.ValidArgsFunction = issueIDCompletion
-	rootCmd.AddCommand(commentCmd)
+	rootCmd.AddCommand(newCommentCmd())
 }

@@ -60,7 +60,7 @@ Examples:
 			entries = filterBySource(entries, sourceFilter)
 		}
 
-		if jsonOutput {
+		if isJSONOutput() {
 			return outputJSON(entries)
 		}
 
@@ -140,61 +140,38 @@ func collectViperEntries() []configEntry {
 			continue
 		}
 		seen[key] = true
-
-		// Skip map-type keys that Viper flattens into individual dotted paths.
-		// These are container keys (directory.labels, external_projects, repos)
-		// whose individual sub-keys are already included.
-		if isContainerKey(key) {
-			continue
+		if entry, ok := collectViperEntry(key); ok {
+			entries = append(entries, entry)
 		}
-
-		value := formatViperValue(config.GetString(key))
-		source := config.GetValueSource(key)
-		sourceLabel := viperSourceLabel(key, source)
-
-		// The "actor" key gets the same BEADS_ACTOR > BD_ACTOR precedence as
-		// the runtime path (resolveConfiguredActor in main.go): viper's
-		// AutomaticEnv binds the deprecated BD_ACTOR ahead of any explicit
-		// binding, so config.GetString("actor")/viperSourceLabel alone would
-		// report BD_ACTOR's value and provenance even when BEADS_ACTOR is
-		// also set — contradicting the actor that mutations actually use
-		// (GH#4645). Recompute both here so `config show` matches reality.
-		if key == "actor" {
-			value = formatViperValue(resolveConfiguredActor())
-			if beadsActor := os.Getenv("BEADS_ACTOR"); beadsActor != "" {
-				sourceLabel = "env: BEADS_ACTOR"
-			}
-		}
-
-		// User-global keys (metrics.*) are honored at runtime from the user-global
-		// config.yaml only, never merged project config; report that authoritative
-		// value AND its user-global source so the listing matches what bd actually
-		// uses (and `bd config get`), not a project value/source that has no
-		// runtime effect. The viper source label alone is ambiguous: a project
-		// .beads/config.yaml that also sets a metrics key makes GetValueSource
-		// report SourceConfigFile ("config.yaml"), which would attribute the
-		// displayed user-global value to the project file the runtime ignores.
-		if config.IsUserGlobalKey(key) {
-			value = formatViperValue(config.GetUserYamlConfig(key))
-			if value == "" {
-				continue // unset in user-global; runtime uses the built-in default
-			}
-			sourceLabel = config.UserConfigYamlDisplayPath()
-		}
-
-		// Skip empty defaults — they add noise without information
-		if source == config.SourceDefault && value == "" {
-			continue
-		}
-
-		entries = append(entries, configEntry{
-			Key:    key,
-			Value:  value,
-			Source: sourceLabel,
-		})
 	}
 
 	return entries
+}
+
+func collectViperEntry(key string) (configEntry, bool) {
+	if isContainerKey(key) {
+		return configEntry{}, false
+	}
+	value := formatViperValue(config.GetString(key))
+	source := config.GetValueSource(key)
+	sourceLabel := viperSourceLabel(key, source)
+	if key == "actor" {
+		value = formatViperValue(resolveConfiguredActor())
+		if os.Getenv("BEADS_ACTOR") != "" {
+			sourceLabel = "env: BEADS_ACTOR"
+		}
+	}
+	if config.IsUserGlobalKey(key) {
+		value = formatViperValue(config.GetUserYamlConfig(key))
+		if value == "" {
+			return configEntry{}, false
+		}
+		sourceLabel = config.UserConfigYamlDisplayPath()
+	}
+	if source == config.SourceDefault && value == "" {
+		return configEntry{}, false
+	}
+	return configEntry{Key: key, Value: value, Source: sourceLabel}, true
 }
 
 // isContainerKey returns true for keys that are map/struct containers

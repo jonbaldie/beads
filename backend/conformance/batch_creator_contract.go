@@ -66,9 +66,9 @@ func RunBatchCreatorCreatesEveryItemAsOneAct(t *testing.T, ctx context.Context, 
 	request := publicops.CreateBatchRequest{
 		Actor: "batch-writer",
 		Items: []publicops.BatchCreateItem{
-			batchCreatorItem(&types.Issue{Title: "first", Priority: 1, IssueType: types.TypeTask, Labels: []string{"alpha"}}),
-			batchCreatorItem(&types.Issue{Title: "second", Priority: 2, IssueType: types.TypeBug}),
-			batchCreatorItem(&types.Issue{Title: "third", Priority: 3, IssueType: types.TypeFeature}),
+			batchCreatorItem(&types.Issue{IssueContent: types.IssueContent{Title: "first"}, IssueWorkflow: types.IssueWorkflow{Priority: 1, IssueType: types.TypeTask}, IssueGraph: types.IssueGraph{Labels: []string{"alpha"}}}),
+			batchCreatorItem(&types.Issue{IssueContent: types.IssueContent{Title: "second"}, IssueWorkflow: types.IssueWorkflow{Priority: 2, IssueType: types.TypeBug}}),
+			batchCreatorItem(&types.Issue{IssueContent: types.IssueContent{Title: "third"}, IssueWorkflow: types.IssueWorkflow{Priority: 3, IssueType: types.TypeFeature}}),
 		},
 	}
 	result, err := fixture.BatchCreator.CreateBatch(ctx, request)
@@ -79,6 +79,16 @@ func RunBatchCreatorCreatesEveryItemAsOneAct(t *testing.T, ctx context.Context, 
 		t.Fatalf("CreateBatch returned %d issues for %d items; the result is promised one entry per item at the same index",
 			len(result.Issues), len(request.Items))
 	}
+	assertBatchCreatorResults(t, ctx, fixture, request, result)
+}
+
+func assertBatchCreatorResults(
+	t *testing.T,
+	ctx context.Context,
+	fixture BatchCreatorFixture,
+	request publicops.CreateBatchRequest,
+	result publicops.CreateBatchResult,
+) {
 	seen := map[string]bool{}
 	for i, issue := range result.Issues {
 		if issue == nil {
@@ -152,7 +162,7 @@ func RunBatchCreatorRefusesEverythingWhenOneItemRefuses(t *testing.T, ctx contex
 // filtered-to-nothing list silently stops creating anything.
 func RunBatchCreatorRejectsAnUnusableRequest(t *testing.T, ctx context.Context, fixture BatchCreatorFixture) {
 	t.Helper()
-	item := batchCreatorItem(&types.Issue{Title: "unreachable", Priority: 2, IssueType: types.TypeTask})
+	item := batchCreatorItem(&types.Issue{IssueContent: types.IssueContent{Title: "unreachable"}, IssueWorkflow: types.IssueWorkflow{Priority: 2, IssueType: types.TypeTask}})
 	for _, test := range []struct {
 		name    string
 		request publicops.CreateBatchRequest
@@ -452,9 +462,9 @@ func RunBatchCreatorRecordsOneHistoryEntry(t *testing.T, ctx context.Context, fi
 				Actor:      "batch-writer",
 				Provenance: test.provenance,
 				Items: []publicops.BatchCreateItem{
-					batchCreatorItem(&types.Issue{Title: "one", Priority: 2, IssueType: types.TypeTask}),
-					batchCreatorItem(&types.Issue{Title: "two", Priority: 2, IssueType: types.TypeTask}),
-					batchCreatorItem(&types.Issue{Title: "three", Priority: 2, IssueType: types.TypeTask}),
+					batchCreatorItem(&types.Issue{IssueContent: types.IssueContent{Title: "one"}, IssueWorkflow: types.IssueWorkflow{Priority: 2, IssueType: types.TypeTask}}),
+					batchCreatorItem(&types.Issue{IssueContent: types.IssueContent{Title: "two"}, IssueWorkflow: types.IssueWorkflow{Priority: 2, IssueType: types.TypeTask}}),
+					batchCreatorItem(&types.Issue{IssueContent: types.IssueContent{Title: "three"}, IssueWorkflow: types.IssueWorkflow{Priority: 2, IssueType: types.TypeTask}}),
 				},
 			}); err != nil {
 				t.Fatalf("CreateBatch(3 durable items): %v", err)
@@ -519,7 +529,7 @@ func RunBatchCreatorDoesNotMutateTheCallerRequest(t *testing.T, ctx context.Cont
 		Actor:      "batch-writer",
 		Provenance: "bd: create 1 issue(s) from plan.md",
 		Items: []publicops.BatchCreateItem{{
-			Issue:        &types.Issue{Title: "caller owned", Priority: 2, IssueType: types.TypeTask, Labels: []string{"kept"}},
+			Issue:        &types.Issue{IssueContent: types.IssueContent{Title: "caller owned"}, IssueWorkflow: types.IssueWorkflow{Priority: 2, IssueType: types.TypeTask}, IssueGraph: types.IssueGraph{Labels: []string{"kept"}}},
 			Dependencies: []publicops.CreateDependency{{TargetID: target, Type: types.DepBlocks}},
 		}},
 	}
@@ -527,7 +537,7 @@ func RunBatchCreatorDoesNotMutateTheCallerRequest(t *testing.T, ctx context.Cont
 		Actor:      request.Actor,
 		Provenance: request.Provenance,
 		Items: []publicops.BatchCreateItem{{
-			Issue:        &types.Issue{Title: "caller owned", Priority: 2, IssueType: types.TypeTask, Labels: []string{"kept"}},
+			Issue:        &types.Issue{IssueContent: types.IssueContent{Title: "caller owned"}, IssueWorkflow: types.IssueWorkflow{Priority: 2, IssueType: types.TypeTask}, IssueGraph: types.IssueGraph{Labels: []string{"kept"}}},
 			Dependencies: []publicops.CreateDependency{{TargetID: target, Type: types.DepBlocks}},
 		}},
 	}
@@ -548,7 +558,7 @@ func batchCreatorItem(issue *types.Issue) publicops.BatchCreateItem {
 // batchCreatorIssue is an issue with an EXPLICIT id, for the cases that have to
 // name their rows — the create-only guard and every edge target.
 func batchCreatorIssue(id, title string) *types.Issue {
-	return &types.Issue{ID: id, Title: title, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	return &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: title}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 }
 
 // seedBatchCreatorIssue occupies an id through the fixture's own create, which

@@ -10,6 +10,7 @@ import "testing"
 // plural sibling's equivalents; this test only pins down which shapes are
 // accepted vs rejected.
 func TestValidateCommentArgs(t *testing.T) {
+	commentCmd := newCommentCmd()
 	origJSONOutput := jsonOutput
 	jsonOutput = false
 	t.Cleanup(func() { jsonOutput = origJSONOutput })

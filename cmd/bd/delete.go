@@ -16,11 +16,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var deleteCmd = &cobra.Command{
-	Use:     "delete <issue-id> [issue-id...]",
-	GroupID: "issues",
-	Short:   "Delete one or more issues and clean up references",
-	Long: `Delete one or more issues and clean up all references to them.
+func newDeleteCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:     "delete <issue-id> [issue-id...]",
+		GroupID: "issues",
+		Short:   "Delete one or more issues and clean up references",
+		Long: `Delete one or more issues and clean up all references to them.
 This command will:
 1. Remove all dependency links (any type, both directions) involving the issues
 2. Update text references to "[deleted:ID]" in directly connected issues
@@ -47,144 +48,171 @@ Cascade: Recursively delete all dependents
 
 Force: Delete and orphan dependents
   bd delete bd-1 --force`,
-	Args:          cobra.MinimumNArgs(0),
-	SilenceUsage:  true,
-	SilenceErrors: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		CheckReadonly("delete")
+		Args:          cobra.MinimumNArgs(0),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE:          runDeleteCommand,
+	}
+}
 
-		evt := metrics.NewCommandEvent("delete")
-		defer func() {
-			if c := metrics.Global(); c != nil {
-				c.CloseEventAndAdd(evt)
-			}
-		}()
+type deleteCommandOptions struct {
+	fromFile string
+	force    bool
+	dryRun   bool
+	cascade  bool
+}
 
-		if usesProxiedServer() {
-			return runDeleteProxiedServer(cmd, rootCtx, args)
+func runDeleteCommand(cmd *cobra.Command, args []string) error {
+	if err := CheckReadonly("delete"); err != nil {
+		return err
+	}
+	evt := metrics.NewCommandEvent("delete")
+	defer func() {
+		if c := metrics.Global(); c != nil {
+			c.CloseEventAndAdd(evt)
 		}
+	}()
 
-		fromFile, _ := cmd.Flags().GetString("from-file")
-		force, _ := cmd.Flags().GetBool("force")
-		dryRun, _ := cmd.Flags().GetBool("dry-run")
-		cascade, _ := cmd.Flags().GetBool("cascade")
-		issueIDs := make([]string, 0, len(args))
-		issueIDs = append(issueIDs, args...)
-		if fromFile != "" {
-			fileIDs, err := readIssueIDsFromFile(fromFile)
-			if err != nil {
-				return HandleError("reading file: %v", err)
-			}
-			issueIDs = append(issueIDs, fileIDs...)
-		}
-		if len(issueIDs) == 0 {
-			_ = cmd.Usage()
-			return HandleError("no issue IDs provided")
-		}
-		issueIDs = uniqueStrings(issueIDs)
+	if usesProxiedServer() {
+		return runDeleteProxiedServer(cmd, getRootContext(), args)
+	}
+	options := readDeleteCommandOptions(cmd)
+	issueIDs, err := loadAndValidateDeleteIDs(cmd, args, options.fromFile)
+	if err != nil {
+		return err
+	}
+	if err := ensureDeleteStore(); err != nil {
+		return err
+	}
+	if len(issueIDs) > 1 || options.cascade {
+		return runDeleteBatchCommand(cmd, issueIDs, options)
+	}
+	return runDeleteSingleCommand(getRootContext(), issueIDs[0], options)
+}
 
-		if store == nil {
-			if err := ensureStoreActive(); err != nil {
-				return HandleError("%v", err)
-			}
-		}
+func loadAndValidateDeleteIDs(cmd *cobra.Command, args []string, fromFile string) ([]string, error) {
+	issueIDs, err := loadDeleteCommandIDs(args, fromFile)
+	if err != nil {
+		return nil, HandleError("reading file: %v", err)
+	}
+	if len(issueIDs) == 0 {
+		_ = cmd.Usage()
+		return nil, HandleError("no issue IDs provided")
+	}
+	return issueIDs, nil
+}
 
-		if len(issueIDs) > 1 || cascade {
-			if err := deleteBatch(cmd, issueIDs, force, dryRun, cascade, jsonOutput, false); err != nil {
-				if _, ok := exitCodeFromError(err); ok {
-					return err
-				}
-				return HandleError("%v", err)
-			}
-			return nil
-		}
-
-		issueID := issueIDs[0]
-		ctx := rootCtx
-		// Get the issue to be deleted, using prefix-based routing. Resolution
-		// stays in the front door: issueops.DeleteRequest.IDs are exact, because
-		// resolving an ambiguous prefix and then deleting the row it hit is the
-		// one place a convenience is not.
-		routedResult, err := resolveAndGetIssueForMutation(ctx, store, issueID)
-		if err != nil {
-			if isNotFoundErr(err) {
-				return HandleError("issue %s not found", issueID)
-			}
-			return HandleError("%v", err)
-		}
-		defer routedResult.Close()
-		issue := routedResult.Issue
-		issueID = routedResult.ResolvedID
-		activeStore := routedResult.Store
-
-		deleter, err := activeStore.Deleter()
-		if err != nil {
-			return HandleError("%v", err)
-		}
-		// --force is this command's CONFIRMATION as well as its orphan mode, so an
-		// unconfirmed run asks the role the same question a --dry-run does. The
-		// rewrite runs INSIDE the transaction that deletes, because it is the
-		// role's.
-		request := issueops.DeleteRequest{
-			Actor:  actor,
-			IDs:    []string{issueID},
-			Force:  force,
-			DryRun: dryRun || !force,
-		}
-		opsCtx, err := issueOpsContext(ctx)
-		if err != nil {
-			return HandleError("%v", err)
-		}
-		result, err := deleter.Delete(opsCtx, request)
-		if request.DryRun {
-			if err != nil {
-				if previewErr := outputDeletionPreview([]string{issueID}, map[string]*types.Issue{issueID: issue}, false, dryRun, nil, err, jsonOutput); previewErr != nil {
-					return previewErr
-				}
-				if jsonOutput {
-					return outputJSONError(err, "")
-				}
-				return HandleError("previewing deletion: %v", err)
-			}
-			if jsonOutput || isQuiet() {
-				return outputDeletionPreview([]string{issueID}, map[string]*types.Issue{issueID: issue}, false, dryRun, &result, nil, jsonOutput)
-			}
-			return renderSingleDeletePreview(ctx, activeStore, issueID, issue, dryRun, result)
-		}
-		if err != nil {
-			return HandleError("deleting issue: %v", err)
-		}
-
-		commandDidWrite.Store(true)
-
-		// NO COMMIT COMPENSATION HERE. The role versions its own deletion on
-		// every backend now, including the embedded one, which publishes the
-		// entry after its SQL commit — and it does so on the store the rows
-		// were actually deleted from, which for a prefix-routed id is the
-		// TARGET repository rather than this workspace. This route once had to
-		// mint that commit itself, because the port onto the role dropped the
-		// version commit embedded deletes used to get; a compensation here
-		// would now find a clean working set and add nothing but a second
-		// spelling of the same event. Batch and off modes are still honored:
-		// issueOpsContext above defers the role's commit in either.
-
-		if jsonOutput {
-			// The single-issue keys, unchanged: `deleted` is the id rather than a
-			// list here, which is what every `bd delete <one-id> --json` parses.
-			if err := outputJSON(map[string]interface{}{
-				"deleted":              issueID,
-				"dependencies_removed": result.Dependencies,
-				"references_updated":   result.ReferencesUpdated,
-			}); err != nil {
-				return err
-			}
-		} else {
-			fmt.Printf("%s Deleted %s\n", ui.RenderPass("✓"), issueID)
-			fmt.Printf("  Removed %d dependency link(s)\n", result.Dependencies)
-			fmt.Printf("  Updated text references in %d issue(s)\n", result.ReferencesUpdated)
-		}
+func ensureDeleteStore() error {
+	if getStore() != nil {
 		return nil
-	},
+	}
+	if err := ensureStoreActive(); err != nil {
+		return HandleError("%v", err)
+	}
+	return nil
+}
+
+func readDeleteCommandOptions(cmd *cobra.Command) deleteCommandOptions {
+	fromFile, _ := cmd.Flags().GetString("from-file")
+	force, _ := cmd.Flags().GetBool("force")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	cascade, _ := cmd.Flags().GetBool("cascade")
+	return deleteCommandOptions{fromFile: fromFile, force: force, dryRun: dryRun, cascade: cascade}
+}
+
+func loadDeleteCommandIDs(args []string, fromFile string) ([]string, error) {
+	issueIDs := make([]string, 0, len(args))
+	issueIDs = append(issueIDs, args...)
+	if fromFile != "" {
+		fileIDs, err := readIssueIDsFromFile(fromFile)
+		if err != nil {
+			return nil, err
+		}
+		issueIDs = append(issueIDs, fileIDs...)
+	}
+	return uniqueStrings(issueIDs), nil
+}
+
+func runDeleteBatchCommand(cmd *cobra.Command, issueIDs []string, options deleteCommandOptions) error {
+	if err := deleteBatch(cmd, issueIDs, options.force, options.dryRun, options.cascade, isJSONOutput(), false); err != nil {
+		if _, ok := exitCodeFromError(err); ok {
+			return err
+		}
+		return HandleError("%v", err)
+	}
+	return nil
+}
+
+func runDeleteSingleCommand(ctx context.Context, requestedID string, options deleteCommandOptions) error {
+	// Get the issue to be deleted, using prefix-based routing. Resolution stays
+	// in the front door: DeleteRequest.IDs are exact after this point.
+	routedResult, err := resolveAndGetIssueForMutation(ctx, getStore(), requestedID)
+	if err != nil {
+		if isNotFoundErr(err) {
+			return HandleError("issue %s not found", requestedID)
+		}
+		return HandleError("%v", err)
+	}
+	defer routedResult.Close()
+	issueID := routedResult.ResolvedID
+	request := issueops.DeleteRequest{
+		Actor:  getActor(),
+		IDs:    []string{issueID},
+		Force:  options.force,
+		DryRun: options.dryRun || !options.force,
+	}
+	result, err := executeSingleDelete(ctx, routedResult.Store, request)
+	if request.DryRun {
+		return handleSingleDeletePreview(ctx, routedResult.Store, issueID, routedResult.Issue, options.dryRun, isJSONOutput(), result, err)
+	}
+	if err != nil {
+		return HandleError("deleting issue: %v", err)
+	}
+	commandDidWrite.Store(true)
+	return renderSingleDeleteSuccess(issueID, result, isJSONOutput())
+}
+
+func handleSingleDeletePreview(ctx context.Context, activeStore storage.DoltStorage, issueID string, issue *types.Issue, dryRun, jsonOutput bool, result issueops.DeleteResult, deleteErr error) error {
+	issues := map[string]*types.Issue{issueID: issue}
+	if deleteErr != nil {
+		if previewErr := outputDeletionPreview([]string{issueID}, issues, false, dryRun, nil, deleteErr, jsonOutput); previewErr != nil {
+			return previewErr
+		}
+		if jsonOutput {
+			return outputJSONError(deleteErr, "")
+		}
+		return HandleError("previewing deletion: %v", deleteErr)
+	}
+	if jsonOutput || isQuiet() {
+		return outputDeletionPreview([]string{issueID}, issues, false, dryRun, &result, nil, jsonOutput)
+	}
+	return renderSingleDeletePreview(ctx, activeStore, issueID, issue, dryRun, result)
+}
+
+func executeSingleDelete(ctx context.Context, activeStore storage.DoltStorage, request issueops.DeleteRequest) (issueops.DeleteResult, error) {
+	deleter, err := activeStore.Deleter()
+	if err != nil {
+		return issueops.DeleteResult{}, HandleError("%v", err)
+	}
+	opsCtx, err := issueOpsContext(ctx)
+	if err != nil {
+		return issueops.DeleteResult{}, HandleError("%v", err)
+	}
+	return deleter.Delete(opsCtx, request)
+}
+
+func renderSingleDeleteSuccess(issueID string, result issueops.DeleteResult, jsonOutput bool) error {
+	if jsonOutput {
+		return outputJSON(map[string]interface{}{
+			"deleted":              issueID,
+			"dependencies_removed": result.Dependencies,
+			"references_updated":   result.ReferencesUpdated,
+		})
+	}
+	fmt.Printf("%s Deleted %s\n", ui.RenderPass("✓"), issueID)
+	fmt.Printf("  Removed %d dependency link(s)\n", result.Dependencies)
+	fmt.Printf("  Updated text references in %d issue(s)\n", result.ReferencesUpdated)
+	return nil
 }
 
 // renderSingleDeletePreview prints the human preview for a one-issue delete. The
@@ -195,59 +223,93 @@ func renderSingleDeletePreview(
 	ctx context.Context, activeStore storage.DoltStorage,
 	issueID string, issue *types.Issue, dryRun bool, result issueops.DeleteResult,
 ) error {
-	connectedIssues := make(map[string]*types.Issue)
+	preview, err := loadSingleDeletePreview(ctx, activeStore, issueID)
+	if err != nil {
+		return err
+	}
+	renderSingleDeleteHeader(issueID, issue)
+	renderSingleDeleteDependencies(preview.depRecords, preview.dependents, issueID)
+	renderSingleDeleteReferences(preview.connectedIssues, issueID)
+	renderSingleDeleteOutcome(dryRun, result, issueID)
+	return nil
+}
+
+type singleDeletePreview struct {
+	connectedIssues map[string]*types.Issue
+	dependents      []*types.Issue
+	depRecords      []*types.Dependency
+}
+
+func loadSingleDeletePreview(ctx context.Context, activeStore storage.DoltStorage, issueID string) (singleDeletePreview, error) {
+	preview := singleDeletePreview{connectedIssues: make(map[string]*types.Issue)}
 	deps, err := activeStore.GetDependencies(ctx, issueID)
 	if err != nil {
-		return HandleError("getting dependencies: %v", err)
+		return singleDeletePreview{}, HandleError("getting dependencies: %v", err)
 	}
 	for _, dep := range deps {
-		connectedIssues[dep.ID] = dep
+		preview.connectedIssues[dep.ID] = dep
 	}
-	dependents, err := activeStore.GetDependents(ctx, issueID)
+	preview.dependents, err = activeStore.GetDependents(ctx, issueID)
 	if err != nil {
-		return HandleError("getting dependents: %v", err)
+		return singleDeletePreview{}, HandleError("getting dependents: %v", err)
 	}
-	for _, dependent := range dependents {
-		connectedIssues[dependent.ID] = dependent
+	for _, dependent := range preview.dependents {
+		preview.connectedIssues[dependent.ID] = dependent
 	}
-	depRecords, err := activeStore.GetDependencyRecords(ctx, issueID)
+	preview.depRecords, err = activeStore.GetDependencyRecords(ctx, issueID)
 	if err != nil {
-		return HandleError("getting dependency records: %v", err)
+		return singleDeletePreview{}, HandleError("getting dependency records: %v", err)
 	}
-	// The role's own citation rule, not a second copy: a preview naming a
-	// different set of neighbors than the deletion rewrites is worse than none.
-	re := storeissueops.DeletedReferencePattern(issueID)
+	return preview, nil
+}
 
+func renderSingleDeleteHeader(issueID string, issue *types.Issue) {
 	fmt.Printf("\n%s\n", ui.RenderFail("⚠️  DELETE PREVIEW"))
 	fmt.Printf("\nIssue to delete:\n")
 	fmt.Printf("  %s: %s\n", issueID, issue.Title)
+}
+
+func renderSingleDeleteDependencies(depRecords []*types.Dependency, dependents []*types.Issue, issueID string) {
 	totalDeps := len(depRecords) + len(dependents)
-	if totalDeps > 0 {
-		fmt.Printf("\nDependency links to remove: %d\n", totalDeps)
-		for _, dep := range depRecords {
-			fmt.Printf("  %s → %s (%s)\n", dep.IssueID, dep.DependsOnID, dep.Type)
-		}
-		for _, dep := range dependents {
-			fmt.Printf("  %s → %s (inbound)\n", dep.ID, issueID)
-		}
+	if totalDeps == 0 {
+		return
 	}
-	if len(connectedIssues) > 0 {
-		fmt.Printf("\nConnected issues where text references will be updated:\n")
-		issuesWithRefs := 0
-		for id, connIssue := range connectedIssues {
-			hasRefs := re.MatchString(connIssue.Description) ||
-				(connIssue.Notes != "" && re.MatchString(connIssue.Notes)) ||
-				(connIssue.Design != "" && re.MatchString(connIssue.Design)) ||
-				(connIssue.AcceptanceCriteria != "" && re.MatchString(connIssue.AcceptanceCriteria))
-			if hasRefs {
-				fmt.Printf("  %s: %s\n", id, connIssue.Title)
-				issuesWithRefs++
-			}
-		}
-		if issuesWithRefs == 0 {
-			fmt.Printf("  (none have text references)\n")
-		}
+	fmt.Printf("\nDependency links to remove: %d\n", totalDeps)
+	for _, dep := range depRecords {
+		fmt.Printf("  %s → %s (%s)\n", dep.IssueID, dep.DependsOnID, dep.Type)
 	}
+	for _, dep := range dependents {
+		fmt.Printf("  %s → %s (inbound)\n", dep.ID, issueID)
+	}
+}
+
+func renderSingleDeleteReferences(connectedIssues map[string]*types.Issue, issueID string) {
+	if len(connectedIssues) == 0 {
+		return
+	}
+	fmt.Printf("\nConnected issues where text references will be updated:\n")
+	re := storeissueops.DeletedReferencePattern(issueID)
+	issuesWithRefs := 0
+	for id, connIssue := range connectedIssues {
+		if !issueHasDeletedReference(connIssue, re) {
+			continue
+		}
+		fmt.Printf("  %s: %s\n", id, connIssue.Title)
+		issuesWithRefs++
+	}
+	if issuesWithRefs == 0 {
+		fmt.Printf("  (none have text references)\n")
+	}
+}
+
+func issueHasDeletedReference(issue *types.Issue, re interface{ MatchString(string) bool }) bool {
+	return re.MatchString(issue.Description) ||
+		(issue.Notes != "" && re.MatchString(issue.Notes)) ||
+		(issue.Design != "" && re.MatchString(issue.Design)) ||
+		(issue.AcceptanceCriteria != "" && re.MatchString(issue.AcceptanceCriteria))
+}
+
+func renderSingleDeleteOutcome(dryRun bool, result issueops.DeleteResult, issueID string) {
 	if dryRun {
 		fmt.Printf("\nWould delete: %d issues\n", result.Deleted)
 		fmt.Printf("Would remove: %d dependencies, %d labels, %d events\n", result.Dependencies, result.Labels, result.Events)
@@ -255,16 +317,15 @@ func renderSingleDeletePreview(
 			fmt.Printf("Would orphan: %d issues\n", len(result.Orphaned))
 		}
 		fmt.Printf("\n(Dry-run mode - no changes made)\n")
-	} else {
-		fmt.Printf("\n%s\n", ui.RenderWarn("This operation cannot be undone!"))
-		fmt.Printf("To proceed, run: %s\n\n", ui.RenderWarn("bd delete "+issueID+" --force"))
+		return
 	}
-	return nil
+	fmt.Printf("\n%s\n", ui.RenderWarn("This operation cannot be undone!"))
+	fmt.Printf("To proceed, run: %s\n\n", ui.RenderWarn("bd delete "+issueID+" --force"))
 }
 
 // deleteIssue removes an issue from the database.
 func deleteIssue(ctx context.Context, issueID string) error {
-	return store.DeleteIssue(ctx, issueID)
+	return getStore().DeleteIssue(ctx, issueID)
 }
 
 // deleteBatch is the multi-id and cascade path, shared by `bd delete`,
@@ -276,87 +337,31 @@ func deleteIssue(ctx context.Context, issueID string) error {
 //
 //nolint:unparam // cmd parameter required for potential future use
 func deleteBatch(_ *cobra.Command, issueIDs []string, force bool, dryRun bool, cascade bool, jsonOutput bool, _ bool, _ ...string) error {
-	if store == nil {
+	if getStore() == nil {
 		if err := ensureStoreActive(); err != nil {
 			return err
 		}
 	}
-	ctx := rootCtx
-	issues := make(map[string]*types.Issue)
-	resolvedIDs := make([]string, 0, len(issueIDs))
-	notFound := []string{}
-	var routedStore storage.DoltStorage
-	for _, id := range issueIDs {
-		result, err := resolveAndGetIssueForMutation(ctx, store, id)
-		if err != nil {
-			if isNotFoundErr(err) {
-				notFound = append(notFound, id)
-			} else {
-				return fmt.Errorf("getting issue %s: %v", id, err)
-			}
-		} else {
-			issues[result.ResolvedID] = result.Issue
-			resolvedIDs = append(resolvedIDs, result.ResolvedID)
-			if result.Routed && routedStore == nil {
-				routedStore = result.Store
-			} else {
-				result.Close()
-			}
-		}
-	}
-	if routedStore != nil {
-		defer func() { _ = routedStore.Close() }()
-	}
-	if len(notFound) > 0 {
-		return fmt.Errorf("issues not found: %s", strings.Join(notFound, ", "))
-	}
-	batchStore := store
-	if routedStore != nil {
-		batchStore = routedStore
-	}
-
-	deleter, err := batchStore.Deleter()
+	ctx := getRootContext()
+	targets, err := resolveDeleteBatchTargets(ctx, issueIDs)
 	if err != nil {
 		return err
+	}
+	if targets.routedStore != nil {
+		defer func() { _ = targets.routedStore.Close() }()
 	}
 	// --force is the confirmation as well as the orphan mode, so an unconfirmed
 	// run asks the role what it WOULD do; see the single-id path.
 	request := issueops.DeleteRequest{
-		Actor:   actor,
-		IDs:     resolvedIDs,
+		Actor:   getActor(),
+		IDs:     targets.resolvedIDs,
 		Cascade: cascade,
 		Force:   force,
 		DryRun:  dryRun || !force,
 	}
-	opsCtx, err := issueOpsContext(ctx)
-	if err != nil {
-		return HandleError("%v", err)
-	}
-	result, err := deleter.Delete(opsCtx, request)
+	result, err := executeDeleteBatch(ctx, targets.store(), request)
 	if request.DryRun {
-		if err != nil {
-			if previewErr := outputDeletionPreview(resolvedIDs, issues, cascade, dryRun, nil, err, jsonOutput); previewErr != nil {
-				return previewErr
-			}
-			if jsonOutput {
-				return outputJSONError(err, "")
-			}
-			return err
-		}
-		if previewErr := outputDeletionPreview(resolvedIDs, issues, cascade, dryRun, &result, nil, jsonOutput); previewErr != nil {
-			return previewErr
-		}
-		if !dryRun && !jsonOutput && !isQuiet() {
-			fmt.Printf("\n%s\n", ui.RenderWarn("This operation cannot be undone!"))
-			if cascade {
-				fmt.Printf("To proceed with cascade deletion, run: %s\n",
-					ui.RenderWarn("bd delete "+strings.Join(resolvedIDs, " ")+" --cascade --force"))
-			} else {
-				fmt.Printf("To proceed, run: %s\n",
-					ui.RenderWarn("bd delete "+strings.Join(resolvedIDs, " ")+" --force"))
-			}
-		}
-		return nil
+		return handleDeleteBatchPreview(targets, cascade, dryRun, jsonOutput, result, err)
 	}
 	if err != nil {
 		return err
@@ -367,9 +372,103 @@ func deleteBatch(_ *cobra.Command, issueIDs []string, force bool, dryRun bool, c
 	// NO COMMIT COMPENSATION HERE, for the reason the single-id path gives:
 	// the role versions the deletion itself, on the store the rows were
 	// deleted from, and defers it in batch and off modes.
+	return renderDeleteBatchSuccess(targets.resolvedIDs, result, jsonOutput)
+}
 
+type deleteBatchTargets struct {
+	issues      map[string]*types.Issue
+	resolvedIDs []string
+	routedStore storage.DoltStorage
+}
+
+func (t deleteBatchTargets) store() storage.DoltStorage {
+	if t.routedStore != nil {
+		return t.routedStore
+	}
+	return getStore()
+}
+
+func resolveDeleteBatchTargets(ctx context.Context, issueIDs []string) (deleteBatchTargets, error) {
+	targets := deleteBatchTargets{
+		issues:      make(map[string]*types.Issue),
+		resolvedIDs: make([]string, 0, len(issueIDs)),
+	}
+	var notFound []string
+	for _, id := range issueIDs {
+		result, err := resolveAndGetIssueForMutation(ctx, getStore(), id)
+		if err != nil {
+			if isNotFoundErr(err) {
+				notFound = append(notFound, id)
+				continue
+			}
+			return deleteBatchTargets{}, fmt.Errorf("getting issue %s: %v", id, err)
+		}
+		addDeleteBatchTarget(&targets, result)
+	}
+	if len(notFound) > 0 {
+		if targets.routedStore != nil {
+			_ = targets.routedStore.Close()
+		}
+		return deleteBatchTargets{}, fmt.Errorf("issues not found: %s", strings.Join(notFound, ", "))
+	}
+	return targets, nil
+}
+
+func addDeleteBatchTarget(targets *deleteBatchTargets, result *RoutedResult) {
+	targets.issues[result.ResolvedID] = result.Issue
+	targets.resolvedIDs = append(targets.resolvedIDs, result.ResolvedID)
+	if result.Routed && targets.routedStore == nil {
+		targets.routedStore = result.Store
+		return
+	}
+	result.Close()
+}
+
+func executeDeleteBatch(ctx context.Context, batchStore storage.DoltStorage, request issueops.DeleteRequest) (issueops.DeleteResult, error) {
+	deleter, err := batchStore.Deleter()
+	if err != nil {
+		return issueops.DeleteResult{}, err
+	}
+	opsCtx, err := issueOpsContext(ctx)
+	if err != nil {
+		return issueops.DeleteResult{}, HandleError("%v", err)
+	}
+	return deleter.Delete(opsCtx, request)
+}
+
+func handleDeleteBatchPreview(targets deleteBatchTargets, cascade, dryRun, jsonOutput bool, result issueops.DeleteResult, depError error) error {
+	if depError != nil {
+		if previewErr := outputDeletionPreview(targets.resolvedIDs, targets.issues, cascade, dryRun, nil, depError, jsonOutput); previewErr != nil {
+			return previewErr
+		}
+		if jsonOutput {
+			return outputJSONError(depError, "")
+		}
+		return depError
+	}
+	if previewErr := outputDeletionPreview(targets.resolvedIDs, targets.issues, cascade, dryRun, &result, nil, jsonOutput); previewErr != nil {
+		return previewErr
+	}
+	if !dryRun && !jsonOutput && !isQuiet() {
+		renderDeleteBatchConfirmation(targets.resolvedIDs, cascade)
+	}
+	return nil
+}
+
+func renderDeleteBatchConfirmation(resolvedIDs []string, cascade bool) {
+	fmt.Printf("\n%s\n", ui.RenderWarn("This operation cannot be undone!"))
+	if cascade {
+		fmt.Printf("To proceed with cascade deletion, run: %s\n",
+			ui.RenderWarn("bd delete "+strings.Join(resolvedIDs, " ")+" --cascade --force"))
+		return
+	}
+	fmt.Printf("To proceed, run: %s\n",
+		ui.RenderWarn("bd delete "+strings.Join(resolvedIDs, " ")+" --force"))
+}
+
+func renderDeleteBatchSuccess(resolvedIDs []string, result issueops.DeleteResult, jsonOutput bool) error {
 	if jsonOutput {
-		if err := outputJSON(map[string]interface{}{
+		return outputJSON(map[string]interface{}{
 			"deleted":              resolvedIDs,
 			"deleted_count":        result.Deleted,
 			"dependencies_removed": result.Dependencies,
@@ -377,19 +476,16 @@ func deleteBatch(_ *cobra.Command, issueIDs []string, force bool, dryRun bool, c
 			"events_removed":       result.Events,
 			"references_updated":   result.ReferencesUpdated,
 			"orphaned_issues":      result.Orphaned,
-		}); err != nil {
-			return err
-		}
-	} else {
-		fmt.Printf("%s Deleted %d issue(s)\n", ui.RenderPass("✓"), result.Deleted)
-		fmt.Printf("  Removed %d dependency link(s)\n", result.Dependencies)
-		fmt.Printf("  Removed %d label(s)\n", result.Labels)
-		fmt.Printf("  Removed %d event(s)\n", result.Events)
-		fmt.Printf("  Updated text references in %d issue(s)\n", result.ReferencesUpdated)
-		if len(result.Orphaned) > 0 {
-			fmt.Printf("  %s Orphaned %d issue(s): %s\n",
-				ui.RenderWarn("⚠"), len(result.Orphaned), strings.Join(result.Orphaned, ", "))
-		}
+		})
+	}
+	fmt.Printf("%s Deleted %d issue(s)\n", ui.RenderPass("✓"), result.Deleted)
+	fmt.Printf("  Removed %d dependency link(s)\n", result.Dependencies)
+	fmt.Printf("  Removed %d label(s)\n", result.Labels)
+	fmt.Printf("  Removed %d event(s)\n", result.Events)
+	fmt.Printf("  Updated text references in %d issue(s)\n", result.ReferencesUpdated)
+	if len(result.Orphaned) > 0 {
+		fmt.Printf("  %s Orphaned %d issue(s): %s\n",
+			ui.RenderWarn("⚠"), len(result.Orphaned), strings.Join(result.Orphaned, ", "))
 	}
 	return nil
 }
@@ -402,23 +498,7 @@ func deleteBatch(_ *cobra.Command, issueIDs []string, force bool, dryRun bool, c
 // "we did not get that far".
 func outputDeletionPreview(issueIDs []string, issues map[string]*types.Issue, cascade bool, dryRun bool, result *issueops.DeleteResult, depError error, jsonOutput bool) error {
 	if jsonOutput {
-		preview := map[string]interface{}{
-			"preview":   true,
-			"dry_run":   dryRun,
-			"issue_ids": issueIDs,
-			"cascade":   cascade,
-		}
-		if result != nil {
-			preview["would_delete"] = result.Deleted
-			preview["would_remove_dependencies"] = result.Dependencies
-			preview["would_remove_labels"] = result.Labels
-			preview["would_remove_events"] = result.Events
-			preview["would_orphan"] = len(result.Orphaned)
-		}
-		if depError != nil {
-			preview["error"] = depError.Error()
-		}
-		return outputJSON(preview)
+		return outputJSONDeletionPreview(issueIDs, cascade, dryRun, result, depError)
 	}
 	if isQuiet() {
 		return nil
@@ -426,11 +506,7 @@ func outputDeletionPreview(issueIDs []string, issues map[string]*types.Issue, ca
 
 	fmt.Printf("\n%s\n", ui.RenderFail("⚠️  DELETE PREVIEW"))
 	fmt.Printf("\nIssues to delete (%d):\n", len(issueIDs))
-	for _, id := range issueIDs {
-		if issue := issues[id]; issue != nil {
-			fmt.Printf("  %s: %s\n", id, issue.Title)
-		}
-	}
+	renderDeletePreviewIssues(issueIDs, issues)
 	if cascade {
 		fmt.Printf("\n%s Cascade mode enabled - will also delete all dependent issues\n", ui.RenderWarn("⚠"))
 	}
@@ -449,6 +525,36 @@ func outputDeletionPreview(issueIDs []string, issues map[string]*types.Issue, ca
 		}
 	}
 	return nil
+}
+
+func outputJSONDeletionPreview(issueIDs []string, cascade, dryRun bool, result *issueops.DeleteResult, depError error) error {
+	preview := map[string]interface{}{
+		"preview":   true,
+		"dry_run":   dryRun,
+		"issue_ids": issueIDs,
+		"cascade":   cascade,
+	}
+	if result != nil {
+		preview["would_delete"] = result.Deleted
+		preview["would_remove_dependencies"] = result.Dependencies
+		preview["would_remove_labels"] = result.Labels
+		preview["would_remove_events"] = result.Events
+		preview["would_orphan"] = len(result.Orphaned)
+	}
+	if depError != nil {
+		preview["error"] = depError.Error()
+	}
+	return outputJSON(preview)
+}
+
+func renderDeletePreviewIssues(issueIDs []string, issues map[string]*types.Issue) {
+	for _, id := range issueIDs {
+		issue := issues[id]
+		if issue == nil {
+			continue
+		}
+		fmt.Printf("  %s: %s\n", id, issue.Title)
+	}
 }
 
 // readIssueIDsFromFile reads issue IDs from a file (one per line)
@@ -489,10 +595,11 @@ func uniqueStrings(slice []string) []string {
 }
 
 func init() {
-	deleteCmd.Flags().BoolP("force", "f", false, "Actually delete (without this flag, shows preview)")
-	deleteCmd.Flags().String("from-file", "", "Read issue IDs from file (one per line)")
-	deleteCmd.Flags().Bool("dry-run", false, "Preview what would be deleted without making changes")
-	deleteCmd.Flags().Bool("cascade", false, "Recursively delete all dependent issues")
-	deleteCmd.ValidArgsFunction = issueIDCompletion
-	rootCmd.AddCommand(deleteCmd)
+	cmd := newDeleteCommand()
+	cmd.Flags().BoolP("force", "f", false, "Actually delete (without this flag, shows preview)")
+	cmd.Flags().String("from-file", "", "Read issue IDs from file (one per line)")
+	cmd.Flags().Bool("dry-run", false, "Preview what would be deleted without making changes")
+	cmd.Flags().Bool("cascade", false, "Recursively delete all dependent issues")
+	cmd.ValidArgsFunction = issueIDCompletion
+	rootCmd.AddCommand(cmd)
 }

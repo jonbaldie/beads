@@ -38,54 +38,60 @@ func readLineUnbuffered() (string, error) {
 // avoiding subprocess lock contention. (GH#1805)
 func updateRepoIDInProcess(path string, beadsDir string, autoYes bool) error {
 	ctx := context.Background()
-
-	// Compute new repo ID
 	newRepoID, err := beads.ComputeRepoIDForPath(path)
 	if err != nil {
 		return fmt.Errorf("failed to compute repository ID: %w", err)
 	}
-
-	// Open database
 	store, err := dolt.NewFromConfig(ctx, beadsDir)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 	defer func() { _ = store.Close() }()
-
-	// Get old repo ID (treat any error as "no existing repo_id")
 	oldRepoID, _ := store.GetMetadata(ctx, "repo_id")
+	oldDisplay, newDisplay := repoIDDisplays(oldRepoID, newRepoID)
+	proceed, err := confirmRepoIDChange(oldRepoID, newRepoID, oldDisplay, newDisplay, autoYes)
+	if err != nil || !proceed {
+		return err
+	}
+	return writeRepoID(ctx, store, newRepoID, oldDisplay, newDisplay)
+}
 
-	oldDisplay := "none"
+func repoIDDisplays(oldRepoID, newRepoID string) (oldDisplay, newDisplay string) {
+	oldDisplay = "none"
 	if len(oldRepoID) >= 8 {
 		oldDisplay = oldRepoID[:8]
 	}
-	newDisplay := newRepoID
+	newDisplay = newRepoID
 	if len(newDisplay) >= 8 {
 		newDisplay = newDisplay[:8]
 	}
+	return oldDisplay, newDisplay
+}
 
-	// Prompt for confirmation if repo_id exists and differs
-	if oldRepoID != "" && oldRepoID != newRepoID && !autoYes {
-		fmt.Printf("  WARNING: Changing repository ID can break sync if other clones exist.\n\n")
-		fmt.Printf("  Current repo ID: %s\n", oldDisplay)
-		fmt.Printf("  New repo ID:     %s\n\n", newDisplay)
-		fmt.Printf("  Continue? [y/N] ")
-		response, err := repoFingerprintReadLine()
-		if err != nil {
-			return fmt.Errorf("failed to read input: %w", err)
-		}
-		response = strings.TrimSpace(strings.ToLower(response))
-		if response != "y" && response != "yes" {
-			fmt.Println("  → Canceled")
-			return nil
-		}
+func confirmRepoIDChange(oldRepoID, newRepoID, oldDisplay, newDisplay string, autoYes bool) (bool, error) {
+	if oldRepoID == "" || oldRepoID == newRepoID || autoYes {
+		return true, nil
 	}
+	fmt.Printf("  WARNING: Changing repository ID can break sync if other clones exist.\n\n")
+	fmt.Printf("  Current repo ID: %s\n", oldDisplay)
+	fmt.Printf("  New repo ID:     %s\n\n", newDisplay)
+	fmt.Printf("  Continue? [y/N] ")
+	response, err := repoFingerprintReadLine()
+	if err != nil {
+		return false, fmt.Errorf("failed to read input: %w", err)
+	}
+	response = strings.TrimSpace(strings.ToLower(response))
+	if response != "y" && response != "yes" {
+		fmt.Println("  → Canceled")
+		return false, nil
+	}
+	return true, nil
+}
 
-	// Update repo ID
+func writeRepoID(ctx context.Context, store *dolt.DoltStore, newRepoID, oldDisplay, newDisplay string) error {
 	if err := store.SetMetadata(ctx, "repo_id", newRepoID); err != nil {
 		return fmt.Errorf("failed to update repo_id: %w", err)
 	}
-
 	fmt.Printf("  ✓ Repository ID updated (old: %s, new: %s)\n", oldDisplay, newDisplay)
 	return nil
 }
@@ -104,14 +110,18 @@ func RepoFingerprint(path string, autoYes bool) error {
 	if err != nil {
 		return err
 	}
-
-	// In --yes mode, auto-select the recommended safe action [1].
 	if autoYes {
 		fmt.Println("  → Auto mode (--yes): updating repo ID in-process...")
 		return updateRepoIDInProcess(path, beadsDir, true)
 	}
+	response, err := promptRepoFingerprintChoice()
+	if err != nil {
+		return err
+	}
+	return applyRepoFingerprintChoice(path, beadsDir, response)
+}
 
-	// Prompt user for action
+func promptRepoFingerprintChoice() (string, error) {
 	fmt.Println("\n  Repo fingerprint mismatch detected. Choose an action:")
 	fmt.Println()
 	fmt.Println("    [1] Update repo ID (if git remote URL changed or bd was upgraded)")
@@ -119,72 +129,78 @@ func RepoFingerprint(path string, autoYes bool) error {
 	fmt.Println("    [s] Skip (do nothing)")
 	fmt.Println()
 	fmt.Print("  Choice [1/2/s]: ")
-
-	// Read single character without buffering to avoid consuming input meant for subprocesses
 	response, err := repoFingerprintReadLine()
 	if err != nil {
-		return fmt.Errorf("failed to read input: %w", err)
+		return "", fmt.Errorf("failed to read input: %w", err)
 	}
+	return strings.TrimSpace(strings.ToLower(response)), nil
+}
 
-	response = strings.TrimSpace(strings.ToLower(response))
-
+func applyRepoFingerprintChoice(path, beadsDir, response string) error {
 	switch response {
 	case "1":
 		return updateRepoIDInProcess(path, beadsDir, false)
-
 	case "2":
-		// Detect backend to determine what to remove
-		cfg, cfgErr := configfile.Load(beadsDir)
-		if cfgErr != nil || cfg == nil {
-			cfg = configfile.DefaultConfig()
-		}
-		dbPath := cfg.DatabasePath(beadsDir)
-		isDolt := cfg.GetBackend() == configfile.BackendDolt
-
-		// Confirm before destructive action
-		fmt.Printf("  ⚠️  This will DELETE %s. Continue? [y/N]: ", dbPath)
-		confirm, err := repoFingerprintReadLine()
-		if err != nil {
-			return fmt.Errorf("failed to read confirmation: %w", err)
-		}
-		confirm = strings.TrimSpace(strings.ToLower(confirm))
-		if confirm != "y" && confirm != "yes" {
-			fmt.Println("  → Skipped (canceled)")
-			return nil
-		}
-
-		// Remove database and reinitialize in-process
-		fmt.Printf("  → Removing %s...\n", dbPath)
-		if isDolt {
-			if err := os.RemoveAll(dbPath); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("failed to remove Dolt database: %w", err)
-			}
-		} else {
-			if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("failed to remove database: %w", err)
-			}
-			_ = os.Remove(dbPath + "-wal")
-			_ = os.Remove(dbPath + "-shm")
-		}
-
-		// Reinitialize by creating a new store (auto-bootstraps from JSONL)
-		fmt.Println("  → Reinitializing database from JSONL...")
-		ctx := context.Background()
-		store, err := dolt.NewFromConfig(ctx, beadsDir)
-		if err != nil {
-			return fmt.Errorf("failed to initialize database: %w", err)
-		}
-		defer func() { _ = store.Close() }()
-
-		fmt.Println("  ✓ Database reinitialized")
-		return nil
-
+		return reinitializeFingerprintDatabase(beadsDir)
 	case "s", "":
 		fmt.Println("  → Skipped")
 		return nil
-
 	default:
 		fmt.Printf("  → Unrecognized input '%s', skipping\n", response)
 		return nil
 	}
+}
+
+func reinitializeFingerprintDatabase(beadsDir string) error {
+	cfg, cfgErr := configfile.Load(beadsDir)
+	if cfgErr != nil || cfg == nil {
+		cfg = configfile.DefaultConfig()
+	}
+	dbPath := cfg.DatabasePath(beadsDir)
+	proceed, err := confirmFingerprintReinit(dbPath)
+	if err != nil || !proceed {
+		return err
+	}
+	if err := removeFingerprintDatabase(dbPath, cfg.GetBackend() == configfile.BackendDolt); err != nil {
+		return err
+	}
+	fmt.Println("  → Reinitializing database from JSONL...")
+	ctx := context.Background()
+	store, err := dolt.NewFromConfig(ctx, beadsDir)
+	if err != nil {
+		return fmt.Errorf("failed to initialize database: %w", err)
+	}
+	defer func() { _ = store.Close() }()
+	fmt.Println("  ✓ Database reinitialized")
+	return nil
+}
+
+func confirmFingerprintReinit(dbPath string) (bool, error) {
+	fmt.Printf("  ⚠️  This will DELETE %s. Continue? [y/N]: ", dbPath)
+	confirm, err := repoFingerprintReadLine()
+	if err != nil {
+		return false, fmt.Errorf("failed to read confirmation: %w", err)
+	}
+	confirm = strings.TrimSpace(strings.ToLower(confirm))
+	if confirm != "y" && confirm != "yes" {
+		fmt.Println("  → Skipped (canceled)")
+		return false, nil
+	}
+	return true, nil
+}
+
+func removeFingerprintDatabase(dbPath string, isDolt bool) error {
+	fmt.Printf("  → Removing %s...\n", dbPath)
+	if isDolt {
+		if err := os.RemoveAll(dbPath); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove Dolt database: %w", err)
+		}
+		return nil
+	}
+	if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove database: %w", err)
+	}
+	_ = os.Remove(dbPath + "-wal")
+	_ = os.Remove(dbPath + "-shm")
+	return nil
 }

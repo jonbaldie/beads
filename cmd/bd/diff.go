@@ -38,11 +38,11 @@ Examples:
 			}
 		}()
 
-		ctx := rootCtx
+		ctx := getRootContext()
 		fromRef := args[0]
 		toRef := args[1]
 
-		entries, err := store.Diff(ctx, fromRef, toRef)
+		entries, err := getStore().Diff(ctx, fromRef, toRef)
 		if err != nil {
 			return HandleErrorRespectJSON("failed to get diff: %v", err)
 		}
@@ -52,7 +52,7 @@ Examples:
 			return nil
 		}
 
-		if jsonOutput {
+		if isJSONOutput() {
 			return outputJSON(entries)
 		}
 
@@ -82,10 +82,10 @@ Examples:
 			for _, entry := range added {
 				if entry.NewValue != nil {
 					fmt.Printf("  + %s: %s\n",
-						ui.StatusOpenStyle.Render(entry.IssueID),
+						ui.StatusOpenStyle().Render(entry.IssueID),
 						entry.NewValue.Title)
 				} else {
-					fmt.Printf("  + %s\n", ui.StatusOpenStyle.Render(entry.IssueID))
+					fmt.Printf("  + %s\n", ui.StatusOpenStyle().Render(entry.IssueID))
 				}
 			}
 			fmt.Println()
@@ -95,7 +95,7 @@ Examples:
 		if len(modified) > 0 {
 			fmt.Printf("%s Modified (%d):\n", ui.RenderAccent("~"), len(modified))
 			for _, entry := range modified {
-				fmt.Printf("  ~ %s", ui.StatusInProgressStyle.Render(entry.IssueID))
+				fmt.Printf("  ~ %s", ui.StatusInProgressStyle().Render(entry.IssueID))
 				if entry.OldValue != nil && entry.NewValue != nil {
 					// Show what changed
 					changes := []string{}
@@ -145,7 +145,8 @@ func joinStrings(strs []string, sep string) string {
 		return ""
 	}
 	result := strs[0]
-	for i := 1; i < len(strs); i++ {
+	n := len(strs)
+	for i := 1; i < n; i++ {
 		result += sep + strs[i]
 	}
 	return result

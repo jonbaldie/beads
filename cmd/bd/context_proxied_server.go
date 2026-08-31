@@ -27,7 +27,7 @@ func runContextProxiedServer(cmd *cobra.Command, ctx context.Context) error {
 	}
 
 	view := contextInfoView(info)
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(view)
 	}
 	printContextText(view)
@@ -35,7 +35,7 @@ func runContextProxiedServer(cmd *cobra.Command, ctx context.Context) error {
 }
 
 func contextProxiedError(format string, args ...any) error {
-	if jsonOutput {
+	if isJSONOutput() {
 		if jerr := outputJSON(map[string]string{"error": fmt.Sprintf(format, args...)}); jerr != nil {
 			return jerr
 		}
@@ -64,22 +64,27 @@ func contextInfoView(d domain.ContextInfo) ContextInfo {
 	published := domain.PublishedContext(d)
 	return ContextInfo{
 		BdVersion: published.BdVersion,
-		Backend:   published.Backend,
-		DoltMode:  published.DoltMode,
-		Database:  published.Database,
-		BeadsDir:  published.BeadsDir,
-		RepoRoot:  published.RepoRoot,
-		ProjectID: published.ProjectID,
-
-		CWDRepoRoot:   d.CWDRepoRoot,
-		IsRedirected:  d.IsRedirected,
-		IsWorktree:    d.IsWorktree,
-		ServerHost:    d.ServerHost,
-		ServerPort:    d.ServerPort,
-		ProxiedDir:    d.ProxiedDir,
-		DataDir:       d.DataDir,
-		Role:          d.Role,
-		SyncRemote:    d.SyncRemote,
-		SyncGitRemote: d.SyncRemote,
+		ContextRepoInfo: ContextRepoInfo{
+			BeadsDir:     published.BeadsDir,
+			RepoRoot:     published.RepoRoot,
+			CWDRepoRoot:  d.CWDRepoRoot,
+			IsRedirected: d.IsRedirected,
+			IsWorktree:   d.IsWorktree,
+			Role:         d.Role,
+		},
+		ContextBackendInfo: ContextBackendInfo{
+			Backend:    published.Backend,
+			DoltMode:   published.DoltMode,
+			Database:   published.Database,
+			ProjectID:  published.ProjectID,
+			ServerHost: d.ServerHost,
+			ServerPort: d.ServerPort,
+			ProxiedDir: d.ProxiedDir,
+			DataDir:    d.DataDir,
+		},
+		ContextSyncInfo: ContextSyncInfo{
+			SyncRemote:    d.SyncRemote,
+			SyncGitRemote: d.SyncRemote,
+		},
 	}
 }

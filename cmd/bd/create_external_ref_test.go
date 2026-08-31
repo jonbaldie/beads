@@ -10,10 +10,14 @@ func TestBuildCreateIssueExternalRefPrelink(t *testing.T) {
 	ref := "https://linear.app/team/issue/TEAM-123/fix-login"
 
 	issue := buildCreateIssue(createIssueParams{
-		Title:       "Pre-linked Linear issue",
-		Priority:    2,
-		IssueType:   types.TypeTask,
-		ExternalRef: ref,
+		ident: createIssueIdentity{
+			Title:       "Pre-linked Linear issue",
+			ExternalRef: ref,
+		},
+		class: createIssueClass{
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	})
 
 	if issue.ExternalRef == nil {
@@ -26,9 +30,8 @@ func TestBuildCreateIssueExternalRefPrelink(t *testing.T) {
 
 func TestBuildCreateIssueEmptyExternalRefIsNil(t *testing.T) {
 	issue := buildCreateIssue(createIssueParams{
-		Title:     "Local-only issue",
-		Priority:  2,
-		IssueType: types.TypeTask,
+		ident: createIssueIdentity{Title: "Local-only issue"},
+		class: createIssueClass{Priority: 2, IssueType: types.TypeTask},
 	})
 
 	if issue.ExternalRef != nil {

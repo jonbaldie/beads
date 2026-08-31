@@ -285,11 +285,17 @@ func TestEmbeddedCreate(t *testing.T) {
 		}
 
 		sourceParent := &types.Issue{
-			Title:      "Source repository parent",
-			Priority:   1,
-			Status:     types.StatusOpen,
-			IssueType:  types.TypeTask,
-			SourceRepo: "/path/to/repo",
+			IssueContent: types.IssueContent{
+				Title: "Source repository parent",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
+			IssueGraph: types.IssueGraph{
+				SourceRepo: "/path/to/repo",
+			},
 		}
 		if err := store.CreateIssue(t.Context(), sourceParent, "test"); err != nil {
 			t.Fatalf("create source repository parent: %v", err)
@@ -848,10 +854,14 @@ func TestEmbeddedCreateCommitPending(t *testing.T) {
 
 		// Create an issue (writes to working set, no dolt commit in embedded mode)
 		issue := &types.Issue{
-			Title:     "Pending issue",
-			Priority:  2,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
+			IssueContent: types.IssueContent{
+				Title: "Pending issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatalf("CreateIssue: %v", err)

@@ -68,22 +68,26 @@ SEE ALSO:
 		olderThanDays, _ := cmd.Flags().GetInt("older-than")
 		wispOnly, _ := cmd.Flags().GetBool("ephemeral")
 
-		if store == nil {
+		if getStore() == nil {
 			if err := ensureStoreActive(); err != nil {
 				return HandleError("%v", err)
 			}
 		}
 
-		ctx := rootCtx
+		ctx := getRootContext()
 
 		// Build filter for closed issues. Cleanup is a scripted sweep — opt out
 		// of BEADS_MAX_ROWS (designer §4.1) so a misconfigured env doesn't abort
 		// cleanup mid-run and leave the database in an unswept state.
 		statusClosed := types.StatusClosed
 		filter := types.IssueFilter{
-			Status:        &statusClosed,
-			MaxRows:       0,
-			MaxRowsSource: "",
+			IssueFilterCore: types.IssueFilterCore{
+				Status: &statusClosed,
+			},
+			IssueFilterPage: types.IssueFilterPage{
+				MaxRows:       0,
+				MaxRowsSource: "",
+			},
 		}
 
 		if olderThanDays > 0 {
@@ -96,7 +100,7 @@ SEE ALSO:
 			filter.Ephemeral = &wispTrue
 		}
 
-		closedIssues, err := store.SearchIssues(ctx, "", filter)
+		closedIssues, err := getStore().SearchIssues(ctx, "", filter)
 		if err != nil {
 			return HandleError("listing issues: %v", err)
 		}
@@ -112,12 +116,12 @@ SEE ALSO:
 		}
 		closedIssues = filteredIssues
 
-		if pinnedCount > 0 && !jsonOutput {
+		if pinnedCount > 0 && !isJSONOutput() {
 			fmt.Printf("Skipping %d pinned issue(s) (protected from cleanup)\n", pinnedCount)
 		}
 
 		if len(closedIssues) == 0 {
-			if jsonOutput {
+			if isJSONOutput() {
 				result := CleanupEmptyResponse{
 					DeletedCount: 0,
 					Message:      "No closed issues to delete",
@@ -160,7 +164,7 @@ SEE ALSO:
 				"Use --force to confirm or --dry-run to preview.")
 		}
 
-		if !jsonOutput {
+		if !isJSONOutput() {
 			issueType := "closed"
 			if wispOnly {
 				issueType = "closed wisp"
@@ -176,7 +180,7 @@ SEE ALSO:
 			fmt.Println()
 		}
 
-		if err := deleteBatch(cmd, issueIDs, force, dryRun, cascade, jsonOutput, false, "cleanup"); err != nil {
+		if err := deleteBatch(cmd, issueIDs, force, dryRun, cascade, isJSONOutput(), false, "cleanup"); err != nil {
 			return HandleError("%v", err)
 		}
 		return nil

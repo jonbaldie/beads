@@ -9,15 +9,17 @@ import (
 	"github.com/jonbaldie/beads/internal/storage/versioncontrolops"
 )
 
-func runCompactDoltProxiedServer(ctx context.Context) error {
+func runCompactDoltProxiedServer(ctx context.Context, dryRun bool) error {
 	start := time.Now()
 
-	if !compactDryRun {
-		CheckReadonly("compact")
+	if !dryRun {
+		if err := CheckReadonly("compact"); err != nil {
+			return err
+		}
 	}
 
-	if compactDryRun {
-		if jsonOutput {
+	if dryRun {
+		if isJSONOutput() {
 			return outputJSON(map[string]interface{}{
 				"dry_run": true,
 			})
@@ -27,7 +29,7 @@ func runCompactDoltProxiedServer(ctx context.Context) error {
 		return nil
 	}
 
-	if !jsonOutput {
+	if !isJSONOutput() {
 		fmt.Printf("Running Dolt garbage collection...\n")
 	}
 
@@ -40,7 +42,7 @@ func runCompactDoltProxiedServer(ctx context.Context) error {
 
 	elapsed := time.Since(start)
 
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(map[string]interface{}{
 			"success":    true,
 			"elapsed_ms": elapsed.Milliseconds(),

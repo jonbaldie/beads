@@ -103,8 +103,10 @@ func TestRoleContractCasesMatchTheBundleFields(t *testing.T) {
 		}
 	}
 
-	for i := range bundleType.NumField() {
-		field := bundleType.Field(i)
+	for _, field := range reflect.VisibleFields(bundleType) {
+		if field.Type.Kind() != reflect.Func {
+			continue
+		}
 		contract, ok := rows[field.Name]
 		if !ok {
 			t.Errorf("RoleContractBundle.%s has no roleContractCases row, so nothing ever calls it", field.Name)
@@ -113,7 +115,7 @@ func TestRoleContractCasesMatchTheBundleFields(t *testing.T) {
 		// Only this field is supplied, so only this row may report itself
 		// supplied. A copy-pasted field picker fails here.
 		bundle := reflect.New(bundleType).Elem()
-		bundle.Field(i).Set(nonNilFactory(field.Type))
+		bundle.FieldByIndex(field.Index).Set(nonNilFactory(field.Type))
 		supplied := bundle.Interface().(RoleContractBundle)
 		if !contract.supplied(supplied) {
 			t.Errorf("roleContractCases row %q does not read RoleContractBundle.%s", contract.role, field.Name)

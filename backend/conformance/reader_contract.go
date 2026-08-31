@@ -160,9 +160,11 @@ func RunReaderReadyDefaultTypeExclusionsYieldToAnExplicitType(t *testing.T, ctx 
 		{types.TypeMolecule, molecule},
 	} {
 		page, err = fixture.Reader.Ready(ctx, publicops.ReadyRequest{
-			Labels:       []string{scope},
-			IssueType:    string(excluded.issueType),
-			ExcludeTypes: []string{string(excluded.issueType)},
+			Labels:    []string{scope},
+			IssueType: string(excluded.issueType),
+			ReadyRequestFilters: publicops.ReadyRequestFilters{
+				ExcludeTypes: []string{string(excluded.issueType)},
+			},
 		})
 		if err != nil {
 			t.Fatalf("Ready with IssueType=%s: %v", excluded.issueType, err)
@@ -320,9 +322,7 @@ func RunReaderOffsetSkipsTheRowsBeforeThePage(t *testing.T, ctx context.Context,
 			})
 		}},
 		{"List", func(offset int) (publicops.IssuePage, error) {
-			return fixture.Reader.List(ctx, publicops.ListRequest{
-				IDFilter: idScope, SortBy: "created", Offset: offset,
-			})
+			return fixture.Reader.List(ctx, publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: idScope}, ListPageOptions: publicops.ListPageOptions{SortBy: "created", Offset: offset}})
 		}},
 	} {
 		// Offset 0 is not a page request, so it is the baseline every paged
@@ -338,7 +338,8 @@ func RunReaderOffsetSkipsTheRowsBeforeThePage(t *testing.T, ctx context.Context,
 			t.Fatalf("%s at Offset 0 returned %v, want the three seeded rows", test.what, whole)
 		}
 
-		for offset := 1; offset <= len(ids); offset++ {
+		idCount := len(ids)
+		for offset := 1; offset <= idCount; offset++ {
 			paged, err := test.call(offset)
 			if err != nil {
 				t.Errorf("%s at Offset %d: %v", test.what, offset, err)
@@ -483,27 +484,27 @@ func RunReaderListDefaultExclusionsAndTheirOverrides(t *testing.T, ctx context.C
 		req  publicops.ListRequest
 		want []string
 	}{
-		{"default", publicops.ListRequest{IDFilter: scope}, []string{open}},
-		{"AllFlag replaces the status exclusions only", publicops.ListRequest{IDFilter: scope, AllFlag: true}, []string{open, closed, flagOnly, statusOnly, flagAndStatus, flagAndClosed}},
-		{"Status replaces the status exclusions", publicops.ListRequest{IDFilter: scope, Status: string(types.StatusClosed)}, []string{closed}},
-		{"Status pinned drops the flag predicate too", publicops.ListRequest{IDFilter: scope, Status: string(types.StatusPinned)}, []string{statusOnly, flagAndStatus}},
-		{"PinnedFlag answers the flagged rows at any status", publicops.ListRequest{IDFilter: scope, PinnedFlag: true}, []string{flagOnly, flagAndStatus, flagAndClosed}},
-		{"NoPinnedFlag changes nothing on a default listing", publicops.ListRequest{IDFilter: scope, NoPinnedFlag: true}, []string{open}},
-		{"NoPinnedFlag holds the flag predicate under AllFlag", publicops.ListRequest{IDFilter: scope, AllFlag: true, NoPinnedFlag: true}, []string{open, closed, statusOnly}},
-		{"IncludeGates", publicops.ListRequest{IDFilter: scope, IncludeGates: true}, []string{open, gate}},
-		{"IncludeTemplates", publicops.ListRequest{IDFilter: scope, IncludeTemplates: true}, []string{open, template}},
+		{"default", publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: scope}}, []string{open}},
+		{"AllFlag replaces the status exclusions only", publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: scope}, ListModeOptions: publicops.ListModeOptions{AllFlag: true}}, []string{open, closed, flagOnly, statusOnly, flagAndStatus, flagAndClosed}},
+		{"Status replaces the status exclusions", publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: scope, Status: string(types.StatusClosed)}}, []string{closed}},
+		{"Status pinned drops the flag predicate too", publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: scope, Status: string(types.StatusPinned)}}, []string{statusOnly, flagAndStatus}},
+		{"PinnedFlag answers the flagged rows at any status", publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: scope}, ListVisibilityOptions: publicops.ListVisibilityOptions{PinnedFlag: true}}, []string{flagOnly, flagAndStatus, flagAndClosed}},
+		{"NoPinnedFlag changes nothing on a default listing", publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: scope}, ListVisibilityOptions: publicops.ListVisibilityOptions{NoPinnedFlag: true}}, []string{open}},
+		{"NoPinnedFlag holds the flag predicate under AllFlag", publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: scope}, ListVisibilityOptions: publicops.ListVisibilityOptions{NoPinnedFlag: true}, ListModeOptions: publicops.ListModeOptions{AllFlag: true}}, []string{open, closed, statusOnly}},
+		{"IncludeGates", publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: scope}, ListVisibilityOptions: publicops.ListVisibilityOptions{IncludeGates: true}}, []string{open, gate}},
+		{"IncludeTemplates", publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: scope}, ListVisibilityOptions: publicops.ListVisibilityOptions{IncludeTemplates: true}}, []string{open, template}},
 		// IncludeInfra is BOTH knobs at once: it admits the plane and takes the
 		// infra-type exclusion off, so it is the only request here that reaches
 		// the infra-typed wisp.
-		{"IncludeInfra reaches the ephemeral plane and the infra types", publicops.ListRequest{IDFilter: scope, IncludeInfra: true}, []string{open, wisp, infraWisp}},
+		{"IncludeInfra reaches the ephemeral plane and the infra types", publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: scope}, ListVisibilityOptions: publicops.ListVisibilityOptions{IncludeInfra: true}}, []string{open, wisp, infraWisp}},
 		// The plane knob alone. It admits the plane and takes NO exclusion off
 		// with it: the gate and the template stay hidden, and so does the
 		// infra-typed wisp in the very plane it just admitted. That last row is
 		// the one that makes this an observation — a field wired to
 		// IncludeInfra's branch answers with it.
-		{"IncludeEphemeral reaches the plane and takes no type exclusion off", publicops.ListRequest{IDFilter: scope, IncludeEphemeral: true}, []string{open, wisp}},
+		{"IncludeEphemeral reaches the plane and takes no type exclusion off", publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: scope}, ListVisibilityOptions: publicops.ListVisibilityOptions{IncludeEphemeral: true}}, []string{open, wisp}},
 		// And they compose rather than fight: the union of the two answers.
-		{"IncludeEphemeral with IncludeInfra", publicops.ListRequest{IDFilter: scope, IncludeEphemeral: true, IncludeInfra: true}, []string{open, wisp, infraWisp}},
+		{"IncludeEphemeral with IncludeInfra", publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: scope}, ListVisibilityOptions: publicops.ListVisibilityOptions{IncludeEphemeral: true, IncludeInfra: true}}, []string{open, wisp, infraWisp}},
 	} {
 		page, err := fixture.Reader.List(ctx, test.req)
 		if err != nil {
@@ -522,16 +523,15 @@ func RunReaderListRejectsATypeOutsideTheWorkspaceVocabulary(t *testing.T, ctx co
 	t.Helper()
 	const unknown = "no-such-type-anywhere"
 
-	page, err := fixture.Reader.List(ctx, publicops.ListRequest{IssueType: unknown})
+	page, err := fixture.Reader.List(ctx, publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IssueType: unknown}})
 	if err == nil {
 		t.Fatalf("List with an unknown issue type returned %d items and no error, want a refusal", len(page.Items))
 	}
 
 	// A built-in type is accepted by the same validation, so the refusal above
 	// is the vocabulary check and not a blanket rejection of IssueType.
-	if _, err := fixture.Reader.List(ctx, publicops.ListRequest{
-		IDFilter:  readerIDFilter(readerID(fixture, "lstype", "absent")),
-		IssueType: string(types.TypeTask),
+	if _, err := fixture.Reader.List(ctx, publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: readerIDFilter(readerID(fixture, "lstype", "absent")),
+		IssueType: string(types.TypeTask)},
 	}); err != nil {
 		t.Fatalf("List with a built-in issue type: %v", err)
 	}
@@ -560,7 +560,7 @@ func RunReaderListNaturalNumericIDSortTrimsAfterTheFetch(t *testing.T, ctx conte
 	}
 	scope := readerIDFilter(one, two, ten)
 
-	page, err := fixture.Reader.List(ctx, publicops.ListRequest{IDFilter: scope, SortBy: "id"})
+	page, err := fixture.Reader.List(ctx, publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: scope}, ListPageOptions: publicops.ListPageOptions{SortBy: "id"}})
 	if err != nil {
 		t.Fatalf("List --sort id: %v", err)
 	}
@@ -572,7 +572,7 @@ func RunReaderListNaturalNumericIDSortTrimsAfterTheFetch(t *testing.T, ctx conte
 	// The trim is the ONLY thing bounding this page, and it runs after the
 	// natural sort: a limit of two must keep the two natural-lowest ids, not
 	// the two the query happened to return first.
-	page, err = fixture.Reader.List(ctx, publicops.ListRequest{IDFilter: scope, SortBy: "id", Limit: readerLimit(2)})
+	page, err = fixture.Reader.List(ctx, publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: scope}, ListPageOptions: publicops.ListPageOptions{SortBy: "id", Limit: readerLimit(2)}})
 	if err != nil {
 		t.Fatalf("List --sort id --limit 2: %v", err)
 	}
@@ -581,7 +581,7 @@ func RunReaderListNaturalNumericIDSortTrimsAfterTheFetch(t *testing.T, ctx conte
 		t.Error("List --sort id --limit 2 hid a row without reporting HasMore")
 	}
 
-	page, err = fixture.Reader.List(ctx, publicops.ListRequest{IDFilter: scope, SortBy: "id", Reverse: true, Limit: readerLimit(2)})
+	page, err = fixture.Reader.List(ctx, publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: scope}, ListPageOptions: publicops.ListPageOptions{SortBy: "id", Reverse: true, Limit: readerLimit(2)}})
 	if err != nil {
 		t.Fatalf("List --sort id --reverse --limit 2: %v", err)
 	}
@@ -620,11 +620,9 @@ func RunReaderListKeysetPositionResumesTheCreatedDescIDAscOrder(t *testing.T, ct
 		seedReaderIssue(t, ctx, fixture, issue)
 	}
 
-	page, err := fixture.Reader.List(ctx, publicops.ListRequest{
-		IDFilter:       readerIDFilter(newest, cursor, sameSecond, oldest),
-		SortBy:         "created",
+	page, err := fixture.Reader.List(ctx, publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: readerIDFilter(newest, cursor, sameSecond, oldest)}, ListPageOptions: publicops.ListPageOptions{SortBy: "created",
 		AfterCreatedAt: &cursorAt,
-		AfterID:        cursor,
+		AfterID:        cursor},
 	})
 	if err != nil {
 		t.Fatalf("List from a keyset position: %v", err)
@@ -675,9 +673,7 @@ func RunReaderListReadyFlagAnswersTheBlockerAwareSet(t *testing.T, ctx context.C
 		t.Fatalf("seed the blocking edge: %v", err)
 	}
 
-	page, err := fixture.Reader.List(ctx, publicops.ListRequest{
-		Labels: []string{scope}, ReadyFlag: true, SortBy: "id",
-	})
+	page, err := fixture.Reader.List(ctx, publicops.ListRequest{ListLabelFilters: publicops.ListLabelFilters{Labels: []string{scope}}, ListModeOptions: publicops.ListModeOptions{ReadyFlag: true}, ListPageOptions: publicops.ListPageOptions{SortBy: "id"}})
 	if err != nil {
 		t.Fatalf("List --ready: %v", err)
 	}
@@ -685,9 +681,7 @@ func RunReaderListReadyFlagAnswersTheBlockerAwareSet(t *testing.T, ctx context.C
 
 	// The same arm, under a sort the database cannot express and a limit: the
 	// epilogue has to sort AND trim here, and report the truncation.
-	page, err = fixture.Reader.List(ctx, publicops.ListRequest{
-		Labels: []string{scope}, ReadyFlag: true, SortBy: "id", Limit: readerLimit(1),
-	})
+	page, err = fixture.Reader.List(ctx, publicops.ListRequest{ListLabelFilters: publicops.ListLabelFilters{Labels: []string{scope}}, ListModeOptions: publicops.ListModeOptions{ReadyFlag: true}, ListPageOptions: publicops.ListPageOptions{SortBy: "id", Limit: readerLimit(1)}})
 	if err != nil {
 		t.Fatalf("List --ready --sort id --limit 1: %v", err)
 	}
@@ -724,21 +718,24 @@ func RunReaderListReadyFlagRefusesAFilterItCannotCarry(t *testing.T, ctx context
 	}
 	cutoff := time.Now().UTC().Add(-time.Hour)
 	maxPriority := 1
+	assertReadyFilterRefusals(t, ctx, fixture, scope, one, cutoff, maxPriority)
+	assertReadyMultipleDropped(t, ctx, fixture, one)
+	assertReadyCarried(t, ctx, fixture, scope, one, two)
+	assertReadyFilterWithoutFlag(t, ctx, fixture, one)
+}
 
-	// One per family the doc names, not one per field: the id set, the text
-	// searches, the date bounds, the pinned/absent-relation flags, the numeric
-	// range and the keyset position.
+func assertReadyFilterRefusals(t *testing.T, ctx context.Context, fixture ReaderFixture, scope, one string, cutoff time.Time, maxPriority int) {
 	for _, tc := range []struct {
 		name  string
 		req   publicops.ListRequest
 		field string
 	}{
-		{"IDFilter", publicops.ListRequest{IDFilter: readerIDFilter(one), ReadyFlag: true}, "IDFilter"},
-		{"TitleContains", publicops.ListRequest{Labels: []string{scope}, TitleContains: one, ReadyFlag: true}, "TitleContains"},
-		{"CreatedAfter", publicops.ListRequest{Labels: []string{scope}, CreatedAfter: &cutoff, ReadyFlag: true}, "CreatedAfter"},
-		{"PinnedFlag", publicops.ListRequest{Labels: []string{scope}, PinnedFlag: true, ReadyFlag: true}, "PinnedFlag"},
-		{"PriorityMax", publicops.ListRequest{Labels: []string{scope}, PriorityMax: &maxPriority, ReadyFlag: true}, "PriorityMax"},
-		{"keyset position", publicops.ListRequest{Labels: []string{scope}, AfterCreatedAt: &cutoff, AfterID: one, ReadyFlag: true}, "AfterCreatedAt"},
+		{"IDFilter", publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: readerIDFilter(one)}, ListModeOptions: publicops.ListModeOptions{ReadyFlag: true}}, "IDFilter"},
+		{"TitleContains", publicops.ListRequest{ListLabelFilters: publicops.ListLabelFilters{Labels: []string{scope}}, ListTextFilters: publicops.ListTextFilters{TitleContains: one}, ListModeOptions: publicops.ListModeOptions{ReadyFlag: true}}, "TitleContains"},
+		{"CreatedAfter", publicops.ListRequest{ListLabelFilters: publicops.ListLabelFilters{Labels: []string{scope}}, ListTimeFilters: publicops.ListTimeFilters{CreatedAfter: &cutoff}, ListModeOptions: publicops.ListModeOptions{ReadyFlag: true}}, "CreatedAfter"},
+		{"PinnedFlag", publicops.ListRequest{ListLabelFilters: publicops.ListLabelFilters{Labels: []string{scope}}, ListVisibilityOptions: publicops.ListVisibilityOptions{PinnedFlag: true}, ListModeOptions: publicops.ListModeOptions{ReadyFlag: true}}, "PinnedFlag"},
+		{"PriorityMax", publicops.ListRequest{ListLabelFilters: publicops.ListLabelFilters{Labels: []string{scope}}, ListPriorityFilters: publicops.ListPriorityFilters{PriorityMax: &maxPriority}, ListModeOptions: publicops.ListModeOptions{ReadyFlag: true}}, "PriorityMax"},
+		{"keyset position", publicops.ListRequest{ListLabelFilters: publicops.ListLabelFilters{Labels: []string{scope}}, ListModeOptions: publicops.ListModeOptions{ReadyFlag: true}, ListPageOptions: publicops.ListPageOptions{AfterCreatedAt: &cutoff, AfterID: one}}, "AfterCreatedAt"},
 	} {
 		page, err := fixture.Reader.List(ctx, tc.req)
 		if !errors.Is(err, publicops.ErrValidation) {
@@ -749,13 +746,10 @@ func RunReaderListReadyFlagRefusesAFilterItCannotCarry(t *testing.T, ctx context
 			t.Errorf("List --ready with %s refused without naming the field: %v", tc.name, err)
 		}
 	}
+}
 
-	// Naming every field it could not honor, not just the first: a caller who
-	// fixes one and retries should not have to discover the next one the same
-	// way.
-	_, err := fixture.Reader.List(ctx, publicops.ListRequest{
-		IDFilter: readerIDFilter(one), OverdueFlag: true, ReadyFlag: true,
-	})
+func assertReadyMultipleDropped(t *testing.T, ctx context.Context, fixture ReaderFixture, one string) {
+	_, err := fixture.Reader.List(ctx, publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: readerIDFilter(one)}, ListStateFilters: publicops.ListStateFilters{OverdueFlag: true}, ListModeOptions: publicops.ListModeOptions{ReadyFlag: true}})
 	if !errors.Is(err, publicops.ErrValidation) {
 		t.Fatalf("List --ready with two dropped fields: %v; want ErrValidation", err)
 	}
@@ -764,22 +758,18 @@ func RunReaderListReadyFlagRefusesAFilterItCannotCarry(t *testing.T, ctx context
 			t.Errorf("List --ready with two dropped fields did not name %s: %v", field, err)
 		}
 	}
+}
 
-	// The refusal is scoped to what the query cannot carry. Labels is carried,
-	// and NoPinnedFlag is already true of the ready set, so neither is refused
-	// — the doc promises both, and a validator that refused every flag it did
-	// not recognize would break `bd list --ready` outright.
-	page, err := fixture.Reader.List(ctx, publicops.ListRequest{
-		Labels: []string{scope}, NoPinnedFlag: true, ReadyFlag: true, SortBy: "id",
-	})
+func assertReadyCarried(t *testing.T, ctx context.Context, fixture ReaderFixture, scope, one, two string) {
+	page, err := fixture.Reader.List(ctx, publicops.ListRequest{ListLabelFilters: publicops.ListLabelFilters{Labels: []string{scope}}, ListVisibilityOptions: publicops.ListVisibilityOptions{NoPinnedFlag: true}, ListModeOptions: publicops.ListModeOptions{ReadyFlag: true}, ListPageOptions: publicops.ListPageOptions{SortBy: "id"}})
 	if err != nil {
 		t.Fatalf("List --ready --no-pinned on a carried scope: %v", err)
 	}
 	assertReaderPageIDs(t, "List --ready --no-pinned on a carried scope", page, []string{one, two})
+}
 
-	// Without ReadyFlag the same dropped fields are ordinary list filters and
-	// must still work: the refusal belongs to the arm, not to the request type.
-	page, err = fixture.Reader.List(ctx, publicops.ListRequest{IDFilter: readerIDFilter(one), SortBy: "id"})
+func assertReadyFilterWithoutFlag(t *testing.T, ctx context.Context, fixture ReaderFixture, one string) {
+	page, err := fixture.Reader.List(ctx, publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: readerIDFilter(one)}, ListPageOptions: publicops.ListPageOptions{SortBy: "id"}})
 	if err != nil {
 		t.Fatalf("List --id without --ready: %v", err)
 	}
@@ -794,7 +784,7 @@ func RunReaderListEmptyPageIsWellFormed(t *testing.T, ctx context.Context, fixtu
 	t.Helper()
 	absent := readerIDFilter(readerID(fixture, "lsempty", "never-seeded"))
 
-	listed, err := fixture.Reader.List(ctx, publicops.ListRequest{IDFilter: absent})
+	listed, err := fixture.Reader.List(ctx, publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: absent}})
 	if err != nil {
 		t.Fatalf("List matching nothing: %v", err)
 	}
@@ -850,26 +840,29 @@ func RunReaderListEmptyPageIsWellFormed(t *testing.T, ctx context.Context, fixtu
 // above.
 func RunReaderListMaxRowsIsHonored(t *testing.T, ctx context.Context, fixture ReaderFixture) {
 	t.Helper()
+	ids := seedMaxRowsIssues(t, ctx, fixture)
+	idScope := readerIDFilter(ids...)
+	assertMaxRowsRoomyAndTight(t, ctx, fixture, ids, idScope)
+	assertMaxRowsLimitBoundary(t, ctx, fixture, ids, idScope)
+}
+
+func seedMaxRowsIssues(t *testing.T, ctx context.Context, fixture ReaderFixture) []string {
 	var ids []string
 	for _, tag := range []string{"a", "b", "c"} {
 		id := readerID(fixture, "maxrows", tag)
 		ids = append(ids, id)
 		seedReaderIssue(t, ctx, fixture, readerIssue(id, types.TypeTask, ""))
 	}
-	idScope := readerIDFilter(ids...)
+	return ids
+}
 
-	// A cap the three seeded rows fit inside: an ordinary page everywhere.
+func assertMaxRowsRoomyAndTight(t *testing.T, ctx context.Context, fixture ReaderFixture, ids []string, idScope string) {
 	const roomyWhat = "List under a cap the result set fits inside"
-	roomy, err := fixture.Reader.List(ctx, publicops.ListRequest{
-		IDFilter: idScope, SortBy: "created", MaxRows: len(ids) + 1, MaxRowsSource: "--max-rows",
-	})
+	roomy, err := fixture.Reader.List(ctx, publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: idScope}, ListPageOptions: publicops.ListPageOptions{SortBy: "created", MaxRows: len(ids) + 1, MaxRowsSource: "--max-rows"}})
 	if err != nil {
 		t.Fatalf("%s: %v", roomyWhat, err)
 	}
 	assertReaderPageIDSet(t, roomyWhat, roomy, ids)
-
-	// A cap the result set exceeds, with and without an offset in front of it.
-	// A PAGE from either means the field was ignored.
 	for _, test := range []struct {
 		what   string
 		offset int
@@ -877,9 +870,8 @@ func RunReaderListMaxRowsIsHonored(t *testing.T, ctx context.Context, fixture Re
 		{"List under a cap the result set exceeds", 0},
 		{"List under a cap the result set exceeds, behind an offset", 1},
 	} {
-		tight, err := fixture.Reader.List(ctx, publicops.ListRequest{
-			IDFilter: idScope, SortBy: "created", Offset: test.offset,
-			MaxRows: len(ids) - 1, MaxRowsSource: "--max-rows",
+		tight, err := fixture.Reader.List(ctx, publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: idScope}, ListPageOptions: publicops.ListPageOptions{SortBy: "created", Offset: test.offset,
+			MaxRows: len(ids) - 1, MaxRowsSource: "--max-rows"},
 		})
 		if err == nil {
 			t.Fatalf("%s (MaxRows=%d over %d matching rows) returned the page %v and no error: the cap was silently ignored",
@@ -906,14 +898,12 @@ func RunReaderListMaxRowsIsHonored(t *testing.T, ctx context.Context, fixture Re
 				test.what, tooMany.Source, "--max-rows")
 		}
 	}
+}
 
-	// The boundary, one row apart, over the same three rows and the same cap.
-	// Limit 2 under a cap of 2 delivers a page of 2 and says there is more;
-	// Limit 3 under the same cap fires.
+func assertMaxRowsLimitBoundary(t *testing.T, ctx context.Context, fixture ReaderFixture, ids []string, idScope string) {
 	const cap2 = 2
-	page, err := fixture.Reader.List(ctx, publicops.ListRequest{
-		IDFilter: idScope, SortBy: "created", Limit: readerLimit(cap2),
-		MaxRows: cap2, MaxRowsSource: "--max-rows",
+	page, err := fixture.Reader.List(ctx, publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: idScope}, ListPageOptions: publicops.ListPageOptions{SortBy: "created", Limit: readerLimit(cap2),
+		MaxRows: cap2, MaxRowsSource: "--max-rows"},
 	})
 	if err != nil {
 		t.Fatalf("List at Limit=%d under MaxRows=%d: %v; a page the caller receives cannot exceed a cap it fits inside, so this must not fire",
@@ -926,9 +916,8 @@ func RunReaderListMaxRowsIsHonored(t *testing.T, ctx context.Context, fixture Re
 		t.Errorf("List at Limit=%d under MaxRows=%d over %d rows reported has_more=false; the probe row that answers that question is what the cap must not fire on",
 			cap2, cap2, len(ids))
 	}
-	over, err := fixture.Reader.List(ctx, publicops.ListRequest{
-		IDFilter: idScope, SortBy: "created", Limit: readerLimit(cap2 + 1),
-		MaxRows: cap2, MaxRowsSource: "--max-rows",
+	over, err := fixture.Reader.List(ctx, publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: idScope}, ListPageOptions: publicops.ListPageOptions{SortBy: "created", Limit: readerLimit(cap2 + 1),
+		MaxRows: cap2, MaxRowsSource: "--max-rows"},
 	})
 	if err == nil {
 		t.Fatalf("List at Limit=%d under MaxRows=%d returned the page %v; a page that could exceed the cap has to fire it",
@@ -976,6 +965,15 @@ func RunReaderListMaxRowsBoundaryIsLimitPlusOffset(t *testing.T, ctx context.Con
 	t.Helper()
 	const rowCap = 3
 	scope := readerLabel(fixture, "maxrowswindow")
+	ids := seedMaxRowsWindowIssues(t, ctx, fixture, scope)
+	idScope := readerIDFilter(ids...)
+	order := readMaxRowsWindowOrder(t, ctx, fixture, ids, idScope)
+
+	assertMaxRowsWindowCases(t, ctx, fixture, ids, idScope, order, rowCap)
+	assertReadyMaxRowsWindow(t, ctx, fixture, scope, ids, rowCap)
+}
+
+func seedMaxRowsWindowIssues(t *testing.T, ctx context.Context, fixture ReaderFixture, scope string) []string {
 	var ids []string
 	base := time.Now().UTC().Truncate(time.Second).Add(-5 * time.Hour)
 	for i, tag := range []string{"a", "b", "c", "d", "e"} {
@@ -986,14 +984,11 @@ func RunReaderListMaxRowsBoundaryIsLimitPlusOffset(t *testing.T, ctx context.Con
 		issue.CreatedAt, issue.UpdatedAt = at, at
 		seedReaderIssue(t, ctx, fixture, issue)
 	}
-	idScope := readerIDFilter(ids...)
+	return ids
+}
 
-	// The order every expectation below is a window of, READ rather than
-	// assumed: which end "created" starts from is the query's business, and
-	// this case is about which rows the cap counts, not about that.
-	unpaged, err := fixture.Reader.List(ctx, publicops.ListRequest{
-		IDFilter: idScope, SortBy: "created", Limit: readerLimit(0),
-	})
+func readMaxRowsWindowOrder(t *testing.T, ctx context.Context, fixture ReaderFixture, ids []string, idScope string) []string {
+	unpaged, err := fixture.Reader.List(ctx, publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: idScope}, ListPageOptions: publicops.ListPageOptions{SortBy: "created", Limit: readerLimit(0)}})
 	if err != nil {
 		t.Fatalf("List unpaged: %v", err)
 	}
@@ -1002,80 +997,70 @@ func RunReaderListMaxRowsBoundaryIsLimitPlusOffset(t *testing.T, ctx context.Con
 		t.Fatalf("List unpaged returned %v, want the %d seeded rows: a result set smaller than the bound cannot observe the cap this case drives",
 			order, len(ids))
 	}
+	return order
+}
 
-	// The window, one row of offset at a time, against a cap of three.
-	for _, test := range []struct {
-		what   string
-		limit  int
-		offset int
-		fires  bool
-	}{
-		// Limit+Offset == MaxRows-1: strictly inside the cap.
+type maxRowsWindowCase struct {
+	what   string
+	limit  int
+	offset int
+	fires  bool
+}
+
+func assertMaxRowsWindowCases(t *testing.T, ctx context.Context, fixture ReaderFixture, ids []string, idScope string, order []string, rowCap int) {
+	for _, test := range []maxRowsWindowCase{
 		{"Limit+Offset one row inside the cap", 1, 1, false},
-		// Limit+Offset == MaxRows: the touched window is exactly the cap, and
-		// the probe row that answers has-more must not be counted against it.
 		{"Limit+Offset exactly at the cap", 2, 1, false},
-		// Limit+Offset == MaxRows+1: the same limit and the same cap, one more
-		// row of skip, and the query can now touch more rows than the cap
-		// allows.
 		{"Limit+Offset one row past the cap", 2, 2, true},
 	} {
-		what := test.what
-		page, err := fixture.Reader.List(ctx, publicops.ListRequest{
-			IDFilter: idScope, SortBy: "created",
-			Limit: readerLimit(test.limit), Offset: test.offset,
-			MaxRows: rowCap, MaxRowsSource: "--max-rows",
-		})
-		if test.fires {
-			if err == nil {
-				t.Errorf("%s (Limit=%d Offset=%d MaxRows=%d over %d matching rows) returned the page %v; a query that may touch %d rows has to fire a cap of %d",
-					what, test.limit, test.offset, rowCap, len(ids), readerPageIDs(page), test.limit+test.offset, rowCap)
-				continue
-			}
-			var tooMany *storageops.ErrTooManyRows
-			if !errors.As(err, &tooMany) {
-				t.Errorf("%s failed with %v, want *ErrTooManyRows", what, err)
-				continue
-			}
-			if tooMany.Cap != rowCap {
-				t.Errorf("%s: the cap error reports Cap = %d, want the %d the request asked for; the probe row's bump must not reach the caller",
-					what, tooMany.Cap, rowCap)
-			}
-			if tooMany.Found <= tooMany.Cap {
-				t.Errorf("%s: the cap error reports Found = %d against Cap = %d; a cap that fired saw more rows than it allows",
-					what, tooMany.Found, tooMany.Cap)
-			}
-			continue
-		}
-		if err != nil {
-			t.Errorf("%s (Limit=%d Offset=%d MaxRows=%d): %v; a query bounded to %d rows cannot break a cap of %d, so this must not fire",
-				what, test.limit, test.offset, rowCap, err, test.limit+test.offset, rowCap)
-			continue
-		}
-		assertReaderPageIDs(t, what, page, order[test.offset:test.offset+test.limit])
-		// Every window here stops short of the fifth row, so the page that
-		// came back hid something. A body that failed to reach past the skip
-		// answers the same rows with has_more=false.
-		if !page.HasMore {
-			t.Errorf("%s reported has_more=false over %d matching rows; the row past the page is what the bound has to have reached",
-				what, len(ids))
-		}
+		assertMaxRowsWindowCase(t, ctx, fixture, ids, idScope, order, rowCap, test)
 	}
+}
 
-	// THE SAME BOUNDARY ON THE --ready ARM, which is a different query in both
-	// seams — a blocker-aware union rather than the search — reached through
-	// the same request and the same cap. Both sides are driven: an arm that
-	// refused every capped ready request would pass on the firing half alone.
-	//
-	// WHICH rows come back is deliberately not asserted here. The ready query
-	// runs in its sort POLICY's order and the display order is applied to the
-	// page afterwards, so a bounded ready query picks its rows in an order this
-	// request does not name — that promise is
-	// RunReaderReadySortPoliciesOrderTheSameRows's, and restating it here would
-	// pin an order the contract does not owe. What this arm owes is the cap.
-	readyAll, err := fixture.Reader.List(ctx, publicops.ListRequest{
-		Labels: []string{scope}, ReadyFlag: true, SortBy: "created", Limit: readerLimit(0),
+func assertMaxRowsWindowCase(t *testing.T, ctx context.Context, fixture ReaderFixture, ids []string, idScope string, order []string, rowCap int, test maxRowsWindowCase) {
+	page, err := fixture.Reader.List(ctx, publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: idScope}, ListPageOptions: publicops.ListPageOptions{SortBy: "created",
+		Limit: readerLimit(test.limit), Offset: test.offset,
+		MaxRows: rowCap, MaxRowsSource: "--max-rows"},
 	})
+	if test.fires {
+		assertMaxRowsWindowFired(t, test, page, err, len(ids), rowCap)
+		return
+	}
+	if err != nil {
+		t.Errorf("%s (Limit=%d Offset=%d MaxRows=%d): %v; a query bounded to %d rows cannot break a cap of %d, so this must not fire",
+			test.what, test.limit, test.offset, rowCap, err, test.limit+test.offset, rowCap)
+		return
+	}
+	assertReaderPageIDs(t, test.what, page, order[test.offset:test.offset+test.limit])
+	if !page.HasMore {
+		t.Errorf("%s reported has_more=false over %d matching rows; the row past the page is what the bound has to have reached",
+			test.what, len(ids))
+	}
+}
+
+func assertMaxRowsWindowFired(t *testing.T, test maxRowsWindowCase, page publicops.IssuePage, err error, matching, rowCap int) {
+	if err == nil {
+		t.Errorf("%s (Limit=%d Offset=%d MaxRows=%d over %d matching rows) returned the page %v; a query that may touch %d rows has to fire a cap of %d",
+			test.what, test.limit, test.offset, rowCap, matching, readerPageIDs(page), test.limit+test.offset, rowCap)
+		return
+	}
+	var tooMany *storageops.ErrTooManyRows
+	if !errors.As(err, &tooMany) {
+		t.Errorf("%s failed with %v, want *ErrTooManyRows", test.what, err)
+		return
+	}
+	if tooMany.Cap != rowCap {
+		t.Errorf("%s: the cap error reports Cap = %d, want the %d the request asked for; the probe row's bump must not reach the caller",
+			test.what, tooMany.Cap, rowCap)
+	}
+	if tooMany.Found <= tooMany.Cap {
+		t.Errorf("%s: the cap error reports Found = %d against Cap = %d; a cap that fired saw more rows than it allows",
+			test.what, tooMany.Found, tooMany.Cap)
+	}
+}
+
+func assertReadyMaxRowsWindow(t *testing.T, ctx context.Context, fixture ReaderFixture, scope string, ids []string, rowCap int) {
+	readyAll, err := fixture.Reader.List(ctx, publicops.ListRequest{ListLabelFilters: publicops.ListLabelFilters{Labels: []string{scope}}, ListModeOptions: publicops.ListModeOptions{ReadyFlag: true}, ListPageOptions: publicops.ListPageOptions{SortBy: "created", Limit: readerLimit(0)}})
 	if err != nil {
 		t.Fatalf("List --ready unpaged: %v", err)
 	}
@@ -1083,9 +1068,12 @@ func RunReaderListMaxRowsBoundaryIsLimitPlusOffset(t *testing.T, ctx context.Con
 		t.Fatalf("List --ready unpaged returned %v, want the %d seeded rows: they are open, unassigned and unblocked, and a smaller ready set cannot reach the cap",
 			got, len(ids))
 	}
-	readyAt, err := fixture.Reader.List(ctx, publicops.ListRequest{
-		Labels: []string{scope}, ReadyFlag: true, SortBy: "created",
-		Limit: readerLimit(2), Offset: 1, MaxRows: rowCap, MaxRowsSource: "--max-rows",
+	assertReadyMaxRowsWindowBoundary(t, ctx, fixture, scope, rowCap)
+}
+
+func assertReadyMaxRowsWindowBoundary(t *testing.T, ctx context.Context, fixture ReaderFixture, scope string, rowCap int) {
+	readyAt, err := fixture.Reader.List(ctx, publicops.ListRequest{ListLabelFilters: publicops.ListLabelFilters{Labels: []string{scope}}, ListModeOptions: publicops.ListModeOptions{ReadyFlag: true}, ListPageOptions: publicops.ListPageOptions{SortBy: "created",
+		Limit: readerLimit(2), Offset: 1, MaxRows: rowCap, MaxRowsSource: "--max-rows"},
 	})
 	switch {
 	case err != nil:
@@ -1093,9 +1081,8 @@ func RunReaderListMaxRowsBoundaryIsLimitPlusOffset(t *testing.T, ctx context.Con
 	case len(readyAt.Items) != 2:
 		t.Errorf("List --ready at Limit=2 Offset=1 returned %v, want the 2 rows behind the skip", readerPageIDs(readyAt))
 	}
-	readyOver, err := fixture.Reader.List(ctx, publicops.ListRequest{
-		Labels: []string{scope}, ReadyFlag: true, SortBy: "created",
-		Limit: readerLimit(2), Offset: 2, MaxRows: rowCap, MaxRowsSource: "--max-rows",
+	readyOver, err := fixture.Reader.List(ctx, publicops.ListRequest{ListLabelFilters: publicops.ListLabelFilters{Labels: []string{scope}}, ListModeOptions: publicops.ListModeOptions{ReadyFlag: true}, ListPageOptions: publicops.ListPageOptions{SortBy: "created",
+		Limit: readerLimit(2), Offset: 2, MaxRows: rowCap, MaxRowsSource: "--max-rows"},
 	})
 	if err == nil {
 		t.Fatalf("List --ready at Limit=2 Offset=2 under MaxRows=%d returned the page %v; the ready query counts a skipped row the same way the search does",
@@ -1128,17 +1115,42 @@ func RunReaderListMaxRowsBoundaryIsLimitPlusOffset(t *testing.T, ctx context.Con
 // the caller.
 func RunReaderListSkipCountsDropsTheCardinalitiesAndNothingElse(t *testing.T, ctx context.Context, fixture ReaderFixture) {
 	t.Helper()
-	subject := readerID(fixture, "skipcounts", "subject")
-	blocker := readerID(fixture, "skipcounts", "blocker")
-	dependent := readerID(fixture, "skipcounts", "dependent")
-	parent := readerID(fixture, "skipcounts", "parent")
+	subject, blocker, dependent, parent := seedSkipCountsCase(t, ctx, fixture)
+
+	idScope := readerIDFilter(subject, blocker, dependent, parent)
+	req := publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: idScope}, ListPageOptions: publicops.ListPageOptions{SortBy: "created"}}
+
+	hydrated, err := fixture.Reader.List(ctx, req)
+	if err != nil {
+		t.Fatalf("List with the counts hydrated: %v", err)
+	}
+	hydratedRow := readerRowByID(t, "List with the counts hydrated", hydrated, subject)
+	if hydratedRow == nil {
+		return
+	}
+	assertSkipCountsHydratedPremise(t, hydratedRow)
+
+	req.SkipCounts = true
+	skipped, err := fixture.Reader.List(ctx, req)
+	if err != nil {
+		t.Fatalf("List with SkipCounts: %v", err)
+	}
+	skippedRow := readerRowByID(t, "List with SkipCounts", skipped, subject)
+	if skippedRow == nil {
+		return
+	}
+	assertSkipCountsZeroes(t, skippedRow)
+	assertSkipCountsUnchanged(t, hydrated, skipped, hydratedRow, skippedRow)
+}
+
+func seedSkipCountsCase(t *testing.T, ctx context.Context, fixture ReaderFixture) (subject, blocker, dependent, parent string) {
+	subject = readerID(fixture, "skipcounts", "subject")
+	blocker = readerID(fixture, "skipcounts", "blocker")
+	dependent = readerID(fixture, "skipcounts", "dependent")
+	parent = readerID(fixture, "skipcounts", "parent")
 	for _, id := range []string{subject, blocker, dependent, parent} {
 		seedReaderIssue(t, ctx, fixture, readerIssue(id, types.TypeTask, ""))
 	}
-	// One outgoing blocks edge, one incoming one, and a parent-child edge, so
-	// the subject row carries a nonzero DependencyCount, DependentCount and
-	// Parent at once. Parent rides the same mega-query as the counts and is NOT
-	// a count: it is the tripwire for a knob that suppressed too much.
 	for _, edge := range []*types.Dependency{
 		{IssueID: subject, DependsOnID: blocker, Type: types.DepBlocks},
 		{IssueID: dependent, DependsOnID: subject, Type: types.DepBlocks},
@@ -1151,51 +1163,35 @@ func RunReaderListSkipCountsDropsTheCardinalitiesAndNothingElse(t *testing.T, ct
 	if err := fixture.AddComment(ctx, subject, "seed", "so the comment count is nonzero"); err != nil {
 		t.Fatalf("seed the comment: %v", err)
 	}
+	return subject, blocker, dependent, parent
+}
 
-	idScope := readerIDFilter(subject, blocker, dependent, parent)
-	req := publicops.ListRequest{IDFilter: idScope, SortBy: "created"}
-
-	hydrated, err := fixture.Reader.List(ctx, req)
-	if err != nil {
-		t.Fatalf("List with the counts hydrated: %v", err)
-	}
-	hydratedRow := readerRowByID(t, "List with the counts hydrated", hydrated, subject)
-	if hydratedRow == nil {
-		return
-	}
-	// The premise. If the seeded row has no counts to suppress and no parent to
-	// keep, the second half of this case proves nothing either way.
-	if hydratedRow.DependencyCount == 0 || hydratedRow.DependentCount == 0 || hydratedRow.CommentCount == 0 {
+func assertSkipCountsHydratedPremise(t *testing.T, row *types.IssueWithCounts) {
+	if row.DependencyCount == 0 || row.DependentCount == 0 || row.CommentCount == 0 {
 		t.Fatalf("the seeded subject came back with counts (%d, %d, %d); this case needs all three nonzero before it can assert they are suppressed",
-			hydratedRow.DependencyCount, hydratedRow.DependentCount, hydratedRow.CommentCount)
+			row.DependencyCount, row.DependentCount, row.CommentCount)
 	}
-	if hydratedRow.Parent == nil {
+	if row.Parent == nil {
 		t.Fatalf("the seeded subject came back with no Parent; this case needs one before Parent can be the tripwire for a knob that suppressed too much")
 	}
+}
 
-	req.SkipCounts = true
-	skipped, err := fixture.Reader.List(ctx, req)
-	if err != nil {
-		t.Fatalf("List with SkipCounts: %v", err)
-	}
-	skippedRow := readerRowByID(t, "List with SkipCounts", skipped, subject)
-	if skippedRow == nil {
-		return
-	}
+func assertSkipCountsZeroes(t *testing.T, row *types.IssueWithCounts) {
 	for _, got := range []struct {
 		what  string
 		count int
 	}{
-		{"DependencyCount", skippedRow.DependencyCount},
-		{"DependentCount", skippedRow.DependentCount},
-		{"CommentCount", skippedRow.CommentCount},
+		{"DependencyCount", row.DependencyCount},
+		{"DependentCount", row.DependentCount},
+		{"CommentCount", row.CommentCount},
 	} {
 		if got.count != 0 {
 			t.Errorf("List with SkipCounts returned %s = %d, want 0: the knob was accepted and the aggregate computed anyway", got.what, got.count)
 		}
 	}
+}
 
-	// Nothing else moves.
+func assertSkipCountsUnchanged(t *testing.T, hydrated, skipped publicops.IssuePage, hydratedRow, skippedRow *types.IssueWithCounts) {
 	if !slices.Equal(readerPageIDs(skipped), readerPageIDs(hydrated)) {
 		t.Errorf("List with SkipCounts returned %v, want the same page as without it, %v: this knob chooses what is hydrated, never which rows match",
 			readerPageIDs(skipped), readerPageIDs(hydrated))
@@ -1284,8 +1280,26 @@ func RunReaderGetMissIsNotFoundAndBackendFailureDoesNotDecay(t *testing.T, ctx c
 // rows says so rather than reading as "no comments".
 func RunReaderGetOptionalRowListsAreOffByDefault(t *testing.T, ctx context.Context, fixture ReaderFixture) {
 	t.Helper()
-	subject := readerID(fixture, "getopt", "subject")
-	dependent := readerID(fixture, "getopt", "dependent")
+	subject, dependent, commentText := seedGetOptionalRows(t, ctx, fixture)
+
+	details, err := fixture.Reader.Get(ctx, publicops.GetRequest{ID: subject})
+	if err != nil {
+		t.Fatalf("Get with both options off: %v", err)
+	}
+	assertGetOptionalRowsOff(t, details)
+
+	details, err = fixture.Reader.Get(ctx, publicops.GetRequest{
+		ID: subject, IncludeDependents: true, IncludeComments: true,
+	})
+	if err != nil {
+		t.Fatalf("Get with both options on: %v", err)
+	}
+	assertGetOptionalRowsOn(t, details, dependent, commentText)
+}
+
+func seedGetOptionalRows(t *testing.T, ctx context.Context, fixture ReaderFixture) (subject, dependent, commentText string) {
+	subject = readerID(fixture, "getopt", "subject")
+	dependent = readerID(fixture, "getopt", "dependent")
 	seedReaderIssue(t, ctx, fixture, readerIssue(subject, types.TypeTask, ""))
 	seedReaderIssue(t, ctx, fixture, readerIssue(dependent, types.TypeTask, ""))
 	if err := fixture.AddDependency(ctx, &types.Dependency{
@@ -1293,15 +1307,14 @@ func RunReaderGetOptionalRowListsAreOffByDefault(t *testing.T, ctx context.Conte
 	}, "seed"); err != nil {
 		t.Fatalf("seed the incoming edge: %v", err)
 	}
-	const commentText = "the detail view carries a count for this"
+	commentText = "the detail view carries a count for this"
 	if err := fixture.AddComment(ctx, subject, "seed", commentText); err != nil {
 		t.Fatalf("seed the comment: %v", err)
 	}
+	return subject, dependent, commentText
+}
 
-	details, err := fixture.Reader.Get(ctx, publicops.GetRequest{ID: subject})
-	if err != nil {
-		t.Fatalf("Get with both options off: %v", err)
-	}
+func assertGetOptionalRowsOff(t *testing.T, details *publicops.IssueDetails) {
 	assertReaderCount(t, "DependentCount", details.DependentCount, 1)
 	assertReaderCount(t, "CommentCount", details.CommentCount, 1)
 	if len(details.Dependents) != 0 {
@@ -1313,13 +1326,9 @@ func RunReaderGetOptionalRowListsAreOffByDefault(t *testing.T, ctx context.Conte
 	if details.CommentsOmitted == nil || !*details.CommentsOmitted {
 		t.Errorf("CommentsOmitted = %v with a nonzero comment count and no rows, want true", details.CommentsOmitted)
 	}
+}
 
-	details, err = fixture.Reader.Get(ctx, publicops.GetRequest{
-		ID: subject, IncludeDependents: true, IncludeComments: true,
-	})
-	if err != nil {
-		t.Fatalf("Get with both options on: %v", err)
-	}
+func assertGetOptionalRowsOn(t *testing.T, details *publicops.IssueDetails, dependent, commentText string) {
 	assertReaderCount(t, "DependentCount with the rows requested", details.DependentCount, 1)
 	assertReaderCount(t, "CommentCount with the rows requested", details.CommentCount, 1)
 	if len(details.Dependents) != 1 || details.Dependents[0].ID != dependent {
@@ -1339,10 +1348,25 @@ func RunReaderGetOptionalRowListsAreOffByDefault(t *testing.T, ctx context.Conte
 // options already have a case against.
 func RunReaderGetBriefDepsProjectsTheDependencyRows(t *testing.T, ctx context.Context, fixture ReaderFixture) {
 	t.Helper()
-	subject := readerID(fixture, "briefdeps", "subject")
-	blocker := readerID(fixture, "briefdeps", "blocker")
-	const heavy = "the free-form body a brief projection is meant to drop"
+	subject, blocker, heavy := seedBriefDepsCase(t, ctx, fixture)
 
+	details, err := fixture.Reader.Get(ctx, publicops.GetRequest{ID: subject})
+	if err != nil {
+		t.Fatalf("Get with BriefDeps off: %v", err)
+	}
+	assertBriefDepsOff(t, details, heavy)
+
+	details, err = fixture.Reader.Get(ctx, publicops.GetRequest{ID: subject, BriefDeps: true})
+	if err != nil {
+		t.Fatalf("Get with BriefDeps on: %v", err)
+	}
+	assertBriefDepsOn(t, details, blocker)
+}
+
+func seedBriefDepsCase(t *testing.T, ctx context.Context, fixture ReaderFixture) (subject, blocker, heavy string) {
+	subject = readerID(fixture, "briefdeps", "subject")
+	blocker = readerID(fixture, "briefdeps", "blocker")
+	heavy = "the free-form body a brief projection is meant to drop"
 	seedReaderIssue(t, ctx, fixture, readerIssue(subject, types.TypeTask, ""))
 	blockerIssue := readerIssue(blocker, types.TypeTask, "")
 	blockerIssue.Description = heavy
@@ -1355,36 +1379,41 @@ func RunReaderGetBriefDepsProjectsTheDependencyRows(t *testing.T, ctx context.Co
 	}, "seed"); err != nil {
 		t.Fatalf("seed the outgoing edge: %v", err)
 	}
+	return subject, blocker, heavy
+}
 
-	details, err := fixture.Reader.Get(ctx, publicops.GetRequest{ID: subject})
-	if err != nil {
-		t.Fatalf("Get with BriefDeps off: %v", err)
-	}
+func assertBriefDepsOff(t *testing.T, details *publicops.IssueDetails, heavy string) {
 	if len(details.Dependencies) != 1 {
 		t.Fatalf("Get returned %d dependency rows, want 1", len(details.Dependencies))
 	}
-	if got := details.Dependencies[0]; got.Description != heavy || got.Design != heavy ||
-		got.AcceptanceCriteria != heavy || got.Notes != heavy {
+	got := details.Dependencies[0]
+	if got.Description != heavy || got.Design != heavy || got.AcceptanceCriteria != heavy || got.Notes != heavy {
 		t.Errorf("BriefDeps off must return the full body, got description=%d design=%d acceptance=%d notes=%d",
 			len(got.Description), len(got.Design), len(got.AcceptanceCriteria), len(got.Notes))
 	}
+}
 
-	details, err = fixture.Reader.Get(ctx, publicops.GetRequest{ID: subject, BriefDeps: true})
-	if err != nil {
-		t.Fatalf("Get with BriefDeps on: %v", err)
-	}
+func assertBriefDepsOn(t *testing.T, details *publicops.IssueDetails, blocker string) {
 	if len(details.Dependencies) != 1 {
 		t.Fatalf("BriefDeps returned %d dependency rows, want 1", len(details.Dependencies))
 	}
 	got := details.Dependencies[0]
+	assertBriefDepsIdentity(t, got, blocker)
+	assertBriefDepsText(t, got)
+	assertReaderCount(t, "DependencyCount under BriefDeps", details.DependencyCount, 1)
+}
+
+func assertBriefDepsIdentity(t *testing.T, got *types.IssueWithDependencyMetadata, blocker string) {
 	if got.ID != blocker || got.Title != blocker || got.Status != types.StatusOpen ||
 		got.IssueType != types.TypeTask || got.Priority != 2 || got.DependencyType != types.DepBlocks {
 		t.Errorf("BriefDeps dropped an identity field: %+v", got)
 	}
+}
+
+func assertBriefDepsText(t *testing.T, got *types.IssueWithDependencyMetadata) {
 	if got.Description != "" || got.Design != "" || got.Notes != "" || got.AcceptanceCriteria != "" {
 		t.Errorf("BriefDeps left free-form text on the row: %+v", got)
 	}
-	assertReaderCount(t, "DependencyCount under BriefDeps", details.DependencyCount, 1)
 }
 
 // RunReaderGetDetailShapeMatchesTheSeededIssue pins the shape of the detail view
@@ -1395,10 +1424,24 @@ func RunReaderGetBriefDepsProjectsTheDependencyRows(t *testing.T, ctx context.Co
 // return a plausible-looking detail view.
 func RunReaderGetDetailShapeMatchesTheSeededIssue(t *testing.T, ctx context.Context, fixture ReaderFixture) {
 	t.Helper()
-	subject := readerID(fixture, "getshape", "subject")
-	blocker := readerID(fixture, "getshape", "blocker")
-	label := readerLabel(fixture, "getshape")
-	seeded := readerIssue(subject, types.TypeBug, label)
+	subject, blocker, label, seeded := seedGetDetailShapeCase(t, ctx, fixture)
+
+	details, err := fixture.Reader.Get(ctx, publicops.GetRequest{ID: subject})
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	assertGetDetailIdentity(t, details, seeded, label)
+	assertGetDetailEdges(t, details, blocker)
+	assertReaderCount(t, "DependencyCount", details.DependencyCount, 1)
+	assertReaderCount(t, "DependentCount", details.DependentCount, 0)
+	assertReaderCount(t, "CommentCount", details.CommentCount, 0)
+}
+
+func seedGetDetailShapeCase(t *testing.T, ctx context.Context, fixture ReaderFixture) (subject, blocker, label string, seeded *types.Issue) {
+	subject = readerID(fixture, "getshape", "subject")
+	blocker = readerID(fixture, "getshape", "blocker")
+	label = readerLabel(fixture, "getshape")
+	seeded = readerIssue(subject, types.TypeBug, label)
 	seeded.Title = "a title the detail view must echo"
 	seeded.Priority = 1
 	seedReaderIssue(t, ctx, fixture, seeded)
@@ -1408,11 +1451,10 @@ func RunReaderGetDetailShapeMatchesTheSeededIssue(t *testing.T, ctx context.Cont
 	}, "seed"); err != nil {
 		t.Fatalf("seed the outgoing edge: %v", err)
 	}
+	return subject, blocker, label, seeded
+}
 
-	details, err := fixture.Reader.Get(ctx, publicops.GetRequest{ID: subject})
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
+func assertGetDetailIdentity(t *testing.T, details *publicops.IssueDetails, seeded *types.Issue, label string) {
 	if details.Title != seeded.Title {
 		t.Errorf("Title = %q, want %q", details.Title, seeded.Title)
 	}
@@ -1425,15 +1467,15 @@ func RunReaderGetDetailShapeMatchesTheSeededIssue(t *testing.T, ctx context.Cont
 	if !slices.Contains(details.Labels, label) {
 		t.Errorf("Labels = %v, want it to carry the seeded label %q", details.Labels, label)
 	}
+}
+
+func assertGetDetailEdges(t *testing.T, details *publicops.IssueDetails, blocker string) {
 	if got := readerDependencyIDs(details.Dependencies); !slices.Equal(got, []string{blocker}) {
 		t.Errorf("Dependencies = %v, want the one outgoing edge to %s", got, blocker)
 	}
 	if len(details.Dependencies) == 1 && details.Dependencies[0].DependencyType != types.DepBlocks {
 		t.Errorf("the outgoing edge came back with type %q, want %q", details.Dependencies[0].DependencyType, types.DepBlocks)
 	}
-	assertReaderCount(t, "DependencyCount", details.DependencyCount, 1)
-	assertReaderCount(t, "DependentCount", details.DependentCount, 0)
-	assertReaderCount(t, "CommentCount", details.CommentCount, 0)
 }
 
 // RunReaderDoesNotMutateTheCallerRequest is the role's single request-snapshot
@@ -1450,23 +1492,20 @@ func RunReaderDoesNotMutateTheCallerRequest(t *testing.T, ctx context.Context, f
 	t.Helper()
 	limit := 5
 	ready := publicops.ReadyRequest{
-		Labels:         []string{"Beta", "alpha"},
-		LabelsAny:      []string{"gamma", " delta "},
-		ExcludeLabels:  []string{"omega"},
-		ExcludeTypes:   []string{"chore,epic", " feat "},
-		MetadataFields: map[string]string{"kind": "probe"},
-		Sort:           "priority",
-		Limit:          &limit,
+		Labels:    []string{"Beta", "alpha"},
+		LabelsAny: []string{"gamma", " delta "},
+		ReadyRequestFilters: publicops.ReadyRequestFilters{
+			ExcludeLabels:  []string{"omega"},
+			ExcludeTypes:   []string{"chore,epic", " feat "},
+			MetadataFields: map[string]string{"kind": "probe"},
+		},
+		Sort:  "priority",
+		Limit: &limit,
 	}
-	list := publicops.ListRequest{
-		IDFilter:       readerIDFilter(readerID(fixture, "nomut", "a"), readerID(fixture, "nomut", "b")),
-		Labels:         []string{"Beta", "alpha"},
-		LabelsAny:      []string{"gamma", " delta "},
-		ExcludeLabels:  []string{"omega"},
-		ExcludeTypes:   []string{"chore,epic", " feat "},
-		MetadataFields: map[string]string{"kind": "probe"},
-		SortBy:         "id",
-		Limit:          &limit,
+	list := publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: readerIDFilter(readerID(fixture, "nomut", "a"), readerID(fixture, "nomut", "b"))}, ListLabelFilters: publicops.ListLabelFilters{Labels: []string{"Beta", "alpha"},
+		LabelsAny:     []string{"gamma", " delta "},
+		ExcludeLabels: []string{"omega"}}, ListVisibilityOptions: publicops.ListVisibilityOptions{ExcludeTypes: []string{"chore,epic", " feat "}}, ListStateFilters: publicops.ListStateFilters{MetadataFields: map[string]string{"kind": "probe"}}, ListPageOptions: publicops.ListPageOptions{SortBy: "id",
+		Limit: &limit},
 	}
 	get := publicops.GetRequest{ID: readerID(fixture, "nomut", "absent")}
 
@@ -1538,9 +1577,7 @@ func RunReaderListLimitBoundaryUnderASortTheDatabaseCanExpress(t *testing.T, ctx
 	}
 	scope := readerIDFilter(ids...)
 
-	full, err := fixture.Reader.List(ctx, publicops.ListRequest{
-		IDFilter: scope, SortBy: "created", Limit: readerLimit(0),
-	})
+	full, err := fixture.Reader.List(ctx, publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: scope}, ListPageOptions: publicops.ListPageOptions{SortBy: "created", Limit: readerLimit(0)}})
 	if err != nil {
 		t.Fatalf("List --sort created --limit 0: %v", err)
 	}
@@ -1563,9 +1600,7 @@ func RunReaderListLimitBoundaryUnderASortTheDatabaseCanExpress(t *testing.T, ctx
 		{"a limit exactly at the result count hides nothing", readerLimit(3), 3, false},
 		{"a limit of one is the tightest page the over-fetch has to get right", readerLimit(1), 1, true},
 	} {
-		page, err := fixture.Reader.List(ctx, publicops.ListRequest{
-			IDFilter: scope, SortBy: "created", Limit: test.limit,
-		})
+		page, err := fixture.Reader.List(ctx, publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: scope}, ListPageOptions: publicops.ListPageOptions{SortBy: "created", Limit: test.limit}})
 		if err != nil {
 			t.Fatalf("List --sort created (%s): %v", test.name, err)
 		}
@@ -1640,9 +1675,9 @@ func RunReaderReadySetOwnsItsStatusPinnedAndTemplateDecisions(t *testing.T, ctx 
 		name string
 		req  publicops.ListRequest
 	}{
-		{"List --ready", publicops.ListRequest{Labels: []string{scope}, ReadyFlag: true}},
-		{"List --ready --templates", publicops.ListRequest{Labels: []string{scope}, ReadyFlag: true, IncludeTemplates: true}},
-		{"List --ready --skip-labels", publicops.ListRequest{Labels: []string{scope}, ReadyFlag: true, SkipLabels: true}},
+		{"List --ready", publicops.ListRequest{ListLabelFilters: publicops.ListLabelFilters{Labels: []string{scope}}, ListModeOptions: publicops.ListModeOptions{ReadyFlag: true}}},
+		{"List --ready --templates", publicops.ListRequest{ListLabelFilters: publicops.ListLabelFilters{Labels: []string{scope}}, ListVisibilityOptions: publicops.ListVisibilityOptions{IncludeTemplates: true}, ListModeOptions: publicops.ListModeOptions{ReadyFlag: true}}},
+		{"List --ready --skip-labels", publicops.ListRequest{ListLabelFilters: publicops.ListLabelFilters{Labels: []string{scope}}, ListProjectionOptions: publicops.ListProjectionOptions{SkipLabels: true}, ListModeOptions: publicops.ListModeOptions{ReadyFlag: true}}},
 	} {
 		page, err := fixture.Reader.List(ctx, test.req)
 		if err != nil {
@@ -1697,7 +1732,7 @@ func RunReaderListReadyFlagCarriesTheAssigneeAndPriorityFilters(t *testing.T, ct
 
 	// The unfiltered arm first: all three rows are ready, so every narrowing
 	// below is the filter's doing and not the scope's.
-	page, err := fixture.Reader.List(ctx, publicops.ListRequest{Labels: []string{scope}, ReadyFlag: true})
+	page, err := fixture.Reader.List(ctx, publicops.ListRequest{ListLabelFilters: publicops.ListLabelFilters{Labels: []string{scope}}, ListModeOptions: publicops.ListModeOptions{ReadyFlag: true}})
 	if err != nil {
 		t.Fatalf("List --ready: %v", err)
 	}
@@ -1709,9 +1744,9 @@ func RunReaderListReadyFlagCarriesTheAssigneeAndPriorityFilters(t *testing.T, ct
 		req  publicops.ListRequest
 		want []string
 	}{
-		{"List --ready --assignee", publicops.ListRequest{Labels: []string{scope}, ReadyFlag: true, Assignee: me}, []string{mine}},
-		{"List --ready --unassigned", publicops.ListRequest{Labels: []string{scope}, ReadyFlag: true, NoAssignee: true}, []string{nobodys}},
-		{"List --ready --priority", publicops.ListRequest{Labels: []string{scope}, ReadyFlag: true, Priority: &priority}, []string{theirs, nobodys}},
+		{"List --ready --assignee", publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{Assignee: me}, ListLabelFilters: publicops.ListLabelFilters{Labels: []string{scope}}, ListModeOptions: publicops.ListModeOptions{ReadyFlag: true}}, []string{mine}},
+		{"List --ready --unassigned", publicops.ListRequest{ListLabelFilters: publicops.ListLabelFilters{Labels: []string{scope}}, ListProjectionOptions: publicops.ListProjectionOptions{NoAssignee: true}, ListModeOptions: publicops.ListModeOptions{ReadyFlag: true}}, []string{nobodys}},
+		{"List --ready --priority", publicops.ListRequest{ListLabelFilters: publicops.ListLabelFilters{Labels: []string{scope}}, ListPriorityFilters: publicops.ListPriorityFilters{Priority: &priority}, ListModeOptions: publicops.ListModeOptions{ReadyFlag: true}}, []string{theirs, nobodys}},
 	} {
 		page, err := fixture.Reader.List(ctx, test.req)
 		if err != nil {
@@ -1760,7 +1795,7 @@ func RunReaderListStatusAcceptsACommaSeparatedORSet(t *testing.T, ctx context.Co
 		{"a three-status set is the whole seeded scope", "open,in_progress,closed", []string{open, inProgress, closed}},
 		{"whitespace around a member is the caller's, not the query's", " closed , open ", []string{closed, open}},
 	} {
-		page, err := fixture.Reader.List(ctx, publicops.ListRequest{IDFilter: scope, Status: test.status})
+		page, err := fixture.Reader.List(ctx, publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: scope, Status: test.status}})
 		if err != nil {
 			t.Fatalf("List --status %q (%s): %v", test.status, test.name, err)
 		}
@@ -1807,90 +1842,104 @@ func RunReaderListStatusAcceptsACommaSeparatedORSet(t *testing.T, ctx context.Co
 // the id tiebreak alone.
 func RunReaderReadyPageIsThePrefixOfTheUnboundedAnswerCountsIncluded(t *testing.T, ctx context.Context, fixture ReaderFixture) {
 	t.Helper()
-	scope := readerLabel(fixture, "rdycnt")
-	id := func(name string) string { return readerID(fixture, "rdycnt", name) }
-	plain, onedep, twodeps := id("plain"), id("onedep"), id("twodeps")
-	depended, commented, family := id("depended"), id("commented"), id("family")
-	closedA, closedB, closedC := id("closed-a"), id("closed-b"), id("closed-c")
-	dependentA, dependentB := id("dependent-a"), id("dependent-b")
-	parent, related := id("parent"), id("related")
+	seed := seedReadyCountsCase(t, ctx, fixture)
 
-	// The ready rows, in the order `oldest` will answer with. Whole seconds
-	// apart; the helpers below are unlabeled, so they are outside the scope
-	// this case queries no matter what state they are in.
+	request := func(limit int) publicops.ReadyRequest {
+		return publicops.ReadyRequest{Labels: []string{seed.scope}, Sort: "oldest", Limit: readerLimit(limit)}
+	}
+	unbounded, err := fixture.Reader.Ready(ctx, request(0))
+	if err != nil {
+		t.Fatalf("Ready unlimited: %v", err)
+	}
+	assertReadyCountsUnbounded(t, unbounded, seed)
+	assertReadyCountsPages(t, ctx, fixture, request, unbounded, len(seed.order))
+}
+
+type readyCountsSeed struct {
+	scope                       string
+	order                       []string
+	plain, onedep, twodeps      string
+	depended, commented, family string
+	parent                      string
+}
+
+func seedReadyCountsCase(t *testing.T, ctx context.Context, fixture ReaderFixture) readyCountsSeed {
+	id := func(name string) string { return readerID(fixture, "rdycnt", name) }
+	seed := readyCountsSeed{
+		scope:     readerLabel(fixture, "rdycnt"),
+		plain:     id("plain"),
+		onedep:    id("onedep"),
+		twodeps:   id("twodeps"),
+		depended:  id("depended"),
+		commented: id("commented"),
+		family:    id("family"),
+		parent:    id("parent"),
+	}
+	closedA, closedB, closedC := id("closed-a"), id("closed-b"), id("closed-c")
+	dependentA, dependentB, related := id("dependent-a"), id("dependent-b"), id("related")
+	seed.order = []string{seed.plain, seed.onedep, seed.twodeps, seed.depended, seed.commented, seed.family}
 	base := time.Now().UTC().Truncate(time.Second).Add(-2 * time.Hour)
-	order := []string{plain, onedep, twodeps, depended, commented, family}
-	for i, member := range order {
-		issue := readerIssue(member, types.TypeTask, scope)
+	for i, member := range seed.order {
+		issue := readerIssue(member, types.TypeTask, seed.scope)
 		at := base.Add(time.Duration(i) * time.Second)
-		issue.CreatedAt = at
-		issue.UpdatedAt = at
+		issue.CreatedAt, issue.UpdatedAt = at, at
 		seedReaderIssue(t, ctx, fixture, issue)
 	}
-	// A CLOSED blocker is a blocks dependency that does not block, which is the
-	// only way a row can be ready and carry a nonzero DependencyCount at once.
 	for _, blocker := range []string{closedA, closedB, closedC} {
 		closedIssue := readerIssue(blocker, types.TypeTask, "")
 		closedIssue.Status = types.StatusClosed
 		seedReaderIssue(t, ctx, fixture, closedIssue)
 	}
-	for _, helper := range []string{dependentA, dependentB, parent, related} {
+	for _, helper := range []string{dependentA, dependentB, seed.parent, related} {
 		seedReaderIssue(t, ctx, fixture, readerIssue(helper, types.TypeTask, ""))
 	}
 	for _, edge := range []*types.Dependency{
-		{IssueID: onedep, DependsOnID: closedA, Type: types.DepBlocks},
-		{IssueID: twodeps, DependsOnID: closedB, Type: types.DepBlocks},
-		{IssueID: twodeps, DependsOnID: closedC, Type: types.DepBlocks},
-		{IssueID: dependentA, DependsOnID: depended, Type: types.DepBlocks},
-		{IssueID: dependentB, DependsOnID: depended, Type: types.DepBlocks},
-		{IssueID: family, DependsOnID: parent, Type: types.DepParentChild},
-		{IssueID: family, DependsOnID: related, Type: types.DepRelatesTo},
+		{IssueID: seed.onedep, DependsOnID: closedA, Type: types.DepBlocks},
+		{IssueID: seed.twodeps, DependsOnID: closedB, Type: types.DepBlocks},
+		{IssueID: seed.twodeps, DependsOnID: closedC, Type: types.DepBlocks},
+		{IssueID: dependentA, DependsOnID: seed.depended, Type: types.DepBlocks},
+		{IssueID: dependentB, DependsOnID: seed.depended, Type: types.DepBlocks},
+		{IssueID: seed.family, DependsOnID: seed.parent, Type: types.DepParentChild},
+		{IssueID: seed.family, DependsOnID: related, Type: types.DepRelatesTo},
 	} {
 		if err := fixture.AddDependency(ctx, edge, "seed"); err != nil {
 			t.Fatalf("seed edge %s -> %s: %v", edge.IssueID, edge.DependsOnID, err)
 		}
 	}
 	for _, text := range []string{"first", "second"} {
-		if err := fixture.AddComment(ctx, commented, "seed", text); err != nil {
+		if err := fixture.AddComment(ctx, seed.commented, "seed", text); err != nil {
 			t.Fatalf("seed comment %q: %v", text, err)
 		}
 	}
+	return seed
+}
 
-	request := func(limit int) publicops.ReadyRequest {
-		return publicops.ReadyRequest{Labels: []string{scope}, Sort: "oldest", Limit: readerLimit(limit)}
-	}
-	unbounded, err := fixture.Reader.Ready(ctx, request(0))
-	if err != nil {
-		t.Fatalf("Ready unlimited: %v", err)
-	}
-	assertReaderPageIDs(t, "Ready unlimited", unbounded, order)
-	if unbounded.HasMore {
+func assertReadyCountsUnbounded(t *testing.T, page publicops.IssuePage, seed readyCountsSeed) {
+	assertReaderPageIDs(t, "Ready unlimited", page, seed.order)
+	if page.HasMore {
 		t.Error("Ready unlimited reported HasMore")
 	}
-
-	// The exact cardinalities, on the unbounded answer, before any page is
-	// compared against it. A prefix identity over two answers that were both
-	// wrong the same way is the shape of assertion this program keeps
-	// finding, so the reference is pinned to the seeds first.
 	for _, want := range []readerCounts{
-		{id: plain},
-		{id: onedep, dependencies: 1},
-		{id: twodeps, dependencies: 2},
-		{id: depended, dependents: 2},
-		{id: commented, comments: 2},
-		{id: family, parent: &parent},
+		{id: seed.plain},
+		{id: seed.onedep, dependencies: 1},
+		{id: seed.twodeps, dependencies: 2},
+		{id: seed.depended, dependents: 2},
+		{id: seed.commented, comments: 2},
+		{id: seed.family, parent: &seed.parent},
 	} {
-		assertReaderRowCounts(t, "Ready unlimited", unbounded, want)
+		assertReaderRowCounts(t, "Ready unlimited", page, want)
 	}
+}
 
-	for _, limit := range []int{1, 3, len(order), len(order) + 3} {
+func assertReadyCountsPages(t *testing.T, ctx context.Context, fixture ReaderFixture, request func(int) publicops.ReadyRequest, unbounded publicops.IssuePage, total int) {
+	for _, limit := range []int{1, 3, total, total + 3} {
 		page, pageErr := fixture.Reader.Ready(ctx, request(limit))
 		if pageErr != nil {
 			t.Errorf("Ready --limit %d: %v", limit, pageErr)
 			continue
 		}
-		assertReaderPageIsPrefixWithItsCounts(t, fmt.Sprintf("Ready --limit %d", limit), page, unbounded, min(limit, len(order)))
-		if want := limit < len(order); page.HasMore != want {
+		assertReaderPageIsPrefixWithItsCounts(t, fmt.Sprintf("Ready --limit %d", limit), page, unbounded, min(limit, total))
+		if want := limit < total; page.HasMore != want {
 			t.Errorf("Ready --limit %d reported HasMore = %v, want %v", limit, page.HasMore, want)
 		}
 	}
@@ -1980,7 +2029,8 @@ func RunReaderReadyEphemeralPageKeepsBothPlanesCountsAtItsBoundary(t *testing.T,
 	// Every bound from inside the first plane's run to past the end. The
 	// interesting ones are 3 and 4, where the cut lands between a wisp and the
 	// durable row that follows it.
-	for limit := 1; limit <= len(order)+1; limit++ {
+	orderCount := len(order)
+	for limit := 1; limit <= orderCount+1; limit++ {
 		page, pageErr := fixture.Reader.Ready(ctx, request(limit))
 		if pageErr != nil {
 			t.Errorf("Ready --include-ephemeral --limit %d: %v", limit, pageErr)
@@ -2106,16 +2156,42 @@ func RunReaderReadyPageWiderThanTheHydrationBatchIsStillThatPrefix(t *testing.T,
 // name one subject explicitly, so no other case's rows can reach either answer.
 func RunReaderListCountsAreBlocksOnlyWhereGetCountsEveryEdge(t *testing.T, ctx context.Context, fixture ReaderFixture) {
 	t.Helper()
-	id := func(name string) string { return readerID(fixture, "cntsplit", name) }
-	subject, orphan := id("subject"), id("orphan")
-	blocker, parent, related := id("blocker"), id("parent"), id("related")
-	blockedBy, alsoBlockedBy, child := id("blocked-by"), id("also-blocked-by"), id("child")
+	subject, orphan, parent := seedListCountsCase(t, ctx, fixture)
 
+	page, err := fixture.Reader.List(ctx, publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: readerIDFilter(subject, orphan)}})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	assertReaderRowCounts(t, "List", page, readerCounts{
+		id: subject, dependencies: 1, dependents: 2, comments: 2, parent: &parent,
+	})
+	assertReaderRowCounts(t, "List", page, readerCounts{id: orphan})
+
+	details, err := fixture.Reader.Get(ctx, publicops.GetRequest{ID: subject})
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	assertListCountsDetail(t, details)
+
+	// Said once more as the thing itself, so a future change that quietly
+	// unified the two vocabularies fails on the promise rather than on an
+	// arithmetic detail of this fixture.
+	row := readerRowByID(t, "List", page, subject)
+	if row == nil {
+		return
+	}
+	assertListCountsDiffer(t, row, details)
+}
+
+func seedListCountsCase(t *testing.T, ctx context.Context, fixture ReaderFixture) (subject, orphan, parent string) {
+	id := func(name string) string { return readerID(fixture, "cntsplit", name) }
+	subject, orphan = id("subject"), id("orphan")
+	blocker, parentID, related := id("blocker"), id("parent"), id("related")
+	blockedBy, alsoBlockedBy, child := id("blocked-by"), id("also-blocked-by"), id("child")
+	parent = parentID
 	for _, member := range []string{subject, orphan, blocker, parent, related, blockedBy, alsoBlockedBy, child} {
 		seedReaderIssue(t, ctx, fixture, readerIssue(member, types.TypeTask, ""))
 	}
-	// Three out, three in, one type each way that the page counts and two it
-	// does not.
 	for _, edge := range []*types.Dependency{
 		{IssueID: subject, DependsOnID: blocker, Type: types.DepBlocks},
 		{IssueID: subject, DependsOnID: parent, Type: types.DepParentChild},
@@ -2133,31 +2209,16 @@ func RunReaderListCountsAreBlocksOnlyWhereGetCountsEveryEdge(t *testing.T, ctx c
 			t.Fatalf("seed comment %q: %v", text, err)
 		}
 	}
+	return subject, orphan, parent
+}
 
-	page, err := fixture.Reader.List(ctx, publicops.ListRequest{IDFilter: readerIDFilter(subject, orphan)})
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	assertReaderRowCounts(t, "List", page, readerCounts{
-		id: subject, dependencies: 1, dependents: 2, comments: 2, parent: &parent,
-	})
-	assertReaderRowCounts(t, "List", page, readerCounts{id: orphan})
-
-	details, err := fixture.Reader.Get(ctx, publicops.GetRequest{ID: subject})
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
+func assertListCountsDetail(t *testing.T, details *publicops.IssueDetails) {
 	assertReaderCount(t, "Get DependencyCount", details.DependencyCount, 3)
 	assertReaderCount(t, "Get DependentCount", details.DependentCount, 3)
 	assertReaderCount(t, "Get CommentCount", details.CommentCount, 2)
+}
 
-	// Said once more as the thing itself, so a future change that quietly
-	// unified the two vocabularies fails on the promise rather than on an
-	// arithmetic detail of this fixture.
-	row := readerRowByID(t, "List", page, subject)
-	if row == nil {
-		return
-	}
+func assertListCountsDiffer(t *testing.T, row *types.IssueWithCounts, details *publicops.IssueDetails) {
 	if details.DependencyCount != nil && int64(row.DependencyCount) == *details.DependencyCount {
 		t.Errorf("the page and the detail view both answered DependencyCount = %d; the page counts blocks edges and the detail view counts every edge, and this subject has both kinds",
 			row.DependencyCount)
@@ -2268,7 +2329,7 @@ func RunReaderListParentReachesEveryDescendantAndOnlyItsOwn(t *testing.T, ctx co
 		{lower, []string{lowerChild, lowerGrandchild}},
 		{upper, []string{upperChild}},
 	} {
-		page, err := fixture.Reader.List(ctx, publicops.ListRequest{ParentID: test.parent})
+		page, err := fixture.Reader.List(ctx, publicops.ListRequest{ListRelationFilters: publicops.ListRelationFilters{ParentID: test.parent}})
 		if err != nil {
 			t.Fatalf("List --parent %s: %v", test.parent, err)
 		}
@@ -2313,6 +2374,29 @@ func RunReaderListParentReachesEveryDescendantAndOnlyItsOwn(t *testing.T, ctx co
 // have the engine, not the case, decide which rows tie.
 func RunReaderListKeysetWalkOverAnOversizedGroupLosesNothingAndRepeatsNothing(t *testing.T, ctx context.Context, fixture ReaderFixture) {
 	t.Helper()
+	seed := seedKeysetWalkCase(t, ctx, fixture)
+
+	oneShot, err := fixture.Reader.List(ctx, publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: seed.idScope}, ListPageOptions: publicops.ListPageOptions{SortBy: "created"}})
+	if err != nil {
+		t.Fatalf("List unpaged: %v", err)
+	}
+	assertReaderPageIDs(t, "List unpaged", oneShot, seed.want)
+
+	walked := walkKeysetPages(t, ctx, fixture, seed.idScope, len(seed.want))
+	if !slices.Equal(walked, seed.want) {
+		t.Errorf("the keyset walk delivered %v, want the one-shot sequence %v with nothing dropped and nothing repeated", walked, seed.want)
+	}
+
+	assertKeysetGroupStart(t, ctx, fixture, seed)
+}
+
+type keysetWalkSeed struct {
+	newer, older, idScope string
+	groupSecond           time.Time
+	group, want           []string
+}
+
+func seedKeysetWalkCase(t *testing.T, ctx context.Context, fixture ReaderFixture) keysetWalkSeed {
 	newer := readerID(fixture, "kswalk", "newer")
 	older := readerID(fixture, "kswalk", "older")
 	group := []string{
@@ -2321,11 +2405,9 @@ func RunReaderListKeysetWalkOverAnOversizedGroupLosesNothingAndRepeatsNothing(t 
 		readerID(fixture, "kswalk", "a5"),
 	}
 	groupSecond := time.Now().UTC().Truncate(time.Second).Add(-1 * time.Hour)
-
 	seed := func(memberID string, at time.Time) {
 		issue := readerIssue(memberID, types.TypeTask, "")
-		issue.CreatedAt = at
-		issue.UpdatedAt = at
+		issue.CreatedAt, issue.UpdatedAt = at, at
 		seedReaderIssue(t, ctx, fixture, issue)
 	}
 	seed(newer, groupSecond.Add(time.Second))
@@ -2333,68 +2415,78 @@ func RunReaderListKeysetWalkOverAnOversizedGroupLosesNothingAndRepeatsNothing(t 
 		seed(member, groupSecond)
 	}
 	seed(older, groupSecond.Add(-time.Second))
-
 	want := append([]string{newer}, group...)
 	want = append(want, older)
-	idScope := readerIDFilter(want...)
-
-	oneShot, err := fixture.Reader.List(ctx, publicops.ListRequest{IDFilter: idScope, SortBy: "created"})
-	if err != nil {
-		t.Fatalf("List unpaged: %v", err)
+	return keysetWalkSeed{
+		newer: newer, older: older, group: group, want: want,
+		groupSecond: groupSecond, idScope: readerIDFilter(want...),
 	}
-	assertReaderPageIDs(t, "List unpaged", oneShot, want)
+}
 
+func walkKeysetPages(t *testing.T, ctx context.Context, fixture ReaderFixture, idScope string, wantCount int) []string {
 	const pageSize = 2
 	var walked []string
-	seen := make(map[string]bool, len(want))
+	seen := make(map[string]bool, wantCount)
 	var afterCreatedAt *time.Time
 	afterID := ""
-	for page := 0; page <= len(want); page++ {
-		got, pageErr := fixture.Reader.List(ctx, publicops.ListRequest{
-			IDFilter: idScope, SortBy: "created", Limit: readerLimit(pageSize),
-			AfterCreatedAt: afterCreatedAt, AfterID: afterID,
-		})
-		if pageErr != nil {
-			t.Fatalf("List page %d: %v", page, pageErr)
-		}
-		if len(got.Items) == 0 {
-			if got.HasMore {
-				t.Errorf("List page %d came back empty with HasMore set", page)
-			}
+	for page := 0; page <= wantCount; page++ {
+		result := readKeysetWalkPage(t, ctx, fixture, idScope, page, pageSize, afterCreatedAt, afterID, seen)
+		if result.done {
 			break
 		}
-		if len(got.Items) > pageSize {
-			t.Fatalf("List page %d answered %d rows over a Limit of %d", page, len(got.Items), pageSize)
-		}
-		for _, item := range got.Items {
-			if item == nil || item.Issue == nil {
-				t.Fatalf("List page %d returned a nil row", page)
-			}
-			if seen[item.ID] {
-				t.Fatalf("List page %d repeated %s: the same-second group is larger than the page, and the position re-delivered a row it had already handed out",
-					page, item.ID)
-			}
-			seen[item.ID] = true
-			walked = append(walked, item.ID)
-		}
-		last := got.Items[len(got.Items)-1]
-		at := last.CreatedAt.UTC()
-		afterCreatedAt = &at
-		afterID = last.ID
+		walked = append(walked, result.ids...)
+		afterCreatedAt, afterID = result.afterCreatedAt, result.afterID
 	}
-	if !slices.Equal(walked, want) {
-		t.Errorf("the keyset walk delivered %v, want the one-shot sequence %v with nothing dropped and nothing repeated", walked, want)
-	}
+	return walked
+}
 
-	// The group-start form: a position naming the second with no id starts that
-	// second from its first row rather than skipping the group.
-	fromGroupStart, err := fixture.Reader.List(ctx, publicops.ListRequest{
-		IDFilter: idScope, SortBy: "created", AfterCreatedAt: &groupSecond, AfterID: "",
+type keysetPageResult struct {
+	ids            []string
+	afterCreatedAt *time.Time
+	afterID        string
+	done           bool
+}
+
+func readKeysetWalkPage(t *testing.T, ctx context.Context, fixture ReaderFixture, idScope string, page, pageSize int, afterCreatedAt *time.Time, afterID string, seen map[string]bool) keysetPageResult {
+	got, err := fixture.Reader.List(ctx, publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: idScope}, ListPageOptions: publicops.ListPageOptions{SortBy: "created", Limit: readerLimit(pageSize),
+		AfterCreatedAt: afterCreatedAt, AfterID: afterID},
 	})
+	if err != nil {
+		t.Fatalf("List page %d: %v", page, err)
+	}
+	if len(got.Items) == 0 {
+		if got.HasMore {
+			t.Errorf("List page %d came back empty with HasMore set", page)
+		}
+		return keysetPageResult{done: true}
+	}
+	if len(got.Items) > pageSize {
+		t.Fatalf("List page %d answered %d rows over a Limit of %d", page, len(got.Items), pageSize)
+	}
+	ids := make([]string, 0, len(got.Items))
+	for _, item := range got.Items {
+		if item == nil || item.Issue == nil {
+			t.Fatalf("List page %d returned a nil row", page)
+		}
+		if seen[item.ID] {
+			t.Fatalf("List page %d repeated %s: the same-second group is larger than the page, and the position re-delivered a row it had already handed out",
+				page, item.ID)
+		}
+		seen[item.ID] = true
+		ids = append(ids, item.ID)
+	}
+	last := got.Items[len(got.Items)-1]
+	at := last.CreatedAt.UTC()
+	return keysetPageResult{ids: ids, afterCreatedAt: &at, afterID: last.ID}
+}
+
+func assertKeysetGroupStart(t *testing.T, ctx context.Context, fixture ReaderFixture, seed keysetWalkSeed) {
+	fromGroupStart, err := fixture.Reader.List(ctx, publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: seed.idScope}, ListPageOptions: publicops.ListPageOptions{SortBy: "created", AfterCreatedAt: &seed.groupSecond, AfterID: ""}})
 	if err != nil {
 		t.Fatalf(`List from (the group's second, ""): %v`, err)
 	}
-	assertReaderPageIDs(t, `List from (the group's second, "")`, fromGroupStart, append(slices.Clone(group), older))
+	want := append(slices.Clone(seed.group), seed.older)
+	assertReaderPageIDs(t, `List from (the group's second, "")`, fromGroupStart, want)
 }
 
 // RunReaderListKeysetPositionNarrowsWithoutReplacingTheOtherPredicates pins the
@@ -2450,10 +2542,8 @@ func RunReaderListKeysetPositionNarrowsWithoutReplacingTheOtherPredicates(t *tes
 		seed(id(fmt.Sprintf("shadow%d", i)), at, types.StatusOpen)
 	}
 
-	base := publicops.ListRequest{
-		IDFilter: readerIDFilter(newest, cursor, closedSibling, sameSecond, older, closedOlder, oldest),
-		Status:   string(types.StatusOpen),
-		SortBy:   "created",
+	base := publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: readerIDFilter(newest, cursor, closedSibling, sameSecond, older, closedOlder, oldest),
+		Status: string(types.StatusOpen)}, ListPageOptions: publicops.ListPageOptions{SortBy: "created"},
 	}
 	matched, err := fixture.Reader.List(ctx, base)
 	if err != nil {
@@ -2507,37 +2597,9 @@ func RunReaderListKeysetPositionNarrowsWithoutReplacingTheOtherPredicates(t *tes
 // happens to read first.
 func RunReaderListIncludeEphemeralMergesThePlanesIntoOneOrder(t *testing.T, ctx context.Context, fixture ReaderFixture) {
 	t.Helper()
-	id := func(name string) string { return readerID(fixture, "lseph", name) }
-	seeds := []struct {
-		id        string
-		ephemeral bool
-	}{
-		{id("i1"), false}, {id("w1"), true}, {id("i2"), false},
-		{id("w2"), true}, {id("i3"), false}, {id("w3"), true},
-	}
+	merged, durableOnly := seedIncludeEphemeralCase(t, ctx, fixture)
 
-	firstSecond := time.Now().UTC().Truncate(time.Second).Add(-2 * time.Hour)
-	var merged, durableOnly []string
-	for i, seed := range seeds {
-		issue := readerIssue(seed.id, types.TypeTask, "")
-		at := firstSecond.Add(time.Duration(i) * time.Second)
-		issue.CreatedAt = at
-		issue.UpdatedAt = at
-		if seed.ephemeral {
-			issue.Ephemeral = true
-			seedReaderWisp(t, ctx, fixture, issue)
-		} else {
-			seedReaderIssue(t, ctx, fixture, issue)
-			durableOnly = append(durableOnly, seed.id)
-		}
-		merged = append(merged, seed.id)
-	}
-	// The answer is (created_at DESC, id ASC), so both expectations run
-	// youngest first — the reverse of the seeding order.
-	slices.Reverse(merged)
-	slices.Reverse(durableOnly)
-
-	scoped := publicops.ListRequest{IDFilter: readerIDFilter(merged...), SortBy: "created"}
+	scoped := publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: readerIDFilter(merged...)}, ListPageOptions: publicops.ListPageOptions{SortBy: "created"}}
 	durable, err := fixture.Reader.List(ctx, scoped)
 	if err != nil {
 		t.Fatalf("List over both planes' ids without the flag: %v", err)
@@ -2551,12 +2613,44 @@ func RunReaderListIncludeEphemeralMergesThePlanesIntoOneOrder(t *testing.T, ctx 
 		t.Fatalf("List --include-ephemeral: %v", err)
 	}
 	assertReaderPageIDs(t, "List --include-ephemeral", all, merged)
+	assertIncludeEphemeralLimits(t, ctx, fixture, admitted, merged)
+	walked := walkIncludeEphemeralPages(t, ctx, fixture, admitted, len(merged))
+	if !slices.Equal(walked, merged) {
+		t.Errorf("the keyset walk over the merged planes delivered %v, want the one-shot sequence %v with nothing dropped and nothing repeated", walked, merged)
+	}
+}
 
-	// Every bound from inside the first plane's run to past the end. The
-	// interesting ones are the cuts that land between a wisp and the durable
-	// row next to it, which is where a body that trimmed one plane before
-	// merging keeps the wrong row.
-	for limit := 1; limit <= len(merged)+1; limit++ {
+func seedIncludeEphemeralCase(t *testing.T, ctx context.Context, fixture ReaderFixture) (merged, durableOnly []string) {
+	id := func(name string) string { return readerID(fixture, "lseph", name) }
+	seeds := []struct {
+		id        string
+		ephemeral bool
+	}{
+		{id("i1"), false}, {id("w1"), true}, {id("i2"), false},
+		{id("w2"), true}, {id("i3"), false}, {id("w3"), true},
+	}
+	firstSecond := time.Now().UTC().Truncate(time.Second).Add(-2 * time.Hour)
+	for i, seed := range seeds {
+		issue := readerIssue(seed.id, types.TypeTask, "")
+		at := firstSecond.Add(time.Duration(i) * time.Second)
+		issue.CreatedAt, issue.UpdatedAt = at, at
+		if seed.ephemeral {
+			issue.Ephemeral = true
+			seedReaderWisp(t, ctx, fixture, issue)
+		} else {
+			seedReaderIssue(t, ctx, fixture, issue)
+			durableOnly = append(durableOnly, seed.id)
+		}
+		merged = append(merged, seed.id)
+	}
+	slices.Reverse(merged)
+	slices.Reverse(durableOnly)
+	return merged, durableOnly
+}
+
+func assertIncludeEphemeralLimits(t *testing.T, ctx context.Context, fixture ReaderFixture, admitted publicops.ListRequest, merged []string) {
+	mergedCount := len(merged)
+	for limit := 1; limit <= mergedCount+1; limit++ {
 		bounded := admitted
 		bounded.Limit = readerLimit(limit)
 		page, pageErr := fixture.Reader.List(ctx, bounded)
@@ -2564,58 +2658,64 @@ func RunReaderListIncludeEphemeralMergesThePlanesIntoOneOrder(t *testing.T, ctx 
 			t.Errorf("List --include-ephemeral --limit %d: %v", limit, pageErr)
 			continue
 		}
-		assertReaderPageIDs(t, fmt.Sprintf("List --include-ephemeral --limit %d", limit), page, merged[:min(limit, len(merged))])
-		if want := limit < len(merged); page.HasMore != want {
+		what := fmt.Sprintf("List --include-ephemeral --limit %d", limit)
+		assertReaderPageIDs(t, what, page, merged[:min(limit, mergedCount)])
+		if want := limit < mergedCount; page.HasMore != want {
 			t.Errorf("List --include-ephemeral --limit %d reported HasMore = %v, want %v", limit, page.HasMore, want)
 		}
 	}
+}
 
-	// The keyset walk across the merge. The position is a created-order pair
-	// and neither half of it names a plane, so a walk that resumes correctly on
-	// one plane and skips the other is the failure this looks for: every page
-	// but the first resumes from a row of the plane the previous page ended on.
+func walkIncludeEphemeralPages(t *testing.T, ctx context.Context, fixture ReaderFixture, admitted publicops.ListRequest, wantCount int) []string {
 	const pageSize = 2
 	var walked []string
-	seen := make(map[string]bool, len(merged))
+	seen := make(map[string]bool, wantCount)
 	var afterCreatedAt *time.Time
 	afterID := ""
-	for page := 0; page <= len(merged); page++ {
-		req := admitted
-		req.Limit = readerLimit(pageSize)
-		req.AfterCreatedAt = afterCreatedAt
-		req.AfterID = afterID
-		got, pageErr := fixture.Reader.List(ctx, req)
-		if pageErr != nil {
-			t.Fatalf("List --include-ephemeral page %d: %v", page, pageErr)
-		}
-		if len(got.Items) == 0 {
-			if got.HasMore {
-				t.Errorf("List --include-ephemeral page %d came back empty with HasMore set", page)
-			}
+	for page := 0; page <= wantCount; page++ {
+		result := readIncludeEphemeralPage(t, ctx, fixture, admitted, page, pageSize, afterCreatedAt, afterID, seen)
+		if result.done {
 			break
 		}
-		if len(got.Items) > pageSize {
-			t.Fatalf("List --include-ephemeral page %d answered %d rows over a Limit of %d", page, len(got.Items), pageSize)
-		}
-		for _, item := range got.Items {
-			if item == nil || item.Issue == nil {
-				t.Fatalf("List --include-ephemeral page %d returned a nil row", page)
-			}
-			if seen[item.ID] {
-				t.Fatalf("List --include-ephemeral page %d repeated %s: a position that crossed the plane boundary re-delivered a row it had already handed out",
-					page, item.ID)
-			}
-			seen[item.ID] = true
-			walked = append(walked, item.ID)
-		}
-		last := got.Items[len(got.Items)-1]
-		at := last.CreatedAt.UTC()
-		afterCreatedAt = &at
-		afterID = last.ID
+		walked = append(walked, result.ids...)
+		afterCreatedAt, afterID = result.afterCreatedAt, result.afterID
 	}
-	if !slices.Equal(walked, merged) {
-		t.Errorf("the keyset walk over the merged planes delivered %v, want the one-shot sequence %v with nothing dropped and nothing repeated", walked, merged)
+	return walked
+}
+
+func readIncludeEphemeralPage(t *testing.T, ctx context.Context, fixture ReaderFixture, admitted publicops.ListRequest, page, pageSize int, afterCreatedAt *time.Time, afterID string, seen map[string]bool) keysetPageResult {
+	req := admitted
+	req.Limit = readerLimit(pageSize)
+	req.AfterCreatedAt = afterCreatedAt
+	req.AfterID = afterID
+	got, err := fixture.Reader.List(ctx, req)
+	if err != nil {
+		t.Fatalf("List --include-ephemeral page %d: %v", page, err)
 	}
+	if len(got.Items) == 0 {
+		if got.HasMore {
+			t.Errorf("List --include-ephemeral page %d came back empty with HasMore set", page)
+		}
+		return keysetPageResult{done: true}
+	}
+	if len(got.Items) > pageSize {
+		t.Fatalf("List --include-ephemeral page %d answered %d rows over a Limit of %d", page, len(got.Items), pageSize)
+	}
+	ids := make([]string, 0, len(got.Items))
+	for _, item := range got.Items {
+		if item == nil || item.Issue == nil {
+			t.Fatalf("List --include-ephemeral page %d returned a nil row", page)
+		}
+		if seen[item.ID] {
+			t.Fatalf("List --include-ephemeral page %d repeated %s: a position that crossed the plane boundary re-delivered a row it had already handed out",
+				page, item.ID)
+		}
+		seen[item.ID] = true
+		ids = append(ids, item.ID)
+	}
+	last := got.Items[len(got.Items)-1]
+	at := last.CreatedAt.UTC()
+	return keysetPageResult{ids: ids, afterCreatedAt: &at, afterID: last.ID}
 }
 
 // RunReaderListWispTypeNarrowsTheAdmittedPlaneRatherThanAdmittingIt pins
@@ -2660,10 +2760,10 @@ func RunReaderListWispTypeNarrowsTheAdmittedPlaneRatherThanAdmittingIt(t *testin
 		req  publicops.ListRequest
 		want []string
 	}{
-		{"WispType alone admits no plane", publicops.ListRequest{IDFilter: scope, WispType: wispType(types.WispTypeHeartbeat)}, nil},
-		{"IncludeEphemeral alone admits every classification", publicops.ListRequest{IDFilter: scope, IncludeEphemeral: true}, []string{durable, heartbeat, patrol}},
-		{"the two compose as an AND", publicops.ListRequest{IDFilter: scope, IncludeEphemeral: true, WispType: wispType(types.WispTypeHeartbeat)}, []string{heartbeat}},
-		{"and the other classification is reachable the same way", publicops.ListRequest{IDFilter: scope, IncludeEphemeral: true, WispType: wispType(types.WispTypePatrol)}, []string{patrol}},
+		{"WispType alone admits no plane", publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: scope}, ListRelationFilters: publicops.ListRelationFilters{WispType: wispType(types.WispTypeHeartbeat)}}, nil},
+		{"IncludeEphemeral alone admits every classification", publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: scope}, ListVisibilityOptions: publicops.ListVisibilityOptions{IncludeEphemeral: true}}, []string{durable, heartbeat, patrol}},
+		{"the two compose as an AND", publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: scope}, ListVisibilityOptions: publicops.ListVisibilityOptions{IncludeEphemeral: true}, ListRelationFilters: publicops.ListRelationFilters{WispType: wispType(types.WispTypeHeartbeat)}}, []string{heartbeat}},
+		{"and the other classification is reachable the same way", publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: scope}, ListVisibilityOptions: publicops.ListVisibilityOptions{IncludeEphemeral: true}, ListRelationFilters: publicops.ListRelationFilters{WispType: wispType(types.WispTypePatrol)}}, []string{patrol}},
 	} {
 		page, err := fixture.Reader.List(ctx, test.req)
 		if err != nil {
@@ -2700,32 +2800,9 @@ func RunReaderListWispTypeNarrowsTheAdmittedPlaneRatherThanAdmittingIt(t *testin
 // without setting it would answer correctly and lie about why.
 func RunReaderListBriefDropsTheFreeFormTextAndNothingElse(t *testing.T, ctx context.Context, fixture ReaderFixture) {
 	t.Helper()
-	subject := readerID(fixture, "lsbrief", "subject")
-	blocker := readerID(fixture, "lsbrief", "blocker")
-	dependent := readerID(fixture, "lsbrief", "dependent")
-	parent := readerID(fixture, "lsbrief", "parent")
-	label := readerLabel(fixture, "lsbrief")
+	subject, blocker, dependent, parent := seedListBriefCase(t, ctx, fixture)
 
-	for _, id := range []string{subject, blocker, dependent, parent} {
-		seedReaderIssue(t, ctx, fixture, readerHeavyIssue(id, label))
-	}
-	// The same three edges and one comment the SkipCounts case seeds, so the
-	// counts and Parent this one holds STILL are nonzero and can be tripwires
-	// for a projection that suppressed more than the text.
-	for _, edge := range []*types.Dependency{
-		{IssueID: subject, DependsOnID: blocker, Type: types.DepBlocks},
-		{IssueID: dependent, DependsOnID: subject, Type: types.DepBlocks},
-		{IssueID: subject, DependsOnID: parent, Type: types.DepParentChild},
-	} {
-		if err := fixture.AddDependency(ctx, edge, "seed"); err != nil {
-			t.Fatalf("seed edge %s -> %s: %v", edge.IssueID, edge.DependsOnID, err)
-		}
-	}
-	if err := fixture.AddComment(ctx, subject, "seed", "so the comment count is nonzero"); err != nil {
-		t.Fatalf("seed the comment: %v", err)
-	}
-
-	req := publicops.ListRequest{IDFilter: readerIDFilter(subject, blocker, dependent, parent), SortBy: "created"}
+	req := publicops.ListRequest{ListIdentityFilters: publicops.ListIdentityFilters{IDFilter: readerIDFilter(subject, blocker, dependent, parent)}, ListPageOptions: publicops.ListPageOptions{SortBy: "created"}}
 	hydrated, err := fixture.Reader.List(ctx, req)
 	if err != nil {
 		t.Fatalf("List with the text hydrated: %v", err)
@@ -2734,11 +2811,7 @@ func RunReaderListBriefDropsTheFreeFormTextAndNothingElse(t *testing.T, ctx cont
 	if hydratedRow == nil {
 		return
 	}
-	assertReaderHeavyPremise(t, "List", hydratedRow.Issue)
-	if hydratedRow.DependencyCount == 0 || hydratedRow.DependentCount == 0 || hydratedRow.CommentCount == 0 || hydratedRow.Parent == nil {
-		t.Fatalf("the seeded subject came back with counts (%d, %d, %d) and Parent %v; this case needs all of them populated before it can assert Brief leaves them alone",
-			hydratedRow.DependencyCount, hydratedRow.DependentCount, hydratedRow.CommentCount, readerParentText(hydratedRow.Parent))
-	}
+	assertListBriefHydratedPremise(t, hydratedRow)
 
 	req.Brief = true
 	brief, err := fixture.Reader.List(ctx, req)
@@ -2750,33 +2823,8 @@ func RunReaderListBriefDropsTheFreeFormTextAndNothingElse(t *testing.T, ctx cont
 		return
 	}
 	assertReaderBriefRow(t, "List with Brief", briefRow.Issue, hydratedRow.Issue)
-
-	if !slices.Equal(readerPageIDs(brief), readerPageIDs(hydrated)) {
-		t.Errorf("List with Brief returned %v, want the same page as without it, %v: this knob chooses what is hydrated, never which rows match",
-			readerPageIDs(brief), readerPageIDs(hydrated))
-	}
-	if brief.HasMore != hydrated.HasMore {
-		t.Errorf("List with Brief reported HasMore = %v, want %v", brief.HasMore, hydrated.HasMore)
-	}
-	for _, got := range []struct {
-		what      string
-		got, want int
-	}{
-		{"DependencyCount", briefRow.DependencyCount, hydratedRow.DependencyCount},
-		{"DependentCount", briefRow.DependentCount, hydratedRow.DependentCount},
-		{"CommentCount", briefRow.CommentCount, hydratedRow.CommentCount},
-	} {
-		if got.got != got.want {
-			t.Errorf("List with Brief returned %s = %d, want %d: Brief bounds a row's TEXT and no aggregate beside it", got.what, got.got, got.want)
-		}
-	}
-	if !readerSameParent(briefRow.Parent, hydratedRow.Parent) {
-		t.Errorf("List with Brief returned Parent = %v, want %v: Parent is not free-form text and rides the same query",
-			readerParentText(briefRow.Parent), readerParentText(hydratedRow.Parent))
-	}
-	if !slices.Equal(briefRow.Labels, hydratedRow.Labels) {
-		t.Errorf("List with Brief returned Labels = %v, want %v: labels are their own opt-out (SkipLabels) and this is not it", briefRow.Labels, hydratedRow.Labels)
-	}
+	assertBriefPageUnchanged(t, "List with Brief", brief, hydrated)
+	assertListBriefMetadata(t, briefRow, hydratedRow)
 }
 
 // RunReaderReadyBriefDropsTheFreeFormTextAndNothingElse is ListRequest.Brief's
@@ -2789,22 +2837,7 @@ func RunReaderListBriefDropsTheFreeFormTextAndNothingElse(t *testing.T, ctx cont
 // the CLI, so this case is the only thing holding it.
 func RunReaderReadyBriefDropsTheFreeFormTextAndNothingElse(t *testing.T, ctx context.Context, fixture ReaderFixture) {
 	t.Helper()
-	label := readerLabel(fixture, "rdybrief")
-	subject := readerID(fixture, "rdybrief", "subject")
-	dependent := readerID(fixture, "rdybrief", "dependent")
-
-	for _, id := range []string{subject, dependent} {
-		seedReaderIssue(t, ctx, fixture, readerHeavyIssue(id, label))
-	}
-	// An INCOMING blocks edge only. It leaves the subject itself unblocked, so
-	// it still qualifies for ready work, while giving its row a nonzero
-	// DependentCount for the same tripwire the listing case uses.
-	if err := fixture.AddDependency(ctx, &types.Dependency{IssueID: dependent, DependsOnID: subject, Type: types.DepBlocks}, "seed"); err != nil {
-		t.Fatalf("seed edge %s -> %s: %v", dependent, subject, err)
-	}
-	if err := fixture.AddComment(ctx, subject, "seed", "so the comment count is nonzero"); err != nil {
-		t.Fatalf("seed the comment: %v", err)
-	}
+	label, subject := seedReadyBriefCase(t, ctx, fixture)
 
 	req := publicops.ReadyRequest{Labels: []string{label}, Sort: "oldest"}
 	hydrated, err := fixture.Reader.Ready(ctx, req)
@@ -2816,10 +2849,7 @@ func RunReaderReadyBriefDropsTheFreeFormTextAndNothingElse(t *testing.T, ctx con
 		return
 	}
 	assertReaderHeavyPremise(t, "Ready", hydratedRow.Issue)
-	if hydratedRow.DependentCount == 0 || hydratedRow.CommentCount == 0 {
-		t.Fatalf("the seeded subject came back with DependentCount %d and CommentCount %d; this case needs both nonzero before it can assert Brief leaves them alone",
-			hydratedRow.DependentCount, hydratedRow.CommentCount)
-	}
+	assertReadyBriefHydratedPremise(t, hydratedRow)
 
 	req.Brief = true
 	brief, err := fixture.Reader.Ready(ctx, req)
@@ -2831,22 +2861,105 @@ func RunReaderReadyBriefDropsTheFreeFormTextAndNothingElse(t *testing.T, ctx con
 		return
 	}
 	assertReaderBriefRow(t, "Ready with Brief", briefRow.Issue, hydratedRow.Issue)
+	assertBriefPageUnchanged(t, "Ready with Brief", brief, hydrated)
+	assertReadyBriefMetadata(t, briefRow, hydratedRow)
+}
 
+func seedListBriefCase(t *testing.T, ctx context.Context, fixture ReaderFixture) (subject, blocker, dependent, parent string) {
+	subject = readerID(fixture, "lsbrief", "subject")
+	blocker = readerID(fixture, "lsbrief", "blocker")
+	dependent = readerID(fixture, "lsbrief", "dependent")
+	parent = readerID(fixture, "lsbrief", "parent")
+	label := readerLabel(fixture, "lsbrief")
+	for _, id := range []string{subject, blocker, dependent, parent} {
+		seedReaderIssue(t, ctx, fixture, readerHeavyIssue(id, label))
+	}
+	for _, edge := range []*types.Dependency{
+		{IssueID: subject, DependsOnID: blocker, Type: types.DepBlocks},
+		{IssueID: dependent, DependsOnID: subject, Type: types.DepBlocks},
+		{IssueID: subject, DependsOnID: parent, Type: types.DepParentChild},
+	} {
+		if err := fixture.AddDependency(ctx, edge, "seed"); err != nil {
+			t.Fatalf("seed edge %s -> %s: %v", edge.IssueID, edge.DependsOnID, err)
+		}
+	}
+	if err := fixture.AddComment(ctx, subject, "seed", "so the comment count is nonzero"); err != nil {
+		t.Fatalf("seed the comment: %v", err)
+	}
+	return subject, blocker, dependent, parent
+}
+
+func assertListBriefHydratedPremise(t *testing.T, row *types.IssueWithCounts) {
+	assertReaderHeavyPremise(t, "List", row.Issue)
+	if row.DependencyCount == 0 || row.DependentCount == 0 || row.CommentCount == 0 || row.Parent == nil {
+		t.Fatalf("the seeded subject came back with counts (%d, %d, %d) and Parent %v; this case needs all of them populated before it can assert Brief leaves them alone",
+			row.DependencyCount, row.DependentCount, row.CommentCount, readerParentText(row.Parent))
+	}
+}
+
+func assertBriefPageUnchanged(t *testing.T, what string, brief, hydrated publicops.IssuePage) {
 	if !slices.Equal(readerPageIDs(brief), readerPageIDs(hydrated)) {
-		t.Errorf("Ready with Brief returned %v, want the same page as without it, %v", readerPageIDs(brief), readerPageIDs(hydrated))
+		t.Errorf("%s returned %v, want the same page as without it, %v: this knob chooses what is hydrated, never which rows match",
+			what, readerPageIDs(brief), readerPageIDs(hydrated))
 	}
 	if brief.HasMore != hydrated.HasMore {
-		t.Errorf("Ready with Brief reported HasMore = %v, want %v", brief.HasMore, hydrated.HasMore)
+		t.Errorf("%s reported HasMore = %v, want %v", what, brief.HasMore, hydrated.HasMore)
 	}
-	// Ready carries no SkipLabels and no SkipCounts (issueops.readyHydrationFor),
-	// so an implementation that reached for the listing's hydration helper here
-	// would drop these along with the text.
-	if briefRow.DependentCount != hydratedRow.DependentCount || briefRow.CommentCount != hydratedRow.CommentCount {
+}
+
+func assertListBriefMetadata(t *testing.T, brief, hydrated *types.IssueWithCounts) {
+	for _, got := range []struct {
+		what      string
+		got, want int
+	}{
+		{"DependencyCount", brief.DependencyCount, hydrated.DependencyCount},
+		{"DependentCount", brief.DependentCount, hydrated.DependentCount},
+		{"CommentCount", brief.CommentCount, hydrated.CommentCount},
+	} {
+		if got.got != got.want {
+			t.Errorf("List with Brief returned %s = %d, want %d: Brief bounds a row's TEXT and no aggregate beside it", got.what, got.got, got.want)
+		}
+	}
+	if !readerSameParent(brief.Parent, hydrated.Parent) {
+		t.Errorf("List with Brief returned Parent = %v, want %v: Parent is not free-form text and rides the same query",
+			readerParentText(brief.Parent), readerParentText(hydrated.Parent))
+	}
+	if !slices.Equal(brief.Labels, hydrated.Labels) {
+		t.Errorf("List with Brief returned Labels = %v, want %v: labels are their own opt-out (SkipLabels) and this is not it", brief.Labels, hydrated.Labels)
+	}
+}
+
+func seedReadyBriefCase(t *testing.T, ctx context.Context, fixture ReaderFixture) (label, subject string) {
+	var dependent string
+	label = readerLabel(fixture, "rdybrief")
+	subject = readerID(fixture, "rdybrief", "subject")
+	dependent = readerID(fixture, "rdybrief", "dependent")
+	for _, id := range []string{subject, dependent} {
+		seedReaderIssue(t, ctx, fixture, readerHeavyIssue(id, label))
+	}
+	if err := fixture.AddDependency(ctx, &types.Dependency{IssueID: dependent, DependsOnID: subject, Type: types.DepBlocks}, "seed"); err != nil {
+		t.Fatalf("seed edge %s -> %s: %v", dependent, subject, err)
+	}
+	if err := fixture.AddComment(ctx, subject, "seed", "so the comment count is nonzero"); err != nil {
+		t.Fatalf("seed the comment: %v", err)
+	}
+	return label, subject
+}
+
+func assertReadyBriefHydratedPremise(t *testing.T, row *types.IssueWithCounts) {
+	if row.DependentCount == 0 || row.CommentCount == 0 {
+		t.Fatalf("the seeded subject came back with DependentCount %d and CommentCount %d; this case needs both nonzero before it can assert Brief leaves them alone",
+			row.DependentCount, row.CommentCount)
+	}
+}
+
+func assertReadyBriefMetadata(t *testing.T, brief, hydrated *types.IssueWithCounts) {
+	if brief.DependentCount != hydrated.DependentCount || brief.CommentCount != hydrated.CommentCount {
 		t.Errorf("Ready with Brief returned DependentCount %d / CommentCount %d, want %d / %d: a ready filter carries no counts opt-out",
-			briefRow.DependentCount, briefRow.CommentCount, hydratedRow.DependentCount, hydratedRow.CommentCount)
+			brief.DependentCount, brief.CommentCount, hydrated.DependentCount, hydrated.CommentCount)
 	}
-	if !slices.Equal(briefRow.Labels, hydratedRow.Labels) {
-		t.Errorf("Ready with Brief returned Labels = %v, want %v: a ready filter carries no label opt-out either", briefRow.Labels, hydratedRow.Labels)
+	if !slices.Equal(brief.Labels, hydrated.Labels) {
+		t.Errorf("Ready with Brief returned Labels = %v, want %v: a ready filter carries no label opt-out either", brief.Labels, hydrated.Labels)
 	}
 }
 
@@ -2935,11 +3048,17 @@ func assertReaderBriefRow(t *testing.T, what string, brief, full *types.Issue) {
 // of those tests changes the field it means to test and nothing else.
 func readerIssue(id string, issueType types.IssueType, label string) *types.Issue {
 	issue := &types.Issue{
-		ID:        id,
-		Title:     id,
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: issueType,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: issueType,
+		},
 	}
 	if label != "" {
 		issue.Labels = []string{label}

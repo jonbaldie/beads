@@ -22,12 +22,20 @@ func TestBurnWisps(t *testing.T) {
 
 	t.Run("DeletesSingleWisp", func(t *testing.T) {
 		wisp := &types.Issue{
-			Title:     "Wisp to burn",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Ephemeral: true,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Wisp to burn",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		}
 		if err := s.CreateIssue(ctx, wisp, "test"); err != nil {
 			t.Fatalf("Failed to create wisp: %v", err)
@@ -56,12 +64,20 @@ func TestBurnWisps(t *testing.T) {
 		var ids []string
 		for i := 0; i < 3; i++ {
 			wisp := &types.Issue{
-				Title:     "Batch wisp",
-				Status:    types.StatusOpen,
-				Priority:  2,
-				IssueType: types.TypeTask,
-				Ephemeral: true,
-				CreatedAt: time.Now(),
+				IssueContent: types.IssueContent{
+					Title: "Batch wisp",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  2,
+					IssueType: types.TypeTask,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: time.Now(),
+				},
+				IssueWisp: types.IssueWisp{
+					Ephemeral: true,
+				},
 			}
 			if err := s.CreateIssue(ctx, wisp, "test"); err != nil {
 				t.Fatalf("Failed to create wisp %d: %v", i, err)
@@ -96,12 +112,20 @@ func TestBurnWisps(t *testing.T) {
 	t.Run("InvalidIDAbortsAtomically", func(t *testing.T) {
 		// Create one valid wisp
 		wisp := &types.Issue{
-			Title:     "Valid wisp",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Ephemeral: true,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Valid wisp",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		}
 		if err := s.CreateIssue(ctx, wisp, "test"); err != nil {
 			t.Fatalf("Failed to create wisp: %v", err)
@@ -133,12 +157,20 @@ func TestAutoCloseCompletedMolecule(t *testing.T) {
 	t.Run("ClosesWhenAllStepsComplete", func(t *testing.T) {
 		// Create molecule root
 		root := &types.Issue{
-			Title:     "Auto-close molecule",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeEpic,
-			Labels:    []string{BeadsTemplateLabel},
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Auto-close molecule",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeEpic,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
+			IssueGraph: types.IssueGraph{
+				Labels: []string{BeadsTemplateLabel},
+			},
 		}
 		if err := s.CreateIssue(ctx, root, "test"); err != nil {
 			t.Fatalf("Failed to create root: %v", err)
@@ -146,18 +178,30 @@ func TestAutoCloseCompletedMolecule(t *testing.T) {
 
 		// Create two steps — one closed, one open
 		step1 := &types.Issue{
-			Title:     "Step 1",
-			Status:    types.StatusClosed,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Step 1",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusClosed,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 		step2 := &types.Issue{
-			Title:     "Step 2",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Step 2",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 
 		for _, step := range []*types.Issue{step1, step2} {
@@ -194,12 +238,20 @@ func TestAutoCloseCompletedMolecule(t *testing.T) {
 	t.Run("DoesNotCloseWhenStepsRemain", func(t *testing.T) {
 		// Create molecule root
 		root := &types.Issue{
-			Title:     "Incomplete molecule",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeEpic,
-			Labels:    []string{BeadsTemplateLabel},
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Incomplete molecule",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeEpic,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
+			IssueGraph: types.IssueGraph{
+				Labels: []string{BeadsTemplateLabel},
+			},
 		}
 		if err := s.CreateIssue(ctx, root, "test"); err != nil {
 			t.Fatalf("Failed to create root: %v", err)
@@ -207,18 +259,30 @@ func TestAutoCloseCompletedMolecule(t *testing.T) {
 
 		// Create two steps — one closed, one still open
 		step1 := &types.Issue{
-			Title:     "Closed step",
-			Status:    types.StatusClosed,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Closed step",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusClosed,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 		step2 := &types.Issue{
-			Title:     "Open step",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Open step",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 
 		for _, step := range []*types.Issue{step1, step2} {
@@ -250,11 +314,17 @@ func TestAutoCloseCompletedMolecule(t *testing.T) {
 	t.Run("NoOpForOrphanIssue", func(t *testing.T) {
 		// Create an issue not part of any molecule
 		orphan := &types.Issue{
-			Title:     "Orphan issue",
-			Status:    types.StatusClosed,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Orphan issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusClosed,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 		if err := s.CreateIssue(ctx, orphan, "test"); err != nil {
 			t.Fatalf("Failed to create orphan: %v", err)
@@ -267,23 +337,37 @@ func TestAutoCloseCompletedMolecule(t *testing.T) {
 	t.Run("NoOpForAlreadyClosedMolecule", func(t *testing.T) {
 		// Create molecule root that's already closed
 		root := &types.Issue{
-			Title:     "Already closed molecule",
-			Status:    types.StatusClosed,
-			Priority:  1,
-			IssueType: types.TypeEpic,
-			Labels:    []string{BeadsTemplateLabel},
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Already closed molecule",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusClosed,
+				Priority:  1,
+				IssueType: types.TypeEpic,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
+			IssueGraph: types.IssueGraph{
+				Labels: []string{BeadsTemplateLabel},
+			},
 		}
 		if err := s.CreateIssue(ctx, root, "test"); err != nil {
 			t.Fatalf("Failed to create root: %v", err)
 		}
 
 		step := &types.Issue{
-			Title:     "Step in closed mol",
-			Status:    types.StatusClosed,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Step in closed mol",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusClosed,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 		if err := s.CreateIssue(ctx, step, "test"); err != nil {
 			t.Fatalf("Failed to create step: %v", err)
@@ -303,12 +387,20 @@ func TestAutoCloseCompletedMolecule(t *testing.T) {
 	t.Run("ClosesWhenReparentedStepExcluded", func(t *testing.T) {
 		// Create molecule root (Epic A)
 		root := &types.Issue{
-			Title:     "Epic with reparented child",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeEpic,
-			Labels:    []string{BeadsTemplateLabel},
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Epic with reparented child",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeEpic,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
+			IssueGraph: types.IssueGraph{
+				Labels: []string{BeadsTemplateLabel},
+			},
 		}
 		if err := s.CreateIssue(ctx, root, "test"); err != nil {
 			t.Fatalf("Failed to create root: %v", err)
@@ -318,12 +410,20 @@ func TestAutoCloseCompletedMolecule(t *testing.T) {
 		var steps []*types.Issue
 		for i := 1; i <= 3; i++ {
 			step := &types.Issue{
-				ID:        fmt.Sprintf("%s.%d", root.ID, i),
-				Title:     fmt.Sprintf("Step %d", i),
-				Status:    types.StatusOpen,
-				Priority:  2,
-				IssueType: types.TypeTask,
-				CreatedAt: time.Now(),
+				IssueID: types.IssueID{
+					ID: fmt.Sprintf("%s.%d", root.ID, i),
+				},
+				IssueContent: types.IssueContent{
+					Title: fmt.Sprintf("Step %d", i),
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  2,
+					IssueType: types.TypeTask,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: time.Now(),
+				},
 			}
 			if err := s.CreateIssue(ctx, step, "test"); err != nil {
 				t.Fatalf("Failed to create step %d: %v", i, err)
@@ -340,11 +440,17 @@ func TestAutoCloseCompletedMolecule(t *testing.T) {
 
 		// Create Epic B for reparenting target
 		epicB := &types.Issue{
-			Title:     "Epic B (reparent target)",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeEpic,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Epic B (reparent target)",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeEpic,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 		if err := s.CreateIssue(ctx, epicB, "test"); err != nil {
 			t.Fatalf("Failed to create Epic B: %v", err)
@@ -393,22 +499,34 @@ func TestFindStaleMolecules(t *testing.T) {
 
 	// Create a stale molecule: open epic with all children closed
 	staleRoot := &types.Issue{
-		Title:     "Stale molecule",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
-		CreatedAt: time.Now(),
+		IssueContent: types.IssueContent{
+			Title: "Stale molecule",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+		},
 	}
 	if err := s.CreateIssue(ctx, staleRoot, "test"); err != nil {
 		t.Fatalf("Failed to create stale root: %v", err)
 	}
 
 	closedChild := &types.Issue{
-		Title:     "Closed child",
-		Status:    types.StatusClosed,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		CreatedAt: time.Now(),
+		IssueContent: types.IssueContent{
+			Title: "Closed child",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+		},
 	}
 	if err := s.CreateIssue(ctx, closedChild, "test"); err != nil {
 		t.Fatalf("Failed to create closed child: %v", err)
@@ -423,22 +541,34 @@ func TestFindStaleMolecules(t *testing.T) {
 
 	// Create a non-stale molecule: open epic with open children
 	activeRoot := &types.Issue{
-		Title:     "Active molecule",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
-		CreatedAt: time.Now(),
+		IssueContent: types.IssueContent{
+			Title: "Active molecule",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+		},
 	}
 	if err := s.CreateIssue(ctx, activeRoot, "test"); err != nil {
 		t.Fatalf("Failed to create active root: %v", err)
 	}
 
 	openChild := &types.Issue{
-		Title:     "Open child",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		CreatedAt: time.Now(),
+		IssueContent: types.IssueContent{
+			Title: "Open child",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+		},
 	}
 	if err := s.CreateIssue(ctx, openChild, "test"); err != nil {
 		t.Fatalf("Failed to create open child: %v", err)
@@ -481,11 +611,17 @@ func TestFindStaleMolecules(t *testing.T) {
 	t.Run("BlockingFilter", func(t *testing.T) {
 		// Create an issue blocked by the stale molecule
 		blockedIssue := &types.Issue{
-			Title:     "Blocked by stale",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeEpic,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Blocked by stale",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeEpic,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 		if err := s.CreateIssue(ctx, blockedIssue, "test"); err != nil {
 			t.Fatalf("Failed to create blocked issue: %v", err)
@@ -521,22 +657,34 @@ func TestFindStaleMolecules(t *testing.T) {
 	t.Run("UnassignedFilter", func(t *testing.T) {
 		// Create an assigned stale molecule
 		assignedRoot := &types.Issue{
-			Title:     "Assigned stale",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeEpic,
-			Assignee:  "some-agent",
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Assigned stale",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeEpic,
+				Assignee:  "some-agent",
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 		if err := s.CreateIssue(ctx, assignedRoot, "test"); err != nil {
 			t.Fatalf("Failed to create assigned root: %v", err)
 		}
 		assignedChild := &types.Issue{
-			Title:     "Assigned child closed",
-			Status:    types.StatusClosed,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Assigned child closed",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusClosed,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 		if err := s.CreateIssue(ctx, assignedChild, "test"); err != nil {
 			t.Fatalf("Failed to create assigned child: %v", err)
@@ -577,7 +725,7 @@ func TestBuildBlockingMap(t *testing.T) {
 	t.Run("SingleBlocker", func(t *testing.T) {
 		blocked := []*types.BlockedIssue{
 			{
-				Issue:          types.Issue{ID: "issue-1"},
+				Issue:          types.Issue{IssueID: types.IssueID{ID: "issue-1"}},
 				BlockedByCount: 1,
 				BlockedBy:      []string{"blocker-1"},
 			},
@@ -593,12 +741,12 @@ func TestBuildBlockingMap(t *testing.T) {
 	t.Run("MultipleBlockers", func(t *testing.T) {
 		blocked := []*types.BlockedIssue{
 			{
-				Issue:          types.Issue{ID: "issue-1"},
+				Issue:          types.Issue{IssueID: types.IssueID{ID: "issue-1"}},
 				BlockedByCount: 2,
 				BlockedBy:      []string{"blocker-a", "blocker-b"},
 			},
 			{
-				Issue:          types.Issue{ID: "issue-2"},
+				Issue:          types.Issue{IssueID: types.IssueID{ID: "issue-2"}},
 				BlockedByCount: 1,
 				BlockedBy:      []string{"blocker-a"},
 			},
@@ -633,11 +781,17 @@ func TestPostCreateWritesDoltCommit(t *testing.T) {
 	t.Run("LabelsPersistedAfterCommit", func(t *testing.T) {
 		// Create an issue
 		issue := &types.Issue{
-			Title:     "Issue with label",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Issue with label",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatalf("Failed to create issue: %v", err)
@@ -674,18 +828,30 @@ func TestPostCreateWritesDoltCommit(t *testing.T) {
 	t.Run("DependencyPersistedAfterCommit", func(t *testing.T) {
 		// Create parent and child issues
 		parent := &types.Issue{
-			Title:     "Parent issue",
-			Status:    types.StatusOpen,
-			Priority:  1,
-			IssueType: types.TypeEpic,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Parent issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeEpic,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 		child := &types.Issue{
-			Title:     "Child issue",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Child issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 		if err := s.CreateIssue(ctx, parent, "test"); err != nil {
 			t.Fatalf("Failed to create parent: %v", err)

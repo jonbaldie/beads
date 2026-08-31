@@ -2,15 +2,10 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
-	"time"
 
 	"github.com/jonbaldie/beads/internal/formula"
-	"github.com/jonbaldie/beads/internal/metrics"
-	"github.com/jonbaldie/beads/internal/storage"
 	"github.com/jonbaldie/beads/internal/types"
 	"github.com/jonbaldie/beads/internal/ui"
 	"github.com/spf13/cobra"
@@ -160,14 +155,9 @@ func parseCookFlags(cmd *cobra.Command, args []string) (*cookFlags, error) {
 func loadAndResolveFormula(formulaPath string, searchPaths []string) (*formula.Formula, error) {
 	parser := formula.NewParser(searchPaths...)
 
-	// Try to load by name first (from .beads/formulas/ registry)
-	f, err := parser.LoadByName(formulaPath)
+	f, err := loadCookFormula(parser, formulaPath)
 	if err != nil {
-		// Fall back to parsing as a file path
-		f, err = parser.ParseFile(formulaPath)
-		if err != nil {
-			return nil, fmt.Errorf("parsing formula: %w", err)
-		}
+		return nil, err
 	}
 
 	// Resolve inheritance
@@ -182,11 +172,7 @@ func loadAndResolveFormula(formulaPath string, searchPaths []string) (*formula.F
 		return nil, fmt.Errorf("applying control flow: %w", err)
 	}
 	resolved.Steps = controlFlowSteps
-
-	// Apply advice transformations
-	if len(resolved.Advice) > 0 {
-		resolved.Steps = formula.ApplyAdvice(resolved.Steps, resolved.Advice)
-	}
+	resolved.Steps = applyCookAdvice(resolved.Steps, resolved.Advice)
 
 	// Apply inline step expansions
 	inlineExpandedSteps, err := formula.ApplyInlineExpansions(resolved.Steps, parser)
@@ -195,32 +181,66 @@ func loadAndResolveFormula(formulaPath string, searchPaths []string) (*formula.F
 	}
 	resolved.Steps = inlineExpandedSteps
 
-	// Apply expansion operators
-	if resolved.Compose != nil && (len(resolved.Compose.Expand) > 0 || len(resolved.Compose.Map) > 0) {
-		expandedSteps, err := formula.ApplyExpansions(resolved.Steps, resolved.Compose, parser)
-		if err != nil {
-			return nil, fmt.Errorf("applying expansions: %w", err)
-		}
-		resolved.Steps = expandedSteps
+	if err := applyCookFormulaExpansions(resolved, parser); err != nil {
+		return nil, err
 	}
-
-	// Apply aspects from compose.aspects
-	if resolved.Compose != nil && len(resolved.Compose.Aspects) > 0 {
-		for _, aspectName := range resolved.Compose.Aspects {
-			aspectFormula, err := parser.LoadByName(aspectName)
-			if err != nil {
-				return nil, fmt.Errorf("loading aspect %q: %w", aspectName, err)
-			}
-			if aspectFormula.Type != formula.TypeAspect {
-				return nil, fmt.Errorf("%q is not an aspect formula (type=%s)", aspectName, aspectFormula.Type)
-			}
-			if len(aspectFormula.Advice) > 0 {
-				resolved.Steps = formula.ApplyAdvice(resolved.Steps, aspectFormula.Advice)
-			}
-		}
+	if err := applyCookFormulaAspects(resolved, parser); err != nil {
+		return nil, err
 	}
 
 	return resolved, nil
+}
+
+func applyCookAdvice(steps []*formula.Step, advice []*formula.AdviceRule) []*formula.Step {
+	if len(advice) > 0 {
+		return formula.ApplyAdvice(steps, advice)
+	}
+	return steps
+}
+
+func loadCookFormula(parser *formula.Parser, formulaPath string) (*formula.Formula, error) {
+	// Try to load by name first (from .beads/formulas/ registry).
+	f, err := parser.LoadByName(formulaPath)
+	if err == nil {
+		return f, nil
+	}
+	// Fall back to parsing as a file path.
+	f, err = parser.ParseFile(formulaPath)
+	if err != nil {
+		return nil, fmt.Errorf("parsing formula: %w", err)
+	}
+	return f, nil
+}
+
+func applyCookFormulaExpansions(resolved *formula.Formula, parser *formula.Parser) error {
+	if resolved.Compose == nil || (len(resolved.Compose.Expand) == 0 && len(resolved.Compose.Map) == 0) {
+		return nil
+	}
+	expandedSteps, err := formula.ApplyExpansions(resolved.Steps, resolved.Compose, parser)
+	if err != nil {
+		return fmt.Errorf("applying expansions: %w", err)
+	}
+	resolved.Steps = expandedSteps
+	return nil
+}
+
+func applyCookFormulaAspects(resolved *formula.Formula, parser *formula.Parser) error {
+	if resolved.Compose == nil || len(resolved.Compose.Aspects) == 0 {
+		return nil
+	}
+	for _, aspectName := range resolved.Compose.Aspects {
+		aspectFormula, err := parser.LoadByName(aspectName)
+		if err != nil {
+			return fmt.Errorf("loading aspect %q: %w", aspectName, err)
+		}
+		if aspectFormula.Type != formula.TypeAspect {
+			return fmt.Errorf("%q is not an aspect formula (type=%s)", aspectName, aspectFormula.Type)
+		}
+		if len(aspectFormula.Advice) > 0 {
+			resolved.Steps = formula.ApplyAdvice(resolved.Steps, aspectFormula.Advice)
+		}
+	}
+	return nil
 }
 
 // outputCookDryRun displays a dry-run preview of what would be cooked
@@ -228,17 +248,27 @@ func outputCookDryRun(resolved *formula.Formula, protoID string, runtimeMode boo
 	modeLabel := "compile-time"
 	if runtimeMode {
 		modeLabel = "runtime"
-		// Apply defaults for runtime mode display
-		for name, def := range resolved.Vars {
-			if _, provided := inputVars[name]; !provided && def.Default != nil {
-				inputVars[name] = *def.Default
-			}
-		}
+		applyCookVariableDefaults(resolved, inputVars)
 	}
 
 	fmt.Printf("\nDry run: would cook formula %s as proto %s (%s mode)\n\n", resolved.Formula, protoID, modeLabel)
 
-	// In runtime mode, show substituted steps
+	printCookDryRunSteps(resolved, runtimeMode, inputVars)
+	printCookVariablesUsed(vars)
+	printCookVariableValues(runtimeMode, inputVars)
+	printCookBondPoints(bondPoints)
+	printCookVariableDefinitions(resolved, runtimeMode)
+}
+
+func applyCookVariableDefaults(resolved *formula.Formula, inputVars map[string]string) {
+	for name, def := range resolved.Vars {
+		if _, provided := inputVars[name]; !provided && def.Default != nil {
+			inputVars[name] = *def.Default
+		}
+	}
+}
+
+func printCookDryRunSteps(resolved *formula.Formula, runtimeMode bool, inputVars map[string]string) {
 	if runtimeMode {
 		substituteFormulaVars(resolved, inputVars)
 		fmt.Printf("Steps (%d) [variables substituted]:\n", len(resolved.Steps))
@@ -246,44 +276,56 @@ func outputCookDryRun(resolved *formula.Formula, protoID string, runtimeMode boo
 		fmt.Printf("Steps (%d) [{{variables}} shown as placeholders]:\n", len(resolved.Steps))
 	}
 	printFormulaSteps(resolved.Steps, "  ")
+}
 
+func printCookVariablesUsed(vars []string) {
 	if len(vars) > 0 {
 		fmt.Printf("\nVariables used: %s\n", strings.Join(vars, ", "))
 	}
+}
 
-	// Show variable values in runtime mode
-	if runtimeMode && len(inputVars) > 0 {
-		fmt.Printf("\nVariable values:\n")
-		for name, value := range inputVars {
-			fmt.Printf("  {{%s}} = %s\n", name, value)
-		}
+func printCookVariableValues(runtimeMode bool, inputVars map[string]string) {
+	if !runtimeMode || len(inputVars) == 0 {
+		return
 	}
+	fmt.Printf("\nVariable values:\n")
+	for name, value := range inputVars {
+		fmt.Printf("  {{%s}} = %s\n", name, value)
+	}
+}
 
+func printCookBondPoints(bondPoints []string) {
 	if len(bondPoints) > 0 {
 		fmt.Printf("Bond points: %s\n", strings.Join(bondPoints, ", "))
 	}
+}
 
-	// Show variable definitions (more useful in compile-time mode)
-	if !runtimeMode && len(resolved.Vars) > 0 {
-		fmt.Printf("\nVariable definitions:\n")
-		for name, def := range resolved.Vars {
-			attrs := []string{}
-			if def.Required {
-				attrs = append(attrs, "required")
-			}
-			if def.Default != nil {
-				attrs = append(attrs, fmt.Sprintf("default=%s", *def.Default))
-			}
-			if len(def.Enum) > 0 {
-				attrs = append(attrs, fmt.Sprintf("enum=[%s]", strings.Join(def.Enum, ",")))
-			}
-			attrStr := ""
-			if len(attrs) > 0 {
-				attrStr = fmt.Sprintf(" (%s)", strings.Join(attrs, ", "))
-			}
-			fmt.Printf("  {{%s}}: %s%s\n", name, def.Description, attrStr)
-		}
+func printCookVariableDefinitions(resolved *formula.Formula, runtimeMode bool) {
+	if runtimeMode || len(resolved.Vars) == 0 {
+		return
 	}
+	fmt.Printf("\nVariable definitions:\n")
+	for name, def := range resolved.Vars {
+		attrs := cookVariableDefinitionAttributes(def)
+		fmt.Printf("  {{%s}}: %s%s\n", name, def.Description, attrs)
+	}
+}
+
+func cookVariableDefinitionAttributes(def *formula.VarDef) string {
+	attrs := []string{}
+	if def.Required {
+		attrs = append(attrs, "required")
+	}
+	if def.Default != nil {
+		attrs = append(attrs, fmt.Sprintf("default=%s", *def.Default))
+	}
+	if len(def.Enum) > 0 {
+		attrs = append(attrs, fmt.Sprintf("enum=[%s]", strings.Join(def.Enum, ",")))
+	}
+	if len(attrs) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (%s)", strings.Join(attrs, ", "))
 }
 
 // outputCookEphemeral outputs the resolved formula as JSON (ephemeral mode)
@@ -317,24 +359,24 @@ func outputCookEphemeral(resolved *formula.Formula, runtimeMode bool, inputVars 
 // persistCookFormula creates a proto bead in the database (persist mode)
 func persistCookFormula(ctx context.Context, resolved *formula.Formula, protoID string, force bool, vars, bondPoints []string) error {
 	// Check if proto already exists
-	existingProto, err := store.GetIssue(ctx, protoID)
+	existingProto, err := getStore().GetIssue(ctx, protoID)
 	if err == nil && existingProto != nil {
 		if !force {
 			return fmt.Errorf("proto %s already exists (use --force to replace)", protoID)
 		}
 		// Delete existing proto and its children
-		if err := deleteProtoSubgraph(ctx, store, protoID); err != nil {
+		if err := deleteProtoSubgraph(ctx, getStore(), protoID); err != nil {
 			return fmt.Errorf("deleting existing proto: %w", err)
 		}
 	}
 
 	// Create the proto bead from the formula
-	result, err := cookFormula(ctx, store, resolved, protoID)
+	result, err := cookFormula(ctx, getStore(), resolved, protoID)
 	if err != nil {
 		return fmt.Errorf("cooking formula: %w", err)
 	}
 
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(cookResult{
 			ProtoID:    result.ProtoID,
 			Formula:    resolved.Formula,
@@ -354,809 +396,4 @@ func persistCookFormula(ctx context.Context, resolved *formula.Formula, protoID 
 	}
 	fmt.Printf("\nTo use: bd mol pour %s --var <name>=<value>\n", result.ProtoID)
 	return nil
-}
-
-func runCook(cmd *cobra.Command, args []string) error {
-	if usesProxiedServer() {
-		return HandleErrorRespectJSON("cook is not supported in proxied-server mode")
-	}
-	evt := metrics.NewCommandEvent("cook")
-	defer func() {
-		if c := metrics.Global(); c != nil {
-			c.CloseEventAndAdd(evt)
-		}
-	}()
-
-	flags, err := parseCookFlags(cmd, args)
-	if err != nil {
-		return HandleError("%v", err)
-	}
-
-	if flags.persist {
-		CheckReadonly("cook --persist")
-		if store == nil {
-			return HandleError("no database connection")
-		}
-	}
-
-	resolved, err := loadAndResolveFormula(flags.formulaPath, flags.searchPaths)
-	if err != nil {
-		return HandleError("%v", err)
-	}
-	if flags.runtimeMode {
-		if err := formula.ValidateVars(resolved, flags.inputVars); err != nil {
-			return HandleError("%v", err)
-		}
-	}
-
-	protoID := resolved.Formula
-	if flags.prefix != "" {
-		protoID = flags.prefix + resolved.Formula
-	}
-
-	vars := formula.ExtractVariables(resolved)
-	var bondPoints []string
-	if resolved.Compose != nil {
-		for _, bp := range resolved.Compose.BondPoints {
-			bondPoints = append(bondPoints, bp.ID)
-		}
-	}
-
-	if flags.dryRun {
-		outputCookDryRun(resolved, protoID, flags.runtimeMode, flags.inputVars, vars, bondPoints)
-		return nil
-	}
-
-	if !flags.persist {
-		if err := outputCookEphemeral(resolved, flags.runtimeMode, flags.inputVars, vars); err != nil {
-			return HandleError("%v", err)
-		}
-		if !jsonOutput {
-			fmt.Fprintf(os.Stderr, "Note: cook is ephemeral and did not persist a proto.\n")
-			fmt.Fprintf(os.Stderr, "  Pour this formula directly:  bd pour %s\n", flags.formulaPath)
-			fmt.Fprintf(os.Stderr, "  Persist a proto first:       bd cook %s --persist\n", flags.formulaPath)
-			fmt.Fprintf(os.Stderr, "  Then:                        bd mol pour <name>\n")
-		}
-		return nil
-	}
-
-	if err := persistCookFormula(rootCtx, resolved, protoID, flags.force, vars, bondPoints); err != nil {
-		return HandleError("%v", err)
-	}
-	return nil
-}
-
-// cookFormulaResult holds the result of cooking
-type cookFormulaResult struct {
-	ProtoID string
-	Created int
-}
-
-// cookFormulaToSubgraph creates an in-memory TemplateSubgraph from a resolved formula.
-// This is the ephemeral proto implementation - no database storage.
-// The returned subgraph can be passed directly to cloneSubgraph for instantiation.
-//
-//nolint:unparam // error return kept for API consistency with future error handling
-func cookFormulaToSubgraph(f *formula.Formula, protoID string) (*TemplateSubgraph, error) {
-	// Map step ID -> created issue
-	issueMap := make(map[string]*types.Issue)
-
-	// Collect all issues and dependencies
-	var issues []*types.Issue
-	var deps []*types.Dependency
-
-	// Determine root title: use {{title}} placeholder if the variable is defined,
-	// otherwise fall back to formula name (GH#852)
-	rootTitle := f.Formula
-	if _, hasTitle := f.Vars["title"]; hasTitle {
-		rootTitle = "{{title}}"
-	}
-
-	// Determine root description: use {{desc}} placeholder if the variable is defined,
-	// otherwise fall back to formula description (GH#852)
-	rootDesc := f.Description
-	if _, hasDesc := f.Vars["desc"]; hasDesc {
-		rootDesc = "{{desc}}"
-	}
-
-	// Create root proto molecule
-	rootIssue := &types.Issue{
-		ID:          protoID,
-		Title:       rootTitle,
-		Description: rootDesc,
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeMolecule,
-		IsTemplate:  true,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-	}
-	issues = append(issues, rootIssue)
-	issueMap[protoID] = rootIssue
-
-	// Collect issues for each step (use protoID as parent for step IDs)
-	// The unified collectSteps builds both issueMap and idMapping
-	idMapping := make(map[string]string)
-	collectSteps(f.Steps, protoID, idMapping, issueMap, &issues, &deps, nil) // nil = keep labels on issues
-
-	// Collect dependencies from depends_on using the idMapping built above
-	for _, step := range f.Steps {
-		collectDependencies(step, idMapping, &deps)
-	}
-
-	return &TemplateSubgraph{
-		Root:         rootIssue,
-		Issues:       issues,
-		Dependencies: deps,
-		IssueMap:     issueMap,
-	}, nil
-}
-
-// createGateIssue creates a gate issue for a step with a Gate field.
-// Gate issues have type=gate and block the step they guard.
-// Returns the gate issue and its ID.
-func createGateIssue(step *formula.Step, parentID string) *types.Issue {
-	if step.Gate == nil {
-		return nil
-	}
-
-	// Generate gate issue ID: {parentID}.gate-{step.ID}
-	gateID := fmt.Sprintf("%s.gate-%s", parentID, step.ID)
-
-	// Build title from gate type and ID
-	title := fmt.Sprintf("Gate: %s", step.Gate.Type)
-	awaitID := gateAwaitID(step.Gate)
-	if awaitID != "" {
-		title = fmt.Sprintf("Gate: %s %s", step.Gate.Type, awaitID)
-	}
-
-	// Parse timeout if specified
-	var timeout time.Duration
-	if step.Gate.Timeout != "" {
-		if parsed, err := time.ParseDuration(step.Gate.Timeout); err == nil {
-			timeout = parsed
-		}
-	}
-
-	gateIssue := &types.Issue{
-		ID:          gateID,
-		Title:       title,
-		Description: fmt.Sprintf("Async gate for step %s", step.ID),
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   "gate",
-		AwaitType:   step.Gate.Type,
-		AwaitID:     awaitID,
-		Timeout:     timeout,
-		IsTemplate:  true,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-	}
-
-	// Propagate the formula-declared repo selector (SF2), matching the
-	// declarative `metadata.repo` selector documented for ad-hoc gates.
-	// Malformed values are left for check time (githubRepoFromIssue) to
-	// reject, consistent with how a check-time-only value on any other
-	// gate created outside `bd gate create` is validated.
-	//
-	// Restricted to gh:* gate types (SF4), same as repoMetadataForGate: a
-	// `repo` field on a human/timer/bead gate step is unrelated, ordinary
-	// metadata, not a GitHub repo selector, so only gh:run/gh:pr gates
-	// write it here.
-	if isGitHubGateType(step.Gate.Type) && step.Gate.Repo != "" {
-		if metaJSON, err := json.Marshal(map[string]string{"repo": step.Gate.Repo}); err == nil {
-			gateIssue.Metadata = metaJSON
-		}
-	}
-
-	return gateIssue
-}
-
-func gateAwaitID(gate *formula.Gate) string {
-	if gate == nil {
-		return ""
-	}
-	if gate.AwaitID != "" {
-		return gate.AwaitID
-	}
-	return gate.ID
-}
-
-// processStepToIssue converts a formula.Step to a types.Issue.
-// The issue includes all fields including Labels populated from step.Labels and waits_for.
-// This is the shared core logic used by both DB-persisted and in-memory cooking.
-func processStepToIssue(step *formula.Step, parentID string) *types.Issue {
-	// Generate issue ID (formula-name.step-id)
-	issueID := fmt.Sprintf("%s.%s", parentID, step.ID)
-
-	// Determine issue type. A parent step with no declared type defaults to
-	// epic; a declared type is honored even when the step has children
-	// (GH#5443).
-	declaredType := strings.TrimSpace(step.Type)
-	issueType := stepTypeToIssueType(declaredType)
-	if len(step.Children) > 0 && declaredType == "" {
-		issueType = types.TypeEpic
-	}
-
-	// Determine priority
-	priority := 2
-	if step.Priority != nil {
-		priority = *step.Priority
-	}
-
-	issue := &types.Issue{
-		ID:             issueID,
-		Title:          step.Title, // Keep {{variables}} for substitution at pour time
-		Description:    step.Description,
-		Notes:          step.Notes,
-		Status:         types.StatusOpen,
-		Priority:       priority,
-		IssueType:      issueType,
-		Assignee:       step.Assignee,
-		IsTemplate:     true,
-		CreatedAt:      time.Now(),
-		UpdatedAt:      time.Now(),
-		SourceFormula:  step.SourceFormula,  // Source tracing
-		SourceLocation: step.SourceLocation, // Source tracing
-	}
-
-	// Populate labels from step
-	issue.Labels = append(issue.Labels, step.Labels...)
-
-	// Add gate label for waits_for field
-	if step.WaitsFor != "" {
-		gateLabel := fmt.Sprintf("gate:%s", step.WaitsFor)
-		issue.Labels = append(issue.Labels, gateLabel)
-	}
-
-	// Carry step metadata through to the issue (GH#3341).
-	if len(step.Metadata) > 0 {
-		if metaJSON, err := json.Marshal(step.Metadata); err == nil {
-			issue.Metadata = metaJSON
-		}
-	}
-
-	return issue
-}
-
-// collectSteps collects issues and dependencies for steps and their children.
-// This is the unified implementation used by both DB-persisted and in-memory cooking.
-//
-// Parameters:
-//   - idMapping: step.ID → issue.ID (always populated, used for dependency resolution)
-//   - issueMap: issue.ID → issue (optional, nil for DB path, populated for in-memory path)
-//   - labelHandler: callback for each label (if nil, labels stay on issue; if set, labels are
-//     extracted and issue.Labels is cleared - use for DB path)
-func collectSteps(steps []*formula.Step, parentID string,
-	idMapping map[string]string,
-	issueMap map[string]*types.Issue,
-	issues *[]*types.Issue,
-	deps *[]*types.Dependency,
-	labelHandler func(issueID, label string)) {
-
-	for _, step := range steps {
-		issue := processStepToIssue(step, parentID)
-		*issues = append(*issues, issue)
-
-		// Build mappings
-		idMapping[step.ID] = issue.ID
-		if issueMap != nil {
-			issueMap[issue.ID] = issue
-		}
-
-		// Handle labels: extract via callback (DB path) or keep on issue (in-memory path)
-		if labelHandler != nil {
-			for _, label := range issue.Labels {
-				labelHandler(issue.ID, label)
-			}
-			issue.Labels = nil // DB stores labels separately
-		}
-
-		// Add parent-child dependency
-		*deps = append(*deps, &types.Dependency{
-			IssueID:     issue.ID,
-			DependsOnID: parentID,
-			Type:        types.DepParentChild,
-		})
-
-		// Create gate issue if step has a Gate (bd-7zka.2)
-		if step.Gate != nil {
-			gateIssue := createGateIssue(step, parentID)
-			*issues = append(*issues, gateIssue)
-
-			// Add gate to mapping (use gate-{step.ID} as key)
-			gateKey := fmt.Sprintf("gate-%s", step.ID)
-			idMapping[gateKey] = gateIssue.ID
-			if issueMap != nil {
-				issueMap[gateIssue.ID] = gateIssue
-			}
-
-			// Handle gate labels if needed
-			if labelHandler != nil && len(gateIssue.Labels) > 0 {
-				for _, label := range gateIssue.Labels {
-					labelHandler(gateIssue.ID, label)
-				}
-				gateIssue.Labels = nil
-			}
-
-			// Gate is a child of the parent (same level as the step)
-			*deps = append(*deps, &types.Dependency{
-				IssueID:     gateIssue.ID,
-				DependsOnID: parentID,
-				Type:        types.DepParentChild,
-			})
-
-			// Step depends on gate (gate blocks the step)
-			*deps = append(*deps, &types.Dependency{
-				IssueID:     issue.ID,
-				DependsOnID: gateIssue.ID,
-				Type:        types.DepBlocks,
-			})
-		}
-
-		// Recursively collect children
-		if len(step.Children) > 0 {
-			collectSteps(step.Children, issue.ID, idMapping, issueMap, issues, deps, labelHandler)
-		}
-	}
-}
-
-// resolveAndCookFormula loads a formula by name, resolves it, applies all transformations,
-// and returns an in-memory TemplateSubgraph ready for instantiation.
-// This is the main entry point for ephemeral proto cooking.
-func resolveAndCookFormula(formulaName string, searchPaths []string) (*TemplateSubgraph, error) {
-	return resolveAndCookFormulaWithVars(formulaName, searchPaths, nil)
-}
-
-// resolveAndCookFormulaWithVars loads a formula and optionally filters steps by condition.
-// If conditionVars is provided, steps with conditions that evaluate to false are excluded.
-// Pass nil for conditionVars to include all steps (condition filtering skipped).
-func resolveAndCookFormulaWithVars(formulaName string, searchPaths []string, conditionVars map[string]string) (*TemplateSubgraph, error) {
-	// Create parser with search paths
-	parser := formula.NewParser(searchPaths...)
-
-	// Load formula by name
-	f, err := parser.LoadByName(formulaName)
-	if err != nil {
-		return nil, fmt.Errorf("loading formula %q: %w", formulaName, err)
-	}
-
-	// Resolve inheritance
-	resolved, err := parser.Resolve(f)
-	if err != nil {
-		return nil, fmt.Errorf("resolving formula %q: %w", formulaName, err)
-	}
-
-	// Validate any caller-provided variable values against enum/pattern/
-	// required-empty constraints. This is deliberately presence-agnostic:
-	// a var missing entirely is left to the caller's own UX (e.g. bd mol
-	// pour/wisp's missing-var hint), but a var explicitly provided with a
-	// value that violates its constraints must error here so it reaches
-	// every caller of this shared path (pour, wisp, mol bond, mol seed) —
-	// runCook does not go through this helper; it validates separately via
-	// its own formula.ValidateVars call under --mode=runtime. Previously
-	// only that `bd cook --mode=runtime` path enforced these (mybd-u2r6).
-	if conditionVars != nil {
-		if err := formula.ValidateProvidedVars(resolved, conditionVars); err != nil {
-			return nil, fmt.Errorf("formula %q: %w", formulaName, err)
-		}
-	}
-
-	// Apply control flow operators - loops, branches, gates
-	controlFlowSteps, err := formula.ApplyControlFlow(resolved.Steps, resolved.Compose)
-	if err != nil {
-		return nil, fmt.Errorf("applying control flow to %q: %w", formulaName, err)
-	}
-	resolved.Steps = controlFlowSteps
-
-	// Apply advice transformations
-	if len(resolved.Advice) > 0 {
-		resolved.Steps = formula.ApplyAdvice(resolved.Steps, resolved.Advice)
-	}
-
-	// Apply inline step expansions
-	inlineExpandedSteps, err := formula.ApplyInlineExpansions(resolved.Steps, parser)
-	if err != nil {
-		return nil, fmt.Errorf("applying inline expansions to %q: %w", formulaName, err)
-	}
-	resolved.Steps = inlineExpandedSteps
-
-	// Apply expansion operators
-	if resolved.Compose != nil && (len(resolved.Compose.Expand) > 0 || len(resolved.Compose.Map) > 0) {
-		expandedSteps, err := formula.ApplyExpansions(resolved.Steps, resolved.Compose, parser)
-		if err != nil {
-			return nil, fmt.Errorf("applying expansions to %q: %w", formulaName, err)
-		}
-		resolved.Steps = expandedSteps
-	}
-
-	// Apply aspects from compose.aspects
-	if resolved.Compose != nil && len(resolved.Compose.Aspects) > 0 {
-		for _, aspectName := range resolved.Compose.Aspects {
-			aspectFormula, err := parser.LoadByName(aspectName)
-			if err != nil {
-				return nil, fmt.Errorf("loading aspect %q: %w", aspectName, err)
-			}
-			if aspectFormula.Type != formula.TypeAspect {
-				return nil, fmt.Errorf("%q is not an aspect formula (type=%s)", aspectName, aspectFormula.Type)
-			}
-			if len(aspectFormula.Advice) > 0 {
-				resolved.Steps = formula.ApplyAdvice(resolved.Steps, aspectFormula.Advice)
-			}
-		}
-	}
-
-	// Apply step condition filtering if vars provided (bd-7zka.1)
-	// This filters out steps whose conditions evaluate to false
-	if conditionVars != nil {
-		// Merge with formula defaults for complete evaluation
-		mergedVars := make(map[string]string)
-		for name, def := range resolved.Vars {
-			if def != nil && def.Default != nil {
-				mergedVars[name] = *def.Default
-			}
-		}
-		for k, v := range conditionVars {
-			mergedVars[k] = v
-		}
-
-		filteredSteps, err := formula.FilterStepsByCondition(resolved.Steps, mergedVars)
-		if err != nil {
-			return nil, fmt.Errorf("filtering steps by condition: %w", err)
-		}
-		resolved.Steps = filteredSteps
-	}
-
-	// Handle standalone expansion formulas (bd-qzb).
-	// Expansion formulas store content in Template, not Steps. Materialize
-	// the template into Steps using a synthetic "main" target so the normal
-	// cooking pipeline can process them.
-	if resolved.Type == formula.TypeExpansion && len(resolved.Template) > 0 {
-		expansionVars := make(map[string]string)
-		for name, def := range resolved.Vars {
-			if def != nil && def.Default != nil {
-				expansionVars[name] = *def.Default
-			}
-		}
-		if conditionVars != nil {
-			for k, v := range conditionVars {
-				expansionVars[k] = v
-			}
-		}
-		if err := formula.MaterializeExpansion(resolved, "main", expansionVars); err != nil {
-			return nil, fmt.Errorf("standalone expansion %q: %w", formulaName, err)
-		}
-	}
-
-	// Cook to in-memory subgraph, including variable definitions for default handling
-	return cookFormulaToSubgraphWithVars(resolved, resolved.Formula, resolved.Vars)
-}
-
-// cookFormulaToSubgraphWithVars creates an in-memory subgraph with variable info attached
-func cookFormulaToSubgraphWithVars(f *formula.Formula, protoID string, vars map[string]*formula.VarDef) (*TemplateSubgraph, error) {
-	subgraph, err := cookFormulaToSubgraph(f, protoID)
-	if err != nil {
-		return nil, err
-	}
-	// Attach variable definitions to the subgraph for default handling during pour
-	// Convert from *VarDef to VarDef for simpler handling
-	if vars != nil {
-		subgraph.VarDefs = make(map[string]formula.VarDef)
-		for k, v := range vars {
-			if v != nil {
-				subgraph.VarDefs[k] = *v
-			}
-		}
-	}
-	// Attach recommended phase and pour flag from formula
-	subgraph.Phase = f.Phase
-	subgraph.Pour = f.Pour
-	return subgraph, nil
-}
-
-// cookFormula creates a proto bead from a resolved formula.
-// protoID is the final ID for the proto (may include a prefix).
-func cookFormula(ctx context.Context, s storage.DoltStorage, f *formula.Formula, protoID string) (*cookFormulaResult, error) {
-	if s == nil {
-		return nil, fmt.Errorf("no database connection")
-	}
-
-	// Map step ID -> created issue ID
-	idMapping := make(map[string]string)
-
-	// Collect all issues and dependencies
-	var issues []*types.Issue
-	var deps []*types.Dependency
-	var labels []struct{ issueID, label string }
-
-	// Determine root title: use {{title}} placeholder if the variable is defined,
-	// otherwise fall back to formula name (GH#852)
-	rootTitle := f.Formula
-	if _, hasTitle := f.Vars["title"]; hasTitle {
-		rootTitle = "{{title}}"
-	}
-
-	// Determine root description: use {{desc}} placeholder if the variable is defined,
-	// otherwise fall back to formula description (GH#852)
-	rootDesc := f.Description
-	if _, hasDesc := f.Vars["desc"]; hasDesc {
-		rootDesc = "{{desc}}"
-	}
-
-	// Create root proto molecule using provided protoID (may include prefix)
-	rootIssue := &types.Issue{
-		ID:          protoID,
-		Title:       rootTitle,
-		Description: rootDesc,
-		Status:      types.StatusOpen,
-		Priority:    2,
-		IssueType:   types.TypeMolecule,
-		IsTemplate:  true,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-	}
-	issues = append(issues, rootIssue)
-	labels = append(labels, struct{ issueID, label string }{protoID, MoleculeLabel})
-
-	// Collect issues for each step (use protoID as parent for step IDs)
-	// Use labelHandler to extract labels for separate DB storage
-	collectSteps(f.Steps, protoID, idMapping, nil, &issues, &deps, func(issueID, label string) {
-		labels = append(labels, struct{ issueID, label string }{issueID, label})
-	})
-
-	// Collect dependencies from depends_on
-	for _, step := range f.Steps {
-		collectDependencies(step, idMapping, &deps)
-	}
-
-	// Create issues, labels, and dependencies in a single atomic transaction.
-	// This prevents orphaned issues if label/dependency creation fails.
-	err := transact(ctx, s, fmt.Sprintf("bd: cook formula %s", protoID), func(tx storage.Transaction) error {
-		// Flatten unregistered step types to task (with a warning) before
-		// inserting, mirroring cloneSubgraphInto (pour). Without this,
-		// PrepareIssueForInsert rejects them with "invalid issue type" and
-		// the whole cook --persist transaction rolls back.
-		if err := flattenUnregisteredIssueTypes(ctx, storeMolWriter{DoltStorage: s, tx: tx}, issues, deps); err != nil {
-			return fmt.Errorf("checking custom types: %w", err)
-		}
-
-		// Create all issues
-		if err := tx.CreateIssues(ctx, issues, actor); err != nil {
-			return fmt.Errorf("failed to create issues: %w", err)
-		}
-
-		// Add labels
-		for _, l := range labels {
-			if err := tx.AddLabel(ctx, l.issueID, l.label, actor); err != nil {
-				return fmt.Errorf("failed to add label %s to %s: %w", l.label, l.issueID, err)
-			}
-		}
-
-		// Add dependencies
-		for _, dep := range deps {
-			if err := tx.AddDependency(ctx, dep, actor); err != nil {
-				return fmt.Errorf("failed to create dependency: %w", err)
-			}
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	return &cookFormulaResult{
-		ProtoID: protoID,
-		Created: len(issues),
-	}, nil
-}
-
-// collectDependencies collects blocking dependencies from depends_on, needs, and waits_for fields.
-// This is the shared implementation used by both DB-persisted and in-memory subgraph cooking.
-func collectDependencies(step *formula.Step, idMapping map[string]string, deps *[]*types.Dependency) {
-	issueID := idMapping[step.ID]
-
-	// Pre-compute the waits_for spawner so we can dedupe against depends_on
-	// and needs below. When waits_for has no explicit `from:`, it infers its
-	// spawner from needs[0] — and `depends_on`/`needs` would otherwise emit a
-	// DepBlocks edge on the same (source, target) pair that `waits_for`
-	// emits a DepWaitsFor edge on. Storage rejects the duplicate. The
-	// DepWaitsFor edge subsumes the blocking semantics, so we skip the
-	// redundant DepBlocks for that specific target (GH#3783).
-	var waitsForSpec *formula.WaitsForSpec
-	var waitsForSpawnerStepID string
-	if step.WaitsFor != "" {
-		waitsForSpec = formula.ParseWaitsFor(step.WaitsFor)
-		if waitsForSpec != nil {
-			waitsForSpawnerStepID = waitsForSpec.SpawnerID
-			if waitsForSpawnerStepID == "" && len(step.Needs) > 0 {
-				waitsForSpawnerStepID = step.Needs[0]
-			}
-		}
-	}
-
-	// waitsForCollapsedBlocks records whether we actually skipped emitting a
-	// DepBlocks edge for the waits_for spawner below (i.e. the spawner step ID
-	// really did appear in depends_on/needs and resolve to a known issue). If
-	// so, the DepWaitsFor edge emitted below must carry also_blocks so it
-	// does not silently drop the blocking semantics that edge collapsed away
-	// (GH#3783 review gap).
-	var waitsForCollapsedBlocks bool
-
-	// Process depends_on field
-	for _, depID := range step.DependsOn {
-		if depID == waitsForSpawnerStepID {
-			// This target is also the waits_for spawner; the DepWaitsFor edge
-			// emitted below subsumes the blocking semantics for this pair.
-			waitsForCollapsedBlocks = true
-			continue
-		}
-		depIssueID, ok := idMapping[depID]
-		if !ok {
-			continue // Will be caught during validation
-		}
-
-		*deps = append(*deps, &types.Dependency{
-			IssueID:     issueID,
-			DependsOnID: depIssueID,
-			Type:        types.DepBlocks,
-		})
-	}
-
-	// Process needs field - simpler alias for sibling dependencies
-	for _, needID := range step.Needs {
-		if needID == waitsForSpawnerStepID {
-			// This target is also the waits_for spawner; the DepWaitsFor edge
-			// emitted below subsumes the blocking semantics for this pair.
-			waitsForCollapsedBlocks = true
-			continue
-		}
-		needIssueID, ok := idMapping[needID]
-		if !ok {
-			continue // Will be caught during validation
-		}
-
-		*deps = append(*deps, &types.Dependency{
-			IssueID:     issueID,
-			DependsOnID: needIssueID,
-			Type:        types.DepBlocks,
-		})
-	}
-
-	// Process waits_for field - fanout gate dependency
-	if waitsForSpec != nil && waitsForSpawnerStepID != "" {
-		if spawnerIssueID, ok := idMapping[waitsForSpawnerStepID]; ok {
-			// Spawner identity is the depends_on_id; metadata carries
-			// the gate. A collapsed needs/depends_on edge additionally marks
-			// also_blocks so the gate blocks while the spawner itself is
-			// open, not only while it has an open child (GH#3783).
-			var dep *types.Dependency
-			var err error
-			if waitsForCollapsedBlocks {
-				dep, err = types.NewWaitsForBlockingDependency(issueID, spawnerIssueID, waitsForSpec.Gate)
-			} else {
-				dep, err = types.NewWaitsForDependency(issueID, spawnerIssueID, waitsForSpec.Gate)
-			}
-			if err == nil {
-				*deps = append(*deps, dep)
-			}
-		}
-	}
-
-	// Recursively handle children
-	for _, child := range step.Children {
-		collectDependencies(child, idMapping, deps)
-	}
-}
-
-// deleteProtoSubgraph deletes a proto and all its children.
-func deleteProtoSubgraph(ctx context.Context, s storage.DoltStorage, protoID string) error {
-	// Load the subgraph
-	subgraph, err := loadTemplateSubgraph(ctx, s, protoID)
-	if err != nil {
-		return fmt.Errorf("load proto: %w", err)
-	}
-
-	// Delete in reverse order (children first)
-	return transact(ctx, s, fmt.Sprintf("bd: delete proto subgraph %s", protoID), func(tx storage.Transaction) error {
-		for i := len(subgraph.Issues) - 1; i >= 0; i-- {
-			issue := subgraph.Issues[i]
-			if err := tx.DeleteIssue(ctx, issue.ID); err != nil {
-				return fmt.Errorf("delete %s: %w", issue.ID, err)
-			}
-		}
-		return nil
-	})
-}
-
-// printFormulaSteps prints steps in a tree format.
-func printFormulaSteps(steps []*formula.Step, indent string) {
-	for i, step := range steps {
-		connector := "├──"
-		if i == len(steps)-1 {
-			connector = "└──"
-		}
-
-		// Collect dependency info
-		var depParts []string
-		if len(step.DependsOn) > 0 {
-			depParts = append(depParts, fmt.Sprintf("depends: %s", strings.Join(step.DependsOn, ", ")))
-		}
-		if len(step.Needs) > 0 {
-			depParts = append(depParts, fmt.Sprintf("needs: %s", strings.Join(step.Needs, ", ")))
-		}
-		if step.WaitsFor != "" {
-			depParts = append(depParts, fmt.Sprintf("waits_for: %s", step.WaitsFor))
-		}
-
-		depStr := ""
-		if len(depParts) > 0 {
-			depStr = fmt.Sprintf(" [%s]", strings.Join(depParts, ", "))
-		}
-
-		typeStr := ""
-		if step.Type != "" && step.Type != "task" {
-			typeStr = fmt.Sprintf(" (%s)", step.Type)
-		}
-
-		// Source tracing info
-		sourceStr := ""
-		if step.SourceFormula != "" || step.SourceLocation != "" {
-			sourceStr = fmt.Sprintf(" [from: %s@%s]", step.SourceFormula, step.SourceLocation)
-		}
-
-		fmt.Printf("%s%s %s: %s%s%s%s\n", indent, connector, step.ID, step.Title, typeStr, depStr, sourceStr)
-
-		if len(step.Children) > 0 {
-			childIndent := indent
-			if i == len(steps)-1 {
-				childIndent += "    "
-			} else {
-				childIndent += "│   "
-			}
-			printFormulaSteps(step.Children, childIndent)
-		}
-	}
-}
-
-// substituteFormulaVars substitutes {{variable}} placeholders in a formula.
-// This is used in runtime mode to fully resolve the formula before output.
-func substituteFormulaVars(f *formula.Formula, vars map[string]string) {
-	// Substitute in top-level fields
-	f.Description = substituteVariables(f.Description, vars)
-
-	// Substitute in all steps recursively
-	substituteStepVars(f.Steps, vars)
-}
-
-// substituteStepVars recursively substitutes variables in step fields.
-func substituteStepVars(steps []*formula.Step, vars map[string]string) {
-	for _, step := range steps {
-		step.Title = substituteVariables(step.Title, vars)
-		step.Description = substituteVariables(step.Description, vars)
-		step.Notes = substituteVariables(step.Notes, vars)
-		if step.Gate != nil {
-			step.Gate.Type = substituteVariables(step.Gate.Type, vars)
-			step.Gate.ID = substituteVariables(step.Gate.ID, vars)
-			step.Gate.AwaitID = substituteVariables(step.Gate.AwaitID, vars)
-			step.Gate.Timeout = substituteVariables(step.Gate.Timeout, vars)
-			step.Gate.Repo = substituteVariables(step.Gate.Repo, vars)
-		}
-		if len(step.Children) > 0 {
-			substituteStepVars(step.Children, vars)
-		}
-	}
-}
-
-func init() {
-	cookCmd.Flags().Bool("dry-run", false, "Preview what would be created")
-	cookCmd.Flags().Bool("persist", false, "Persist proto to database (legacy behavior)")
-	cookCmd.Flags().Bool("force", false, "Replace existing proto if it exists (requires --persist)")
-	cookCmd.Flags().StringSlice("search-path", []string{}, "Additional paths to search for formula inheritance")
-	cookCmd.Flags().String("prefix", "", "Prefix to prepend to proto ID (e.g., 'gt-' creates 'gt-mol-feature')")
-	cookCmd.Flags().StringArray("var", []string{}, "Variable substitution (key=value), enables runtime mode")
-	cookCmd.Flags().String("mode", "", "Cooking mode: compile (keep placeholders) or runtime (substitute vars)")
-
-	rootCmd.AddCommand(cookCmd)
 }

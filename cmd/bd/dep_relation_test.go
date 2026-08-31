@@ -44,7 +44,7 @@ func TestDepRelationFor_CustomTypeKeepsItsName(t *testing.T) {
 func TestGroupDepSections(t *testing.T) {
 	dep := func(id string, dt types.DependencyType) *types.IssueWithDependencyMetadata {
 		return &types.IssueWithDependencyMetadata{
-			Issue:          types.Issue{ID: id},
+			Issue:          types.Issue{IssueID: types.IssueID{ID: id}},
 			DependencyType: dt,
 		}
 	}

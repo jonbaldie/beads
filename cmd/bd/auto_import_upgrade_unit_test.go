@@ -418,7 +418,7 @@ func (c *captureOptsStore) GetIssuesByIDs(_ context.Context, _ []string) ([]*typ
 // ImportOptions.ConflictSkip maps onto storage.BatchCreateOptions.ConflictSkip,
 // and the default (explicit `bd import`) path keeps UPSERT semantics.
 func TestImportIssuesCoreThreadsConflictSkip(t *testing.T) {
-	issues := []*types.Issue{{ID: "unit-1", Title: "t", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
+	issues := []*types.Issue{{IssueID: types.IssueID{ID: "unit-1"}, IssueContent: types.IssueContent{Title: "t"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}}
 
 	t.Run("ConflictSkip true threads through", func(t *testing.T) {
 		s := &captureOptsStore{}

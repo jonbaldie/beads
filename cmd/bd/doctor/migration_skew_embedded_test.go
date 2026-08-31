@@ -30,7 +30,7 @@ func TestCheckMigrationContentSkew_EmbeddedFallback(t *testing.T) {
 	}
 	store.Close()
 
-	got := CheckMigrationContentSkew(&SharedStore{beadsDir: beadsDir})
+	got := CheckMigrationContentSkew(&SharedStore{state: sharedStoreState{beadsDir: beadsDir}})
 	if got.Message == "N/A (no database)" {
 		t.Fatalf("check short-circuited to %q despite an embedded database on disk", got.Message)
 	}

@@ -11,15 +11,15 @@ import (
 
 // issueIDCompletion provides shell completion for issue IDs by querying the storage
 // and returning a list of IDs with their titles as descriptions
-func issueIDCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+func issueIDCompletion(_ *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	// Initialize storage if not already initialized
 	ctx := context.Background()
-	if rootCtx != nil {
-		ctx = rootCtx
+	if getRootContext() != nil {
+		ctx = getRootContext()
 	}
 
 	// Get database path - use same logic as in PersistentPreRun
-	currentDBPath := dbPath
+	currentDBPath := getDBPath()
 	if currentDBPath == "" {
 		currentDBPath = beads.FindDatabasePath()
 		if currentDBPath == "" {
@@ -28,7 +28,7 @@ func issueIDCompletion(cmd *cobra.Command, args []string, toComplete string) ([]
 	}
 
 	// Open database if store is not initialized
-	currentStore := store
+	currentStore := getStore()
 	if currentStore == nil {
 		var err error
 		currentStore, err = openReadOnlyStoreForDBPath(ctx, currentDBPath)
@@ -41,7 +41,10 @@ func issueIDCompletion(cmd *cobra.Command, args []string, toComplete string) ([]
 
 	// Use SearchIssues with IDPrefix filter to efficiently query matching issues
 	filter := types.IssueFilter{
-		IDPrefix: toComplete, // Filter at database level for better performance
+		IssueFilterCore: types.IssueFilterCore{
+			IDPrefix: toComplete,
+		},
+		// Filter at database level for better performance,
 	}
 	issues, err := currentStore.SearchIssues(ctx, "", filter)
 	if err != nil {

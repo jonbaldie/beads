@@ -727,8 +727,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
-          # The script compares the complete production files in the PR with
-          # the merge base; shallow history cannot resolve that base.
+          # Keep checkout behavior aligned with the mutation job. Messgo scans
+          # the complete production tree and does not consume the history.
           fetch-depth: 0
 
       - name: Set up Go
@@ -738,8 +738,6 @@ jobs:
           cache: false
 
       - name: Check messgo rulesets
-        env:
-          MESSGO_DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: ./scripts/ci/messgo.sh
 
   mutago:

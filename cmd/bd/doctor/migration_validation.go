@@ -1,41 +1,56 @@
 package doctor
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/jonbaldie/beads/internal/configfile"
-	"github.com/jonbaldie/beads/internal/storage"
 	"github.com/jonbaldie/beads/internal/storage/dolt"
-	"github.com/jonbaldie/beads/internal/utils"
 )
+
+// MigrationValidationPhase identifies the validation stage and overall readiness.
+type MigrationValidationPhase struct {
+	Phase          string `json:"phase"`           // "pre-migration" or "post-migration"
+	Ready          bool   `json:"ready"`           // true if migration can proceed/succeeded
+	Backend        string `json:"backend"`         // current backend: "sqlite", "dolt", or "jsonl-only"
+	RecommendedFix string `json:"recommended_fix"` // suggested command to fix issues
+}
+
+// MigrationValidationCounts holds issue and malformation counts.
+type MigrationValidationCounts struct {
+	JSONLCount         int `json:"jsonl_count"`          // issue count in JSONL
+	SQLiteCount        int `json:"sqlite_count"`         // issue count in SQLite (pre-migration)
+	DoltCount          int `json:"dolt_count"`           // issue count in Dolt (post-migration)
+	JSONLMalformed     int `json:"jsonl_malformed"`      // count of malformed JSONL lines
+	ForeignPrefixCount int `json:"foreign_prefix_count"` // count of issues with non-local prefixes (cross-rig contamination)
+}
+
+// MigrationValidationFlags holds boolean health flags.
+type MigrationValidationFlags struct {
+	JSONLValid  bool `json:"jsonl_valid"`  // true if JSONL is parseable
+	DoltHealthy bool `json:"dolt_healthy"` // true if Dolt DB is healthy
+	DoltLocked  bool `json:"dolt_locked"`  // true if Dolt has uncommitted changes
+	SchemaValid bool `json:"schema_valid"` // true if schema is complete
+}
+
+// MigrationValidationDiffs holds sample mismatches and diagnostics.
+type MigrationValidationDiffs struct {
+	MissingInDB     []string       `json:"missing_in_db"`    // issue IDs in JSONL but not in DB (sample)
+	MissingInJSONL  []string       `json:"missing_in_jsonl"` // issue IDs in DB but not in JSONL (sample)
+	Errors          []string       `json:"errors"`           // blocking errors
+	Warnings        []string       `json:"warnings"`         // non-blocking warnings
+	ForeignPrefixes map[string]int `json:"foreign_prefixes"` // prefix -> count for foreign-prefix issues
+}
 
 // MigrationValidationResult provides machine-parseable migration validation output.
 // This struct is designed to be consumed by Claude and other automation tools.
 type MigrationValidationResult struct {
-	Phase              string         `json:"phase"`                // "pre-migration" or "post-migration"
-	Ready              bool           `json:"ready"`                // true if migration can proceed/succeeded
-	Backend            string         `json:"backend"`              // current backend: "sqlite", "dolt", or "jsonl-only"
-	JSONLCount         int            `json:"jsonl_count"`          // issue count in JSONL
-	SQLiteCount        int            `json:"sqlite_count"`         // issue count in SQLite (pre-migration)
-	DoltCount          int            `json:"dolt_count"`           // issue count in Dolt (post-migration)
-	MissingInDB        []string       `json:"missing_in_db"`        // issue IDs in JSONL but not in DB (sample)
-	MissingInJSONL     []string       `json:"missing_in_jsonl"`     // issue IDs in DB but not in JSONL (sample)
-	Errors             []string       `json:"errors"`               // blocking errors
-	Warnings           []string       `json:"warnings"`             // non-blocking warnings
-	JSONLValid         bool           `json:"jsonl_valid"`          // true if JSONL is parseable
-	JSONLMalformed     int            `json:"jsonl_malformed"`      // count of malformed JSONL lines
-	DoltHealthy        bool           `json:"dolt_healthy"`         // true if Dolt DB is healthy
-	DoltLocked         bool           `json:"dolt_locked"`          // true if Dolt has uncommitted changes
-	SchemaValid        bool           `json:"schema_valid"`         // true if schema is complete
-	RecommendedFix     string         `json:"recommended_fix"`      // suggested command to fix issues
-	ForeignPrefixCount int            `json:"foreign_prefix_count"` // count of issues with non-local prefixes (cross-rig contamination)
-	ForeignPrefixes    map[string]int `json:"foreign_prefixes"`     // prefix -> count for foreign-prefix issues
+	MigrationValidationPhase
+	MigrationValidationCounts
+	MigrationValidationFlags
+	MigrationValidationDiffs
 }
 
 // CheckMigrationReadiness validates that a beads installation is ready for Dolt migration.
@@ -47,71 +62,27 @@ type MigrationValidationResult struct {
 // Returns a doctor check suitable for standard output and a detailed result for automation.
 func CheckMigrationReadiness(path string) (DoctorCheck, MigrationValidationResult) {
 	result := MigrationValidationResult{
-		Phase:       "pre-migration",
-		Ready:       true,
-		JSONLValid:  true,
-		SchemaValid: true,
+		MigrationValidationPhase: MigrationValidationPhase{
+			Phase: "pre-migration",
+			Ready: true,
+		},
+		MigrationValidationFlags: MigrationValidationFlags{
+			JSONLValid:  true,
+			SchemaValid: true,
+		},
 	}
 
 	beadsDir := ResolveBeadsDirForRepo(path)
-
-	// Check if .beads exists
-	if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
-		result.Ready = false
-		result.Errors = append(result.Errors, "No active beads workspace found")
-		return DoctorCheck{
-			Name:     "Migration Readiness",
-			Status:   StatusError,
-			Message:  "No active beads workspace found",
-			Fix:      "Run 'bd where' to inspect the resolved workspace, or 'bd init' to create a beads installation",
-			Category: CategoryMaintenance,
-		}, result
+	jsonlPath, earlyCheck, done := prepareMigrationReadiness(beadsDir, &result)
+	if done {
+		return earlyCheck, result
 	}
 
-	// Detect current backend
-	result.Backend = GetBackend(beadsDir)
-
-	// Already on Dolt - no migration needed
-	if result.Backend == configfile.BackendDolt {
-		return DoctorCheck{
-			Name:     "Migration Readiness",
-			Status:   StatusOK,
-			Message:  "Already using Dolt backend",
-			Category: CategoryMaintenance,
-		}, result
-	}
-
-	// Find JSONL file
-	jsonlPath := findJSONLFile(beadsDir)
-	if jsonlPath == "" {
-		result.Ready = false
-		result.Errors = append(result.Errors, "No JSONL file found")
-		return DoctorCheck{
-			Name:     "Migration Readiness",
-			Status:   StatusError,
-			Message:  "No JSONL file found",
-			Detail:   "Migration requires issues.jsonl or beads.jsonl",
-			Fix:      "Run 'bd export' to create JSONL file from database",
-			Category: CategoryMaintenance,
-		}, result
-	}
-
-	// Validate JSONL integrity
 	jsonlCount, malformed, _, err := validateJSONLForMigration(jsonlPath)
 	result.JSONLCount = jsonlCount
 	result.JSONLMalformed = malformed
 	if err != nil {
-		result.Ready = false
-		result.JSONLValid = false
-		result.Errors = append(result.Errors, fmt.Sprintf("JSONL validation failed: %v", err))
-		return DoctorCheck{
-			Name:     "Migration Readiness",
-			Status:   StatusError,
-			Message:  fmt.Sprintf("JSONL has %d malformed lines", malformed),
-			Detail:   err.Error(),
-			Fix:      "Run 'bd doctor --fix' to repair JSONL from database",
-			Category: CategoryMaintenance,
-		}, result
+		return migrationReadinessJSONLError(&result, malformed, err)
 	}
 
 	if malformed > 0 {
@@ -120,8 +91,64 @@ func CheckMigrationReadiness(path string) (DoctorCheck, MigrationValidationResul
 	}
 
 	result.Backend = "jsonl-only"
+	return migrationReadinessStatus(&result, jsonlCount)
+}
 
-	// Build status message
+func prepareMigrationReadiness(beadsDir string, result *MigrationValidationResult) (string, DoctorCheck, bool) {
+	if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
+		result.Ready = false
+		result.Errors = append(result.Errors, "No active beads workspace found")
+		return "", DoctorCheck{
+			Name:     "Migration Readiness",
+			Status:   StatusError,
+			Message:  "No active beads workspace found",
+			Fix:      "Run 'bd where' to inspect the resolved workspace, or 'bd init' to create a beads installation",
+			Category: CategoryMaintenance,
+		}, true
+	}
+
+	result.Backend = GetBackend(beadsDir)
+	if result.Backend == configfile.BackendDolt {
+		return "", DoctorCheck{
+			Name:     "Migration Readiness",
+			Status:   StatusOK,
+			Message:  "Already using Dolt backend",
+			Category: CategoryMaintenance,
+		}, true
+	}
+
+	jsonlPath := findJSONLFile(beadsDir)
+	if jsonlPath == "" {
+		result.Ready = false
+		result.Errors = append(result.Errors, "No JSONL file found")
+		return "", DoctorCheck{
+			Name:     "Migration Readiness",
+			Status:   StatusError,
+			Message:  "No JSONL file found",
+			Detail:   "Migration requires issues.jsonl or beads.jsonl",
+			Fix:      "Run 'bd export' to create JSONL file from database",
+			Category: CategoryMaintenance,
+		}, true
+	}
+	return jsonlPath, DoctorCheck{}, false
+}
+
+func migrationReadinessJSONLError(result *MigrationValidationResult, malformed int, err error) (DoctorCheck, MigrationValidationResult) {
+	result.Ready = false
+	result.JSONLValid = false
+	result.Errors = append(result.Errors, fmt.Sprintf("JSONL validation failed: %v", err))
+	return DoctorCheck{
+		Name:     "Migration Readiness",
+		Status:   StatusError,
+		Message:  fmt.Sprintf("JSONL has %d malformed lines", malformed),
+		Detail:   err.Error(),
+		Fix:      "Run 'bd doctor --fix' to repair JSONL from database",
+		Category: CategoryMaintenance,
+	}, *result
+}
+
+func migrationReadinessStatus(result *MigrationValidationResult, jsonlCount int) (DoctorCheck, MigrationValidationResult) {
+
 	if len(result.Errors) > 0 {
 		result.Ready = false
 		return DoctorCheck{
@@ -131,7 +158,7 @@ func CheckMigrationReadiness(path string) (DoctorCheck, MigrationValidationResul
 			Detail:   strings.Join(result.Errors, "\n"),
 			Fix:      "Fix errors before running migration",
 			Category: CategoryMaintenance,
-		}, result
+		}, *result
 	}
 
 	status := StatusOK
@@ -148,7 +175,7 @@ func CheckMigrationReadiness(path string) (DoctorCheck, MigrationValidationResul
 		Detail:   strings.Join(result.Warnings, "\n"),
 		Fix:      "Follow 'bd help init-safety' to reinitialize with Dolt, then import and verify this JSONL export",
 		Category: CategoryMaintenance,
-	}, result
+	}, *result
 }
 
 // CheckMigrationCompletion validates that a Dolt migration completed successfully.
@@ -159,15 +186,25 @@ func CheckMigrationReadiness(path string) (DoctorCheck, MigrationValidationResul
 // 4. Dolt database has no locks or uncommitted changes
 func CheckMigrationCompletion(path string) (DoctorCheck, MigrationValidationResult) {
 	result := MigrationValidationResult{
-		Phase:       "post-migration",
-		Ready:       true,
-		DoltHealthy: true,
-		SchemaValid: true,
+		MigrationValidationPhase: MigrationValidationPhase{
+			Phase: "post-migration",
+			Ready: true,
+		},
+		MigrationValidationFlags: MigrationValidationFlags{
+			DoltHealthy: true,
+			SchemaValid: true,
+		},
 	}
 
 	beadsDir := ResolveBeadsDirForRepo(path)
+	check, done := prepareMigrationCompletion(beadsDir, &result)
+	if done {
+		return check, result
+	}
+	return inspectMigrationCompletion(beadsDir, &result)
+}
 
-	// Check if .beads exists
+func prepareMigrationCompletion(beadsDir string, result *MigrationValidationResult) (DoctorCheck, bool) {
 	if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
 		result.Ready = false
 		result.DoltHealthy = false
@@ -177,13 +214,9 @@ func CheckMigrationCompletion(path string) (DoctorCheck, MigrationValidationResu
 			Status:   StatusError,
 			Message:  "No active beads workspace found",
 			Category: CategoryMaintenance,
-		}, result
+		}, true
 	}
-
-	// Detect current backend
 	result.Backend = GetBackend(beadsDir)
-
-	// Not on Dolt - migration incomplete or not started
 	if result.Backend != configfile.BackendDolt {
 		result.Ready = false
 		result.DoltHealthy = false
@@ -195,46 +228,59 @@ func CheckMigrationCompletion(path string) (DoctorCheck, MigrationValidationResu
 			Detail:   fmt.Sprintf("Current backend: %s", result.Backend),
 			Fix:      "Follow 'bd help init-safety' to reinitialize with Dolt, then import and verify the issue export",
 			Category: CategoryMaintenance,
-		}, result
+		}, true
 	}
+	return DoctorCheck{}, false
+}
 
-	// Check Dolt database health
+func inspectMigrationCompletion(beadsDir string, result *MigrationValidationResult) (DoctorCheck, MigrationValidationResult) {
 	ctx := context.Background()
 	doltPath := getDatabasePath(beadsDir)
 	store, err := dolt.New(ctx, doltServerConfig(beadsDir, doltPath))
 	if err != nil {
-		result.Ready = false
-		result.DoltHealthy = false
-		result.Errors = append(result.Errors, fmt.Sprintf("Failed to open Dolt: %v", err))
-		return DoctorCheck{
-			Name:     "Migration Completion",
-			Status:   StatusError,
-			Message:  "Cannot open Dolt database",
-			Detail:   err.Error(),
-			Fix:      "Check Dolt database integrity or re-run migration",
-			Category: CategoryMaintenance,
-		}, result
+		return migrationCompletionOpenError(result, err)
 	}
 	defer func() { _ = store.Close() }()
 
-	// Get Dolt issue count
 	stats, err := store.GetStatistics(ctx)
 	if err != nil {
-		result.Ready = false
-		result.SchemaValid = false
-		result.Errors = append(result.Errors, fmt.Sprintf("Failed to query Dolt: %v", err))
-		return DoctorCheck{
-			Name:     "Migration Completion",
-			Status:   StatusError,
-			Message:  "Cannot query Dolt database",
-			Detail:   err.Error(),
-			Fix:      "Database schema may be incomplete",
-			Category: CategoryMaintenance,
-		}, result
+		return migrationCompletionQueryError(result, err)
 	}
 	result.DoltCount = stats.TotalIssues
+	appendMigrationLockWarnings(beadsDir, result)
+	compareMigrationCompletion(ctx, store, beadsDir, result)
+	return migrationCompletionStatus(result)
+}
 
-	// Check for Dolt locks/uncommitted changes
+func migrationCompletionOpenError(result *MigrationValidationResult, err error) (DoctorCheck, MigrationValidationResult) {
+	result.Ready = false
+	result.DoltHealthy = false
+	result.Errors = append(result.Errors, fmt.Sprintf("Failed to open Dolt: %v", err))
+	return DoctorCheck{
+		Name:     "Migration Completion",
+		Status:   StatusError,
+		Message:  "Cannot open Dolt database",
+		Detail:   err.Error(),
+		Fix:      "Check Dolt database integrity or re-run migration",
+		Category: CategoryMaintenance,
+	}, *result
+}
+
+func migrationCompletionQueryError(result *MigrationValidationResult, err error) (DoctorCheck, MigrationValidationResult) {
+	result.Ready = false
+	result.SchemaValid = false
+	result.Errors = append(result.Errors, fmt.Sprintf("Failed to query Dolt: %v", err))
+	return DoctorCheck{
+		Name:     "Migration Completion",
+		Status:   StatusError,
+		Message:  "Cannot query Dolt database",
+		Detail:   err.Error(),
+		Fix:      "Database schema may be incomplete",
+		Category: CategoryMaintenance,
+	}, *result
+}
+
+func appendMigrationLockWarnings(beadsDir string, result *MigrationValidationResult) {
 	doltLocked, lockDetail, lockErr := checkDoltLocks(beadsDir)
 	if lockErr != nil {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("Could not check Dolt locks: %v", lockErr))
@@ -244,55 +290,55 @@ func CheckMigrationCompletion(path string) (DoctorCheck, MigrationValidationResu
 			result.Warnings = append(result.Warnings, fmt.Sprintf("Dolt has uncommitted changes: %s", lockDetail))
 		}
 	}
+}
 
-	// Find JSONL file for comparison
+func compareMigrationCompletion(ctx context.Context, store *dolt.DoltStore, beadsDir string, result *MigrationValidationResult) {
 	jsonlPath := findJSONLFile(beadsDir)
-	if jsonlPath != "" {
-		jsonlCount, _, jsonlIDs, err := validateJSONLForMigration(jsonlPath)
-		result.JSONLCount = jsonlCount
-		if err == nil {
-			// Compare Dolt with JSONL
-			missingInDolt := compareDoltWithJSONL(ctx, store, jsonlIDs)
-			result.MissingInDB = missingInDolt
-
-			if len(missingInDolt) > 0 {
-				result.Ready = false
-				result.Errors = append(result.Errors,
-					fmt.Sprintf("%d issues in JSONL missing from Dolt", len(missingInDolt)))
-			}
-
-			// Count comparison
-			if result.DoltCount != jsonlCount {
-				// Only error if Dolt has fewer issues than JSONL
-				if result.DoltCount < jsonlCount {
-					result.Ready = false
-					result.Errors = append(result.Errors,
-						fmt.Sprintf("Count mismatch: Dolt has %d, JSONL has %d", result.DoltCount, jsonlCount))
-				} else {
-					// Dolt has more - check if extra issues are cross-rig contamination or ephemeral
-					foreignCount, foreignPrefixes, ephemeralCount := categorizeDoltExtras(ctx, store, jsonlIDs)
-					result.ForeignPrefixCount = foreignCount
-					result.ForeignPrefixes = foreignPrefixes
-
-					if foreignCount > 0 {
-						prefixList := formatPrefixCounts(foreignPrefixes)
-						result.Warnings = append(result.Warnings,
-							fmt.Sprintf("Dolt has %d issues from other rigs (cross-rig contamination): %s", foreignCount, prefixList))
-					}
-					if ephemeralCount > 0 {
-						result.Warnings = append(result.Warnings,
-							fmt.Sprintf("Dolt has %d ephemeral issues not in JSONL", ephemeralCount))
-					}
-				}
-			}
-		} else {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("Could not validate JSONL: %v", err))
-		}
-	} else {
+	if jsonlPath == "" {
 		result.Warnings = append(result.Warnings, "No JSONL file found for comparison")
+		return
 	}
+	jsonlCount, _, jsonlIDs, err := validateJSONLForMigration(jsonlPath)
+	result.JSONLCount = jsonlCount
+	if err != nil {
+		result.Warnings = append(result.Warnings, fmt.Sprintf("Could not validate JSONL: %v", err))
+		return
+	}
+	missingInDolt := compareDoltWithJSONL(ctx, store, jsonlIDs)
+	result.MissingInDB = missingInDolt
+	if len(missingInDolt) > 0 {
+		result.Ready = false
+		result.Errors = append(result.Errors,
+			fmt.Sprintf("%d issues in JSONL missing from Dolt", len(missingInDolt)))
+	}
+	if result.DoltCount == jsonlCount {
+		return
+	}
+	if result.DoltCount < jsonlCount {
+		result.Ready = false
+		result.Errors = append(result.Errors,
+			fmt.Sprintf("Count mismatch: Dolt has %d, JSONL has %d", result.DoltCount, jsonlCount))
+		return
+	}
+	foreignCount, foreignPrefixes, ephemeralCount := categorizeDoltExtras(ctx, store, jsonlIDs)
+	result.ForeignPrefixCount = foreignCount
+	result.ForeignPrefixes = foreignPrefixes
+	appendMigrationExtraWarnings(result, foreignCount, foreignPrefixes, ephemeralCount)
+}
 
-	// Build status
+func appendMigrationExtraWarnings(result *MigrationValidationResult, foreignCount int, foreignPrefixes map[string]int, ephemeralCount int) {
+	if foreignCount > 0 {
+		prefixList := formatPrefixCounts(foreignPrefixes)
+		result.Warnings = append(result.Warnings,
+			fmt.Sprintf("Dolt has %d issues from other rigs (cross-rig contamination): %s", foreignCount, prefixList))
+	}
+	if ephemeralCount > 0 {
+		result.Warnings = append(result.Warnings,
+			fmt.Sprintf("Dolt has %d ephemeral issues not in JSONL", ephemeralCount))
+	}
+}
+
+func migrationCompletionStatus(result *MigrationValidationResult) (DoctorCheck, MigrationValidationResult) {
 	if len(result.Errors) > 0 {
 		result.Ready = false
 		return DoctorCheck{
@@ -302,7 +348,7 @@ func CheckMigrationCompletion(path string) (DoctorCheck, MigrationValidationResu
 			Detail:   strings.Join(result.Errors, "\n"),
 			Fix:      "Check the export/import results; follow 'bd help init-safety' before reinitializing again",
 			Category: CategoryMaintenance,
-		}, result
+		}, *result
 	}
 
 	status := StatusOK
@@ -318,259 +364,5 @@ func CheckMigrationCompletion(path string) (DoctorCheck, MigrationValidationResu
 		Message:  message,
 		Detail:   strings.Join(result.Warnings, "\n"),
 		Category: CategoryMaintenance,
-	}, result
-}
-
-// CheckDoltLocks checks if the Dolt database has any locks or uncommitted changes.
-func CheckDoltLocks(path string) DoctorCheck {
-	beadsDir := ResolveBeadsDirForRepo(path)
-
-	// Only run for Dolt backend
-	if !IsDoltBackend(beadsDir) {
-		return DoctorCheck{
-			Name:     "Dolt Locks",
-			Status:   StatusOK,
-			Message:  "N/A (not Dolt backend)",
-			Category: CategoryMaintenance,
-		}
-	}
-
-	locked, detail, err := checkDoltLocks(beadsDir)
-	if err != nil {
-		return DoctorCheck{
-			Name:     "Dolt Locks",
-			Status:   StatusWarning,
-			Message:  "Could not check Dolt locks",
-			Detail:   err.Error(),
-			Fix:      "Ensure the Dolt server is running: gt dolt status",
-			Category: CategoryMaintenance,
-		}
-	}
-	if locked {
-		return DoctorCheck{
-			Name:     "Dolt Locks",
-			Status:   StatusWarning,
-			Message:  "Uncommitted changes detected",
-			Detail:   detail,
-			Fix:      "Run 'bd vc commit -m \"commit changes\"' to commit, or changes will auto-commit on next bd command",
-			Category: CategoryMaintenance,
-		}
-	}
-
-	return DoctorCheck{
-		Name:     "Dolt Locks",
-		Status:   StatusOK,
-		Message:  "No locks or uncommitted changes",
-		Category: CategoryMaintenance,
-	}
-}
-
-// Helper functions
-
-// findJSONLFile locates the JSONL file in a .beads directory.
-// Temporary: will be removed with Phase 2c (doctor JSONL cleanup).
-func findJSONLFile(beadsDir string) string {
-	for _, name := range []string{"issues.jsonl", "beads.jsonl"} {
-		p := filepath.Join(beadsDir, name)
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-	return ""
-}
-
-// validateJSONLForMigration validates a JSONL file for migration readiness.
-// Returns: count of valid issues, count of malformed lines, set of valid IDs, and error if blocking.
-func validateJSONLForMigration(jsonlPath string) (int, int, map[string]bool, error) {
-	file, err := os.Open(jsonlPath) //nolint:gosec
-	if err != nil {
-		return 0, 0, nil, fmt.Errorf("failed to open JSONL: %w", err)
-	}
-	defer file.Close()
-
-	ids := make(map[string]bool)
-	var malformed int
-	var parseErrors []string
-
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 1024), 2*1024*1024) // 2MB buffer for large lines
-	lineNo := 0
-
-	for scanner.Scan() {
-		lineNo++
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-
-		var issue struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(line, &issue); err != nil {
-			malformed++
-			if len(parseErrors) < 5 {
-				parseErrors = append(parseErrors, fmt.Sprintf("line %d: %v", lineNo, err))
-			}
-			continue
-		}
-
-		if issue.ID == "" {
-			malformed++
-			if len(parseErrors) < 5 {
-				parseErrors = append(parseErrors, fmt.Sprintf("line %d: missing id field", lineNo))
-			}
-			continue
-		}
-
-		ids[issue.ID] = true
-	}
-
-	if err := scanner.Err(); err != nil {
-		return len(ids), malformed, ids, fmt.Errorf("failed to read JSONL: %w", err)
-	}
-
-	// Return error only if ALL lines are malformed (blocking)
-	if len(ids) == 0 && malformed > 0 {
-		return 0, malformed, ids, fmt.Errorf("JSONL file is completely corrupt: %d malformed lines", malformed)
-	}
-
-	return len(ids), malformed, ids, nil
-}
-
-// compareDoltWithJSONL compares Dolt database with JSONL IDs.
-// Returns IDs in JSONL but not in Dolt (sample first 100).
-func compareDoltWithJSONL(ctx context.Context, store storage.DoltStorage, jsonlIDs map[string]bool) []string {
-	ids := make([]string, 0, len(jsonlIDs))
-	for id := range jsonlIDs {
-		ids = append(ids, id)
-	}
-	if len(ids) == 0 {
-		return nil
-	}
-
-	// Batch fetch all issues from Dolt in chunks
-	foundIDs := make(map[string]bool, len(ids))
-	const batchSize = 500
-	for i := 0; i < len(ids); i += batchSize {
-		end := i + batchSize
-		if end > len(ids) {
-			end = len(ids)
-		}
-		issues, err := store.GetIssuesByIDs(ctx, ids[i:end])
-		if err != nil {
-			continue
-		}
-		for _, issue := range issues {
-			foundIDs[issue.ID] = true
-		}
-	}
-
-	// Set difference: IDs in JSONL but not in Dolt (sample first 100)
-	var missing []string
-	for _, id := range ids {
-		if !foundIDs[id] {
-			missing = append(missing, id)
-			if len(missing) >= 100 {
-				break
-			}
-		}
-	}
-	return missing
-}
-
-// checkDoltLocks checks for uncommitted changes in Dolt.
-// Returns (locked, detail, error). A non-nil error means the check could not
-// be performed (e.g. connection failure) and the locked result is meaningless.
-func checkDoltLocks(beadsDir string) (bool, string, error) {
-	conn, err := openDoltConn(beadsDir)
-	if err != nil {
-		return false, "", fmt.Errorf("cannot connect to Dolt: %w", err)
-	}
-	defer conn.Close()
-
-	ctx := context.Background()
-
-	// Check dolt_status for uncommitted changes
-	rows, err := conn.db.QueryContext(ctx, "SELECT table_name, staged, status FROM dolt_status")
-	if err != nil {
-		return false, "", fmt.Errorf("cannot query dolt_status: %w", err)
-	}
-	defer rows.Close()
-
-	// Same filter as the "Dolt Status" check — see describeUncommittedTables.
-	scanned, err := scanDoltStatus(rows)
-	if err != nil {
-		return false, "", fmt.Errorf("row iteration error: %w", err)
-	}
-	changes := describeUncommittedTables(scanned)
-
-	if len(changes) > 0 {
-		return true, strings.Join(changes, ", "), nil
-	}
-
-	return false, "", nil
-}
-
-// categorizeDoltExtras finds issues in Dolt that aren't in JSONL and categorizes them
-// as either foreign-prefix (cross-rig contamination) or ephemeral (same-prefix).
-// Returns: foreignCount, foreignPrefixes map, ephemeralCount.
-func categorizeDoltExtras(ctx context.Context, store storage.DoltStorage, jsonlIDs map[string]bool) (int, map[string]int, int) {
-	// Get the configured prefix for this rig
-	localPrefix, _ := store.GetConfig(ctx, "issue_prefix") // Best effort: empty prefix means no prefix-based validation
-
-	// Query all issue IDs from Dolt
-	accessor, ok := storage.UnwrapStore(store).(storage.RawDBAccessor)
-	if !ok {
-		return 0, nil, 0
-	}
-	db := accessor.UnderlyingDB()
-	if db == nil {
-		return 0, nil, 0
-	}
-
-	rows, err := db.QueryContext(ctx, "SELECT id FROM issues")
-	if err != nil {
-		return 0, nil, 0
-	}
-	defer rows.Close()
-
-	foreignPrefixes := make(map[string]int)
-	var ephemeralCount int
-
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			continue
-		}
-		// Skip issues that are in JSONL (those are expected)
-		if jsonlIDs[id] {
-			continue
-		}
-		// This issue is in Dolt but not in JSONL - categorize it
-		prefix := utils.ExtractIssuePrefix(id)
-		if localPrefix != "" && prefix != "" && prefix != localPrefix {
-			foreignPrefixes[prefix]++
-		} else {
-			ephemeralCount++
-		}
-	}
-	// Best effort: rows.Err() ignored here since this is a diagnostic categorization
-	// and partial results are acceptable.
-	_ = rows.Err()
-
-	var foreignCount int
-	for _, count := range foreignPrefixes {
-		foreignCount += count
-	}
-
-	return foreignCount, foreignPrefixes, ephemeralCount
-}
-
-// formatPrefixCounts formats a map of prefix -> count as "prefix1 (N), prefix2 (M)".
-func formatPrefixCounts(prefixes map[string]int) string {
-	var parts []string
-	for prefix, count := range prefixes {
-		parts = append(parts, fmt.Sprintf("%s (%d)", prefix, count))
-	}
-	return strings.Join(parts, ", ")
+	}, *result
 }

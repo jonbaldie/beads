@@ -101,9 +101,9 @@ func TestEmbeddedAutoImportJSONLConcurrentWriter(t *testing.T) {
 	dir, beadsDir, _ := bdInit(t, bd, "--prefix", "cr")
 
 	jsonlIssues := []types.Issue{
-		{ID: "cr-import-1", Title: "Imported One", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, CreatedAt: time.Now(), UpdatedAt: time.Now()},
-		{ID: "cr-import-2", Title: "Imported Two", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeBug, CreatedAt: time.Now(), UpdatedAt: time.Now()},
-		{ID: "cr-import-3", Title: "Imported Three", Status: types.StatusOpen, Priority: 3, IssueType: types.TypeTask, CreatedAt: time.Now(), UpdatedAt: time.Now()},
+		{IssueID: types.IssueID{ID: "cr-import-1"}, IssueContent: types.IssueContent{Title: "Imported One"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueTimes: types.IssueTimes{CreatedAt: time.Now(), UpdatedAt: time.Now()}},
+		{IssueID: types.IssueID{ID: "cr-import-2"}, IssueContent: types.IssueContent{Title: "Imported Two"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeBug}, IssueTimes: types.IssueTimes{CreatedAt: time.Now(), UpdatedAt: time.Now()}},
+		{IssueID: types.IssueID{ID: "cr-import-3"}, IssueContent: types.IssueContent{Title: "Imported Three"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 3, IssueType: types.TypeTask}, IssueTimes: types.IssueTimes{CreatedAt: time.Now(), UpdatedAt: time.Now()}},
 	}
 	var lines []string
 	for _, issue := range jsonlIssues {
@@ -194,8 +194,8 @@ func TestEmbeddedAutoImportJSONLSkipsNonEmpty(t *testing.T) {
 
 	// Place a JSONL file with different issues.
 	jsonlIssues := []types.Issue{
-		{ID: "ne-should-not-import-1", Title: "Should Not Import", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, CreatedAt: time.Now(), UpdatedAt: time.Now()},
-		{ID: "ne-should-not-import-2", Title: "Also Should Not Import", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeBug, CreatedAt: time.Now(), UpdatedAt: time.Now()},
+		{IssueID: types.IssueID{ID: "ne-should-not-import-1"}, IssueContent: types.IssueContent{Title: "Should Not Import"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueTimes: types.IssueTimes{CreatedAt: time.Now(), UpdatedAt: time.Now()}},
+		{IssueID: types.IssueID{ID: "ne-should-not-import-2"}, IssueContent: types.IssueContent{Title: "Also Should Not Import"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeBug}, IssueTimes: types.IssueTimes{CreatedAt: time.Now(), UpdatedAt: time.Now()}},
 	}
 	var lines []string
 	for _, issue := range jsonlIssues {
@@ -292,9 +292,9 @@ func TestEmbeddedAutoImportFallback_ConflictSkip_DoesNotClobber(t *testing.T) {
 	now := time.Now().UTC()
 	jsonlIssues := []types.Issue{
 		// Mutated copy of the live issue: UPSERT would clobber it.
-		{ID: live.ID, Title: "CLOBBERED", Status: types.StatusClosed, Priority: 0, IssueType: types.TypeBug, CreatedAt: now, UpdatedAt: now},
+		{IssueID: types.IssueID{ID: live.ID}, IssueContent: types.IssueContent{Title: "CLOBBERED"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed, Priority: 0, IssueType: types.TypeBug}, IssueTimes: types.IssueTimes{CreatedAt: now, UpdatedAt: now}},
 		// Brand-new issue: must still be inserted.
-		{ID: newID, Title: "freshly imported", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, CreatedAt: now, UpdatedAt: now},
+		{IssueID: types.IssueID{ID: newID}, IssueContent: types.IssueContent{Title: "freshly imported"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueTimes: types.IssueTimes{CreatedAt: now, UpdatedAt: now}},
 	}
 	var lines []string
 	for _, issue := range jsonlIssues {
@@ -353,8 +353,8 @@ func TestEmbeddedAutoImportFallback_ConflictSkip_EmptyDBImportsAll(t *testing.T)
 
 	now := time.Now().UTC()
 	jsonlIssues := []types.Issue{
-		{ID: "ce-1", Title: "recovered one", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, CreatedAt: now, UpdatedAt: now},
-		{ID: "ce-2", Title: "recovered two", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeBug, CreatedAt: now, UpdatedAt: now},
+		{IssueID: types.IssueID{ID: "ce-1"}, IssueContent: types.IssueContent{Title: "recovered one"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueTimes: types.IssueTimes{CreatedAt: now, UpdatedAt: now}},
+		{IssueID: types.IssueID{ID: "ce-2"}, IssueContent: types.IssueContent{Title: "recovered two"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeBug}, IssueTimes: types.IssueTimes{CreatedAt: now, UpdatedAt: now}},
 	}
 	var lines []string
 	for _, issue := range jsonlIssues {

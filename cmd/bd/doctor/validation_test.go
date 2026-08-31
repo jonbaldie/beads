@@ -24,9 +24,9 @@ func TestCheckDuplicateIssues_ClosedIssuesExcluded(t *testing.T) {
 	ctx := context.Background()
 
 	issues := []*types.Issue{
-		{Title: "mol-feature-dev", Description: "Molecule for feature", Status: types.StatusClosed, Priority: 2, IssueType: types.TypeTask},
-		{Title: "mol-feature-dev", Description: "Molecule for feature", Status: types.StatusClosed, Priority: 2, IssueType: types.TypeTask},
-		{Title: "mol-feature-dev", Description: "Molecule for feature", Status: types.StatusClosed, Priority: 2, IssueType: types.TypeTask},
+		{IssueContent: types.IssueContent{Title: "mol-feature-dev", Description: "Molecule for feature"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed, Priority: 2, IssueType: types.TypeTask}},
+		{IssueContent: types.IssueContent{Title: "mol-feature-dev", Description: "Molecule for feature"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed, Priority: 2, IssueType: types.TypeTask}},
+		{IssueContent: types.IssueContent{Title: "mol-feature-dev", Description: "Molecule for feature"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed, Priority: 2, IssueType: types.TypeTask}},
 	}
 
 	for _, issue := range issues {
@@ -50,8 +50,8 @@ func TestCheckDuplicateIssues_OpenDuplicatesDetected(t *testing.T) {
 	ctx := context.Background()
 
 	issues := []*types.Issue{
-		{Title: "Fix auth bug", Description: "Users cannot login", Design: "Use OAuth", AcceptanceCriteria: "User can login", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeBug},
-		{Title: "Fix auth bug", Description: "Users cannot login", Design: "Use OAuth", AcceptanceCriteria: "User can login", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeBug},
+		{IssueContent: types.IssueContent{Title: "Fix auth bug", Description: "Users cannot login", Design: "Use OAuth", AcceptanceCriteria: "User can login"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeBug}},
+		{IssueContent: types.IssueContent{Title: "Fix auth bug", Description: "Users cannot login", Design: "Use OAuth", AcceptanceCriteria: "User can login"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeBug}},
 	}
 
 	for _, issue := range issues {
@@ -77,8 +77,8 @@ func TestCheckDuplicateIssues_DifferentDesignNotDuplicate(t *testing.T) {
 	ctx := context.Background()
 
 	issues := []*types.Issue{
-		{Title: "Fix auth bug", Description: "Users cannot login", Design: "Use OAuth", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeBug},
-		{Title: "Fix auth bug", Description: "Users cannot login", Design: "Use SAML", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeBug},
+		{IssueContent: types.IssueContent{Title: "Fix auth bug", Description: "Users cannot login", Design: "Use OAuth"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeBug}},
+		{IssueContent: types.IssueContent{Title: "Fix auth bug", Description: "Users cannot login", Design: "Use SAML"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeBug}},
 	}
 
 	for _, issue := range issues {
@@ -102,8 +102,8 @@ func TestCheckDuplicateIssues_MixedOpenClosed(t *testing.T) {
 	ctx := context.Background()
 
 	openIssues := []*types.Issue{
-		{Title: "Task A", Description: "Do something", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{Title: "Task A", Description: "Do something", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+		{IssueContent: types.IssueContent{Title: "Task A", Description: "Do something"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueContent: types.IssueContent{Title: "Task A", Description: "Do something"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
 	}
 
 	for _, issue := range openIssues {
@@ -112,7 +112,7 @@ func TestCheckDuplicateIssues_MixedOpenClosed(t *testing.T) {
 		}
 	}
 
-	closedIssue := &types.Issue{Title: "Task A", Description: "Do something", Status: types.StatusClosed, Priority: 2, IssueType: types.TypeTask}
+	closedIssue := &types.Issue{IssueContent: types.IssueContent{Title: "Task A", Description: "Do something"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed, Priority: 2, IssueType: types.TypeTask}}
 	if err := store.CreateIssue(ctx, closedIssue, "test"); err != nil {
 		t.Fatalf("Failed to create issue: %v", err)
 	}
@@ -134,8 +134,8 @@ func TestCheckDuplicateIssues_DeletedExcluded(t *testing.T) {
 	ctx := context.Background()
 
 	issues := []*types.Issue{
-		{Title: "Deleted issue", Description: "Was deleted", Status: types.StatusClosed, Priority: 2, IssueType: types.TypeTask},
-		{Title: "Deleted issue", Description: "Was deleted", Status: types.StatusClosed, Priority: 2, IssueType: types.TypeTask},
+		{IssueContent: types.IssueContent{Title: "Deleted issue", Description: "Was deleted"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed, Priority: 2, IssueType: types.TypeTask}},
+		{IssueContent: types.IssueContent{Title: "Deleted issue", Description: "Was deleted"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed, Priority: 2, IssueType: types.TypeTask}},
 	}
 
 	for _, issue := range issues {
@@ -198,11 +198,15 @@ func TestCheckDuplicateIssues_OrchestratorUnderThreshold(t *testing.T) {
 
 	for i := 0; i < 51; i++ {
 		issue := &types.Issue{
-			Title:       "Check own context limit",
-			Description: "Wisp for patrol cycle",
-			Status:      types.StatusOpen,
-			Priority:    2,
-			IssueType:   types.TypeTask,
+			IssueContent: types.IssueContent{
+				Title:       "Check own context limit",
+				Description: "Wisp for patrol cycle",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatalf("Failed to create issue: %v", err)
@@ -307,11 +311,15 @@ func TestCheckDuplicateIssues_NonOrchestratorMode(t *testing.T) {
 
 	for i := 0; i < 51; i++ {
 		issue := &types.Issue{
-			Title:       "Duplicate task",
-			Description: "Some task",
-			Status:      types.StatusOpen,
-			Priority:    2,
-			IssueType:   types.TypeTask,
+			IssueContent: types.IssueContent{
+				Title:       "Duplicate task",
+				Description: "Some task",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatalf("Failed to create issue: %v", err)
@@ -337,11 +345,15 @@ func TestCheckDuplicateIssues_MultipleDuplicateGroups(t *testing.T) {
 	// Group A: 3 identical issues (2 duplicates)
 	for i := 0; i < 3; i++ {
 		issue := &types.Issue{
-			Title:       "Auth bug",
-			Description: "Login fails",
-			Status:      types.StatusOpen,
-			Priority:    1,
-			IssueType:   types.TypeBug,
+			IssueContent: types.IssueContent{
+				Title:       "Auth bug",
+				Description: "Login fails",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeBug,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatalf("Failed to create issue: %v", err)
@@ -351,11 +363,15 @@ func TestCheckDuplicateIssues_MultipleDuplicateGroups(t *testing.T) {
 	// Group B: 2 identical issues (1 duplicate), different content from A
 	for i := 0; i < 2; i++ {
 		issue := &types.Issue{
-			Title:       "Add dark mode",
-			Description: "Users want dark mode",
-			Status:      types.StatusOpen,
-			Priority:    2,
-			IssueType:   types.TypeFeature,
+			IssueContent: types.IssueContent{
+				Title:       "Add dark mode",
+				Description: "Users want dark mode",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeFeature,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatalf("Failed to create issue: %v", err)
@@ -379,9 +395,9 @@ func TestCheckDuplicateIssues_ZeroDuplicatesNullHandling(t *testing.T) {
 	ctx := context.Background()
 
 	issues := []*types.Issue{
-		{Title: "Issue A", Description: "Unique A", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
-		{Title: "Issue B", Description: "Unique B", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
-		{Title: "Issue C", Description: "Unique C", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask},
+		{IssueContent: types.IssueContent{Title: "Issue A", Description: "Unique A"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
+		{IssueContent: types.IssueContent{Title: "Issue B", Description: "Unique B"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
+		{IssueContent: types.IssueContent{Title: "Issue C", Description: "Unique C"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}},
 	}
 
 	for _, issue := range issues {
@@ -407,7 +423,7 @@ func TestCheckChildParentDependenciesDB_NoDeps(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a parent issue and child issue with no dependencies
-	parent := &types.Issue{Title: "Parent", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic}
+	parent := &types.Issue{IssueContent: types.IssueContent{Title: "Parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic}}
 	if err := store.CreateIssue(ctx, parent, "test"); err != nil {
 		t.Fatalf("Failed to create parent: %v", err)
 	}
@@ -429,12 +445,12 @@ func TestCheckChildParentDependenciesDB_BlockingDetected(t *testing.T) {
 	ctx := context.Background()
 
 	// Create parent and child issues
-	parent := &types.Issue{Title: "Parent epic", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic}
+	parent := &types.Issue{IssueContent: types.IssueContent{Title: "Parent epic"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic}}
 	if err := store.CreateIssue(ctx, parent, "test"); err != nil {
 		t.Fatalf("Failed to create parent: %v", err)
 	}
 
-	child := &types.Issue{Title: "Child task", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	child := &types.Issue{IssueContent: types.IssueContent{Title: "Child task"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := store.CreateIssue(ctx, child, "test"); err != nil {
 		t.Fatalf("Failed to create child: %v", err)
 	}
@@ -477,7 +493,7 @@ func TestCheckChildParentDependenciesDB_NonBlockingIgnored(t *testing.T) {
 	store := newTestDoltStore(t, "test")
 	ctx := context.Background()
 
-	parent := &types.Issue{Title: "Parent", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic}
+	parent := &types.Issue{IssueContent: types.IssueContent{Title: "Parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic}}
 	if err := store.CreateIssue(ctx, parent, "test"); err != nil {
 		t.Fatalf("Failed to create parent: %v", err)
 	}
@@ -512,12 +528,12 @@ func TestCheckOrphanedDependenciesDB_IssueToWispTargetIsNotOrphan(t *testing.T) 
 	store := newTestDoltStore(t, "test")
 	ctx := context.Background()
 
-	issue := &types.Issue{ID: "test-mixed-source", Title: "Source", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "test-mixed-source"}, IssueContent: types.IssueContent{Title: "Source"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 		t.Fatalf("CreateIssue source: %v", err)
 	}
 
-	wisp := &types.Issue{ID: "test-wisp-target", Title: "Target wisp", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, NoHistory: true}
+	wisp := &types.Issue{IssueID: types.IssueID{ID: "test-wisp-target"}, IssueContent: types.IssueContent{Title: "Target wisp"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{NoHistory: true}}
 	if err := store.CreateIssue(ctx, wisp, "test"); err != nil {
 		t.Fatalf("CreateIssue wisp: %v", err)
 	}
@@ -543,7 +559,7 @@ func TestCheckOrphanedDependenciesDB_WispDependencyMissingTargetDetected(t *test
 	store := newTestDoltStore(t, "test")
 	ctx := context.Background()
 
-	wisp := &types.Issue{ID: "test-wisp-source", Title: "Source wisp", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, NoHistory: true}
+	wisp := &types.Issue{IssueID: types.IssueID{ID: "test-wisp-source"}, IssueContent: types.IssueContent{Title: "Source wisp"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{NoHistory: true}}
 	if err := store.CreateIssue(ctx, wisp, "test"); err != nil {
 		t.Fatalf("CreateIssue wisp: %v", err)
 	}
@@ -576,12 +592,12 @@ func TestCheckChildParentDependenciesDB_WispChildBlockingParentDetected(t *testi
 	store := newTestDoltStore(t, "test")
 	ctx := context.Background()
 
-	parent := &types.Issue{ID: "test-parent", Title: "Parent", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic}
+	parent := &types.Issue{IssueID: types.IssueID{ID: "test-parent"}, IssueContent: types.IssueContent{Title: "Parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic}}
 	if err := store.CreateIssue(ctx, parent, "test"); err != nil {
 		t.Fatalf("CreateIssue parent: %v", err)
 	}
 
-	child := &types.Issue{ID: "test-parent.1", Title: "Child wisp", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, NoHistory: true}
+	child := &types.Issue{IssueID: types.IssueID{ID: "test-parent.1"}, IssueContent: types.IssueContent{Title: "Child wisp"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{NoHistory: true}}
 	if err := store.CreateIssue(ctx, child, "test"); err != nil {
 		t.Fatalf("CreateIssue child wisp: %v", err)
 	}
@@ -695,10 +711,14 @@ func TestCheckGitConflicts_DoltBackend_Clean(t *testing.T) {
 
 	// Create an issue so the DB isn't empty
 	issue := &types.Issue{
-		Title:     "Test issue",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "Test issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 		t.Fatalf("Failed to create issue: %v", err)

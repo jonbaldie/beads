@@ -140,7 +140,7 @@ func RunLifecycleCreateRejectsMissingDependencyTargets(t *testing.T, ctx context
 			request := tc.request
 			request.Actor = "writer"
 			request.ForceIDPrefix = true
-			request.Issue = &types.Issue{ID: tc.id, Title: tc.name, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+			request.Issue = &types.Issue{IssueID: types.IssueID{ID: tc.id}, IssueContent: types.IssueContent{Title: tc.name}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 			_, err := fixture.Lifecycle.Create(ctx, request)
 			if err == nil {
 				t.Fatal("Create returned nil error, want a refusal for the missing dependency target")
@@ -194,17 +194,34 @@ func RunLifecycleCreateRejectsMissingDependencyTargets(t *testing.T, ctx context
 // deletes the only proof of one of the two behaviors.
 func RunLifecycleCreateRefusesAnOccupiedID(t *testing.T, ctx context.Context, fixture LifecycleCreateFixture) {
 	t.Helper()
-
 	occupied := fixture.IssuePrefix + "-lcc-occupied-issue"
 	seeded := lifecycleCreateIssue(occupied, "lcc-seeded")
 	seedLifecycleCreateIssue(t, ctx, fixture, seeded)
+	assertLifecycleCreateOccupiedDurable(t, ctx, fixture, occupied)
+	assertLifecycleCreateOccupiedWisp(t, ctx, fixture)
+	assertLifecycleCreateOccupiedDurableFromWisp(t, ctx, fixture, occupied)
+}
 
+func assertLifecycleCreateOccupiedDurable(t *testing.T, ctx context.Context, fixture LifecycleCreateFixture, occupied string) {
+	t.Helper()
 	_, err := fixture.Lifecycle.Create(ctx, publicops.CreateRequest{
 		Actor:         "writer",
 		ForceIDPrefix: true,
 		Issue: &types.Issue{
-			ID: occupied, Title: "overwriting title", Status: types.StatusOpen,
-			Priority: 1, IssueType: types.TypeBug, Labels: []string{"lcc-overwriting"},
+			IssueID: types.IssueID{
+				ID: occupied,
+			},
+			IssueContent: types.IssueContent{
+				Title: "overwriting title",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeBug,
+			},
+			IssueGraph: types.IssueGraph{
+				Labels: []string{"lcc-overwriting"},
+			},
 		},
 	})
 	assertLifecycleCreateAlreadyExists(t, err, "durable create over an occupied durable ID", occupied)
@@ -222,27 +239,51 @@ func RunLifecycleCreateRefusesAnOccupiedID(t *testing.T, ctx context.Context, fi
 	}
 	assertLifecycleCreateLabels(t, "after the refused durable create", stored, "lcc-seeded")
 	assertLifecycleCreateWispAbsent(t, ctx, fixture, occupied, "after the refused durable create")
+}
 
+func assertLifecycleCreateOccupiedWisp(t *testing.T, ctx context.Context, fixture LifecycleCreateFixture) {
+	t.Helper()
 	// An ID occupied by a WISP refuses a durable create.
 	wispID := fixture.IssuePrefix + "-lcc-occupied-wisp"
 	if _, err := fixture.Lifecycle.Create(ctx, publicops.CreateRequest{
 		Actor:         "writer",
 		ForceIDPrefix: true,
 		Issue: &types.Issue{
-			ID: wispID, Title: "resident wisp", Status: types.StatusOpen,
-			Priority: 2, IssueType: types.TypeTask, Ephemeral: true,
+			IssueID: types.IssueID{
+				ID: wispID,
+			},
+			IssueContent: types.IssueContent{
+				Title: "resident wisp",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		},
 	}); err != nil {
 		t.Fatalf("seed resident wisp: %v", err)
 	}
 	assertLifecycleCreateResidentWisp(t, ctx, fixture, wispID, "seeded", "resident wisp")
 
-	_, err = fixture.Lifecycle.Create(ctx, publicops.CreateRequest{
+	_, err := fixture.Lifecycle.Create(ctx, publicops.CreateRequest{
 		Actor:         "writer",
 		ForceIDPrefix: true,
 		Issue: &types.Issue{
-			ID: wispID, Title: "durable squatter", Status: types.StatusOpen,
-			Priority: 2, IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: wispID,
+			},
+			IssueContent: types.IssueContent{
+				Title: "durable squatter",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		},
 	})
 	assertLifecycleCreateAlreadyExists(t, err, "durable create over an occupied wisp ID", wispID)
@@ -250,15 +291,30 @@ func RunLifecycleCreateRefusesAnOccupiedID(t *testing.T, ctx context.Context, fi
 	// refused durable create wrote no row in the plane it was aimed at, and the
 	// wisp it collided with still reads as it was seeded.
 	assertLifecycleCreateResidentWisp(t, ctx, fixture, wispID, "after the refused durable create", "resident wisp")
+}
 
+func assertLifecycleCreateOccupiedDurableFromWisp(t *testing.T, ctx context.Context, fixture LifecycleCreateFixture, occupied string) {
+	t.Helper()
 	// And the other direction: an ID occupied by a durable issue refuses an
 	// ephemeral create.
-	_, err = fixture.Lifecycle.Create(ctx, publicops.CreateRequest{
+	_, err := fixture.Lifecycle.Create(ctx, publicops.CreateRequest{
 		Actor:         "writer",
 		ForceIDPrefix: true,
 		Issue: &types.Issue{
-			ID: occupied, Title: "wisp squatter", Status: types.StatusOpen,
-			Priority: 2, IssueType: types.TypeTask, Ephemeral: true,
+			IssueID: types.IssueID{
+				ID: occupied,
+			},
+			IssueContent: types.IssueContent{
+				Title: "wisp squatter",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		},
 	})
 	assertLifecycleCreateAlreadyExists(t, err, "ephemeral create over an occupied durable ID", occupied)
@@ -300,8 +356,20 @@ func RunLifecycleCreateRefusesAForeignIDPrefix(t *testing.T, ctx context.Context
 			_, err := fixture.Lifecycle.Create(ctx, publicops.CreateRequest{
 				Actor: "writer",
 				Issue: &types.Issue{
-					ID: tc.id, Title: tc.name, Status: types.StatusOpen,
-					Priority: 2, IssueType: types.TypeTask, Ephemeral: tc.ephemeral,
+					IssueID: types.IssueID{
+						ID: tc.id,
+					},
+					IssueContent: types.IssueContent{
+						Title: tc.name,
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Status:    types.StatusOpen,
+						Priority:  2,
+						IssueType: types.TypeTask,
+					},
+					IssueWisp: types.IssueWisp{
+						Ephemeral: tc.ephemeral,
+					},
 				},
 			})
 			if !errors.Is(err, storage.ErrPrefixMismatch) {
@@ -314,8 +382,20 @@ func RunLifecycleCreateRefusesAForeignIDPrefix(t *testing.T, ctx context.Context
 			forced, err := fixture.Lifecycle.Create(ctx, publicops.CreateRequest{
 				Actor: "writer", ForceIDPrefix: true,
 				Issue: &types.Issue{
-					ID: tc.id, Title: tc.name, Status: types.StatusOpen,
-					Priority: 2, IssueType: types.TypeTask, Ephemeral: tc.ephemeral,
+					IssueID: types.IssueID{
+						ID: tc.id,
+					},
+					IssueContent: types.IssueContent{
+						Title: tc.name,
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Status:    types.StatusOpen,
+						Priority:  2,
+						IssueType: types.TypeTask,
+					},
+					IssueWisp: types.IssueWisp{
+						Ephemeral: tc.ephemeral,
+					},
 				},
 			})
 			if err != nil {
@@ -354,8 +434,17 @@ func RunLifecycleCreateInheritsParentLabels(t *testing.T, ctx context.Context, f
 		ParentID:                parent,
 		InheritLabelsFromParent: true,
 		Issue: &types.Issue{
-			Title: "inheriting child", Status: types.StatusOpen, Priority: 2,
-			IssueType: types.TypeTask, Labels: []string{"lcc-own", "lcc-shared"},
+			IssueContent: types.IssueContent{
+				Title: "inheriting child",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueGraph: types.IssueGraph{
+				Labels: []string{"lcc-own", "lcc-shared"},
+			},
 		},
 	})
 	if err != nil {
@@ -374,8 +463,17 @@ func RunLifecycleCreateInheritsParentLabels(t *testing.T, ctx context.Context, f
 		ForceIDPrefix: true,
 		ParentID:      parent,
 		Issue: &types.Issue{
-			Title: "own labels only", Status: types.StatusOpen, Priority: 2,
-			IssueType: types.TypeTask, Labels: []string{"lcc-own"},
+			IssueContent: types.IssueContent{
+				Title: "own labels only",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueGraph: types.IssueGraph{
+				Labels: []string{"lcc-own"},
+			},
 		},
 	})
 	if err != nil {
@@ -393,8 +491,14 @@ func RunLifecycleCreateInheritsParentLabels(t *testing.T, ctx context.Context, f
 		ParentID:                bare,
 		InheritLabelsFromParent: true,
 		Issue: &types.Issue{
-			Title: "nothing to inherit", Status: types.StatusOpen, Priority: 2,
-			IssueType: types.TypeTask,
+			IssueContent: types.IssueContent{
+				Title: "nothing to inherit",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		},
 	})
 	if err != nil {
@@ -449,14 +553,40 @@ func RunLifecycleCreateWritesEveryScalarField(t *testing.T, ctx context.Context,
 		Actor:         "writer",
 		ForceIDPrefix: true,
 		Issue: &types.Issue{
-			ID: id, Title: "created title", Description: "created description", Design: "created design",
-			AcceptanceCriteria: "created acceptance", Notes: "created notes",
-			SpecID: "created-spec", AwaitID: "created-await",
-			Status: types.StatusInProgress, Priority: 1, IssueType: types.TypeBug,
-			Assignee: "created-assignee", Owner: "created-owner", ClosedBySession: "created-session",
-			EstimatedMinutes: &minutes, ExternalRef: &externalRef,
-			DueAt: &dueAt, DeferUntil: &deferUntil,
-			CreatedAt: createdAt, CreatedBy: "created-author",
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title:              "created title",
+				Description:        "created description",
+				Design:             "created design",
+				AcceptanceCriteria: "created acceptance",
+				Notes:              "created notes",
+				SpecID:             "created-spec",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:           types.StatusInProgress,
+				Priority:         1,
+				IssueType:        types.TypeBug,
+				Assignee:         "created-assignee",
+				Owner:            "created-owner",
+				EstimatedMinutes: &minutes,
+			},
+			IssueTimes: types.IssueTimes{
+				ClosedBySession: "created-session",
+				CreatedAt:       createdAt,
+				CreatedBy:       "created-author",
+			},
+			IssueLease: types.IssueLease{
+				DueAt:      &dueAt,
+				DeferUntil: &deferUntil,
+			},
+			IssueMeta: types.IssueMeta{
+				ExternalRef: &externalRef,
+			},
+			IssueCoord: types.IssueCoord{
+				AwaitID: "created-await",
+			},
 		},
 	})
 	if err != nil {
@@ -470,24 +600,7 @@ func RunLifecycleCreateWritesEveryScalarField(t *testing.T, ctx context.Context,
 	assertLifecycleCreateCreationStamp(t, id, "in the stored row", lifecycleCreateRow(t, ctx, fixture, id), createdAt, "created-author")
 	assertLifecycleCreateCreationStamp(t, id, "in the create result", created.Issue, createdAt, "created-author")
 
-	// The other direction: a request that names no creation time still gets
-	// one. An empty created_at is a row that sorts and ages as though it were
-	// created at the zero time.
-	stamped := fixture.IssuePrefix + "-lcc-createstamp"
-	lower := time.Now().UTC().Add(-lifecycleCreateClockSlack)
-	if _, err := fixture.Lifecycle.Create(ctx, publicops.CreateRequest{
-		Actor:         "writer",
-		ForceIDPrefix: true,
-		Issue:         lifecycleCreateIssue(stamped),
-	}); err != nil {
-		t.Fatalf("create %s without a creation time: %v", stamped, err)
-	}
-	upper := time.Now().UTC().Add(lifecycleCreateClockSlack)
-	autoStamp := lifecycleCreateRow(t, ctx, fixture, stamped).CreatedAt.UTC()
-	if autoStamp.Before(lower) || autoStamp.After(upper) {
-		t.Errorf("%s created_at = %v after a create that named none, want a stamp between %v and %v — a bare non-empty check would accept the zero time",
-			stamped, autoStamp, lower, upper)
-	}
+	assertLifecycleCreateAutoStamp(t, ctx, fixture)
 
 	want := []lifecycleCreateMember{
 		{"title", "created title"},
@@ -510,6 +623,28 @@ func RunLifecycleCreateWritesEveryScalarField(t *testing.T, ctx context.Context,
 	}
 	assertLifecycleCreateMembers(t, id, "in the stored row", lifecycleCreateRow(t, ctx, fixture, id), want)
 	assertLifecycleCreateMembers(t, id, "in the create result", created.Issue, want)
+}
+
+func assertLifecycleCreateAutoStamp(t *testing.T, ctx context.Context, fixture LifecycleCreateFixture) {
+	t.Helper()
+	// The other direction: a request that names no creation time still gets
+	// one. An empty created_at is a row that sorts and ages as though it were
+	// created at the zero time.
+	stamped := fixture.IssuePrefix + "-lcc-createstamp"
+	lower := time.Now().UTC().Add(-lifecycleCreateClockSlack)
+	if _, err := fixture.Lifecycle.Create(ctx, publicops.CreateRequest{
+		Actor:         "writer",
+		ForceIDPrefix: true,
+		Issue:         lifecycleCreateIssue(stamped),
+	}); err != nil {
+		t.Fatalf("create %s without a creation time: %v", stamped, err)
+	}
+	upper := time.Now().UTC().Add(lifecycleCreateClockSlack)
+	autoStamp := lifecycleCreateRow(t, ctx, fixture, stamped).CreatedAt.UTC()
+	if autoStamp.Before(lower) || autoStamp.After(upper) {
+		t.Errorf("%s created_at = %v after a create that named none, want a stamp between %v and %v — a bare non-empty check would accept the zero time",
+			stamped, autoStamp, lower, upper)
+	}
 }
 
 // lifecycleCreateMember names one member of the scalar surface and the value it
@@ -598,12 +733,20 @@ func lifecycleCreateStamp(value *time.Time) string {
 
 func lifecycleCreateIssue(id string, labels ...string) *types.Issue {
 	return &types.Issue{
-		ID:        id,
-		Title:     id,
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Labels:    labels,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: labels,
+		},
 	}
 }
 

@@ -20,10 +20,14 @@ func TestCheckStaleClosedIssues_DisabledSmallCount(t *testing.T) {
 	closedAt := time.Now().AddDate(0, 0, -60)
 	for i := 0; i < 50; i++ {
 		issue := &types.Issue{
-			Title:     "Closed issue",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueContent: types.IssueContent{
+				Title: "Closed issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatalf("Failed to create issue %d: %v", i, err)
@@ -112,10 +116,14 @@ func TestCheckStaleClosedIssues_EnabledWithCleanable(t *testing.T) {
 	closedAt := time.Now().AddDate(0, 0, -60)
 	for i := 0; i < 5; i++ {
 		issue := &types.Issue{
-			Title:     "Closed issue",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueContent: types.IssueContent{
+				Title: "Closed issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatalf("Failed to create issue %d: %v", i, err)
@@ -157,10 +165,14 @@ func TestCheckStaleClosedIssues_EnabledNoneCleanable(t *testing.T) {
 	closedAt := time.Now().AddDate(0, 0, -10)
 	for i := 0; i < 5; i++ {
 		issue := &types.Issue{
-			Title:     "Closed issue",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueContent: types.IssueContent{
+				Title: "Closed issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatalf("Failed to create issue %d: %v", i, err)
@@ -201,10 +213,14 @@ func TestCheckStaleClosedIssues_PinnedExcluded(t *testing.T) {
 	closedAt := time.Now().AddDate(0, 0, -60)
 	for i := 0; i < 3; i++ {
 		issue := &types.Issue{
-			Title:     "Closed issue",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueContent: types.IssueContent{
+				Title: "Closed issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatalf("Failed to create issue %d: %v", i, err)
@@ -248,10 +264,14 @@ func TestCheckStaleClosedIssues_MixedPinnedAndStale(t *testing.T) {
 	var ids []string
 	for i := 0; i < 8; i++ {
 		issue := &types.Issue{
-			Title:     "Closed issue",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueContent: types.IssueContent{
+				Title: "Closed issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatalf("Failed to create issue %d: %v", i, err)
@@ -298,10 +318,14 @@ func TestCheckPersistentMolIssues_UsesDoltWithoutJSONL(t *testing.T) {
 	ctx := context.Background()
 
 	issue := &types.Issue{
-		Title:     "mol issue should have been ephemeral",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueContent: types.IssueContent{
+			Title: "mol issue should have been ephemeral",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 		t.Fatalf("failed to create issue: %v", err)
@@ -321,7 +345,7 @@ func TestCheckPersistentMolIssues_UsesDoltWithoutJSONL(t *testing.T) {
 func TestCheckMisclassifiedWisps_UsesDoltWithoutJSONL(t *testing.T) {
 	// Test the core logic directly
 	issues := []*types.Issue{
-		{ID: "bd-wisp-misclassified", Ephemeral: false},
+		{IssueID: types.IssueID{ID: "bd-wisp-misclassified"}, IssueWisp: types.IssueWisp{Ephemeral: false}},
 	}
 
 	check := checkMisclassifiedWispsForIssues(issues)
@@ -338,11 +362,17 @@ func TestCheckPatrolPollution_UsesDoltWithoutJSONL(t *testing.T) {
 	var issues []*types.Issue
 	for i := 0; i < PatrolDigestThreshold+1; i++ {
 		issues = append(issues, &types.Issue{
-			ID:        fmt.Sprintf("bd-%04d", i),
-			Title:     fmt.Sprintf("Digest: mol-%02d-patrol", i),
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("bd-%04d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Digest: mol-%02d-patrol", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		})
 	}
 

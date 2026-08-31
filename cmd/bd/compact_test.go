@@ -22,14 +22,22 @@ func TestCompactSuite(t *testing.T) {
 	t.Run("DryRun", func(t *testing.T) {
 		// Create a closed issue
 		issue := &types.Issue{
-			ID:          "test-dryrun-1",
-			Title:       "Test Issue",
-			Description: "This is a long description that should be compacted. " + string(make([]byte, 500)),
-			Status:      types.StatusClosed,
-			Priority:    2,
-			IssueType:   types.TypeTask,
-			CreatedAt:   time.Now().Add(-60 * 24 * time.Hour),
-			ClosedAt:    ptrTime(time.Now().Add(-35 * 24 * time.Hour)),
+			IssueID: types.IssueID{
+				ID: "test-dryrun-1",
+			},
+			IssueContent: types.IssueContent{
+				Title:       "Test Issue",
+				Description: "This is a long description that should be compacted. " + string(make([]byte, 500)),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusClosed,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now().Add(-60 * 24 * time.Hour),
+				ClosedAt:  ptrTime(time.Now().Add(-35 * 24 * time.Hour)),
+			},
 		}
 
 		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
@@ -51,32 +59,56 @@ func TestCompactSuite(t *testing.T) {
 		// Create mix of issues - some eligible, some not
 		issues := []*types.Issue{
 			{
-				ID:          "test-stats-1",
-				Title:       "Old closed",
-				Description: "Content that makes this issue eligible for compaction.",
-				Status:      types.StatusClosed,
-				Priority:    2,
-				IssueType:   types.TypeTask,
-				CreatedAt:   time.Now().Add(-60 * 24 * time.Hour),
-				ClosedAt:    ptrTime(time.Now().Add(-35 * 24 * time.Hour)),
+				IssueID: types.IssueID{
+					ID: "test-stats-1",
+				},
+				IssueContent: types.IssueContent{
+					Title:       "Old closed",
+					Description: "Content that makes this issue eligible for compaction.",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusClosed,
+					Priority:  2,
+					IssueType: types.TypeTask,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: time.Now().Add(-60 * 24 * time.Hour),
+					ClosedAt:  ptrTime(time.Now().Add(-35 * 24 * time.Hour)),
+				},
 			},
 			{
-				ID:          "test-stats-2",
-				Title:       "Recent closed",
-				Description: "Some content here too.",
-				Status:      types.StatusClosed,
-				Priority:    2,
-				IssueType:   types.TypeTask,
-				CreatedAt:   time.Now().Add(-10 * 24 * time.Hour),
-				ClosedAt:    ptrTime(time.Now().Add(-5 * 24 * time.Hour)),
+				IssueID: types.IssueID{
+					ID: "test-stats-2",
+				},
+				IssueContent: types.IssueContent{
+					Title:       "Recent closed",
+					Description: "Some content here too.",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusClosed,
+					Priority:  2,
+					IssueType: types.TypeTask,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: time.Now().Add(-10 * 24 * time.Hour),
+					ClosedAt:  ptrTime(time.Now().Add(-5 * 24 * time.Hour)),
+				},
 			},
 			{
-				ID:        "test-stats-3",
-				Title:     "Still open",
-				Status:    types.StatusOpen,
-				Priority:  2,
-				IssueType: types.TypeTask,
-				CreatedAt: time.Now().Add(-40 * 24 * time.Hour),
+				IssueID: types.IssueID{
+					ID: "test-stats-3",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Still open",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  2,
+					IssueType: types.TypeTask,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: time.Now().Add(-40 * 24 * time.Hour),
+				},
 			},
 		}
 
@@ -119,14 +151,22 @@ func TestCompactSuite(t *testing.T) {
 		for i := 1; i <= 3; i++ {
 			id := fmt.Sprintf("test-runstats-%d", i)
 			issue := &types.Issue{
-				ID:          id,
-				Title:       "Test Issue",
-				Description: string(make([]byte, 500)),
-				Status:      types.StatusClosed,
-				Priority:    2,
-				IssueType:   types.TypeTask,
-				CreatedAt:   time.Now().Add(-60 * 24 * time.Hour),
-				ClosedAt:    ptrTime(time.Now().Add(-35 * 24 * time.Hour)),
+				IssueID: types.IssueID{
+					ID: id,
+				},
+				IssueContent: types.IssueContent{
+					Title:       "Test Issue",
+					Description: string(make([]byte, 500)),
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusClosed,
+					Priority:  2,
+					IssueType: types.TypeTask,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: time.Now().Add(-60 * 24 * time.Hour),
+					ClosedAt:  ptrTime(time.Now().Add(-35 * 24 * time.Hour)),
+				},
 			}
 			if err := s.CreateIssue(ctx, issue, "test"); err != nil {
 				t.Fatal(err)
@@ -149,14 +189,22 @@ func TestCompactSuite(t *testing.T) {
 	t.Run("CompactStatsJSON", func(t *testing.T) {
 		// Create a closed issue eligible for Tier 1
 		issue := &types.Issue{
-			ID:          "test-json-1",
-			Title:       "Test Issue",
-			Description: string(make([]byte, 500)),
-			Status:      types.StatusClosed,
-			Priority:    2,
-			IssueType:   types.TypeTask,
-			CreatedAt:   time.Now().Add(-60 * 24 * time.Hour),
-			ClosedAt:    ptrTime(time.Now().Add(-35 * 24 * time.Hour)),
+			IssueID: types.IssueID{
+				ID: "test-json-1",
+			},
+			IssueContent: types.IssueContent{
+				Title:       "Test Issue",
+				Description: string(make([]byte, 500)),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusClosed,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now().Add(-60 * 24 * time.Hour),
+				ClosedAt:  ptrTime(time.Now().Add(-35 * 24 * time.Hour)),
+			},
 		}
 		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatal(err)
@@ -174,14 +222,22 @@ func TestCompactSuite(t *testing.T) {
 	t.Run("RunCompactSingleDryRun", func(t *testing.T) {
 		// Create a closed issue eligible for compaction
 		issue := &types.Issue{
-			ID:          "test-single-1",
-			Title:       "Test Compact Issue",
-			Description: string(make([]byte, 500)),
-			Status:      types.StatusClosed,
-			Priority:    2,
-			IssueType:   types.TypeTask,
-			CreatedAt:   time.Now().Add(-60 * 24 * time.Hour),
-			ClosedAt:    ptrTime(time.Now().Add(-35 * 24 * time.Hour)),
+			IssueID: types.IssueID{
+				ID: "test-single-1",
+			},
+			IssueContent: types.IssueContent{
+				Title:       "Test Compact Issue",
+				Description: string(make([]byte, 500)),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusClosed,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now().Add(-60 * 24 * time.Hour),
+				ClosedAt:  ptrTime(time.Now().Add(-35 * 24 * time.Hour)),
+			},
 		}
 		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatal(err)
@@ -201,14 +257,22 @@ func TestCompactSuite(t *testing.T) {
 		// Create multiple closed issues
 		for i := 1; i <= 3; i++ {
 			issue := &types.Issue{
-				ID:          fmt.Sprintf("test-all-%d", i),
-				Title:       "Test Issue",
-				Description: string(make([]byte, 500)),
-				Status:      types.StatusClosed,
-				Priority:    2,
-				IssueType:   types.TypeTask,
-				CreatedAt:   time.Now().Add(-60 * 24 * time.Hour),
-				ClosedAt:    ptrTime(time.Now().Add(-35 * 24 * time.Hour)),
+				IssueID: types.IssueID{
+					ID: fmt.Sprintf("test-all-%d", i),
+				},
+				IssueContent: types.IssueContent{
+					Title:       "Test Issue",
+					Description: string(make([]byte, 500)),
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusClosed,
+					Priority:  2,
+					IssueType: types.TypeTask,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: time.Now().Add(-60 * 24 * time.Hour),
+					ClosedAt:  ptrTime(time.Now().Add(-35 * 24 * time.Hour)),
+				},
 			}
 			if err := s.CreateIssue(ctx, issue, "test"); err != nil {
 				t.Fatal(err)
@@ -217,7 +281,7 @@ func TestCompactSuite(t *testing.T) {
 
 		// Verify issues eligible for compaction
 		closedStatus := types.StatusClosed
-		issues, err := s.SearchIssues(ctx, "", types.IssueFilter{Status: &closedStatus})
+		issues, err := s.SearchIssues(ctx, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Status: &closedStatus}})
 		if err != nil {
 			t.Fatalf("SearchIssues failed: %v", err)
 		}

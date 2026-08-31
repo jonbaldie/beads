@@ -73,7 +73,7 @@ func (s *createAtomicFakeStore) SearchIssues(_ context.Context, _ string, filter
 		if !strings.Contains(id, "-") {
 			continue
 		}
-		out = append(out, &types.Issue{ID: id, Title: "resolved", Status: types.StatusOpen, IssueType: types.TypeTask})
+		out = append(out, &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: "resolved"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask}})
 	}
 	return out, nil
 }
@@ -115,7 +115,7 @@ func saveCreateAtomicGlobals(t *testing.T) {
 func TestCreateIssueWithDepsRunsOneTransaction(t *testing.T) {
 	saveCreateAtomicGlobals(t)
 	st := &createAtomicFakeStore{}
-	issue := &types.Issue{Title: "atomic create", Status: types.StatusOpen, IssueType: types.TypeTask}
+	issue := &types.Issue{IssueContent: types.IssueContent{Title: "atomic create"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask}}
 
 	edges := createDepEdges{
 		parentID: "fake-parent",
@@ -163,7 +163,7 @@ func TestCreateIssueWithDepsRunsOneTransaction(t *testing.T) {
 func TestCreateIssueWithDepsRollsBackOnDepFailure(t *testing.T) {
 	saveCreateAtomicGlobals(t)
 	st := &createAtomicFakeStore{failDep: "fake-missing"}
-	issue := &types.Issue{Title: "doomed create", Status: types.StatusOpen, IssueType: types.TypeTask}
+	issue := &types.Issue{IssueContent: types.IssueContent{Title: "doomed create"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask}}
 
 	edges := createDepEdges{
 		specs: []domain.DependencySpec{
@@ -189,7 +189,7 @@ func TestCreateIssueWithDepsRollsBackOnDepFailure(t *testing.T) {
 func TestCreateIssueWithDepsEmptyEdgesUsesStoreCreate(t *testing.T) {
 	saveCreateAtomicGlobals(t)
 	st := &createAtomicFakeStore{}
-	issue := &types.Issue{Title: "bare create", Status: types.StatusOpen, IssueType: types.TypeTask}
+	issue := &types.Issue{IssueContent: types.IssueContent{Title: "bare create"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask}}
 
 	if err := createIssueWithDeps(context.Background(), st, issue, "tester", createDepEdges{}); err != nil {
 		t.Fatalf("createIssueWithDeps: %v", err)

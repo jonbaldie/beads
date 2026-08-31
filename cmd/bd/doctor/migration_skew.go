@@ -78,75 +78,96 @@ func checkMigrationContentSkewEmbedded(ctx context.Context, beadsDir string) (Do
 // (DoltStore.RemoteName(), "origin" by default) — NOT whichever remote happens
 // to sort first in dolt_remotes.
 func checkMigrationContentSkew(ctx context.Context, db *sql.DB, remote string) DoctorCheck {
-	ok := func(msg string) DoctorCheck {
-		return DoctorCheck{Name: migrationContentSkewCheckName, Status: StatusOK, Message: msg, Category: CategoryData}
-	}
-	// "Cannot check" is NOT "checked and matches": surface unexpected failures
-	// as a warning instead of swallowing them as OK (bd-6dnrw.27 — a broken
-	// query made this check a silent permanent no-op).
-	cannot := func(stage string, err error) DoctorCheck {
-		return DoctorCheck{
-			Name:     migrationContentSkewCheckName,
-			Status:   StatusWarning,
-			Message:  fmt.Sprintf("Could not check migration content skew (%s): %v", stage, err),
-			Detail:   "The skew check failed to run; this does not mean skew exists. Re-run `bd doctor` and report the error if it persists.",
-			Category: CategoryData,
-		}
-	}
-
 	if remote == "" {
 		remote = "origin"
 	}
+	if check, done := checkSkewRemotePresent(ctx, db, remote); done {
+		return check
+	}
+	local, check, done := loadSkewLocalHashes(ctx, db)
+	if done {
+		return check
+	}
+	remoteHashes, check, done := loadSkewRemoteHashes(ctx, db, remote, skewActiveBranch(ctx, db))
+	if done {
+		return check
+	}
+	return reportContentSkew(remote, local, remoteHashes)
+}
 
-	// Without the configured sync remote there is nothing to compare against.
+func skewOK(msg string) DoctorCheck {
+	return DoctorCheck{Name: migrationContentSkewCheckName, Status: StatusOK, Message: msg, Category: CategoryData}
+}
+
+func skewCannot(stage string, err error) DoctorCheck {
+	// "Cannot check" is NOT "checked and matches": surface unexpected failures
+	// as a warning instead of swallowing them as OK (bd-6dnrw.27 — a broken
+	// query made this check a silent permanent no-op).
+	return DoctorCheck{
+		Name:     migrationContentSkewCheckName,
+		Status:   StatusWarning,
+		Message:  fmt.Sprintf("Could not check migration content skew (%s): %v", stage, err),
+		Detail:   "The skew check failed to run; this does not mean skew exists. Re-run `bd doctor` and report the error if it persists.",
+		Category: CategoryData,
+	}
+}
+
+func checkSkewRemotePresent(ctx context.Context, db *sql.DB, remote string) (DoctorCheck, bool) {
 	var remoteCount int
-	if err := db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM dolt_remotes WHERE name = ?", remote).Scan(&remoteCount); err != nil {
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM dolt_remotes WHERE name = ?", remote).Scan(&remoteCount); err != nil {
 		if dberrors.IsTableNotExist(err) {
-			return ok("No remote configured — nothing to compare")
+			return skewOK("No remote configured — nothing to compare"), true
 		}
-		return cannot("read dolt_remotes", err)
+		return skewCannot("read dolt_remotes", err), true
 	}
 	if remoteCount == 0 {
-		return ok(fmt.Sprintf("Sync remote %q not configured — nothing to compare", remote))
+		return skewOK(fmt.Sprintf("Sync remote %q not configured — nothing to compare", remote)), true
 	}
+	return DoctorCheck{}, false
+}
 
-	branch := "main"
+func skewActiveBranch(ctx context.Context, db *sql.DB) string {
 	var active string
 	if err := db.QueryRowContext(ctx, "SELECT active_branch()").Scan(&active); err == nil && active != "" {
-		branch = active
+		return active
 	}
+	return "main"
+}
 
+func loadSkewLocalHashes(ctx context.Context, db *sql.DB) (map[int]string, DoctorCheck, bool) {
 	local, err := schema.ReadMigrationContentHashes(ctx, db, "")
 	if err != nil {
 		if schema.MissingMigrationObjectErr(err) {
-			return ok("No local migration content hashes recorded yet")
+			return nil, skewOK("No local migration content hashes recorded yet"), true
 		}
-		return cannot("read local schema_migrations", err)
+		return nil, skewCannot("read local schema_migrations", err), true
 	}
 	if len(local) == 0 {
-		return ok("No local migration content hashes recorded yet")
+		return nil, skewOK("No local migration content hashes recorded yet"), true
 	}
+	return local, DoctorCheck{}, false
+}
 
+func loadSkewRemoteHashes(ctx context.Context, db *sql.DB, remote, branch string) (map[int]string, DoctorCheck, bool) {
 	ref := "remotes/" + remote + "/" + branch
 	remoteHashes, err := schema.ReadMigrationContentHashes(ctx, db, ref)
-	if err != nil {
-		// The remote-tracking ref is not cached yet (e.g. never pushed/pulled).
-		if schema.RemoteRefUnavailableErr(err) {
-			return ok(fmt.Sprintf("No cached remote ref %q to compare", ref))
-		}
-		// The cached ref exists but predates schema_migrations/content_hash.
-		if schema.MissingMigrationObjectErr(err) {
-			return ok(fmt.Sprintf("Cached remote ref %q predates migration content hashes — nothing to compare", ref))
-		}
-		return cannot(fmt.Sprintf("read schema_migrations at %q", ref), err)
+	if err == nil {
+		return remoteHashes, DoctorCheck{}, false
 	}
+	if schema.RemoteRefUnavailableErr(err) {
+		return nil, skewOK(fmt.Sprintf("No cached remote ref %q to compare", ref)), true
+	}
+	if schema.MissingMigrationObjectErr(err) {
+		return nil, skewOK(fmt.Sprintf("Cached remote ref %q predates migration content hashes — nothing to compare", ref)), true
+	}
+	return nil, skewCannot(fmt.Sprintf("read schema_migrations at %q", ref), err), true
+}
 
+func reportContentSkew(remote string, local, remoteHashes map[int]string) DoctorCheck {
 	skewed := schema.ContentHashSkew(local, remoteHashes)
 	if len(skewed) == 0 {
-		return ok(fmt.Sprintf("Applied migrations match remote %q", remote))
+		return skewOK(fmt.Sprintf("Applied migrations match remote %q", remote))
 	}
-
 	versions := make([]string, len(skewed))
 	for i, v := range skewed {
 		versions[i] = fmt.Sprintf("%04d", v)

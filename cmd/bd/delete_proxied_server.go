@@ -44,7 +44,7 @@ func gatherDeleteInput(cmd *cobra.Command, args []string) (*deleteInput, error) 
 	in.cascade, _ = cmd.Flags().GetBool("cascade")
 	in.force, _ = cmd.Flags().GetBool("force")
 	in.dryRun, _ = cmd.Flags().GetBool("dry-run")
-	in.jsonOutput = jsonOutput
+	in.jsonOutput = isJSONOutput()
 	in.quiet = isQuiet()
 	return in, nil
 }
@@ -52,12 +52,12 @@ func gatherDeleteInput(cmd *cobra.Command, args []string) (*deleteInput, error) 
 // proxiedDeleter hands back the named-row erasure surface for the proxied
 // route, through the provider's OWN capability accessor.
 func proxiedDeleter() (issueops.Deleter, error) {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return nil, fmt.Errorf("proxied-server UOW provider not initialized")
 	}
-	source, ok := uowProvider.(uow.DeleterSource)
+	source, ok := getUOWProvider().(uow.DeleterSource)
 	if !ok {
-		return nil, fmt.Errorf("proxied-server provider %T does not offer the Deleter accessor", uowProvider)
+		return nil, fmt.Errorf("proxied-server provider %T does not offer the Deleter accessor", getUOWProvider())
 	}
 	return source.Deleter()
 }
@@ -84,7 +84,7 @@ func runDeleteProxiedServer(cmd *cobra.Command, ctx context.Context, args []stri
 	// --force is the confirmation as well as the orphan mode, exactly as on the
 	// direct route, so an unconfirmed run asks the role what it WOULD do.
 	request := issueops.DeleteRequest{
-		Actor:   actor,
+		Actor:   getActor(),
 		IDs:     in.ids,
 		Cascade: in.cascade,
 		Force:   in.force,
@@ -99,35 +99,29 @@ func runDeleteProxiedServer(cmd *cobra.Command, ctx context.Context, args []stri
 	if err != nil && !errors.As(err, &blocked) {
 		return HandleErrorRespectJSON("%v", err)
 	}
-
 	if request.DryRun {
-		// The role answered WHAT WOULD HAPPEN; this read answers WHICH ROWS,
-		// which is presentation this route has always printed and which no
-		// result carries.
-		preview, previewErr := runDeleteProxiedPreviewTx(ctx, in)
-		if previewErr != nil {
-			return HandleErrorRespectJSON("%v", previewErr)
-		}
-		if err := outputDeleteProxiedPreview(in, deletePreviewResult{
-			preview: preview, res: result, blocked: blocked,
-		}); err != nil {
-			return err
-		}
-		if blocked != nil {
-			// In JSON mode the payload above already carries the refusal in its
-			// "error" key; emitting a second document on stdout is the bug the
-			// same fix on main had to correct.
-			if in.jsonOutput {
-				return &exitError{Code: 1}
-			}
-			return HandleErrorRespectJSON("%v", blocked)
-		}
-		return nil
+		return handleDeleteProxiedPreview(ctx, in, result, blocked)
 	}
-
 	commandDidWrite.Store(true)
 	renderDeleteProxiedResult(in, result)
 	return nil
+}
+
+func handleDeleteProxiedPreview(ctx context.Context, in *deleteInput, result issueops.DeleteResult, blocked *issueops.DependentsOutsideRequestError) error {
+	preview, err := runDeleteProxiedPreviewTx(ctx, in)
+	if err != nil {
+		return HandleErrorRespectJSON("%v", err)
+	}
+	if err := outputDeleteProxiedPreview(in, deletePreviewResult{preview: preview, res: result, blocked: blocked}); err != nil {
+		return err
+	}
+	if blocked == nil {
+		return nil
+	}
+	if in.jsonOutput {
+		return &exitError{Code: 1}
+	}
+	return HandleErrorRespectJSON("%v", blocked)
 }
 
 type deletePreviewResult struct {
@@ -141,7 +135,7 @@ type deletePreviewResult struct {
 // runDeleteProxiedPreviewTx reads the titles and the neighborhood one preview
 // prints. It is a READ unit of work and decides nothing.
 func runDeleteProxiedPreviewTx(ctx context.Context, in *deleteInput) (domain.DeletePreview, error) {
-	return uow.RunTxRead(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (domain.DeletePreview, error) {
+	return uow.RunTxRead(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (domain.DeletePreview, error) {
 		preview, err := uw.IssueUseCase().PreviewDelete(ctx, in.ids)
 		if err != nil {
 			return domain.DeletePreview{}, fmt.Errorf("preview: %w", err)
@@ -180,6 +174,17 @@ func outputDeleteProxiedPreview(in *deleteInput, result deletePreviewResult) err
 
 func renderDeletePreview(in *deleteInput, preview domain.DeletePreview, res issueops.DeleteResult, blocked *issueops.DependentsOutsideRequestError) {
 	fmt.Printf("\n%s\n", ui.RenderFail("⚠️  DELETE PREVIEW"))
+	renderProxiedDeletePreviewIssues(in, preview)
+	if blocked != nil {
+		fmt.Printf("\n%s\n", ui.RenderFail(blocked.Error()))
+		return
+	}
+	renderDeletePreviewCounts(res)
+	renderDeleteConnectedIssues(preview)
+	renderDeletePreviewFooter(in)
+}
+
+func renderProxiedDeletePreviewIssues(in *deleteInput, preview domain.DeletePreview) {
 	fmt.Printf("\nIssues to delete (%d):\n", len(in.ids))
 	for _, id := range in.ids {
 		title := ""
@@ -191,12 +196,9 @@ func renderDeletePreview(in *deleteInput, preview domain.DeletePreview, res issu
 	if in.cascade {
 		fmt.Printf("\n%s Cascade mode enabled - will also delete all dependent issues\n", ui.RenderWarn("⚠"))
 	}
-	if blocked != nil {
-		// The refusal itself says how to proceed, so the "To proceed, run"
-		// footer below would be a second, weaker version of the same advice.
-		fmt.Printf("\n%s\n", ui.RenderFail(blocked.Error()))
-		return
-	}
+}
+
+func renderDeletePreviewCounts(res issueops.DeleteResult) {
 	fmt.Printf("\nWould remove:\n")
 	fmt.Printf("  %d issue(s) total\n", res.Deleted)
 	fmt.Printf("  %d dependency link(s)\n", res.Dependencies)
@@ -206,7 +208,9 @@ func renderDeletePreview(in *deleteInput, preview domain.DeletePreview, res issu
 		fmt.Printf("  %s Would orphan %d issue(s): %s\n",
 			ui.RenderWarn("⚠"), len(res.Orphaned), strings.Join(res.Orphaned, ", "))
 	}
+}
 
+func renderDeleteConnectedIssues(preview domain.DeletePreview) {
 	if len(preview.ConnectedIssues) > 0 {
 		fmt.Printf("\nConnected issues (text references may be rewritten):\n")
 		for _, id := range sortedKeys(preview.ConnectedIssues) {
@@ -218,7 +222,9 @@ func renderDeletePreview(in *deleteInput, preview domain.DeletePreview, res issu
 			fmt.Printf("  %s: %s\n", id, title)
 		}
 	}
+}
 
+func renderDeletePreviewFooter(in *deleteInput) {
 	if in.dryRun {
 		fmt.Printf("\n(Dry-run mode - no changes made)\n")
 		return

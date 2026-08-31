@@ -33,10 +33,11 @@ const (
 	driftStatusSkipped = "skipped"
 )
 
-var configDriftCmd = &cobra.Command{
-	Use:   "drift",
-	Short: "Detect config-vs-reality inconsistencies",
-	Long: `Detect drift between declared configuration and actual system state.
+func newConfigDriftCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "drift",
+		Short: "Detect config-vs-reality inconsistencies",
+		Long: `Detect drift between declared configuration and actual system state.
 
 This is a read-only diagnostic that answers "is my environment consistent
 with my config?" — no mutations are performed.
@@ -53,37 +54,37 @@ Exit codes:
 Examples:
   bd config drift
   bd config drift --json`,
-	SilenceUsage:  true,
-	SilenceErrors: true,
-	RunE: func(_ *cobra.Command, _ []string) error {
-		evt := metrics.NewCommandEvent("config-drift")
-		defer func() {
-			if c := metrics.Global(); c != nil {
-				c.CloseEventAndAdd(evt)
-			}
-		}()
-
-		items := runDriftChecks()
-
-		if jsonOutput {
-			if err := outputJSON(items); err != nil {
-				return err
-			}
-		} else {
-			printDriftItems(items)
-		}
-
-		for _, item := range items {
-			if item.Status == driftStatusDrift {
-				return SilentExit()
-			}
-		}
-		return nil
-	},
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE:          runConfigDrift,
+	}
 }
 
 func init() {
-	configCmd.AddCommand(configDriftCmd)
+	configCmd.AddCommand(newConfigDriftCmd())
+}
+
+func runConfigDrift(_ *cobra.Command, _ []string) error {
+	evt := metrics.NewCommandEvent("config-drift")
+	defer func() {
+		if c := metrics.Global(); c != nil {
+			c.CloseEventAndAdd(evt)
+		}
+	}()
+	items := runDriftChecks()
+	if isJSONOutput() {
+		if err := outputJSON(items); err != nil {
+			return err
+		}
+	} else {
+		printDriftItems(items)
+	}
+	for _, item := range items {
+		if item.Status == driftStatusDrift {
+			return SilentExit()
+		}
+	}
+	return nil
 }
 
 // runDriftChecks runs all drift checks and returns the results.
@@ -153,51 +154,77 @@ func checkHooksDrift() []DriftItem {
 
 // checkRemoteDrift compares federation.remote config against actual Dolt remotes.
 func checkRemoteDrift() []DriftItem {
-	federationRemote := config.GetString("federation.remote")
+	federationRemote, originURL, remoteNames, failure := loadRemoteDriftState()
+	if failure != nil {
+		return []DriftItem{*failure}
+	}
+	return classifyRemoteDrift(federationRemote, originURL, remoteNames)
+}
 
-	// Find the dolt data directory for CLI remote listing
+func loadRemoteDriftState() (string, string, []string, *DriftItem) {
+	federationRemote := config.GetString("federation.remote")
 	beadsDir := beads.FindBeadsDir()
 	if beadsDir == "" {
-		return []DriftItem{{
+		return "", "", nil, &DriftItem{
 			Check:   "remote",
 			Status:  driftStatusSkipped,
 			Message: "No active beads workspace found",
-		}}
+		}
 	}
-
 	ctx := context.Background()
 	st, err := dolt.NewFromConfigWithOptions(ctx, beadsDir, &dolt.Config{
-		ReadOnly:         true,
-		DisableAutoStart: true,
+		ReadOnly: true,
+		ServerOptions: dolt.ServerOptions{
+			DisableAutoStart: true,
+		},
 	})
 	if err != nil {
-		return []DriftItem{{
+		return "", "", nil, &DriftItem{
 			Check:   "remote",
 			Status:  driftStatusSkipped,
 			Message: fmt.Sprintf("Cannot open Dolt store: %v", err),
-		}}
+		}
 	}
 	defer func() { _ = st.Close() }()
-
 	remotes, err := st.ListRemotes(ctx)
 	if err != nil {
-		return []DriftItem{{
+		return "", "", nil, &DriftItem{
 			Check:   "remote",
 			Status:  driftStatusSkipped,
 			Message: fmt.Sprintf("Cannot list remotes: %v", err),
-		}}
-	}
-
-	var originURL string
-	for _, r := range remotes {
-		if r.Name == "origin" {
-			originURL = r.URL
-			break
 		}
 	}
+	var originURL string
+	names := make([]string, len(remotes))
+	for i, r := range remotes {
+		names[i] = r.Name
+		if r.Name == "origin" {
+			originURL = r.URL
+		}
+	}
+	return federationRemote, originURL, names, nil
+}
 
-	// Case 1: federation.remote set, no origin remote
-	if federationRemote != "" && originURL == "" {
+func classifyRemoteDrift(federationRemote, originURL string, remoteNames []string) []DriftItem {
+	if federationRemote != "" {
+		return classifyConfiguredRemote(federationRemote, originURL)
+	}
+	if len(remoteNames) > 0 {
+		return []DriftItem{{
+			Check:   "remote",
+			Status:  driftStatusInfo,
+			Message: fmt.Sprintf("Dolt remotes configured (%s) but federation.remote is not set", strings.Join(remoteNames, ", ")),
+		}}
+	}
+	return []DriftItem{{
+		Check:   "remote",
+		Status:  driftStatusInfo,
+		Message: "No federation.remote configured and no Dolt remotes found",
+	}}
+}
+
+func classifyConfiguredRemote(federationRemote, originURL string) []DriftItem {
+	if originURL == "" {
 		return []DriftItem{{
 			Check:    "remote",
 			Status:   driftStatusDrift,
@@ -207,8 +234,7 @@ func checkRemoteDrift() []DriftItem {
 		}}
 	}
 
-	// Case 2: federation.remote set, origin exists but doesn't match
-	if federationRemote != "" && originURL != "" && !remoteURLMatchesConfig(originURL, federationRemote) {
+	if !remoteURLMatchesConfig(originURL, federationRemote) {
 		return []DriftItem{{
 			Check:    "remote",
 			Status:   driftStatusDrift,
@@ -218,33 +244,10 @@ func checkRemoteDrift() []DriftItem {
 		}}
 	}
 
-	// Case 3: federation.remote set and matches origin
-	if federationRemote != "" && remoteURLMatchesConfig(originURL, federationRemote) {
-		return []DriftItem{{
-			Check:   "remote",
-			Status:  driftStatusOK,
-			Message: "Dolt origin remote matches federation.remote",
-		}}
-	}
-
-	// Case 4: federation.remote not set but remotes exist
-	if federationRemote == "" && len(remotes) > 0 {
-		names := make([]string, len(remotes))
-		for i, r := range remotes {
-			names[i] = r.Name
-		}
-		return []DriftItem{{
-			Check:   "remote",
-			Status:  driftStatusInfo,
-			Message: fmt.Sprintf("Dolt remotes configured (%s) but federation.remote is not set", strings.Join(names, ", ")),
-		}}
-	}
-
-	// Case 5: Neither configured
 	return []DriftItem{{
 		Check:   "remote",
-		Status:  driftStatusInfo,
-		Message: "No federation.remote configured and no Dolt remotes found",
+		Status:  driftStatusOK,
+		Message: "Dolt origin remote matches federation.remote",
 	}}
 }
 
@@ -252,34 +255,34 @@ func checkRemoteDrift() []DriftItem {
 // Uses non-mutating PID file check instead of doltserver.IsRunning() which can
 // delete stale state files.
 func checkServerDrift() []DriftItem {
+	serverDir, wantServer, failure := serverDriftState()
+	if failure != nil {
+		return []DriftItem{*failure}
+	}
+	return classifyServerDrift(wantServer, isServerProbablyRunning(serverDir))
+}
+
+func serverDriftState() (string, bool, *DriftItem) {
 	beadsDir := beads.FindBeadsDir()
 	if beadsDir == "" {
-		return []DriftItem{{
-			Check:   "server",
-			Status:  driftStatusSkipped,
-			Message: "No active beads workspace found",
-		}}
+		return "", false, &DriftItem{Check: "server", Status: driftStatusSkipped, Message: "No active beads workspace found"}
 	}
-
 	wantServer := doltserver.IsSharedServerMode()
-
-	serverDir := beadsDir
-	if wantServer {
-		var err error
-		serverDir, err = doltserver.SharedServerPath()
-		if err != nil {
-			return []DriftItem{{
-				Check:    "server",
-				Status:   driftStatusDrift,
-				Message:  fmt.Sprintf("dolt.shared-server is enabled but its state directory cannot be resolved: %v", err),
-				Expected: "resolvable shared server state directory",
-				Actual:   "unavailable",
-			}}
+	if !wantServer {
+		return beadsDir, false, nil
+	}
+	serverDir, err := doltserver.SharedServerPath()
+	if err != nil {
+		return "", true, &DriftItem{
+			Check: "server", Status: driftStatusDrift,
+			Message:  fmt.Sprintf("dolt.shared-server is enabled but its state directory cannot be resolved: %v", err),
+			Expected: "resolvable shared server state directory", Actual: "unavailable",
 		}
 	}
+	return serverDir, true, nil
+}
 
-	serverRunning := isServerProbablyRunning(serverDir)
-
+func classifyServerDrift(wantServer, serverRunning bool) []DriftItem {
 	if wantServer && !serverRunning {
 		return []DriftItem{{
 			Check:    "server",
@@ -306,7 +309,6 @@ func checkServerDrift() []DriftItem {
 		}}
 	}
 
-	// Neither configured nor running
 	return []DriftItem{{
 		Check:   "server",
 		Status:  driftStatusOK,

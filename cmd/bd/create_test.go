@@ -20,11 +20,17 @@ func TestCreateSuite(t *testing.T) {
 
 	t.Run("BasicIssue", func(t *testing.T) {
 		issue := &types.Issue{
-			Title:     "Test Issue",
-			Priority:  1,
-			IssueType: types.TypeBug,
-			Status:    types.StatusOpen,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Test Issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				IssueType: types.TypeBug,
+				Status:    types.StatusOpen,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 
 		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
@@ -65,12 +71,18 @@ func TestCreateSuite(t *testing.T) {
 
 	t.Run("WithDescription", func(t *testing.T) {
 		issue := &types.Issue{
-			Title:       "Issue with desc",
-			Description: "This is a description",
-			Priority:    2,
-			Status:      types.StatusOpen,
-			IssueType:   types.TypeTask,
-			CreatedAt:   time.Now(),
+			IssueContent: types.IssueContent{
+				Title:       "Issue with desc",
+				Description: "This is a description",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 
 		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
@@ -101,13 +113,19 @@ func TestCreateSuite(t *testing.T) {
 
 	t.Run("WithDesignAndAcceptance", func(t *testing.T) {
 		issue := &types.Issue{
-			Title:              "Feature with design",
-			Design:             "Use MVC pattern",
-			AcceptanceCriteria: "All tests pass",
-			IssueType:          types.TypeFeature,
-			Priority:           2,
-			Status:             types.StatusOpen,
-			CreatedAt:          time.Now(),
+			IssueContent: types.IssueContent{
+				Title:              "Feature with design",
+				Design:             "Use MVC pattern",
+				AcceptanceCriteria: "All tests pass",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				IssueType: types.TypeFeature,
+				Priority:  2,
+				Status:    types.StatusOpen,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 
 		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
@@ -141,11 +159,17 @@ func TestCreateSuite(t *testing.T) {
 
 	t.Run("WithLabels", func(t *testing.T) {
 		issue := &types.Issue{
-			Title:     "Issue with labels",
-			Priority:  0,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeBug,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Issue with labels",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  0,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeBug,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 
 		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
@@ -181,11 +205,17 @@ func TestCreateSuite(t *testing.T) {
 
 	t.Run("WithDependencies", func(t *testing.T) {
 		parent := &types.Issue{
-			Title:     "Parent issue",
-			Priority:  1,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Parent issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 
 		if err := s.CreateIssue(ctx, parent, "test"); err != nil {
@@ -193,11 +223,17 @@ func TestCreateSuite(t *testing.T) {
 		}
 
 		child := &types.Issue{
-			Title:     "Child issue",
-			Priority:  1,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Child issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 
 		if err := s.CreateIssue(ctx, child, "test"); err != nil {
@@ -241,11 +277,17 @@ func TestCreateSuite(t *testing.T) {
 
 	t.Run("WithDiscoveredFromDependency", func(t *testing.T) {
 		parent := &types.Issue{
-			Title:     "Parent work",
-			Priority:  1,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Parent work",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 
 		if err := s.CreateIssue(ctx, parent, "test"); err != nil {
@@ -253,11 +295,17 @@ func TestCreateSuite(t *testing.T) {
 		}
 
 		discovered := &types.Issue{
-			Title:     "Found bug",
-			Priority:  1,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeBug,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Found bug",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeBug,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 
 		if err := s.CreateIssue(ctx, discovered, "test"); err != nil {
@@ -301,12 +349,20 @@ func TestCreateSuite(t *testing.T) {
 
 	t.Run("WithExplicitID", func(t *testing.T) {
 		issue := &types.Issue{
-			ID:        "test-abc123",
-			Title:     "Custom ID issue",
-			Priority:  1,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueID: types.IssueID{
+				ID: "test-abc123",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Custom ID issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 
 		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
@@ -334,12 +390,18 @@ func TestCreateSuite(t *testing.T) {
 
 	t.Run("WithAssignee", func(t *testing.T) {
 		issue := &types.Issue{
-			Title:     "Assigned issue",
-			Assignee:  "alice",
-			Priority:  1,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Assigned issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Assignee:  "alice",
+				Priority:  1,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 
 		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
@@ -380,11 +442,17 @@ func TestCreateSuite(t *testing.T) {
 		createdIDs := make(map[string]bool)
 		for _, issueType := range issueTypes {
 			issue := &types.Issue{
-				Title:     "Test " + string(issueType),
-				IssueType: issueType,
-				Priority:  2,
-				Status:    types.StatusOpen,
-				CreatedAt: time.Now(),
+				IssueContent: types.IssueContent{
+					Title: "Test " + string(issueType),
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: issueType,
+					Priority:  2,
+					Status:    types.StatusOpen,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: time.Now(),
+				},
 			}
 
 			if err := s.CreateIssue(ctx, issue, "test"); err != nil {
@@ -413,27 +481,45 @@ func TestCreateSuite(t *testing.T) {
 
 	t.Run("MultipleDependencies", func(t *testing.T) {
 		parent1 := &types.Issue{
-			Title:     "Parent 1",
-			Priority:  1,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Parent 1",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 
 		parent2 := &types.Issue{
-			Title:     "Parent 2",
-			Priority:  1,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Parent 2",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 
 		child := &types.Issue{
-			Title:     "Child",
-			Priority:  1,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Child",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 
 		if err := s.CreateIssue(ctx, parent1, "test"); err != nil {
@@ -494,12 +580,20 @@ func TestCreateSuite(t *testing.T) {
 		// Create issue with due date
 		dueTime := time.Now().UTC().Truncate(time.Second).Add(24 * time.Hour) // Due in 24 hours
 		issue := &types.Issue{
-			Title:     "Issue with due date",
-			Priority:  1,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
-			DueAt:     &dueTime,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Issue with due date",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
+			IssueLease: types.IssueLease{
+				DueAt: &dueTime,
+			},
 		}
 
 		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
@@ -526,12 +620,20 @@ func TestCreateSuite(t *testing.T) {
 		// Create issue with defer_until
 		deferTime := time.Now().UTC().Truncate(time.Second).Add(2 * time.Hour) // Defer for 2 hours
 		issue := &types.Issue{
-			Title:      "Issue with defer",
-			Priority:   1,
-			Status:     types.StatusOpen,
-			IssueType:  types.TypeTask,
-			DeferUntil: &deferTime,
-			CreatedAt:  time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Issue with defer",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
+			IssueLease: types.IssueLease{
+				DeferUntil: &deferTime,
+			},
 		}
 
 		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
@@ -559,13 +661,21 @@ func TestCreateSuite(t *testing.T) {
 		dueTime := time.Now().Add(48 * time.Hour)   // Due in 48 hours
 		deferTime := time.Now().Add(24 * time.Hour) // Defer for 24 hours
 		issue := &types.Issue{
-			Title:      "Issue with both due and defer",
-			Priority:   1,
-			Status:     types.StatusOpen,
-			IssueType:  types.TypeTask,
-			DueAt:      &dueTime,
-			DeferUntil: &deferTime,
-			CreatedAt:  time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Issue with both due and defer",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
+			IssueLease: types.IssueLease{
+				DueAt:      &dueTime,
+				DeferUntil: &deferTime,
+			},
 		}
 
 		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
@@ -589,10 +699,14 @@ func TestCreateSuite(t *testing.T) {
 	t.Run("ParentChildLabelInheritance", func(t *testing.T) {
 		// Create parent with labels
 		parent := &types.Issue{
-			Title:     "Epic parent with labels",
-			Priority:  1,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeEpic,
+			IssueContent: types.IssueContent{
+				Title: "Epic parent with labels",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeEpic,
+			},
 		}
 		if err := s.CreateIssue(ctx, parent, "test"); err != nil {
 			t.Fatalf("failed to create parent: %v", err)
@@ -610,11 +724,17 @@ func TestCreateSuite(t *testing.T) {
 			t.Fatalf("failed to get next child ID: %v", err)
 		}
 		child := &types.Issue{
-			ID:        childID,
-			Title:     "Child inherits labels",
-			Priority:  2,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: childID,
+			},
+			IssueContent: types.IssueContent{
+				Title: "Child inherits labels",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := s.CreateIssue(ctx, child, "test"); err != nil {
 			t.Fatalf("failed to create child: %v", err)
@@ -662,10 +782,14 @@ func TestCreateSuite(t *testing.T) {
 	t.Run("ParentChildLabelInheritanceMerge", func(t *testing.T) {
 		// Parent has labels "a", "b". Child created with explicit "c".
 		parent := &types.Issue{
-			Title:     "Parent with a,b labels",
-			Priority:  1,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeEpic,
+			IssueContent: types.IssueContent{
+				Title: "Parent with a,b labels",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeEpic,
+			},
 		}
 		if err := s.CreateIssue(ctx, parent, "test"); err != nil {
 			t.Fatalf("failed to create parent: %v", err)
@@ -682,11 +806,17 @@ func TestCreateSuite(t *testing.T) {
 			t.Fatalf("failed to get next child ID: %v", err)
 		}
 		child := &types.Issue{
-			ID:        childID,
-			Title:     "Child with explicit label c",
-			Priority:  2,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: childID,
+			},
+			IssueContent: types.IssueContent{
+				Title: "Child with explicit label c",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := s.CreateIssue(ctx, child, "test"); err != nil {
 			t.Fatalf("failed to create child: %v", err)
@@ -736,10 +866,14 @@ func TestCreateSuite(t *testing.T) {
 	t.Run("ParentChildNoLabels", func(t *testing.T) {
 		// Parent has no labels. Child should have no labels and no error.
 		parent := &types.Issue{
-			Title:     "Parent without labels",
-			Priority:  1,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeEpic,
+			IssueContent: types.IssueContent{
+				Title: "Parent without labels",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeEpic,
+			},
 		}
 		if err := s.CreateIssue(ctx, parent, "test"); err != nil {
 			t.Fatalf("failed to create parent: %v", err)
@@ -750,11 +884,17 @@ func TestCreateSuite(t *testing.T) {
 			t.Fatalf("failed to get next child ID: %v", err)
 		}
 		child := &types.Issue{
-			ID:        childID,
-			Title:     "Child of labelless parent",
-			Priority:  2,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: childID,
+			},
+			IssueContent: types.IssueContent{
+				Title: "Child of labelless parent",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := s.CreateIssue(ctx, child, "test"); err != nil {
 			t.Fatalf("failed to create child: %v", err)
@@ -781,10 +921,14 @@ func TestCreateSuite(t *testing.T) {
 	t.Run("ParentChildNoInheritLabels", func(t *testing.T) {
 		// Simulate --no-inherit-labels: parent has labels, child gets only explicit ones
 		parent := &types.Issue{
-			Title:     "Parent with labels for no-inherit test",
-			Priority:  1,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeEpic,
+			IssueContent: types.IssueContent{
+				Title: "Parent with labels for no-inherit test",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeEpic,
+			},
 		}
 		if err := s.CreateIssue(ctx, parent, "test"); err != nil {
 			t.Fatalf("failed to create parent: %v", err)
@@ -801,11 +945,17 @@ func TestCreateSuite(t *testing.T) {
 			t.Fatalf("failed to get next child ID: %v", err)
 		}
 		child := &types.Issue{
-			ID:        childID,
-			Title:     "Child without inherited labels",
-			Priority:  2,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: childID,
+			},
+			IssueContent: types.IssueContent{
+				Title: "Child without inherited labels",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := s.CreateIssue(ctx, child, "test"); err != nil {
 			t.Fatalf("failed to create child: %v", err)
@@ -845,12 +995,20 @@ func TestCreateSuite(t *testing.T) {
 	t.Run("DiscoveredFromInheritsSourceRepo", func(t *testing.T) {
 		// Create a parent issue with a custom source_repo
 		parent := &types.Issue{
-			Title:      "Parent issue",
-			Priority:   1,
-			Status:     types.StatusOpen,
-			IssueType:  types.TypeTask,
-			SourceRepo: "/path/to/custom/repo",
-			CreatedAt:  time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Parent issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
+			IssueGraph: types.IssueGraph{
+				SourceRepo: "/path/to/custom/repo",
+			},
 		}
 
 		if err := s.CreateIssue(ctx, parent, "test"); err != nil {
@@ -860,11 +1018,17 @@ func TestCreateSuite(t *testing.T) {
 		// Create a discovered issue with discovered-from dependency
 		// This should inherit the parent's source_repo
 		discovered := &types.Issue{
-			Title:     "Discovered bug",
-			Priority:  1,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeBug,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Discovered bug",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeBug,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 
 		// Simulate what happens in create.go when --deps discovered-from:parent is used

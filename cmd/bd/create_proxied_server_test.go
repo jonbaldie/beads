@@ -21,31 +21,47 @@ func TestBuildCreateIssueFromInput_PopulatesAllFields(t *testing.T) {
 	meta := json.RawMessage(`{"k":"v"}`)
 
 	in := createInput{
-		explicitID:         "bd-1",
-		title:              "Title",
-		description:        "Desc",
-		design:             "Design",
-		acceptanceCriteria: "Accept",
-		notes:              "Notes",
-		specID:             "spec-1",
-		priority:           1,
-		issueType:          "feat",
-		assignee:           "alice",
-		externalRef:        "gh-9",
-		estimatedMinutes:   &est,
-		ephemeral:          true,
-		noHistory:          false,
-		createdBy:          "tester",
-		owner:              "tester@example.com",
-		molType:            types.MolType("work"),
-		wispType:           types.WispType("heartbeat"),
-		eventCategory:      "patrol.muted",
-		eventActor:         "agent:foo",
-		eventTarget:        "bd-2",
-		eventPayload:       `{"x":1}`,
-		dueAt:              &due,
-		deferUntil:         &defer1,
-		metadata:           meta,
+		createInputSource: createInputSource{
+			explicitID: "bd-1",
+			title:      "Title",
+		},
+		createInputIdentity: createInputIdentity{
+			specID:      "spec-1",
+			priority:    1,
+			issueType:   "feat",
+			assignee:    "alice",
+			externalRef: "gh-9",
+		},
+		createInputBody: createInputBody{
+			description:        "Desc",
+			design:             "Design",
+			acceptanceCriteria: "Accept",
+			notes:              "Notes",
+		},
+		createInputFlags: createInputFlags{
+			ephemeral: true,
+			noHistory: false,
+		},
+		createInputKind: createInputKind{
+			molType:  types.MolType("work"),
+			wispType: types.WispType("heartbeat"),
+		},
+		createInputEvent: createInputEvent{
+			eventCategory: "patrol.muted",
+			eventActor:    "agent:foo",
+			eventTarget:   "bd-2",
+			eventPayload:  `{"x":1}`,
+		},
+		createInputSchedule: createInputSchedule{
+			estimatedMinutes: &est,
+			dueAt:            &due,
+			deferUntil:       &defer1,
+			metadata:         meta,
+		},
+		createInputRepo: createInputRepo{
+			createdBy: "tester",
+			owner:     "tester@example.com",
+		},
 	}
 
 	got := buildCreateIssueFromInput(in)
@@ -101,7 +117,10 @@ func TestBuildCreateIssueFromInput_PopulatesAllFields(t *testing.T) {
 }
 
 func TestBuildCreateIssueFromInput_EmptyExternalRefIsNilPointer(t *testing.T) {
-	got := buildCreateIssueFromInput(createInput{title: "T", priority: 2, issueType: "task"})
+	got := buildCreateIssueFromInput(createInput{
+		createInputSource:   createInputSource{title: "T"},
+		createInputIdentity: createInputIdentity{priority: 2, issueType: "task"},
+	})
 	if got.ExternalRef != nil {
 		t.Errorf("ExternalRef = %v, want nil for empty input", got.ExternalRef)
 	}
@@ -110,11 +129,9 @@ func TestBuildCreateIssueFromInput_EmptyExternalRefIsNilPointer(t *testing.T) {
 func TestBuildCreateIssueFromInput_ExplicitStatusWinsOverDefer(t *testing.T) {
 	deferUntil := time.Now().UTC().Add(24 * time.Hour)
 	got := buildCreateIssueFromInput(createInput{
-		title:      "T",
-		priority:   2,
-		issueType:  "task",
-		status:     "blocked",
-		deferUntil: &deferUntil,
+		createInputSource:   createInputSource{title: "T"},
+		createInputIdentity: createInputIdentity{priority: 2, issueType: "task", status: "blocked"},
+		createInputSchedule: createInputSchedule{deferUntil: &deferUntil},
 	})
 	if got.Status != types.StatusBlocked {
 		t.Errorf("Status = %q, want %q", got.Status, types.StatusBlocked)
@@ -137,7 +154,7 @@ func nodeIssueFromInput(t *testing.T, node GraphApplyNode, in createInput) *type
 
 func TestGraphApplyNodeIssue_DefaultsAndOpts(t *testing.T) {
 	t.Run("type and priority defaults", func(t *testing.T) {
-		issue := nodeIssueFromInput(t, GraphApplyNode{Key: "n", Title: "N"}, createInput{createdBy: "t"})
+		issue := nodeIssueFromInput(t, GraphApplyNode{Key: "n", Title: "N"}, createInput{createInputRepo: createInputRepo{createdBy: "t"}})
 		if issue.IssueType != types.TypeTask {
 			t.Errorf("type default = %q, want task", issue.IssueType)
 		}
@@ -164,14 +181,13 @@ func TestGraphApplyNodeIssue_DefaultsAndOpts(t *testing.T) {
 
 	t.Run("ephemeral and no-history propagate", func(t *testing.T) {
 		issue := nodeIssueFromInput(t, GraphApplyNode{Key: "n", Title: "N"}, createInput{
-			ephemeral: true,
-			noHistory: false,
+			createInputFlags: createInputFlags{ephemeral: true, noHistory: false},
 		})
 		if !issue.Ephemeral {
 			t.Errorf("ephemeral not propagated")
 		}
 		issue2 := nodeIssueFromInput(t, GraphApplyNode{Key: "n", Title: "N"}, createInput{
-			noHistory: true,
+			createInputFlags: createInputFlags{noHistory: true},
 		})
 		if !issue2.NoHistory {
 			t.Errorf("no_history not propagated")
@@ -180,8 +196,8 @@ func TestGraphApplyNodeIssue_DefaultsAndOpts(t *testing.T) {
 
 	t.Run("per-node storage class overrides plan flags", func(t *testing.T) {
 		off := false
-		issue := nodeIssueFromInput(t, GraphApplyNode{Key: "n", Title: "N", Ephemeral: &off}, createInput{
-			ephemeral: true,
+		issue := nodeIssueFromInput(t, GraphApplyNode{Key: "n", Title: "N", graphApplyNodeExtendedFields: graphApplyNodeExtendedFields{Ephemeral: &off}}, createInput{
+			createInputFlags: createInputFlags{ephemeral: true},
 		})
 		if issue.Ephemeral {
 			t.Errorf("node-level ephemeral=false should override --ephemeral")
@@ -204,7 +220,9 @@ func TestGraphApplyNodeIssue_DefaultsAndOpts(t *testing.T) {
 	t.Run("metadata marshalled to JSON", func(t *testing.T) {
 		issue := nodeIssueFromInput(t, GraphApplyNode{
 			Key: "n", Title: "N",
-			Metadata: map[string]json.RawMessage{"a": json.RawMessage(`"1"`), "b": json.RawMessage(`2`)},
+			graphApplyNodeExtendedFields: graphApplyNodeExtendedFields{
+				Metadata: map[string]json.RawMessage{"a": json.RawMessage(`"1"`), "b": json.RawMessage(`2`)},
+			},
 		}, createInput{})
 		var roundTrip map[string]any
 		if err := json.Unmarshal(issue.Metadata, &roundTrip); err != nil {
@@ -224,8 +242,7 @@ func TestGraphApplyNodeIssue_DefaultsAndOpts(t *testing.T) {
 
 	t.Run("identity fields copied", func(t *testing.T) {
 		issue := nodeIssueFromInput(t, GraphApplyNode{Key: "n", Title: "N"}, createInput{
-			createdBy: "alice",
-			owner:     "alice@example.com",
+			createInputRepo: createInputRepo{createdBy: "alice", owner: "alice@example.com"},
 		})
 		if issue.CreatedBy != "alice" || issue.Owner != "alice@example.com" {
 			t.Errorf("identity copy wrong: %q / %q", issue.CreatedBy, issue.Owner)
@@ -233,8 +250,8 @@ func TestGraphApplyNodeIssue_DefaultsAndOpts(t *testing.T) {
 	})
 
 	t.Run("node owner overrides ambient owner", func(t *testing.T) {
-		issue := nodeIssueFromInput(t, GraphApplyNode{Key: "n", Title: "N", Owner: "bob@example.com"}, createInput{
-			owner: "alice@example.com",
+		issue := nodeIssueFromInput(t, GraphApplyNode{Key: "n", Title: "N", graphApplyNodeIssueFields: graphApplyNodeIssueFields{Owner: "bob@example.com"}}, createInput{
+			createInputRepo: createInputRepo{owner: "alice@example.com"},
 		})
 		if issue.Owner != "bob@example.com" {
 			t.Errorf("Owner = %q, want node override", issue.Owner)
@@ -245,17 +262,21 @@ func TestGraphApplyNodeIssue_DefaultsAndOpts(t *testing.T) {
 		est := 90
 		issue := nodeIssueFromInput(t, GraphApplyNode{
 			Key: "n", Title: "N",
-			Design:             "d",
-			AcceptanceCriteria: "ac",
-			Notes:              "notes",
-			SpecID:             "spec-1",
-			ExternalRef:        "gh-9",
-			EstimatedMinutes:   &est,
-			WispType:           "heartbeat",
-			MolType:            "swarm",
-			Pinned:             true,
-			Status:             "in_progress",
-			ID:                 "bd-abc123",
+			Status: "in_progress",
+			ID:     "bd-abc123",
+			graphApplyNodeIssueFields: graphApplyNodeIssueFields{
+				Design:             "d",
+				AcceptanceCriteria: "ac",
+				Notes:              "notes",
+				SpecID:             "spec-1",
+				ExternalRef:        "gh-9",
+			},
+			graphApplyNodeExtendedFields: graphApplyNodeExtendedFields{
+				EstimatedMinutes: &est,
+				WispType:         "heartbeat",
+				MolType:          "swarm",
+				Pinned:           true,
+			},
 		}, createInput{})
 		if issue.Design != "d" || issue.AcceptanceCriteria != "ac" || issue.Notes != "notes" || issue.SpecID != "spec-1" {
 			t.Errorf("content fields lost: %+v", issue)
@@ -285,8 +306,12 @@ func TestBuildDomainGraphPlan(t *testing.T) {
 	plan := GraphApplyPlan{
 		Nodes: []GraphApplyNode{
 			{Key: "root", Title: "Root", Type: "epic"},
-			{Key: "child", Title: "Child", ParentKey: "root", Assignee: "bob", AssignAfterCreate: true,
-				MetadataRefs: map[string]string{"parent_id": "root"}, Labels: []string{"a", "b"}},
+			{Key: "child", Title: "Child", ParentKey: "root",
+				graphApplyNodeIssueFields: graphApplyNodeIssueFields{Assignee: "bob", AssignAfterCreate: true},
+				graphApplyNodeExtendedFields: graphApplyNodeExtendedFields{
+					MetadataRefs: map[string]string{"parent_id": "root"},
+					Labels:       []string{"a", "b"},
+				}},
 		},
 		Edges: []GraphApplyEdge{
 			{FromKey: "child", ToKey: "root", Type: ""},
@@ -295,7 +320,7 @@ func TestBuildDomainGraphPlan(t *testing.T) {
 		},
 	}
 
-	got, err := buildDomainGraphPlan(plan, createInput{createdBy: "t"})
+	got, err := buildDomainGraphPlan(plan, createInput{createInputRepo: createInputRepo{createdBy: "t"}})
 	if err != nil {
 		t.Fatalf("buildDomainGraphPlan: %v", err)
 	}
@@ -343,13 +368,13 @@ func TestBuildDomainGraphPlan_AliasesAndDeps(t *testing.T) {
 	plan := GraphApplyPlan{
 		Nodes: []GraphApplyNode{
 			{Key: "root", Title: "Root"},
-			{Key: "child", Title: "Child", Parent: "root", Estimate: &est,
+			{Key: "child", Title: "Child", Parent: "root", graphApplyNodeIssueFields: graphApplyNodeIssueFields{Estimate: &est},
 				Deps: []GraphApplyNodeDep{{Target: "root"}, {Target: "ext-1", Type: "related"}}},
-			{Key: "both", Title: "Both", EstimatedMinutes: &canonical, Estimate: &est},
+			{Key: "both", Title: "Both", graphApplyNodeIssueFields: graphApplyNodeIssueFields{Estimate: &est}, graphApplyNodeExtendedFields: graphApplyNodeExtendedFields{EstimatedMinutes: &canonical}},
 		},
 	}
 
-	got, err := buildDomainGraphPlan(plan, createInput{createdBy: "t"})
+	got, err := buildDomainGraphPlan(plan, createInput{createInputRepo: createInputRepo{createdBy: "t"}})
 	if err != nil {
 		t.Fatalf("buildDomainGraphPlan: %v", err)
 	}
@@ -417,7 +442,7 @@ func TestBuildDomainGraphPlanCoversEdgeFields(t *testing.T) {
 			Deps: []GraphApplyNodeDep{dep.Interface().(GraphApplyNodeDep)}}},
 		Edges: []GraphApplyEdge{edge.Interface().(GraphApplyEdge)},
 	}
-	got, err := buildDomainGraphPlan(plan, createInput{createdBy: "t"})
+	got, err := buildDomainGraphPlan(plan, createInput{createInputRepo: createInputRepo{createdBy: "t"}})
 	if err != nil {
 		t.Fatalf("buildDomainGraphPlan: %v", err)
 	}

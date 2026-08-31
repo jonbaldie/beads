@@ -125,62 +125,83 @@ func atomicWriteFile(path string, data []byte) error {
 // runBackupExport performs a Dolt-native backup to .beads/backup/.
 // Returns the updated state.
 func runBackupExport(ctx context.Context, force bool) (*backupState, error) {
-	dir, err := backupDir()
+	dir, state, err := prepareBackup()
 	if err != nil {
 		return nil, err
 	}
-
-	state, err := loadBackupState(dir)
-	if err != nil {
-		return nil, err
-	}
-
-	// Change detection: skip if nothing changed (unless forced)
 	if !force {
-		currentCommit, err := store.GetCurrentCommit(ctx)
+		unchanged, err := backupUnchanged(ctx, state)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get current commit: %w", err)
+			return nil, err
 		}
-		if currentCommit == state.LastDoltCommit && state.LastDoltCommit != "" {
-			debug.Logf("backup: no changes since last backup (commit %s)\n", truncateHash(currentCommit))
+		if unchanged {
 			return state, nil
 		}
 	}
-
-	bs, ok := storage.UnwrapStore(store).(storage.BackupStore)
-	if !ok {
-		return nil, fmt.Errorf("storage backend does not support backup operations")
-	}
-
-	if err := bs.BackupDatabase(ctx, dir); err != nil {
-		// Persist the attempt time even on failure so the throttle
-		// interval (checked by maybeAutoBackup via state.Timestamp)
-		// applies to the next command. Without this, a sync that keeps
-		// failing — e.g. a slow/overloaded shared Dolt server — retries
-		// on EVERY bd command instead of once per interval, turning a
-		// transient slowdown into a self-amplifying storm (the 2026-07
-		// shared-dolt CPU-pin incident). LastDoltCommit is deliberately
-		// left unchanged so change-detection still sees pending work and
-		// a real backup runs once the failure clears.
-		state.Timestamp = time.Now().UTC()
-		if saveErr := saveBackupState(dir, state); saveErr != nil {
-			debug.Logf("backup: failed to persist throttle state after error: %v\n", saveErr)
-		}
+	if err := performBackup(ctx, dir, state); err != nil {
 		return nil, err
 	}
+	return saveSuccessfulBackup(ctx, dir, state)
+}
 
-	// Update watermarks
-	currentCommit, err := store.GetCurrentCommit(ctx)
+func prepareBackup() (string, *backupState, error) {
+	dir, err := backupDir()
+	if err != nil {
+		return "", nil, err
+	}
+	state, err := loadBackupState(dir)
+	if err != nil {
+		return "", nil, err
+	}
+	return dir, state, nil
+}
+
+func backupUnchanged(ctx context.Context, state *backupState) (bool, error) {
+	currentCommit, err := getStore().GetCurrentCommit(ctx)
+	if err != nil {
+		return false, fmt.Errorf("failed to get current commit: %w", err)
+	}
+	unchanged := currentCommit == state.LastDoltCommit && state.LastDoltCommit != ""
+	if unchanged {
+		debug.Logf("backup: no changes since last backup (commit %s)\n", truncateHash(currentCommit))
+	}
+	return unchanged, nil
+}
+
+func performBackup(ctx context.Context, dir string, state *backupState) error {
+	bs, ok := storage.UnwrapStore(getStore()).(storage.BackupStore)
+	if !ok {
+		return fmt.Errorf("storage backend does not support backup operations")
+	}
+	if err := bs.BackupDatabase(ctx, dir); err == nil {
+		return nil
+	} else {
+		persistBackupFailure(dir, state)
+		return err
+	}
+}
+
+func persistBackupFailure(dir string, state *backupState) {
+	// Persist the attempt time even on failure so the throttle interval
+	// (checked by maybeAutoBackup via state.Timestamp) applies to the next
+	// command. LastDoltCommit stays unchanged so change detection still sees
+	// pending work once the failure clears.
+	state.Timestamp = time.Now().UTC()
+	if saveErr := saveBackupState(dir, state); saveErr != nil {
+		debug.Logf("backup: failed to persist throttle state after error: %v\n", saveErr)
+	}
+}
+
+func saveSuccessfulBackup(ctx context.Context, dir string, state *backupState) (*backupState, error) {
+	currentCommit, err := getStore().GetCurrentCommit(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get current commit for state: %w", err)
 	}
 	state.LastDoltCommit = currentCommit
 	state.Timestamp = time.Now().UTC()
-
 	if err := saveBackupState(dir, state); err != nil {
 		return nil, err
 	}
-
 	return state, nil
 }
 

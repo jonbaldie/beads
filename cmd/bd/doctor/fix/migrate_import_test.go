@@ -78,7 +78,11 @@ func TestImportJSONLIntoStore(t *testing.T) {
 	// Create Dolt store. CreateIfMissing: the per-test database does not
 	// exist yet and the dolt.New create-guard refuses to create it
 	// implicitly (bd-nxt5e).
-	store, err := dolt.NewFromConfigWithOptions(ctx, beadsDir, &dolt.Config{CreateIfMissing: true})
+	store, err := dolt.NewFromConfigWithOptions(ctx, beadsDir, &dolt.Config{
+		RemoteOptions: dolt.RemoteOptions{
+			CreateIfMissing: true,
+		},
+	})
 	if err != nil {
 		t.Fatalf("dolt.NewFromConfigWithOptions against running test container: %v", err)
 	}
@@ -86,9 +90,9 @@ func TestImportJSONLIntoStore(t *testing.T) {
 
 	// Write test JSONL
 	issues := []types.Issue{
-		{ID: "test-1", Title: "First issue", Status: "open", IssueType: "task", Priority: 2},
-		{ID: "test-2", Title: "Second issue", Status: "closed", IssueType: "bug", Priority: 1},
-		{ID: "test-3", Title: "Third issue", Status: "open", IssueType: "feature", Priority: 3},
+		{IssueID: types.IssueID{ID: "test-1"}, IssueContent: types.IssueContent{Title: "First issue"}, IssueWorkflow: types.IssueWorkflow{Status: "open", IssueType: "task", Priority: 2}},
+		{IssueID: types.IssueID{ID: "test-2"}, IssueContent: types.IssueContent{Title: "Second issue"}, IssueWorkflow: types.IssueWorkflow{Status: "closed", IssueType: "bug", Priority: 1}},
+		{IssueID: types.IssueID{ID: "test-3"}, IssueContent: types.IssueContent{Title: "Third issue"}, IssueWorkflow: types.IssueWorkflow{Status: "open", IssueType: "feature", Priority: 3}},
 	}
 	jsonlPath := writeTestJSONL(t, beadsDir, issues)
 
@@ -126,7 +130,11 @@ func TestImportJSONLIntoStore_EmptyFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	beadsDir := setupTestBeadsDir(t, tmpDir)
 
-	store, err := dolt.NewFromConfigWithOptions(ctx, beadsDir, &dolt.Config{CreateIfMissing: true})
+	store, err := dolt.NewFromConfigWithOptions(ctx, beadsDir, &dolt.Config{
+		RemoteOptions: dolt.RemoteOptions{
+			CreateIfMissing: true,
+		},
+	})
 	if err != nil {
 		t.Fatalf("dolt.NewFromConfigWithOptions against running test container: %v", err)
 	}
@@ -186,8 +194,8 @@ func TestDatabaseVersionWithBdVersion_ImportsJSONL(t *testing.T) {
 
 	// Write JSONL with issues
 	issues := []types.Issue{
-		{ID: "mdp-1", Title: "Test migration", Status: "open", IssueType: "task", Priority: 2},
-		{ID: "mdp-2", Title: "Another issue", Status: "closed", IssueType: "bug", Priority: 1},
+		{IssueID: types.IssueID{ID: "mdp-1"}, IssueContent: types.IssueContent{Title: "Test migration"}, IssueWorkflow: types.IssueWorkflow{Status: "open", IssueType: "task", Priority: 2}},
+		{IssueID: types.IssueID{ID: "mdp-2"}, IssueContent: types.IssueContent{Title: "Another issue"}, IssueWorkflow: types.IssueWorkflow{Status: "closed", IssueType: "bug", Priority: 1}},
 	}
 	writeTestJSONL(t, beadsDir, issues)
 

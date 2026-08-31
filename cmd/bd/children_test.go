@@ -24,11 +24,17 @@ func TestChildrenIncludesClosedIssues(t *testing.T) {
 
 	// Create parent epic
 	parent := &types.Issue{
-		Title:     "Parent Epic",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
-		CreatedAt: time.Now(),
+		IssueContent: types.IssueContent{
+			Title: "Parent Epic",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+		},
 	}
 	if err := s.CreateIssue(ctx, parent, "test"); err != nil {
 		t.Fatalf("Failed to create parent: %v", err)
@@ -36,18 +42,30 @@ func TestChildrenIncludesClosedIssues(t *testing.T) {
 
 	// Create two child tasks
 	child1 := &types.Issue{
-		Title:     "Child 1",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		CreatedAt: time.Now(),
+		IssueContent: types.IssueContent{
+			Title: "Child 1",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+		},
 	}
 	child2 := &types.Issue{
-		Title:     "Child 2",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		CreatedAt: time.Now(),
+		IssueContent: types.IssueContent{
+			Title: "Child 2",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+		},
 	}
 
 	for _, child := range []*types.Issue{child1, child2} {
@@ -73,8 +91,10 @@ func TestChildrenIncludesClosedIssues(t *testing.T) {
 	t.Run("DefaultFilterExcludesClosedChildren", func(t *testing.T) {
 		// Default list filter excludes closed issues — this is the bug behavior
 		filter := types.IssueFilter{
-			ParentID:      &parent.ID,
-			ExcludeStatus: []types.Status{types.StatusClosed, types.StatusPinned},
+			IssueFilterFlags: types.IssueFilterFlags{
+				ParentID:      &parent.ID,
+				ExcludeStatus: []types.Status{types.StatusClosed, types.StatusPinned},
+			},
 		}
 		issues, err := s.SearchIssues(ctx, "", filter)
 		if err != nil {
@@ -88,7 +108,9 @@ func TestChildrenIncludesClosedIssues(t *testing.T) {
 	t.Run("AllStatusFilterIncludesClosedChildren", func(t *testing.T) {
 		// When status=all (no ExcludeStatus), closed children should appear
 		filter := types.IssueFilter{
-			ParentID: &parent.ID,
+			IssueFilterFlags: types.IssueFilterFlags{
+				ParentID: &parent.ID,
+			},
 		}
 		issues, err := s.SearchIssues(ctx, "", filter)
 		if err != nil {

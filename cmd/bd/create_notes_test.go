@@ -21,12 +21,18 @@ func TestCreateWithNotes(t *testing.T) {
 
 	t.Run("DirectMode_WithNotes", func(t *testing.T) {
 		issue := &types.Issue{
-			Title:     "Issue with notes",
-			Notes:     "These are my test notes",
-			Priority:  1,
-			IssueType: types.TypeTask,
-			Status:    types.StatusOpen,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Issue with notes",
+				Notes: "These are my test notes",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				IssueType: types.TypeTask,
+				Status:    types.StatusOpen,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 
 		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
@@ -46,11 +52,17 @@ func TestCreateWithNotes(t *testing.T) {
 
 	t.Run("DirectMode_WithoutNotes", func(t *testing.T) {
 		issue := &types.Issue{
-			Title:     "Issue without notes",
-			Priority:  2,
-			IssueType: types.TypeBug,
-			Status:    types.StatusOpen,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Issue without notes",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				IssueType: types.TypeBug,
+				Status:    types.StatusOpen,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 
 		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
@@ -70,16 +82,22 @@ func TestCreateWithNotes(t *testing.T) {
 
 	t.Run("DirectMode_WithNotesAndOtherFields", func(t *testing.T) {
 		issue := &types.Issue{
-			Title:              "Full issue with notes",
-			Description:        "Detailed description",
-			Design:             "Design notes here",
-			AcceptanceCriteria: "All tests pass",
-			Notes:              "Additional implementation notes",
-			Priority:           1,
-			IssueType:          types.TypeFeature,
-			Status:             types.StatusOpen,
-			Assignee:           "testuser",
-			CreatedAt:          time.Now(),
+			IssueContent: types.IssueContent{
+				Title:              "Full issue with notes",
+				Description:        "Detailed description",
+				Design:             "Design notes here",
+				AcceptanceCriteria: "All tests pass",
+				Notes:              "Additional implementation notes",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				IssueType: types.TypeFeature,
+				Status:    types.StatusOpen,
+				Assignee:  "testuser",
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 
 		if err := s.CreateIssue(ctx, issue, "test"); err != nil {
@@ -115,12 +133,18 @@ func TestCreateWithNotes(t *testing.T) {
 	t.Run("DirectMode_NotesWithSpecialCharacters", func(t *testing.T) {
 		specialNotes := "Notes with special chars: \n- Bullet point\n- Another one\n\nAnd \"quotes\" and 'apostrophes'"
 		issue := &types.Issue{
-			Title:     "Issue with special char notes",
-			Notes:     specialNotes,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Status:    types.StatusOpen,
-			CreatedAt: time.Now(),
+			IssueContent: types.IssueContent{
+				Title: "Issue with special char notes",
+				Notes: specialNotes,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				IssueType: types.TypeTask,
+				Status:    types.StatusOpen,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 
 		if err := s.CreateIssue(ctx, issue, "test"); err != nil {

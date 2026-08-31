@@ -21,7 +21,7 @@ import (
 // fresh lease (lease_expires_at in the future + heartbeat_at set).
 func testClaim(t *testing.T, f Factory) {
 	s := f(t)
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "cl-1", Title: "T"}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "cl-1"}, IssueContent: types.IssueContent{Title: "T"}}), "a"))
 	before := time.Now().UTC()
 	must(t, s.ClaimIssue(ctx(), "cl-1", "worker"))
 
@@ -71,10 +71,10 @@ func testClaimReadyIssueLabelFilters(t *testing.T, f Factory) {
 	s := f(t)
 	// clf-free is unlabeled and top-priority: it wins any claim whose label filter was
 	// dropped, so every assertion below doubles as a check that the filter was applied.
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "clf-free", Title: "unfenced", Priority: 0}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "clf-p.1", Title: "other lane", Priority: 1}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "clf-p.2", Title: "my lane", Priority: 3}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "clf-x", Title: "my lane, other parent", Priority: 2}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "clf-free"}, IssueContent: types.IssueContent{Title: "unfenced"}, IssueWorkflow: types.IssueWorkflow{Priority: 0}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "clf-p.1"}, IssueContent: types.IssueContent{Title: "other lane"}, IssueWorkflow: types.IssueWorkflow{Priority: 1}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "clf-p.2"}, IssueContent: types.IssueContent{Title: "my lane"}, IssueWorkflow: types.IssueWorkflow{Priority: 3}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "clf-x"}, IssueContent: types.IssueContent{Title: "my lane, other parent"}, IssueWorkflow: types.IssueWorkflow{Priority: 2}}), "a"))
 	must(t, s.AddLabel(ctx(), "clf-p.1", "lane-b", "a"))
 	must(t, s.AddLabel(ctx(), "clf-p.2", "lane-a", "a"))
 	must(t, s.AddLabel(ctx(), "clf-p.2", "tier:opus", "a"))
@@ -90,24 +90,24 @@ func testClaimReadyIssueLabelFilters(t *testing.T, f Factory) {
 
 	// --label-any + --parent: the only child carrying lane-a, even though clf-p.1 is the
 	// higher-priority child and clf-x is the higher-priority lane-a issue.
-	got := claim(types.WorkFilter{LabelsAny: []string{"lane-a", "lane-c"}, ParentID: &parent})
+	got := claim(types.WorkFilter{WorkFilterCore: types.WorkFilterCore{LabelsAny: []string{"lane-a", "lane-c"}, ParentID: &parent}})
 	if got == nil || got.ID != "clf-p.2" {
 		t.Fatalf("claim(--label-any lane-a,lane-c --parent clf-p) = %v, want clf-p.2", issueID(got))
 	}
 
 	// AND-set + OR-set: the AND-set is unsatisfiable, so nothing is claimable — an
 	// unfenced claim would take clf-free.
-	if got := claim(types.WorkFilter{Labels: []string{"tier:nobody"}, LabelsAny: []string{"lane-a"}}); got != nil {
+	if got := claim(types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Labels: []string{"tier:nobody"}, LabelsAny: []string{"lane-a"}}}); got != nil {
 		t.Errorf("claim(--label tier:nobody --label-any lane-a) = %v, want no claim", issueID(got))
 	}
 
 	// --label-any alone still fences: clf-x, not the unlabeled higher-priority clf-free.
-	if got := claim(types.WorkFilter{LabelsAny: []string{"lane-a"}}); got == nil || got.ID != "clf-x" {
+	if got := claim(types.WorkFilter{WorkFilterCore: types.WorkFilterCore{LabelsAny: []string{"lane-a"}}}); got == nil || got.ID != "clf-x" {
 		t.Fatalf("claim(--label-any lane-a) = %v, want clf-x", issueID(got))
 	}
 
 	// Lane exhausted: claim NOTHING rather than falling back to the unfenced clf-free.
-	if got := claim(types.WorkFilter{LabelsAny: []string{"lane-a"}}); got != nil {
+	if got := claim(types.WorkFilter{WorkFilterCore: types.WorkFilterCore{LabelsAny: []string{"lane-a"}}}); got != nil {
 		t.Errorf("claim(--label-any lane-a) with the lane exhausted = %v, want no claim", issueID(got))
 	}
 	if got := claim(types.WorkFilter{}); got == nil || got.ID != "clf-free" {
@@ -126,7 +126,7 @@ func issueID(i *types.Issue) string {
 // Heartbeating with a one-hour TTL must push lease_expires_at far into the future.
 func testHeartbeatRenewsLease(t *testing.T, f Factory) {
 	s := f(t)
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "hb-1", Title: "T"}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "hb-1"}, IssueContent: types.IssueContent{Title: "T"}}), "a"))
 	must(t, s.ClaimIssue(ctx(), "hb-1", "worker"))
 	must(t, s.HeartbeatIssue(issueops.WithLeaseTTL(ctx(), time.Hour), "hb-1", "worker"))
 
@@ -147,7 +147,7 @@ func testHeartbeatRenewsLease(t *testing.T, f Factory) {
 // ErrNotClaimable (matching the Dolt reference).
 func testHeartbeatWisp(t *testing.T, f Factory) {
 	s := f(t)
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "hb-w1", Title: "W", Ephemeral: true}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "hb-w1"}, IssueContent: types.IssueContent{Title: "W"}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
 	err := s.HeartbeatIssue(ctx(), "hb-w1", "worker")
 	if !errors.Is(err, storage.ErrNotClaimable) {
 		t.Errorf("heartbeat wisp: err = %v, want ErrNotClaimable", err)
@@ -158,7 +158,7 @@ func testHeartbeatWisp(t *testing.T, f Factory) {
 // unassigned, reported with its previous owner, and its lease/started_at cleared.
 func testReclaimExpiredLease(t *testing.T, f Factory) {
 	s := f(t)
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "rc-1", Title: "T"}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "rc-1"}, IssueContent: types.IssueContent{Title: "T"}}), "a"))
 	must(t, s.ClaimIssue(ctx(), "rc-1", "deadworker")) // fresh default-TTL lease
 
 	// Reclaim with a cutoff past the lease horizon: a negative olderThan moves the
@@ -199,7 +199,7 @@ func testReclaimExpiredLease(t *testing.T, f Factory) {
 // testReclaimSkipsFreshLease: a live claim (fresh, unexpired lease) is left untouched.
 func testReclaimSkipsFreshLease(t *testing.T, f Factory) {
 	s := f(t)
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "rc-2", Title: "T"}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "rc-2"}, IssueContent: types.IssueContent{Title: "T"}}), "a"))
 	must(t, s.ClaimIssue(ctx(), "rc-2", "liveworker")) // fresh default-TTL lease
 
 	reclaimed, err := s.ReclaimExpiredLeases(ctx(), 0, types.ReclaimFilter{}, "reaper")
@@ -224,7 +224,7 @@ func testReclaimSkipsFreshLease(t *testing.T, f Factory) {
 // dead worker's bead) depends on.
 func testUnclaimIfAssigneeMatch(t *testing.T, f Factory) {
 	s := f(t)
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "ur-1", Title: "T"}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "ur-1"}, IssueContent: types.IssueContent{Title: "T"}}), "a"))
 	must(t, s.ClaimIssue(ctx(), "ur-1", "worker1"))
 
 	must(t, s.UnclaimIssueIfAssignee(ctx(), "ur-1", "releaser", "worker1"))
@@ -251,7 +251,7 @@ func testUnclaimIfAssigneeMatch(t *testing.T, f Factory) {
 // another worker's live claim.
 func testUnclaimIfAssigneeStale(t *testing.T, f Factory) {
 	s := f(t)
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "ur-2", Title: "T"}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "ur-2"}, IssueContent: types.IssueContent{Title: "T"}}), "a"))
 	must(t, s.ClaimIssue(ctx(), "ur-2", "worker2"))
 
 	err := s.UnclaimIssueIfAssignee(ctx(), "ur-2", "releaser", "worker1")

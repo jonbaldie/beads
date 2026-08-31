@@ -126,7 +126,17 @@ func RunReleaserReleasesItsOwnClaim(t *testing.T, ctx context.Context, fixture R
 		"SELECT COUNT(*) FROM issues WHERE id = ? AND started_at IS NOT NULL", id); started != 1 {
 		t.Fatalf("seed left started_at NULL; the cleared-started_at clause below could not fail")
 	}
+	assertReleaserOwnClaimReleased(t, ctx, fixture, id, before)
+}
 
+func assertReleaserOwnClaimReleased(t *testing.T, ctx context.Context, fixture ReleaserFixture, id string, before int64) {
+	t.Helper()
+	result := performReleaserOwnRelease(t, ctx, fixture, id)
+	assertReleaserOwnReleaseState(t, ctx, fixture, id, result, before)
+}
+
+func performReleaserOwnRelease(t *testing.T, ctx context.Context, fixture ReleaserFixture, id string) publicops.ReleaseResult {
+	t.Helper()
 	result, err := fixture.Releaser.Release(ctx, publicops.ReleaseRequest{Actor: releaserHolder, IssueID: id})
 	if err != nil {
 		t.Fatalf("Release() error = %v", err)
@@ -137,7 +147,11 @@ func RunReleaserReleasesItsOwnClaim(t *testing.T, ctx context.Context, fixture R
 	if result.Issue == nil {
 		t.Fatalf("Issue = nil, want the post-release row")
 	}
+	return result
+}
 
+func assertReleaserOwnReleaseState(t *testing.T, ctx context.Context, fixture ReleaserFixture, id string, result publicops.ReleaseResult, before int64) {
+	t.Helper()
 	releaserAssertRow(t, ctx, fixture, "issues", id, "", types.StatusOpen)
 	if started := releaserScalar[int](t, ctx, fixture,
 		"SELECT COUNT(*) FROM issues WHERE id = ? AND started_at IS NULL", id); started != 1 {
@@ -223,8 +237,15 @@ func RunReleaserRefusesAForeignClaimUntilForced(t *testing.T, ctx context.Contex
 // conclusion about the other.
 func RunReleaserReleasesOnlyTheExpectedHolder(t *testing.T, ctx context.Context, fixture ReleaserFixture) {
 	t.Helper()
-	stale := "releaser-previous-holder"
+	assertReleaserExpectedHolderMismatch(t, ctx, fixture)
+	assertReleaserExpectedHolderMatch(t, ctx, fixture)
+	assertReleaserExpectedHolderRespelled(t, ctx, fixture)
+	assertReleaserExpectedHolderPadded(t, ctx, fixture)
+}
 
+func assertReleaserExpectedHolderMismatch(t *testing.T, ctx context.Context, fixture ReleaserFixture) {
+	t.Helper()
+	stale := "releaser-previous-holder"
 	moved := releaserSeedClaimed(t, ctx, fixture, "expect", "moved", false)
 	version := releaserRowVersion(t, ctx, fixture, moved)
 	_, err := fixture.Releaser.Release(ctx, publicops.ReleaseRequest{
@@ -237,7 +258,10 @@ func RunReleaserReleasesOnlyTheExpectedHolder(t *testing.T, ctx context.Context,
 	if got := releaserRowVersion(t, ctx, fixture, moved); got != version {
 		t.Errorf("a refused conditional release moved the row version")
 	}
+}
 
+func assertReleaserExpectedHolderMatch(t *testing.T, ctx context.Context, fixture ReleaserFixture) {
+	t.Helper()
 	current := releaserHolder
 	matched := releaserSeedClaimed(t, ctx, fixture, "expect", "matched", false)
 	result, err := fixture.Releaser.Release(ctx, publicops.ReleaseRequest{
@@ -250,7 +274,10 @@ func RunReleaserReleasesOnlyTheExpectedHolder(t *testing.T, ctx context.Context,
 		t.Errorf("Changed = false, want true for a conditional release that wrote the row")
 	}
 	releaserAssertRow(t, ctx, fixture, "issues", matched, "", types.StatusOpen)
+}
 
+func assertReleaserExpectedHolderRespelled(t *testing.T, ctx context.Context, fixture ReleaserFixture) {
+	t.Helper()
 	// releaserHolder spelled with the other separator: "releaser_holder"
 	// against a row holding "releaser-holder". Both canonicalize to one
 	// identity, so the release lands.
@@ -266,7 +293,10 @@ func RunReleaserReleasesOnlyTheExpectedHolder(t *testing.T, ctx context.Context,
 			respelled, releaserHolder, err)
 	}
 	releaserAssertRow(t, ctx, fixture, "issues", separatorSpelled, "", types.StatusOpen)
+}
 
+func assertReleaserExpectedHolderPadded(t *testing.T, ctx context.Context, fixture ReleaserFixture) {
+	t.Helper()
 	// The other half of the same predicate: separators are all that is
 	// forgiven. A padded expectation is a different string and refuses, and the
 	// claim it named is still there afterwards.
@@ -561,12 +591,20 @@ func RunReleaserDoesNotMutateTheCallerRequest(t *testing.T, ctx context.Context,
 
 func releaserIssue(fixture ReleaserFixture, tag, name string, ephemeral bool) *types.Issue {
 	return &types.Issue{
-		ID:        fmt.Sprintf("%s-%s-%s", fixture.IssuePrefix, tag, name),
-		Title:     tag + " " + name,
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: ephemeral,
+		IssueID: types.IssueID{
+			ID: fmt.Sprintf("%s-%s-%s", fixture.IssuePrefix, tag, name),
+		},
+		IssueContent: types.IssueContent{
+			Title: tag + " " + name,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: ephemeral,
+		},
 	}
 }
 

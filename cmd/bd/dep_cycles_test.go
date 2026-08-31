@@ -25,11 +25,11 @@ func TestDepCyclesNamesTheMembersItCannotDescribe(t *testing.T) {
 	out := captureCycleStdout(t, func() {
 		printCycleReportForTest(t, issueops.CycleReport{Cycles: []issueops.Cycle{
 			{Members: []issueops.CycleMember{
-				{ID: "bd-a", Issue: &types.Issue{ID: "bd-a", Title: "Alpha"}},
-				{ID: "bd-b", Issue: &types.Issue{ID: "bd-b", Title: "Beta"}},
+				{ID: "bd-a", Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-a"}, IssueContent: types.IssueContent{Title: "Alpha"}}},
+				{ID: "bd-b", Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-b"}, IssueContent: types.IssueContent{Title: "Beta"}}},
 			}},
 			{Partial: true, Members: []issueops.CycleMember{
-				{ID: "bd-c", Issue: &types.Issue{ID: "bd-c", Title: "Gamma"}},
+				{ID: "bd-c", Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-c"}, IssueContent: types.IssueContent{Title: "Gamma"}}},
 				{ID: "bd-ghost"},
 			}},
 		}})
@@ -73,9 +73,9 @@ func TestCycleWarningSpellsTheWholePathIncludingUndescribableMembers(t *testing.
 	os.Stderr = w
 
 	printCycleWarnings([]issueops.Cycle{{Partial: true, Members: []issueops.CycleMember{
-		{ID: "bd-a", Issue: &types.Issue{ID: "bd-a"}},
+		{ID: "bd-a", Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-a"}}},
 		{ID: "bd-ghost"},
-		{ID: "bd-c", Issue: &types.Issue{ID: "bd-c"}},
+		{ID: "bd-c", Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-c"}}},
 	}}})
 
 	_ = w.Close()

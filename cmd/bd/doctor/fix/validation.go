@@ -23,22 +23,38 @@ func getDatabasePath(beadsDir string) string {
 // OrphanedDependencies removes dependencies pointing to non-existent issues.
 // If verbose is true, prints each removed dependency; otherwise shows only summary.
 func OrphanedDependencies(path string, verbose bool) error {
-	beadsDir, err := resolvedWorkspaceBeadsDir(path)
+	db, err := openGuardedDoctorDB(path, "Orphaned dependencies fix")
 	if err != nil {
 		return err
 	}
-
-	db, cfg, err := openDoltDB(beadsDir)
-	if err != nil {
-		fmt.Printf("  Orphaned dependencies fix skipped (%v)\n", err)
+	if db == nil {
 		return nil
 	}
 	defer db.Close()
-
-	if skip, err := guardFixTarget("Orphaned dependencies fix", db, beadsDir, cfg); skip {
+	orphans, err := loadOrphanedDependencies(db)
+	if err != nil {
 		return err
 	}
+	if len(orphans) == 0 {
+		fmt.Println("  No orphaned dependencies to fix")
+		return nil
+	}
+	removed, err := deleteOrphanedDependencies(db, orphans, verbose)
+	if err != nil {
+		return err
+	}
+	_, _ = db.Exec("CALL DOLT_COMMIT('-Am', 'doctor: remove orphaned dependencies')") // Best effort: commit advisory; schema fix already applied in-memory
+	fmt.Printf("  Fixed %d orphaned dependency reference(s)\n", removed)
+	return nil
+}
 
+type orphanedDep struct {
+	depTable    string
+	issueID     string
+	dependsOnID string
+}
+
+func loadOrphanedDependencies(db *sql.DB) ([]orphanedDep, error) {
 	// Find orphaned dependencies (exclude external: cross-rig tracking refs, #1593)
 	//nolint:gosec // G202: fixDependencyUnionSQL returns a fixed internal SELECT fragment.
 	query := `
@@ -50,39 +66,29 @@ func OrphanedDependencies(path string, verbose bool) error {
 	`
 	rows, err := db.Query(query)
 	if err != nil {
-		return fmt.Errorf("failed to query orphaned dependencies: %w", err)
+		return nil, fmt.Errorf("failed to query orphaned dependencies: %w", err)
 	}
 	defer rows.Close()
-
-	type orphan struct {
-		depTable    string
-		issueID     string
-		dependsOnID string
-	}
-	var orphans []orphan
-
+	var orphans []orphanedDep
 	for rows.Next() {
-		var o orphan
+		var o orphanedDep
 		if err := rows.Scan(&o.depTable, &o.issueID, &o.dependsOnID); err == nil {
 			orphans = append(orphans, o)
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("row iteration error: %w", err)
+		return nil, fmt.Errorf("row iteration error: %w", err)
 	}
+	return orphans, nil
+}
 
-	if len(orphans) == 0 {
-		fmt.Println("  No orphaned dependencies to fix")
-		return nil
-	}
-
-	// Delete orphaned dependencies
+func deleteOrphanedDependencies(db *sql.DB, orphans []orphanedDep, verbose bool) (int, error) {
 	// Uses explicit transaction so writes persist when @@autocommit is OFF
 	// (e.g. Dolt server started with --no-auto-commit).
 	showIndividual := verbose || len(orphans) < 20
 	tx, err := db.Begin()
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
+		return 0, fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	var removed int
 	for _, o := range orphans {
@@ -98,22 +104,17 @@ func OrphanedDependencies(path string, verbose bool) error {
 		}
 		if err != nil {
 			fmt.Printf("  Warning: failed to remove %s→%s: %v\n", o.issueID, o.dependsOnID, err)
-		} else {
-			removed++
-			if showIndividual {
-				fmt.Printf("  Removed orphaned dependency: %s→%s\n", o.issueID, o.dependsOnID)
-			}
+			continue
+		}
+		removed++
+		if showIndividual {
+			fmt.Printf("  Removed orphaned dependency: %s→%s\n", o.issueID, o.dependsOnID)
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit orphaned dependency removals: %w", err)
+		return 0, fmt.Errorf("failed to commit orphaned dependency removals: %w", err)
 	}
-
-	// Commit changes in Dolt
-	_, _ = db.Exec("CALL DOLT_COMMIT('-Am', 'doctor: remove orphaned dependencies')") // Best effort: commit advisory; schema fix already applied in-memory
-
-	fmt.Printf("  Fixed %d orphaned dependency reference(s)\n", removed)
-	return nil
+	return removed, nil
 }
 
 // ChildParentDependencies removes child→parent blocking dependencies.
@@ -121,22 +122,39 @@ func OrphanedDependencies(path string, verbose bool) error {
 // Requires explicit opt-in via --fix-child-parent flag since some workflows may use these intentionally.
 // If verbose is true, prints each removed dependency; otherwise shows only summary.
 func ChildParentDependencies(path string, verbose bool) error {
-	beadsDir, err := resolvedWorkspaceBeadsDir(path)
+	db, err := openGuardedDoctorDB(path, "Child-parent dependencies fix")
 	if err != nil {
 		return err
 	}
-
-	db, cfg, err := openDoltDB(beadsDir)
-	if err != nil {
-		fmt.Printf("  Child-parent dependencies fix skipped (%v)\n", err)
+	if db == nil {
 		return nil
 	}
 	defer db.Close()
-
-	if skip, err := guardFixTarget("Child-parent dependencies fix", db, beadsDir, cfg); skip {
+	badDeps, err := loadChildParentDependencies(db)
+	if err != nil {
 		return err
 	}
+	if len(badDeps) == 0 {
+		fmt.Println("  No child→parent dependencies to fix")
+		return nil
+	}
+	removed, err := deleteChildParentDependencies(db, badDeps, verbose)
+	if err != nil {
+		return err
+	}
+	_, _ = db.Exec("CALL DOLT_COMMIT('-Am', 'doctor: remove child-parent dependency anti-patterns')") // Best effort: commit advisory; schema fix already applied in-memory
+	fmt.Printf("  Fixed %d child→parent dependency anti-pattern(s)\n", removed)
+	return nil
+}
 
+type childParentDep struct {
+	depTable    string
+	issueID     string
+	dependsOnID string
+	depType     string
+}
+
+func loadChildParentDependencies(db *sql.DB) ([]childParentDep, error) {
 	// Find child→parent BLOCKING dependencies where issue_id starts with depends_on_id + "."
 	// Only matches blocking types (blocks, conditional-blocks, waits-for) that cause deadlock.
 	// Excludes 'parent-child' type which is a legitimate structural hierarchy relationship.
@@ -149,40 +167,30 @@ func ChildParentDependencies(path string, verbose bool) error {
 	`
 	rows, err := db.Query(query)
 	if err != nil {
-		return fmt.Errorf("failed to query child-parent dependencies: %w", err)
+		return nil, fmt.Errorf("failed to query child-parent dependencies: %w", err)
 	}
 	defer rows.Close()
-
-	type badDep struct {
-		depTable    string
-		issueID     string
-		dependsOnID string
-		depType     string
-	}
-	var badDeps []badDep
-
+	var badDeps []childParentDep
 	for rows.Next() {
-		var d badDep
+		var d childParentDep
 		if err := rows.Scan(&d.depTable, &d.issueID, &d.dependsOnID, &d.depType); err == nil {
 			badDeps = append(badDeps, d)
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("row iteration error: %w", err)
+		return nil, fmt.Errorf("row iteration error: %w", err)
 	}
+	return badDeps, nil
+}
 
-	if len(badDeps) == 0 {
-		fmt.Println("  No child→parent dependencies to fix")
-		return nil
-	}
-
+func deleteChildParentDependencies(db *sql.DB, badDeps []childParentDep, verbose bool) (int, error) {
 	// Delete child→parent blocking dependencies (preserving parent-child type)
 	// Uses explicit transaction so writes persist when @@autocommit is OFF
 	// (e.g. Dolt server started with --no-auto-commit).
 	showIndividual := verbose || len(badDeps) < 20
 	tx, err := db.Begin()
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
+		return 0, fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	var removed int
 	for _, d := range badDeps {
@@ -198,49 +206,54 @@ func ChildParentDependencies(path string, verbose bool) error {
 		}
 		if err != nil {
 			fmt.Printf("  Warning: failed to remove %s→%s: %v\n", d.issueID, d.dependsOnID, err)
-		} else {
-			removed++
-			if showIndividual {
-				fmt.Printf("  Removed child→parent dependency: %s→%s\n", d.issueID, d.dependsOnID)
-			}
+			continue
+		}
+		removed++
+		if showIndividual {
+			fmt.Printf("  Removed child→parent dependency: %s→%s\n", d.issueID, d.dependsOnID)
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit dependency removals: %w", err)
+		return 0, fmt.Errorf("failed to commit dependency removals: %w", err)
 	}
-
-	// Commit changes in Dolt
-	_, _ = db.Exec("CALL DOLT_COMMIT('-Am', 'doctor: remove child-parent dependency anti-patterns')") // Best effort: commit advisory; schema fix already applied in-memory
-
-	fmt.Printf("  Fixed %d child→parent dependency anti-pattern(s)\n", removed)
-	return nil
+	return removed, nil
 }
 
 // CrossTableDuplicates removes issues-table rows whose IDs also exist in the
 // wisps table. The wisps copy is canonical (be-iabdi); stale issues rows are
 // deleted along with their child rows (labels, events, dependencies, comments).
 func CrossTableDuplicates(path string, verbose bool) error {
-	beadsDir, err := resolvedWorkspaceBeadsDir(path)
+	db, err := openGuardedDoctorDB(path, "Cross-table duplicates fix")
 	if err != nil {
 		return err
 	}
-
-	db, cfg, err := openDoltDB(beadsDir)
-	if err != nil {
-		fmt.Printf("  Cross-table duplicates fix skipped (%v)\n", err)
+	if db == nil {
 		return nil
 	}
 	defer db.Close()
-
-	if skip, err := guardFixTarget("Cross-table duplicates fix", db, beadsDir, cfg); skip {
+	dupIDs, err := loadCrossTableDuplicateIDs(db)
+	if err != nil {
 		return err
 	}
+	if len(dupIDs) == 0 {
+		fmt.Println("  No cross-table duplicates to fix")
+		return nil
+	}
+	removed, err := deleteCrossTableDuplicates(db, dupIDs, verbose)
+	if err != nil {
+		return err
+	}
+	_, _ = db.Exec("CALL DOLT_COMMIT('-Am', 'doctor: remove stale issues copies of wisps (be-iabdi)')") // Best effort
+	fmt.Printf("  Fixed %d cross-table duplicate(s)\n", removed)
+	return nil
+}
 
-	// Find IDs present in both tables — the wisp copy is canonical.
+func loadCrossTableDuplicateIDs(db *sql.DB) ([]string, error) {
 	rows, err := db.Query(`SELECT id FROM issues WHERE id IN (SELECT id FROM wisps)`)
 	if err != nil {
-		return fmt.Errorf("failed to query cross-table duplicates: %w", err)
+		return nil, fmt.Errorf("failed to query cross-table duplicates: %w", err)
 	}
+	defer rows.Close()
 	var dupIDs []string
 	for rows.Next() {
 		var id string
@@ -249,25 +262,19 @@ func CrossTableDuplicates(path string, verbose bool) error {
 		}
 	}
 	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return fmt.Errorf("row iteration error: %w", err)
+		return nil, fmt.Errorf("row iteration error: %w", err)
 	}
-	_ = rows.Close()
+	return dupIDs, nil
+}
 
-	if len(dupIDs) == 0 {
-		fmt.Println("  No cross-table duplicates to fix")
-		return nil
-	}
-
+func deleteCrossTableDuplicates(db *sql.DB, dupIDs []string, verbose bool) (int, error) {
 	showIndividual := verbose || len(dupIDs) < 20
 	tx, txErr := db.Begin()
 	if txErr != nil {
-		return fmt.Errorf("failed to begin transaction: %w", txErr)
+		return 0, fmt.Errorf("failed to begin transaction: %w", txErr)
 	}
-
 	var removed int
 	for _, id := range dupIDs {
-		// Delete child rows first (FK-safe order), then the issues row.
 		for _, childTable := range []string{"labels", "events", "dependencies", "comments"} {
 			//nolint:gosec // G202: childTable is from a hardcoded list above.
 			if _, err := tx.Exec(fmt.Sprintf("DELETE FROM %s WHERE issue_id = ?", childTable), id); err != nil {
@@ -276,22 +283,17 @@ func CrossTableDuplicates(path string, verbose bool) error {
 		}
 		if _, err := tx.Exec("DELETE FROM issues WHERE id = ?", id); err != nil {
 			fmt.Printf("  Warning: failed to delete issues row for %s: %v\n", id, err)
-		} else {
-			removed++
-			if showIndividual {
-				fmt.Printf("  Removed stale issues-table copy of %s (canonical in wisps)\n", id)
-			}
+			continue
+		}
+		removed++
+		if showIndividual {
+			fmt.Printf("  Removed stale issues-table copy of %s (canonical in wisps)\n", id)
 		}
 	}
-
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit cross-table duplicate removals: %w", err)
+		return 0, fmt.Errorf("failed to commit cross-table duplicate removals: %w", err)
 	}
-
-	_, _ = db.Exec("CALL DOLT_COMMIT('-Am', 'doctor: remove stale issues copies of wisps (be-iabdi)')") // Best effort
-
-	fmt.Printf("  Fixed %d cross-table duplicate(s)\n", removed)
-	return nil
+	return removed, nil
 }
 
 // CountCrossTableDuplicates returns the number of IDs present in both the
@@ -321,6 +323,23 @@ func CountCrossTableDuplicates(path string) (int, error) {
 // Also returns the loaded config so callers that need it afterward (e.g. to
 // verify the connection's target identity) don't have to load it a second
 // time and risk it disagreeing with what was actually dialed.
+func openGuardedDoctorDB(path, label string) (*sql.DB, error) {
+	beadsDir, err := resolvedWorkspaceBeadsDir(path)
+	if err != nil {
+		return nil, err
+	}
+	db, cfg, err := openDoltDB(beadsDir)
+	if err != nil {
+		fmt.Printf("  %s skipped (%v)\n", label, err)
+		return nil, nil
+	}
+	if skip, err := guardFixTarget(label, db, beadsDir, cfg); skip {
+		_ = db.Close()
+		return nil, err
+	}
+	return db, nil
+}
+
 func openDoltDB(beadsDir string) (*sql.DB, *configfile.Config, error) {
 	cfg, err := configfile.Load(beadsDir)
 	if err != nil || cfg == nil {

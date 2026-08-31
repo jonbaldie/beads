@@ -94,29 +94,17 @@ func TestParseCountRequestCarriesEveryFilterFlag(t *testing.T) {
 	}
 	priority, min, max := 1, 0, 4
 	want := issueops.CountRequest{
-		Status:        "closed",
-		IssueType:     "bug",
-		Assignee:      "alice",
-		Priority:      &priority,
-		PriorityMin:   &min,
-		PriorityMax:   &max,
-		Labels:        []string{"alpha", "beta"},
-		LabelsAny:     []string{"gamma"},
-		TitleSearch:   "needle",
-		IDFilter:      "bd-1,bd-2",
-		TitleContains: "tc",
-		DescContains:  "dc",
-		NotesContains: "nc",
-		CreatedAfter:  day(1),
-		CreatedBefore: day(2),
-		UpdatedAfter:  day(3),
-		UpdatedBefore: day(4),
-		ClosedAfter:   day(5),
-		ClosedBefore:  day(6),
-		EmptyDesc:     true,
-		NoAssignee:    true,
-		NoLabels:      true,
-		IncludeInfra:  true,
+		CountIdentityFilters: issueops.CountIdentityFilters{Status: "closed", IssueType: "bug", Assignee: "alice"},
+		CountPriorityFilters: issueops.CountPriorityFilters{Priority: &priority, PriorityMin: &min, PriorityMax: &max},
+		CountTextFilters: issueops.CountTextFilters{
+			Labels: []string{"alpha", "beta"}, LabelsAny: []string{"gamma"}, TitleSearch: "needle", IDFilter: "bd-1,bd-2",
+			TitleContains: "tc", DescContains: "dc", NotesContains: "nc",
+		},
+		CountTimeFilters: issueops.CountTimeFilters{
+			CreatedAfter: day(1), CreatedBefore: day(2), UpdatedAfter: day(3),
+			UpdatedBefore: day(4), ClosedAfter: day(5), ClosedBefore: day(6),
+		},
+		CountPresenceFilters: issueops.CountPresenceFilters{EmptyDesc: true, NoAssignee: true, NoLabels: true, IncludeInfra: true},
 	}
 	if !reflect.DeepEqual(request, want) {
 		t.Errorf("parseCountRequest built\n %#v\nwant\n %#v", request, want)

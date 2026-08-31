@@ -12,24 +12,37 @@ import (
 )
 
 // ContextInfo contains the effective backend identity and repository context.
-type ContextInfo struct {
-	BeadsDir      string `json:"beads_dir"`
-	RepoRoot      string `json:"repo_root"`
-	CWDRepoRoot   string `json:"cwd_repo_root,omitempty"`
-	IsRedirected  bool   `json:"is_redirected"`
-	IsWorktree    bool   `json:"is_worktree"`
-	Backend       string `json:"backend"`
-	DoltMode      string `json:"dolt_mode"`
-	ServerHost    string `json:"server_host,omitempty"`
-	ServerPort    int    `json:"server_port,omitempty"`
-	ProxiedDir    string `json:"proxied_dir,omitempty"`
-	Database      string `json:"database"`
-	DataDir       string `json:"data_dir,omitempty"`
-	ProjectID     string `json:"project_id,omitempty"`
+type ContextRepoInfo struct {
+	BeadsDir     string `json:"beads_dir"`
+	RepoRoot     string `json:"repo_root"`
+	CWDRepoRoot  string `json:"cwd_repo_root,omitempty"`
+	IsRedirected bool   `json:"is_redirected"`
+	IsWorktree   bool   `json:"is_worktree"`
+	Role         string `json:"role,omitempty"`
+}
+
+type ContextBackendInfo struct {
+	Backend    string `json:"backend"`
+	DoltMode   string `json:"dolt_mode"`
+	ServerHost string `json:"server_host,omitempty"`
+	ServerPort int    `json:"server_port,omitempty"`
+	ProxiedDir string `json:"proxied_dir,omitempty"`
+	Database   string `json:"database"`
+	DataDir    string `json:"data_dir,omitempty"`
+	ProjectID  string `json:"project_id,omitempty"`
+}
+
+type ContextSyncInfo struct {
 	SyncRemote    string `json:"sync_remote,omitempty"`
 	SyncGitRemote string `json:"sync_git_remote,omitempty"` // Deprecated: use sync_remote
-	Role          string `json:"role,omitempty"`
-	BdVersion     string `json:"bd_version"`
+}
+
+// ContextInfo contains the effective backend identity and repository context.
+type ContextInfo struct {
+	ContextRepoInfo
+	ContextBackendInfo
+	ContextSyncInfo
+	BdVersion string `json:"bd_version"`
 }
 
 var contextCmd = &cobra.Command{
@@ -57,7 +70,7 @@ Examples:
 		}()
 
 		if usesProxiedServer() {
-			return runContextProxiedServer(cmd, rootCtx)
+			return runContextProxiedServer(cmd, getRootContext())
 		}
 
 		// The direct route reads config files itself rather than through the
@@ -77,7 +90,7 @@ Examples:
 
 		rc, err := beads.GetRepoContext()
 		if err != nil {
-			if jsonOutput {
+			if isJSONOutput() {
 				if jerr := outputJSON(map[string]string{"error": fmt.Sprintf("cannot resolve repo context: %v", err)}); jerr != nil {
 					return jerr
 				}
@@ -111,7 +124,7 @@ Examples:
 		snapshot.SyncRemote = resolveSyncRemoteFromDir(rc.BeadsDir)
 
 		info := contextInfoView(snapshot)
-		if jsonOutput {
+		if isJSONOutput() {
 			return outputJSON(info)
 		}
 		printContextText(info)
@@ -157,8 +170,12 @@ func applyContextBackend(snapshot *domain.ContextInfo, beadsDir string, cfg *con
 func printContextText(info ContextInfo) {
 	fmt.Printf("bd version:     %s\n", info.BdVersion)
 	fmt.Println()
+	printContextRepository(info)
+	printContextBackend(info)
+	printContextSync(info)
+}
 
-	// Repository
+func printContextRepository(info ContextInfo) {
 	fmt.Println("Repository:")
 	fmt.Printf("  beads dir:    %s\n", info.BeadsDir)
 	fmt.Printf("  repo root:    %s\n", info.RepoRoot)
@@ -175,8 +192,9 @@ func printContextText(info ContextInfo) {
 		fmt.Printf("  role:         %s\n", info.Role)
 	}
 	fmt.Println()
+}
 
-	// Backend
+func printContextBackend(info ContextInfo) {
 	fmt.Println("Backend:")
 	fmt.Printf("  type:         %s\n", info.Backend)
 	// Dolt-only identity. A registered backend reports neither, and a bare
@@ -200,8 +218,9 @@ func printContextText(info ContextInfo) {
 	if info.ProjectID != "" {
 		fmt.Printf("  project id:   %s\n", info.ProjectID)
 	}
+}
 
-	// Sync
+func printContextSync(info ContextInfo) {
 	if info.SyncRemote != "" {
 		fmt.Println()
 		fmt.Println("Sync:")
@@ -211,5 +230,4 @@ func printContextText(info ContextInfo) {
 
 func init() {
 	rootCmd.AddCommand(contextCmd)
-	readOnlyCommands["context"] = true
 }

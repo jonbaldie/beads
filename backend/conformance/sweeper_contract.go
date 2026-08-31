@@ -537,13 +537,23 @@ func sweeperPattern(fixture SweeperFixture, tag string) string {
 func sweeperIssue(fixture SweeperFixture, tag, name string, ephemeral bool) *types.Issue {
 	closedAt := sweeperClosedAt
 	return &types.Issue{
-		ID:        fmt.Sprintf("%s-%s-%s", fixture.IssuePrefix, tag, name),
-		Title:     tag + " " + name,
-		Status:    types.StatusClosed,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: ephemeral,
-		ClosedAt:  &closedAt,
+		IssueID: types.IssueID{
+			ID: fmt.Sprintf("%s-%s-%s", fixture.IssuePrefix, tag, name),
+		},
+		IssueContent: types.IssueContent{
+			Title: tag + " " + name,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			ClosedAt: &closedAt,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: ephemeral,
+		},
 	}
 }
 

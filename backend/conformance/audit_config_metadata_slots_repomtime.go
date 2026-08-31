@@ -259,7 +259,7 @@ func testAuditSlotGetNonStringValues(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
 	meta := `{"n":5,"b":true,"arr":[1,2],"obj":{"y":2,"x":1},"s":"str"}`
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-slotmeta", Title: "T", Metadata: []byte(meta)}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-slotmeta"}, IssueContent: types.IssueContent{Title: "T"}, IssueMeta: types.IssueMeta{Metadata: []byte(meta)}}), "a"))
 
 	cases := []struct{ key, want string }{
 		{"n", "5"},

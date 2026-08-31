@@ -416,11 +416,17 @@ func seedCycleDetectorWisp(t *testing.T, ctx context.Context, fixture CycleDetec
 // can tell the right row from a row.
 func cycleDetectorSeed(id string) *types.Issue {
 	return &types.Issue{
-		ID:        id,
-		Title:     id,
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 }
 

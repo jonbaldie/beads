@@ -20,18 +20,18 @@ func openCycleDetector() (issueops.CycleDetector, error) {
 	if usesProxiedServer() {
 		return proxiedCycleDetector()
 	}
-	return store.CycleDetector()
+	return getStore().CycleDetector()
 }
 
 // proxiedCycleDetector hands back the guarded cycle-report surface for the
 // proxied-server provider, through the provider's own capability accessor.
 func proxiedCycleDetector() (issueops.CycleDetector, error) {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return nil, errors.New("proxied-server UOW provider not initialized")
 	}
-	src, ok := uowProvider.(uow.CycleDetectorSource)
+	src, ok := getUOWProvider().(uow.CycleDetectorSource)
 	if !ok {
-		return nil, fmt.Errorf("proxied-server provider %T does not offer the cycle-report surface", uowProvider)
+		return nil, fmt.Errorf("proxied-server provider %T does not offer the cycle-report surface", getUOWProvider())
 	}
 	return src.CycleDetector()
 }
@@ -42,12 +42,12 @@ func runDepCycles() error {
 	if err != nil {
 		return HandleErrorRespectJSON("%v", err)
 	}
-	report, err := detector.DetectCycles(rootCtx, issueops.DetectCyclesRequest{})
+	report, err := detector.DetectCycles(getRootContext(), issueops.DetectCyclesRequest{})
 	if err != nil {
 		return HandleErrorRespectJSON("%v", err)
 	}
 
-	if jsonOutput {
+	if isJSONOutput() {
 		// The role's slice is empty rather than nil for an acyclic workspace, so
 		// this is `[]` and never `null` without a guard here.
 		return outputJSON(report.Cycles)
@@ -109,7 +109,7 @@ func warnIfCyclesExist(s storage.DoltStorage) {
 		printCycleDetectionError(err)
 		return
 	}
-	report, err := detector.DetectCycles(rootCtx, issueops.DetectCyclesRequest{})
+	report, err := detector.DetectCycles(getRootContext(), issueops.DetectCyclesRequest{})
 	if err != nil {
 		printCycleDetectionError(err)
 		return

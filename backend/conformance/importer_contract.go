@@ -139,49 +139,55 @@ func RunImporterRejectsAStaleRowAndNamesIt(t *testing.T, ctx context.Context, fi
 		t.Fatalf("the seeded row is stored at updated_at %s, want %s verbatim: an anchor the import re-stamped with the clock makes every arm below compare against the wrong instant",
 			stored, y2021)
 	}
+	assertImporterOlderRow(t, ctx, fixture, anchor, sibling, y2020, y2022)
+	assertImporterNewerRow(t, ctx, fixture, anchor, y2022)
+	assertImporterEqualRow(t, ctx, fixture, anchor, y2022)
+}
 
-	t.Run("OlderIsRejectedAndNamed", func(t *testing.T) {
-		result := runImporterBatch(t, ctx, fixture, "older",
-			importerIssueAt(anchor, "stale", y2020),
-			importerIssueAt(sibling, "lands beside the rejection", y2022))
+func assertImporterOlderRow(t *testing.T, ctx context.Context, fixture ImporterFixture, anchor, sibling string, stale, siblingStamp time.Time) {
+	t.Helper()
+	result := runImporterBatch(t, ctx, fixture, "older",
+		importerIssueAt(anchor, "stale", stale),
+		importerIssueAt(sibling, "lands beside the rejection", siblingStamp))
 
-		assertImporterScalar(t, ctx, fixture, "title after an older row", anchor, "original")
-		assertImporterRowCount(t, ctx, fixture, "issues", sibling, 1)
-		if got := result.StaleRejectedIDs; len(got) != 1 || got[0] != anchor {
-			t.Errorf("StaleRejectedIDs = %v, want exactly [%s]: a row the guard kept out of the store is one the caller is owed the id of, or the import reports having written work it discarded",
-				got, anchor)
-		}
-		if result.Created != 1 {
-			t.Errorf("Created = %d for a 2-row batch with 1 rejection, want 1: Created counts what landed, not what was asked for", result.Created)
-		}
-	})
+	assertImporterScalar(t, ctx, fixture, "title after an older row", anchor, "original")
+	assertImporterRowCount(t, ctx, fixture, "issues", sibling, 1)
+	if got := result.StaleRejectedIDs; len(got) != 1 || got[0] != anchor {
+		t.Errorf("StaleRejectedIDs = %v, want exactly [%s]: a row the guard kept out of the store is one the caller is owed the id of, or the import reports having written work it discarded",
+			got, anchor)
+	}
+	if result.Created != 1 {
+		t.Errorf("Created = %d for a 2-row batch with 1 rejection, want 1: Created counts what landed, not what was asked for", result.Created)
+	}
+}
 
-	t.Run("NewerOverwrites", func(t *testing.T) {
-		result := runImporterBatch(t, ctx, fixture, "newer", importerIssueAt(anchor, "fresh", y2022))
+func assertImporterNewerRow(t *testing.T, ctx context.Context, fixture ImporterFixture, anchor string, newer time.Time) {
+	t.Helper()
+	result := runImporterBatch(t, ctx, fixture, "newer", importerIssueAt(anchor, "fresh", newer))
 
-		assertImporterScalar(t, ctx, fixture, "title after a newer row", anchor, "fresh")
-		if len(result.StaleRejectedIDs) != 0 {
-			t.Errorf("StaleRejectedIDs = %v for a strictly newer row, want none", result.StaleRejectedIDs)
-		}
-		if result.Created != 1 {
-			t.Errorf("Created = %d for one accepted row, want 1", result.Created)
-		}
-	})
+	assertImporterScalar(t, ctx, fixture, "title after a newer row", anchor, "fresh")
+	if len(result.StaleRejectedIDs) != 0 {
+		t.Errorf("StaleRejectedIDs = %v for a strictly newer row, want none", result.StaleRejectedIDs)
+	}
+	if result.Created != 1 {
+		t.Errorf("Created = %d for one accepted row, want 1", result.Created)
+	}
+}
 
-	t.Run("EqualIsAcceptedNotRejected", func(t *testing.T) {
-		result := runImporterBatch(t, ctx, fixture, "equal", importerIssueAt(anchor, "tie", y2022))
+func assertImporterEqualRow(t *testing.T, ctx context.Context, fixture ImporterFixture, anchor string, equal time.Time) {
+	t.Helper()
+	result := runImporterBatch(t, ctx, fixture, "equal", importerIssueAt(anchor, "tie", equal))
 
-		// Same observable as the older arm through the title alone, which is
-		// the whole point: only the two assertions below tell them apart.
-		assertImporterScalar(t, ctx, fixture, "title after an equal-stamp row", anchor, "fresh")
-		if len(result.StaleRejectedIDs) != 0 {
-			t.Errorf("StaleRejectedIDs = %v for an equal-timestamp row, want none: a tie is the local row winning a conditional upsert, not the stale guard firing, and reporting it would tell a caller its row was discarded when it was accepted",
-				result.StaleRejectedIDs)
-		}
-		if result.Created != 1 {
-			t.Errorf("Created = %d for an equal-timestamp row, want 1: the row was written, and only its columns declined to move", result.Created)
-		}
-	})
+	// Same observable as the older arm through the title alone, which is
+	// the whole point: only the two assertions below tell them apart.
+	assertImporterScalar(t, ctx, fixture, "title after an equal-stamp row", anchor, "fresh")
+	if len(result.StaleRejectedIDs) != 0 {
+		t.Errorf("StaleRejectedIDs = %v for an equal-timestamp row, want none: a tie is the local row winning a conditional upsert, not the stale guard firing, and reporting it would tell a caller its row was discarded when it was accepted",
+			result.StaleRejectedIDs)
+	}
+	if result.Created != 1 {
+		t.Errorf("Created = %d for an equal-timestamp row, want 1: the row was written, and only its columns declined to move", result.Created)
+	}
 }
 
 // RunImporterReportsTheAbsentTargetItDroppedOnce is the case this contract
@@ -348,7 +354,7 @@ func runImporterBatch(t *testing.T, ctx context.Context, fixture ImporterFixture
 // the rows it carries, because it is replaying a snapshot rather than minting
 // work.
 func importerIssue(id, title string) *types.Issue {
-	return &types.Issue{ID: id, Title: title, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	return &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: title}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 }
 
 // importerIssueAt is importerIssue carrying the timestamps a snapshot was

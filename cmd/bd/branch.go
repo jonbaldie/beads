@@ -34,20 +34,20 @@ Examples:
 			}
 		}()
 
-		ctx := rootCtx
+		ctx := getRootContext()
 
 		if len(args) == 0 {
-			branches, err := store.ListBranches(ctx)
+			branches, err := getStore().ListBranches(ctx)
 			if err != nil {
 				return HandleErrorRespectJSON("failed to list branches: %v", err)
 			}
 
-			currentBranch, err := store.CurrentBranch(ctx)
+			currentBranch, err := getStore().CurrentBranch(ctx)
 			if err != nil {
 				currentBranch = ""
 			}
 
-			if jsonOutput {
+			if isJSONOutput() {
 				return outputJSON(map[string]interface{}{
 					"current":  currentBranch,
 					"branches": branches,
@@ -57,7 +57,7 @@ Examples:
 			fmt.Printf("\n%s Branches:\n\n", ui.RenderAccent("🌿"))
 			for _, branch := range branches {
 				if branch == currentBranch {
-					fmt.Printf("  * %s\n", ui.StatusInProgressStyle.Render(branch))
+					fmt.Printf("  * %s\n", ui.StatusInProgressStyle().Render(branch))
 				} else {
 					fmt.Printf("    %s\n", branch)
 				}
@@ -67,11 +67,11 @@ Examples:
 		}
 
 		branchName := args[0]
-		if err := store.Branch(ctx, branchName); err != nil {
+		if err := getStore().Branch(ctx, branchName); err != nil {
 			return HandleErrorRespectJSON("failed to create branch: %v", err)
 		}
 
-		if jsonOutput {
+		if isJSONOutput() {
 			return outputJSON(map[string]interface{}{
 				"created": branchName,
 			})

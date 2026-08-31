@@ -14,60 +14,67 @@ type configSideEffect struct {
 
 // checkConfigSetSideEffects returns any hints/warnings for a config key being set.
 func checkConfigSetSideEffects(key, value string) []configSideEffect {
-	var effects []configSideEffect
-
-	switch {
-	case key == "federation.remote":
-		effects = append(effects, configSideEffect{
+	if key == "federation.remote" {
+		return []configSideEffect{{
 			Message: fmt.Sprintf("To activate, ensure a Dolt remote matches this URL: %s", value),
 			Command: fmt.Sprintf("bd dolt remote add origin %s", value),
-		})
-
-	case key == "dolt.shared-server" && strings.EqualFold(value, "true"):
-		effects = append(effects, configSideEffect{
-			Message: "Shared server mode enabled. Start the server to activate.",
-			Command: "bd dolt server start",
-		})
-
-	case key == "dolt.shared-server" && !strings.EqualFold(value, "true"):
-		effects = append(effects, configSideEffect{
-			Message: "Shared server mode disabled. Stop any running server if no longer needed.",
-			Command: "bd dolt server stop",
-		})
-
-	case key == "dolt.debug" && strings.EqualFold(value, "true"):
-		effects = append(effects, configSideEffect{
-			Message: "Debug mode will apply on the next Dolt server start (loglevel=debug, --prof cpu).",
-			Command: "bd dolt stop && bd dolt start",
-		})
-
-	case key == "dolt.debug" && !strings.EqualFold(value, "true"):
-		effects = append(effects, configSideEffect{
-			Message: "Debug mode disabled. Restart the server to drop --prof and --loglevel=debug.",
-			Command: "bd dolt stop && bd dolt start",
-		})
-
-	case key == "routing.mode":
-		validModes := map[string]bool{"maintainer": true, "contributor": true, "auto": true, "explicit": true}
-		if !validModes[value] {
-			effects = append(effects, configSideEffect{
-				Message: fmt.Sprintf("Unknown routing mode %q. Valid values: auto, maintainer, contributor, explicit", value),
-			})
-		}
-
-	case key == "backup.enabled" && strings.EqualFold(value, "true"):
-		effects = append(effects, configSideEffect{
-			Message: "Backups enabled. Backups run automatically on issue writes.",
-		})
-
-	case key == "sync.git-remote":
-		effects = append(effects, configSideEffect{
+		}}
+	}
+	if key == "dolt.shared-server" {
+		return sharedServerConfigSideEffect(value)
+	}
+	if key == "dolt.debug" {
+		return debugConfigSideEffect(value)
+	}
+	if key == "routing.mode" {
+		return routingModeConfigSideEffect(value)
+	}
+	if key == "backup.enabled" && strings.EqualFold(value, "true") {
+		return []configSideEffect{{Message: "Backups enabled. Backups run automatically on issue writes."}}
+	}
+	if key == "sync.git-remote" {
+		return []configSideEffect{{
 			Message: fmt.Sprintf("Git sync remote set to %q. Ensure this git remote exists.", value),
 			Command: fmt.Sprintf("git remote -v | grep %s", value),
-		})
+		}}
 	}
+	return nil
+}
 
-	return effects
+func sharedServerConfigSideEffect(value string) []configSideEffect {
+	if strings.EqualFold(value, "true") {
+		return []configSideEffect{{
+			Message: "Shared server mode enabled. Start the server to activate.",
+			Command: "bd dolt server start",
+		}}
+	}
+	return []configSideEffect{{
+		Message: "Shared server mode disabled. Stop any running server if no longer needed.",
+		Command: "bd dolt server stop",
+	}}
+}
+
+func debugConfigSideEffect(value string) []configSideEffect {
+	if strings.EqualFold(value, "true") {
+		return []configSideEffect{{
+			Message: "Debug mode will apply on the next Dolt server start (loglevel=debug, --prof cpu).",
+			Command: "bd dolt stop && bd dolt start",
+		}}
+	}
+	return []configSideEffect{{
+		Message: "Debug mode disabled. Restart the server to drop --prof and --loglevel=debug.",
+		Command: "bd dolt stop && bd dolt start",
+	}}
+}
+
+func routingModeConfigSideEffect(value string) []configSideEffect {
+	validModes := map[string]bool{"maintainer": true, "contributor": true, "auto": true, "explicit": true}
+	if validModes[value] {
+		return nil
+	}
+	return []configSideEffect{{
+		Message: fmt.Sprintf("Unknown routing mode %q. Valid values: auto, maintainer, contributor, explicit", value),
+	}}
 }
 
 // checkConfigUnsetSideEffects returns any hints/warnings for a config key being unset.

@@ -247,20 +247,28 @@ func TestCheckMigrationCompletionResult_NotDoltBackend(t *testing.T) {
 
 func TestMigrationValidationResult_JSONSerialization(t *testing.T) {
 	result := MigrationValidationResult{
-		Phase:          "pre-migration",
-		Ready:          true,
-		Backend:        "sqlite",
-		JSONLCount:     100,
-		SQLiteCount:    100,
-		MissingInDB:    []string{},
-		MissingInJSONL: []string{},
-		Errors:         []string{},
-		Warnings:       []string{"Some warning"},
-		JSONLValid:     true,
-		JSONLMalformed: 0,
-		DoltHealthy:    false,
-		DoltLocked:     false,
-		SchemaValid:    true,
+		MigrationValidationPhase: MigrationValidationPhase{
+			Phase:   "pre-migration",
+			Ready:   true,
+			Backend: "sqlite",
+		},
+		MigrationValidationCounts: MigrationValidationCounts{
+			JSONLCount:     100,
+			SQLiteCount:    100,
+			JSONLMalformed: 0,
+		},
+		MigrationValidationFlags: MigrationValidationFlags{
+			JSONLValid:  true,
+			DoltHealthy: false,
+			DoltLocked:  false,
+			SchemaValid: true,
+		},
+		MigrationValidationDiffs: MigrationValidationDiffs{
+			MissingInDB:    []string{},
+			MissingInJSONL: []string{},
+			Errors:         []string{},
+			Warnings:       []string{"Some warning"},
+		},
 	}
 
 	// Verify fields are set correctly (JSON serialization is tested implicitly by the struct)

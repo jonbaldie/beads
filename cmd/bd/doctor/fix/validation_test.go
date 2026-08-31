@@ -90,11 +90,15 @@ func newFixTestStore(t *testing.T, dir string, prefix string) *dolt.DoltStore {
 	// made every test using this helper skip).
 	dbPath := filepath.Join(beadsDir, "beads.db")
 	store, err := dolt.New(ctx, &dolt.Config{
-		Path:            dbPath,
-		ServerHost:      "127.0.0.1",
-		ServerPort:      port,
-		Database:        dbName,
-		CreateIfMissing: true,
+		Path: dbPath,
+		ServerOptions: dolt.ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: port,
+		},
+		Database: dbName,
+		RemoteOptions: dolt.RemoteOptions{
+			CreateIfMissing: true,
+		},
 	})
 	if err != nil {
 		t.Fatalf("dolt.New against running test container: %v", err)
@@ -164,11 +168,19 @@ func TestChildParentDependencies_NoBadDeps(t *testing.T) {
 	// Create issues
 	for _, id := range []string{"bd-abc", "bd-abc.1", "bd-xyz"} {
 		issue := &types.Issue{
-			ID:        id,
-			Title:     "Issue " + id,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: "Issue " + id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatal(err)
@@ -212,11 +224,19 @@ func TestChildParentDependencies_FixesBadDeps(t *testing.T) {
 	// Create issues
 	for _, id := range []string{"bd-abc", "bd-abc.1", "bd-abc.1.2"} {
 		issue := &types.Issue{
-			ID:        id,
-			Title:     "Issue " + id,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: "Issue " + id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatal(err)
@@ -268,11 +288,19 @@ func TestChildParentDependencies_PreservesParentChildType(t *testing.T) {
 	// Create issues
 	for _, id := range []string{"bd-abc", "bd-abc.1", "bd-abc.2"} {
 		issue := &types.Issue{
-			ID:        id,
-			Title:     "Issue " + id,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
-			CreatedAt: time.Now(),
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: "Issue " + id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatal(err)

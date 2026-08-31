@@ -55,12 +55,18 @@ func newIdentityTestStore(t *testing.T, dir, prefix string) (store *dolt.DoltSto
 	}
 
 	store, err := dolt.New(ctx, &dolt.Config{
-		Path:            filepath.Join(beadsDir, "beads.db"),
-		ServerHost:      "127.0.0.1",
-		ServerPort:      port,
-		Database:        dbName,
-		CreateIfMissing: true,
-		MaxOpenConns:    1,
+		Path: filepath.Join(beadsDir, "beads.db"),
+		ServerOptions: dolt.ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: port,
+		},
+		Database: dbName,
+		RemoteOptions: dolt.RemoteOptions{
+			CreateIfMissing: true,
+		},
+		PoolOptions: dolt.PoolOptions{
+			MaxOpenConns: 1,
+		},
 	})
 	if err != nil {
 		t.Fatalf("dolt.New against running test container: %v", err)
@@ -112,11 +118,17 @@ func TestDestructiveFix_AbortsOnProjectIdentityMismatch(t *testing.T) {
 	// re-key/delete if it were allowed to proceed against this connection.
 	for _, id := range []string{"tst-1", "tst-2"} {
 		issue := &types.Issue{
-			ID:        id,
-			Title:     "mismatch guard test " + id,
-			Priority:  2,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: "mismatch guard test " + id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatalf("CreateIssue(%s): %v", id, err)
@@ -195,11 +207,17 @@ func TestDestructiveFix_SkipsOnUnverifiableTarget(t *testing.T) {
 	const randomID = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
 	for _, id := range []string{"skp-1", "skp-2"} {
 		issue := &types.Issue{
-			ID:        id,
-			Title:     "skip guard test " + id,
-			Priority:  2,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: "skip guard test " + id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatalf("CreateIssue(%s): %v", id, err)

@@ -77,38 +77,56 @@ import (
 //
 // A fixture per role per workspace contains every one of them.
 type RoleContractBundle struct {
+	RoleMutationFactories
+	RoleGraphFactories
+	RoleQueryFactories
+}
+
+// RoleMutationFactories supplies contracts whose primary capability changes
+// issue state or workspace configuration.
+type RoleMutationFactories struct {
 	// Called ONCE; the whole contract runs against the one fixture.
 	BatchApply           func(t *testing.T) *BatchApplyFixture
 	BatchCloser          func(t *testing.T) *BatchCloserFixture
 	BatchCreator         func(t *testing.T) *BatchCreatorFixture
-	BlockingAnnotator    func(t *testing.T) *BlockingAnnotatorFixture
 	Bootstrapper         func(t *testing.T) *BootstrapperFixture
 	Claimer              func(t *testing.T) *ClaimerFixture
 	Commenter            func(t *testing.T) *CommenterFixture
-	Counter              func(t *testing.T) *CounterFixture
-	CycleDetector        func(t *testing.T) *CycleDetectorFixture
 	Deleter              func(t *testing.T) *DeleterFixture
-	DependencyEditor     func(t *testing.T) *DependencyEditorFixture
-	EdgeReader           func(t *testing.T) *EdgeReaderFixture
-	GraphCounter         func(t *testing.T) *GraphCounterFixture
 	Importer             func(t *testing.T) *ImporterFixture
-	Journal              func(t *testing.T) *JournalFixture
 	LifecycleCloseReopen func(t *testing.T) *LifecycleCloseReopenFixture
 	LifecycleCreate      func(t *testing.T) *LifecycleCreateFixture
 	LifecycleUpdate      func(t *testing.T) *LifecycleUpdateFixture
-	Memories             func(t *testing.T) *MemoriesFixture
 	MetadataCAS          func(t *testing.T) *MetadataCASFixture
-	Querier              func(t *testing.T) *QuerierFixture
-	Reader               func(t *testing.T) *ReaderFixture
 	ReadyClaimer         func(t *testing.T) *ReadyClaimerFixture
-	ReadyCounter         func(t *testing.T) *ReadyCounterFixture
-	Relations            func(t *testing.T) *RelationsFixture
 	Releaser             func(t *testing.T) *ReleaserFixture
-	StatsReporter        func(t *testing.T) *StatsReporterFixture
-	Sweeper              func(t *testing.T) *SweeperFixture
-	TreeWalker           func(t *testing.T) *TreeWalkerFixture
-	VersionReconciler    func(t *testing.T) *VersionReconcilerFixture
-	WorkspaceConfig      func(t *testing.T) *WorkspaceConfigFixture
+}
+
+// RoleGraphFactories supplies contracts that inspect or change relationships
+// between issues.
+type RoleGraphFactories struct {
+	BlockingAnnotator func(t *testing.T) *BlockingAnnotatorFixture
+	CycleDetector     func(t *testing.T) *CycleDetectorFixture
+	DependencyEditor  func(t *testing.T) *DependencyEditorFixture
+	EdgeReader        func(t *testing.T) *EdgeReaderFixture
+	GraphCounter      func(t *testing.T) *GraphCounterFixture
+	Relations         func(t *testing.T) *RelationsFixture
+	Sweeper           func(t *testing.T) *SweeperFixture
+	TreeWalker        func(t *testing.T) *TreeWalkerFixture
+}
+
+// RoleQueryFactories supplies read, reporting, history, and broad operation
+// contracts.
+type RoleQueryFactories struct {
+	Counter           func(t *testing.T) *CounterFixture
+	Journal           func(t *testing.T) *JournalFixture
+	Memories          func(t *testing.T) *MemoriesFixture
+	Querier           func(t *testing.T) *QuerierFixture
+	Reader            func(t *testing.T) *ReaderFixture
+	ReadyCounter      func(t *testing.T) *ReadyCounterFixture
+	StatsReporter     func(t *testing.T) *StatsReporterFixture
+	VersionReconciler func(t *testing.T) *VersionReconcilerFixture
+	WorkspaceConfig   func(t *testing.T) *WorkspaceConfigFixture
 
 	// IssueOperations is called ONCE PER CASE. No in-tree leg has ever run two
 	// of these cases against one workspace — the store legs take a fresh store

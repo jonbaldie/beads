@@ -16,78 +16,92 @@ import (
 // This fix is DISABLED by default (stale_closed_issues_days=0). Users must
 // explicitly set a positive threshold in metadata.json to enable cleanup.
 func StaleClosedIssues(path string) error {
-	beadsDir, err := resolvedWorkspaceBeadsDir(path)
+	beadsDir, thresholdDays, err := staleClosedCleanupConfig(path)
 	if err != nil {
 		return err
 	}
-
-	// Load config and check if cleanup is enabled
-	cfg, err := configfile.Load(beadsDir)
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	// Get threshold; 0 means disabled
-	var thresholdDays int
-	if cfg != nil {
-		thresholdDays = cfg.GetStaleClosedIssuesDays()
-	}
-
 	if thresholdDays == 0 {
 		fmt.Println("  Stale closed issues cleanup disabled (set stale_closed_issues_days to enable)")
 		return nil
 	}
-
-	// Open database using factory to respect backend configuration (bd-m2jr:
-	// SQLite fallback fix). This handler DELETES issues, so it opens through
-	// the bead-mutating factory: the deletes are journaled like any other.
 	ctx := context.Background()
 	store, err := openBeadMutatingStore(ctx, beadsDir)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 	defer func() { _ = store.Close() }()
+	issues, err := searchStaleClosedIssues(ctx, store, thresholdDays)
+	if err != nil {
+		return err
+	}
+	deleted, skipped := deleteUnpinnedIssues(ctx, store, issues)
+	reportStaleClosedCleanup(deleted, skipped, thresholdDays)
+	return nil
+}
 
-	// Find closed issues older than configured threshold
+func staleClosedCleanupConfig(path string) (beadsDir string, thresholdDays int, err error) {
+	beadsDir, err = resolvedWorkspaceBeadsDir(path)
+	if err != nil {
+		return "", 0, err
+	}
+	cfg, err := configfile.Load(beadsDir)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to load config: %w", err)
+	}
+	if cfg != nil {
+		thresholdDays = cfg.GetStaleClosedIssuesDays()
+	}
+	return beadsDir, thresholdDays, nil
+}
+
+type issueMutator interface {
+	SearchIssues(ctx context.Context, query string, filter types.IssueFilter) ([]*types.Issue, error)
+	DeleteIssue(ctx context.Context, id string) error
+}
+
+func searchStaleClosedIssues(ctx context.Context, store issueMutator, thresholdDays int) ([]*types.Issue, error) {
 	cutoff := time.Now().AddDate(0, 0, -thresholdDays)
 	statusClosed := types.StatusClosed
-	filter := types.IssueFilter{
-		Status:       &statusClosed,
-		ClosedBefore: &cutoff,
-	}
-
-	issues, err := store.SearchIssues(ctx, "", filter)
+	issues, err := store.SearchIssues(ctx, "", types.IssueFilter{
+		IssueFilterCore: types.IssueFilterCore{
+			Status: &statusClosed,
+		},
+		IssueFilterMatch: types.IssueFilterMatch{
+			ClosedBefore: &cutoff,
+		},
+	})
 	if err != nil {
-		return fmt.Errorf("failed to query issues: %w", err)
+		return nil, fmt.Errorf("failed to query issues: %w", err)
 	}
+	return issues, nil
+}
 
-	// Filter out pinned issues and delete the rest
-	var deleted, skipped int
+func deleteUnpinnedIssues(ctx context.Context, store issueMutator, issues []*types.Issue) (deleted, skipped int) {
 	for _, issue := range issues {
 		if issue.Pinned {
 			skipped++
 			continue
 		}
-
 		if err := store.DeleteIssue(ctx, issue.ID); err != nil {
 			fmt.Printf("  Warning: failed to delete %s: %v\n", issue.ID, err)
 			continue
 		}
 		deleted++
 	}
+	return deleted, skipped
+}
 
+func reportStaleClosedCleanup(deleted, skipped, thresholdDays int) {
 	if deleted == 0 && skipped == 0 {
 		fmt.Println("  No stale closed issues to clean up")
-	} else {
-		if deleted > 0 {
-			fmt.Printf("  Cleaned up %d stale closed issue(s) (older than %d days)\n", deleted, thresholdDays)
-		}
-		if skipped > 0 {
-			fmt.Printf("  Skipped %d pinned issue(s)\n", skipped)
-		}
+		return
 	}
-
-	return nil
+	if deleted > 0 {
+		fmt.Printf("  Cleaned up %d stale closed issue(s) (older than %d days)\n", deleted, thresholdDays)
+	}
+	if skipped > 0 {
+		fmt.Printf("  Skipped %d pinned issue(s)\n", skipped)
+	}
 }
 
 // PatrolPollution deletes patrol digest and session ended beads that pollute the database.
@@ -103,60 +117,70 @@ func PatrolPollution(path string) error {
 	if err != nil {
 		return err
 	}
-
-	// Open database using factory to respect backend configuration (bd-m2jr:
-	// SQLite fallback fix). This handler DELETES issues, so it opens through
-	// the bead-mutating factory: the deletes are journaled like any other.
 	ctx := context.Background()
 	store, err := openBeadMutatingStore(ctx, beadsDir)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 	defer func() { _ = store.Close() }()
-
-	// Get all issues and identify pollution
-	ephemeral := false
-	issues, err := store.SearchIssues(ctx, "", types.IssueFilter{Ephemeral: &ephemeral})
+	issues, err := searchNonEphemeralIssues(ctx, store)
 	if err != nil {
-		return fmt.Errorf("failed to query issues: %w", err)
+		return err
 	}
-
-	var patrolDigestCount, sessionBeadCount int
-	var toDelete []string
-
-	for _, issue := range issues {
-		title := issue.Title
-
-		// Check for patrol digest pattern: "Digest: mol-*-patrol"
-		if strings.HasPrefix(title, "Digest: mol-") && strings.HasSuffix(title, "-patrol") {
-			patrolDigestCount++
-			toDelete = append(toDelete, issue.ID)
-			continue
-		}
-
-		// Check for session ended pattern: "Session ended: *"
-		if strings.HasPrefix(title, "Session ended:") {
-			sessionBeadCount++
-			toDelete = append(toDelete, issue.ID)
-		}
-	}
-
+	patrolDigestCount, sessionBeadCount, toDelete := collectPatrolPollution(issues)
 	if len(toDelete) == 0 {
 		fmt.Println("  No patrol pollution beads to delete")
 		return nil
 	}
+	deleted := deleteIssueIDs(ctx, store, toDelete)
+	reportPatrolPollution(patrolDigestCount, sessionBeadCount, deleted)
+	return nil
+}
 
-	// Delete all pollution beads
+func searchNonEphemeralIssues(ctx context.Context, store issueMutator) ([]*types.Issue, error) {
+	ephemeral := false
+	issues, err := store.SearchIssues(ctx, "", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{Ephemeral: &ephemeral}})
+	if err != nil {
+		return nil, fmt.Errorf("failed to query issues: %w", err)
+	}
+	return issues, nil
+}
+
+func isPatrolPollutionTitle(title string) (patrolDigest, sessionEnded bool) {
+	if strings.HasPrefix(title, "Digest: mol-") && strings.HasSuffix(title, "-patrol") {
+		return true, false
+	}
+	return false, strings.HasPrefix(title, "Session ended:")
+}
+
+func collectPatrolPollution(issues []*types.Issue) (patrolDigestCount, sessionBeadCount int, toDelete []string) {
+	for _, issue := range issues {
+		patrolDigest, sessionEnded := isPatrolPollutionTitle(issue.Title)
+		switch {
+		case patrolDigest:
+			patrolDigestCount++
+			toDelete = append(toDelete, issue.ID)
+		case sessionEnded:
+			sessionBeadCount++
+			toDelete = append(toDelete, issue.ID)
+		}
+	}
+	return patrolDigestCount, sessionBeadCount, toDelete
+}
+
+func deleteIssueIDs(ctx context.Context, store issueMutator, ids []string) int {
 	var deleted int
-	for _, id := range toDelete {
+	for _, id := range ids {
 		if err := store.DeleteIssue(ctx, id); err != nil {
 			fmt.Printf("  Warning: failed to delete %s: %v\n", id, err)
 			continue
 		}
 		deleted++
 	}
+	return deleted
+}
 
-	// Report results
+func reportPatrolPollution(patrolDigestCount, sessionBeadCount, deleted int) {
 	if patrolDigestCount > 0 {
 		fmt.Printf("  Deleted %d patrol digest bead(s)\n", patrolDigestCount)
 	}
@@ -164,6 +188,4 @@ func PatrolPollution(path string) error {
 		fmt.Printf("  Deleted %d session ended bead(s)\n", sessionBeadCount)
 	}
 	fmt.Printf("  Total: %d pollution bead(s) removed\n", deleted)
-
-	return nil
 }

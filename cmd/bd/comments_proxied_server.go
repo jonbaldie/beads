@@ -19,34 +19,41 @@ import (
 
 func runCommentsProxiedServer(cmd *cobra.Command, ctx context.Context, args []string) error {
 	localTime, _ := cmd.Flags().GetBool("local-time")
-	issueID := args[0]
-
-	uw, err := proxiedOpenReadUOW(ctx)
+	issueID, comments, err := loadProxiedComments(ctx, args[0])
 	if err != nil {
 		return err
 	}
+	if isJSONOutput() {
+		return outputJSON(comments)
+	}
+	return renderProxiedComments(issueID, comments, localTime)
+}
+
+func loadProxiedComments(ctx context.Context, requestedID string) (string, []*types.Comment, error) {
+	uw, err := proxiedOpenReadUOW(ctx)
+	if err != nil {
+		return "", nil, err
+	}
 	defer uw.Close(ctx)
 
-	issue, isWisp, err := workapi.GetIssueOrWisp(ctx, workapi.NewUOWDetailSource(uw), issueID)
+	issue, isWisp, err := workapi.GetIssueOrWisp(ctx, workapi.NewUOWDetailSource(uw), requestedID)
 	if errors.Is(err, storage.ErrNotFound) {
-		return HandleErrorRespectJSON("issue %s not found", issueID)
+		return "", nil, HandleErrorRespectJSON("issue %s not found", requestedID)
 	}
 	if err != nil {
-		return HandleErrorRespectJSON("resolving %s: %v", issueID, err)
+		return "", nil, HandleErrorRespectJSON("resolving %s: %v", requestedID, err)
 	}
-	issueID = issue.ID
-
-	comments, err := proxiedGetComments(ctx, uw, issueID, isWisp)
+	comments, err := proxiedGetComments(ctx, uw, issue.ID, isWisp)
 	if err != nil {
-		return HandleErrorRespectJSON("getting comments: %v", err)
+		return "", nil, HandleErrorRespectJSON("getting comments: %v", err)
 	}
 	if comments == nil {
 		comments = make([]*types.Comment, 0)
 	}
+	return issue.ID, comments, nil
+}
 
-	if jsonOutput {
-		return outputJSON(comments)
-	}
+func renderProxiedComments(issueID string, comments []*types.Comment, localTime bool) error {
 
 	if len(comments) == 0 {
 		fmt.Printf("No comments on %s\n", issueID)
@@ -77,7 +84,7 @@ func runCommentProxiedServer(ctx context.Context, id, author, text string) error
 
 	SetLastTouchedID(issue.ID)
 
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(comment)
 	}
 	fmt.Printf("%s Comment added to %s\n", ui.RenderPass("✓"), formatFeedbackID(issue.ID, issue.Title))
@@ -90,7 +97,7 @@ func runCommentsAddProxiedServer(ctx context.Context, issueID, author, text stri
 		return HandleErrorRespectJSON("%v", err)
 	}
 
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(comment)
 	}
 	fmt.Printf("Comment added to %s\n", issue.ID)
@@ -102,12 +109,12 @@ func runCommentsAddProxiedServer(ctx context.Context, issueID, author, text stri
 // the same two-step proxiedIssueReader performs, and for the same reason: the
 // accessor is where each layer is added.
 func proxiedCommenter() (issueops.Commenter, error) {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return nil, errors.New("proxied-server UOW provider not initialized")
 	}
-	src, ok := uowProvider.(uow.CommenterSource)
+	src, ok := getUOWProvider().(uow.CommenterSource)
 	if !ok {
-		return nil, fmt.Errorf("proxied-server provider %T does not offer the add-comment surface", uowProvider)
+		return nil, fmt.Errorf("proxied-server provider %T does not offer the add-comment surface", getUOWProvider())
 	}
 	return src.Commenter()
 }

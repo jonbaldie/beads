@@ -43,65 +43,85 @@ func runCreateProxiedServer(cmd *cobra.Command, ctx context.Context, in createIn
 }
 
 func runCreateProxiedSingle(_ *cobra.Command, ctx context.Context, in createInput) error {
-	if err := runCreateLintIssue(in); err != nil {
+	deps, waitsFor, err := prepareCreateProxiedSingle(in)
+	if err != nil {
 		return err
+	}
+	if in.dryRun {
+		return runCreateProxiedDryRun(ctx, in)
+	}
+	return runCreateProxiedSingleWrite(ctx, in, deps, waitsFor)
+}
+
+func prepareCreateProxiedSingle(in createInput) ([]domain.DependencySpec, *domain.WaitsForSpec, error) {
+	if err := runCreateLintIssue(in); err != nil {
+		return nil, nil, err
 	}
 	if in.explicitID != "" {
 		if _, err := validation.ValidateIDFormat(in.explicitID); err != nil {
-			return HandleError("%v", err)
+			return nil, nil, HandleError("%v", err)
 		}
 	}
 	deps, err := parseDepSpecs(in.deps)
 	if err != nil {
-		return HandleError("%v", err)
+		return nil, nil, HandleError("%v", err)
 	}
 	waitsFor, err := buildWaitsFor(in.waitsFor, in.waitsForGate, in.waitsForGateSet)
 	if err != nil {
-		return HandleError("%v", err)
+		return nil, nil, HandleError("%v", err)
 	}
+	return deps, waitsFor, nil
+}
 
-	if in.dryRun {
-		if uowProvider == nil {
-			return HandleError("proxied-server UOW provider not initialized")
-		}
-		previewLabels := in.labels
-		if in.parentID != "" {
-			dryUW, err := uowProvider.NewUOW(ctx)
-			if err != nil {
-				return HandleError("open unit of work: %v", err)
-			}
-			if _, err := dryUW.IssueUseCase().GetIssue(ctx, in.parentID); err != nil {
-				dryUW.Close(ctx)
-				return HandleError("parent issue %s not found: %v", in.parentID, err)
-			}
-			if !in.noInheritLabels {
-				// A READ inside the DRY-RUN unit of work, which is opened only to
-				// be discarded: this previews what --parent would inherit without
-				// creating anything. The role that answers it for real is
-				// CreateRequest.InheritLabelsFromParent, which resolves the parent's
-				// labels inside the create it is part of — and a preview has no
-				// create to be part of. A dry-run mode on the create role is the
-				// follow-up (ga-2ltro.12).
-				inherited, lerr := dryUW.LabelUseCase().GetLabels(ctx, in.parentID) //nolint:forbidigo // dry-run preview; the role resolves this only inside a real create
-				if lerr != nil {
-					dryUW.Close(ctx)
-					return HandleError("dry-run inherit labels: %v", lerr)
-				}
-				previewLabels = mergeCreateLabels(in.labels, inherited)
-			}
-			dryUW.Close(ctx)
-		}
-		previewIssue := buildCreateIssueFromInput(in)
-		if in.jsonOutput {
-			if err := outputJSON(previewIssue); err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			}
-		} else {
-			renderCreateDryRunPreview(previewIssue, previewLabels, in.deps)
+func runCreateProxiedDryRun(ctx context.Context, in createInput) error {
+	if getUOWProvider() == nil {
+		return HandleError("proxied-server UOW provider not initialized")
+	}
+	previewLabels, err := createProxiedDryRunLabels(ctx, in)
+	if err != nil {
+		return err
+	}
+	previewIssue := buildCreateIssueFromInput(in)
+	if in.jsonOutput {
+		if err := outputJSON(previewIssue); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		}
 		return nil
 	}
+	renderCreateDryRunPreview(previewIssue, previewLabels, in.deps)
+	return nil
+}
 
+func createProxiedDryRunLabels(ctx context.Context, in createInput) ([]string, error) {
+	if in.parentID == "" {
+		return in.labels, nil
+	}
+	dryUW, err := getUOWProvider().NewUOW(ctx)
+	if err != nil {
+		return nil, HandleError("open unit of work: %v", err)
+	}
+	defer dryUW.Close(ctx)
+	if _, err := dryUW.IssueUseCase().GetIssue(ctx, in.parentID); err != nil {
+		return nil, HandleError("parent issue %s not found: %v", in.parentID, err)
+	}
+	if in.noInheritLabels {
+		return in.labels, nil
+	}
+	// A READ inside the DRY-RUN unit of work, which is opened only to
+	// be discarded: this previews what --parent would inherit without
+	// creating anything. The role that answers it for real is
+	// CreateRequest.InheritLabelsFromParent, which resolves the parent's
+	// labels inside the create it is part of — and a preview has no
+	// create to be part of. A dry-run mode on the create role is the
+	// follow-up (ga-2ltro.12).
+	inherited, lerr := dryUW.LabelUseCase().GetLabels(ctx, in.parentID) //nolint:forbidigo // dry-run preview; the role resolves this only inside a real create
+	if lerr != nil {
+		return nil, HandleError("dry-run inherit labels: %v", lerr)
+	}
+	return mergeCreateLabels(in.labels, inherited), nil
+}
+
+func runCreateProxiedSingleWrite(ctx context.Context, in createInput, deps []domain.DependencySpec, waitsFor *domain.WaitsForSpec) error {
 	ops, err := proxiedIssueLifecycle()
 	if err != nil {
 		return HandleError("%v", err)
@@ -123,7 +143,7 @@ func runCreateProxiedSingle(_ *cobra.Command, ctx context.Context, in createInpu
 		Actor:                   in.createdBy,
 		Issue:                   issue,
 		ParentID:                in.parentID,
-		InheritLabelsFromParent: !in.noInheritLabels && in.parentID != "",
+		InheritLabelsFromParent: inheritLabelsFromParent(in),
 		Dependencies:            createDependencyRequests(deps),
 		WaitsFor:                waitsForRequest(waitsFor),
 		ForceIDPrefix:           in.force,
@@ -148,7 +168,15 @@ func runCreateProxiedSingle(_ *cobra.Command, ctx context.Context, in createInpu
 	created := result.Issue
 	created.Dependencies = nil
 	created.Comments = nil
+	printCreateProxiedSingle(in, created)
+	return nil
+}
 
+func inheritLabelsFromParent(in createInput) bool {
+	return !in.noInheritLabels && in.parentID != ""
+}
+
+func printCreateProxiedSingle(in createInput, created *types.Issue) {
 	switch {
 	case in.jsonOutput:
 		if err := outputJSON(created); err != nil {
@@ -161,7 +189,6 @@ func runCreateProxiedSingle(_ *cobra.Command, ctx context.Context, in createInpu
 		fmt.Printf("  Priority: P%d\n", created.Priority)
 		fmt.Printf("  Status: %s\n", created.Status)
 	}
-	return nil
 }
 
 // inheritProxiedSourceRepo copies a discovered-from parent's source repo onto
@@ -197,9 +224,13 @@ func runCreateLintIssue(in createInput) error {
 		return nil
 	}
 	lintIssue := &types.Issue{
-		IssueType:          types.IssueType(in.issueType).Normalize(),
-		Description:        in.description,
-		AcceptanceCriteria: in.acceptanceCriteria,
+		IssueContent: types.IssueContent{
+			Description:        in.description,
+			AcceptanceCriteria: in.acceptanceCriteria,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.IssueType(in.issueType).Normalize(),
+		},
 	}
 	if err := validation.LintIssue(lintIssue); err != nil {
 		if in.validationMode == "error" {
@@ -212,32 +243,42 @@ func runCreateLintIssue(in createInput) error {
 
 func buildCreateIssueFromInput(in createInput) *types.Issue {
 	return buildCreateIssue(createIssueParams{
-		ID:                 in.explicitID,
-		Title:              in.title,
-		Description:        in.description,
-		Design:             in.design,
-		AcceptanceCriteria: in.acceptanceCriteria,
-		Notes:              in.notes,
-		SpecID:             in.specID,
-		Priority:           in.priority,
-		IssueType:          types.IssueType(in.issueType).Normalize(),
-		Assignee:           in.assignee,
-		ExternalRef:        in.externalRef,
-		EstimatedMinutes:   in.estimatedMinutes,
-		Ephemeral:          in.ephemeral,
-		NoHistory:          in.noHistory,
-		CreatedBy:          in.createdBy,
-		Owner:              in.owner,
-		MolType:            in.molType,
-		WispType:           in.wispType,
-		EventKind:          in.eventCategory,
-		Actor:              in.eventActor,
-		Target:             in.eventTarget,
-		Payload:            in.eventPayload,
-		InitialStatus:      in.status,
-		DueAt:              in.dueAt,
-		DeferUntil:         in.deferUntil,
-		Metadata:           in.metadata,
+		ident: createIssueIdentity{
+			ID:          in.explicitID,
+			Title:       in.title,
+			SpecID:      in.specID,
+			Assignee:    in.assignee,
+			ExternalRef: in.externalRef,
+			CreatedBy:   in.createdBy,
+			Owner:       in.owner,
+		},
+		body: createIssueBody{
+			Description:        in.description,
+			Design:             in.design,
+			AcceptanceCriteria: in.acceptanceCriteria,
+			Notes:              in.notes,
+			Metadata:           in.metadata,
+		},
+		class: createIssueClass{
+			Priority:      in.priority,
+			IssueType:     types.IssueType(in.issueType).Normalize(),
+			Ephemeral:     in.ephemeral,
+			NoHistory:     in.noHistory,
+			MolType:       in.molType,
+			WispType:      in.wispType,
+			InitialStatus: in.status,
+		},
+		schedule: createIssueSchedule{
+			EstimatedMinutes: in.estimatedMinutes,
+			DueAt:            in.dueAt,
+			DeferUntil:       in.deferUntil,
+		},
+		event: createIssueEvent{
+			EventKind: in.eventCategory,
+			Actor:     in.eventActor,
+			Target:    in.eventTarget,
+			Payload:   in.eventPayload,
+		},
 	})
 }
 
@@ -269,57 +310,69 @@ func runCreateProxiedMarkdown(_ *cobra.Command, ctx context.Context, in createIn
 // proxiedBatchCreator reaches the batch-create role through the provider's own
 // capability accessor, which is where each decorator adds its layer.
 func proxiedBatchCreator() (issueops.BatchCreator, error) {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return nil, errors.New("proxied-server UOW provider not initialized")
 	}
-	src, ok := uowProvider.(uow.BatchCreatorSource)
+	src, ok := getUOWProvider().(uow.BatchCreatorSource)
 	if !ok {
-		return nil, fmt.Errorf("proxied-server provider %T does not offer the batch-create surface", uowProvider)
+		return nil, fmt.Errorf("proxied-server provider %T does not offer the batch-create surface", getUOWProvider())
 	}
 	return src.BatchCreator()
 }
 
 func runCreateProxiedGraph(_ *cobra.Command, ctx context.Context, in createInput) error {
+	plan, err := loadCreateGraphPlan(in)
+	if err != nil {
+		return err
+	}
+	if getUOWProvider() == nil {
+		return HandleError("proxied-server UOW provider not initialized")
+	}
+	if in.dryRun {
+		return runCreateProxiedGraphDryRun(ctx, in, &plan)
+	}
+	return runCreateProxiedGraphWrite(ctx, in, plan)
+}
+
+func loadCreateGraphPlan(in createInput) (GraphApplyPlan, error) {
+	var plan GraphApplyPlan
 	data, err := os.ReadFile(in.graphFile) // #nosec G304 -- user-provided path is intentional
 	if err != nil {
-		return HandleError("reading graph plan: %v", err)
+		return plan, HandleError("reading graph plan: %v", err)
 	}
 	if unknown := detectUnknownGraphFields(data); len(unknown) > 0 {
 		warnUnknownGraphFields(os.Stderr, unknown)
 	}
-
-	var plan GraphApplyPlan
 	if err := json.Unmarshal(data, &plan); err != nil {
-		return HandleError("parsing graph plan: %v", err)
+		return plan, HandleError("parsing graph plan: %v", err)
 	}
+	return plan, nil
+}
 
-	if uowProvider == nil {
-		return HandleError("proxied-server UOW provider not initialized")
+func runCreateProxiedGraphDryRun(ctx context.Context, in createInput, plan *GraphApplyPlan) error {
+	dryUW, err := getUOWProvider().NewUOW(ctx)
+	if err != nil {
+		return HandleError("open unit of work: %v", err)
 	}
-
-	if in.dryRun {
-		dryUW, err := uowProvider.NewUOW(ctx)
-		if err != nil {
-			return HandleError("open unit of work: %v", err)
-		}
-		cctx, err := dryUW.ConfigUseCase().LoadCreateContext(ctx)
-		if err != nil {
-			dryUW.Close(ctx)
-			return HandleError("load create context: %v", err)
-		}
-		// Keep the UOW open through validation: the explicit-ID collision
-		// preflight reads through it.
-		_, err = validateProxiedGraphPlan(&plan, in, cctx, uowIssueExists(ctx, dryUW))
+	cctx, err := dryUW.ConfigUseCase().LoadCreateContext(ctx)
+	if err != nil {
 		dryUW.Close(ctx)
-		if err != nil {
-			return HandleError("invalid graph plan: %v", err)
-		}
-		if err := emitGraphApplyDryRun(&plan, in.graphApplyOptions()); err != nil {
-			return HandleError("%v", err)
-		}
-		return nil
+		return HandleError("load create context: %v", err)
 	}
+	// Keep the UOW open through validation: the explicit-ID collision
+	// preflight reads through it.
+	_, err = validateProxiedGraphPlan(plan, in, cctx, uowIssueExists(ctx, dryUW))
+	dryUW.Close(ctx)
+	if err != nil {
+		return HandleError("invalid graph plan: %v", err)
+	}
+	if err := emitGraphApplyDryRun(plan, in.graphApplyOptions()); err != nil {
+		return HandleError("%v", err)
+	}
+	return nil
+}
 
+func runCreateProxiedGraphWrite(ctx context.Context, in createInput, plan GraphApplyPlan) error {
 	domainPlan, err := buildDomainGraphPlan(plan, in)
 	if err != nil {
 		return err
@@ -330,51 +383,54 @@ func runCreateProxiedGraph(_ *cobra.Command, ctx context.Context, in createInput
 		commitMsg = fmt.Sprintf("bd: graph-apply %d nodes", len(plan.Nodes))
 	}
 
-	res, err := uow.RunTxResult(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (map[string]string, string, error) {
-		cctx, err := uw.ConfigUseCase().LoadCreateContext(ctx)
-		if err != nil {
-			return nil, "", fmt.Errorf("load create context: %w", err)
-		}
-
-		// validateProxiedGraphPlan enforces a uniform storage class, so its
-		// resolved useWisp decides which table the whole plan routes to. The
-		// collision preflight runs inside this transaction, so it cannot race
-		// a concurrent create of the same explicit ID.
-		useWisp, err := validateProxiedGraphPlan(&plan, in, cctx, uowIssueExists(ctx, uw))
-		if err != nil {
-			return nil, "", fmt.Errorf("invalid graph plan: %w", err)
-		}
-
-		var result domain.GraphApplyResult
-		var applyErr error
-		if useWisp {
-			result, applyErr = uw.IssueUseCase().ApplyWispGraph(ctx, domainPlan, in.createdBy)
-		} else {
-			result, applyErr = uw.IssueUseCase().ApplyIssueGraph(ctx, domainPlan, in.createdBy)
-		}
-		if applyErr != nil {
-			return nil, "", fmt.Errorf("graph create: %w", applyErr)
-		}
-
-		return result.IDs, commitMsg, nil
+	res, err := uow.RunTxResult(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (map[string]string, string, error) {
+		return applyCreateProxiedGraphTx(ctx, uw, in, plan, domainPlan, commitMsg)
 	})
 	if err != nil {
 		return HandleError("%v", err)
 	}
+	return printCreateProxiedGraphResult(in, res)
+}
 
+func applyCreateProxiedGraphTx(ctx context.Context, uw uow.UnitOfWork, in createInput, plan GraphApplyPlan, domainPlan domain.GraphPlan, commitMsg string) (map[string]string, string, error) {
+	cctx, err := uw.ConfigUseCase().LoadCreateContext(ctx)
+	if err != nil {
+		return nil, "", fmt.Errorf("load create context: %w", err)
+	}
+	// validateProxiedGraphPlan enforces a uniform storage class, so its
+	// resolved useWisp decides which table the whole plan routes to. The
+	// collision preflight runs inside this transaction, so it cannot race
+	// a concurrent create of the same explicit ID.
+	useWisp, err := validateProxiedGraphPlan(&plan, in, cctx, uowIssueExists(ctx, uw))
+	if err != nil {
+		return nil, "", fmt.Errorf("invalid graph plan: %w", err)
+	}
+	result, applyErr := applyCreateProxiedGraphPlan(ctx, uw, in, domainPlan, useWisp)
+	if applyErr != nil {
+		return nil, "", fmt.Errorf("graph create: %w", applyErr)
+	}
+	return result.IDs, commitMsg, nil
+}
+
+func applyCreateProxiedGraphPlan(ctx context.Context, uw uow.UnitOfWork, in createInput, domainPlan domain.GraphPlan, useWisp bool) (domain.GraphApplyResult, error) {
+	if useWisp {
+		return uw.IssueUseCase().ApplyWispGraph(ctx, domainPlan, in.createdBy)
+	}
+	return uw.IssueUseCase().ApplyIssueGraph(ctx, domainPlan, in.createdBy)
+}
+
+func printCreateProxiedGraphResult(in createInput, res map[string]string) error {
 	if in.jsonOutput {
 		if err := outputJSON(GraphApplyResult{IDs: res}); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		}
 		return nil
 	}
-
 	fmt.Printf("Created %d issues\n", len(res))
 	keys := make([]string, 0, len(res))
 	for k := range res {
 		keys = append(keys, k)
 	}
-
 	sort.Strings(keys)
 	for _, k := range keys {
 		fmt.Printf("  %s -> %s\n", k, res[k])

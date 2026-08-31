@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jonbaldie/beads/internal/storage"
 	"github.com/jonbaldie/beads/internal/types"
 )
 
@@ -22,12 +23,21 @@ import (
 // already "expired": scoping, not staleness, decides what each call reclaims.
 func testReclaimScoped(t *testing.T, f Factory) {
 	s := f(t)
+	seedReclaimScope(t, s)
+	reclaim, inProgress := reclaimScopeHelpers(t, s)
+	assertReclaimLabelScope(t, reclaim, inProgress)
+	assertReclaimAssigneeScope(t, reclaim, inProgress)
+	assertReclaimIDScope(t, reclaim, inProgress)
+	assertReclaimExcludeScope(t, reclaim, inProgress)
+	assertReclaimLabelAnyScope(t, s, inProgress)
+}
 
+func seedReclaimScope(t *testing.T, s storage.DoltStorage) {
 	// Four claimed, all-stale issues across two lanes and three workers.
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "rs-a1", Title: "lane-a"}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "rs-a2", Title: "lane-a opus"}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "rs-b1", Title: "lane-b"}), "a"))
-	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{ID: "rs-c1", Title: "no lane"}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "rs-a1"}, IssueContent: types.IssueContent{Title: "lane-a"}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "rs-a2"}, IssueContent: types.IssueContent{Title: "lane-a opus"}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "rs-b1"}, IssueContent: types.IssueContent{Title: "lane-b"}}), "a"))
+	must(t, s.CreateIssue(ctx(), withDefaults(&types.Issue{IssueID: types.IssueID{ID: "rs-c1"}, IssueContent: types.IssueContent{Title: "no lane"}}), "a"))
 	must(t, s.AddLabel(ctx(), "rs-a1", "lane-a", "a"))
 	must(t, s.AddLabel(ctx(), "rs-a2", "lane-a", "a"))
 	must(t, s.AddLabel(ctx(), "rs-a2", "tier:opus", "a"))
@@ -36,7 +46,9 @@ func testReclaimScoped(t *testing.T, f Factory) {
 	must(t, s.ClaimIssue(ctx(), "rs-a2", "wa"))
 	must(t, s.ClaimIssue(ctx(), "rs-b1", "wb"))
 	must(t, s.ClaimIssue(ctx(), "rs-c1", "wc"))
+}
 
+func reclaimScopeHelpers(t *testing.T, s storage.DoltStorage) (func(types.ReclaimFilter) []string, func(string) bool) {
 	// reclaim runs a scoped reaper and returns the sorted set of reclaimed IDs.
 	reclaim := func(filter types.ReclaimFilter) []string {
 		t.Helper()
@@ -55,33 +67,41 @@ func testReclaimScoped(t *testing.T, f Factory) {
 		must(t, err)
 		return got.Status == types.StatusInProgress
 	}
-	eq := slices.Equal[[]string]
+	return reclaim, inProgress
+}
 
+func assertReclaimLabelScope(t *testing.T, reclaim func(types.ReclaimFilter) []string, inProgress func(string) bool) {
 	// --label (AND-set): only lane-b's stale lease is reverted; the lane-a and
 	// unlabeled claims are untouched even though a global reaper would take them.
-	if got := reclaim(types.ReclaimFilter{Labels: []string{"lane-b"}}); !eq(got, []string{"rs-b1"}) {
+	if got := reclaim(types.ReclaimFilter{Labels: []string{"lane-b"}}); !slices.Equal(got, []string{"rs-b1"}) {
 		t.Fatalf("reclaim(--label lane-b) = %v, want [rs-b1]", got)
 	}
 	if !inProgress("rs-a1") || !inProgress("rs-a2") || !inProgress("rs-c1") {
 		t.Fatalf("label-scoped reclaim disturbed out-of-scope claims")
 	}
+}
 
+func assertReclaimAssigneeScope(t *testing.T, reclaim func(types.ReclaimFilter) []string, inProgress func(string) bool) {
 	// --assignee: only worker wc's stale lease.
-	if got := reclaim(types.ReclaimFilter{Assignees: []string{"wc"}}); !eq(got, []string{"rs-c1"}) {
+	if got := reclaim(types.ReclaimFilter{Assignees: []string{"wc"}}); !slices.Equal(got, []string{"rs-c1"}) {
 		t.Fatalf("reclaim(--assignee wc) = %v, want [rs-c1]", got)
 	}
 	if !inProgress("rs-a1") || !inProgress("rs-a2") {
 		t.Fatalf("assignee-scoped reclaim disturbed out-of-scope claims")
 	}
+}
 
+func assertReclaimIDScope(t *testing.T, reclaim func(types.ReclaimFilter) []string, inProgress func(string) bool) {
 	// --id: exactly the named issue, not its lane-mate rs-a2.
-	if got := reclaim(types.ReclaimFilter{IDs: []string{"rs-a1"}}); !eq(got, []string{"rs-a1"}) {
+	if got := reclaim(types.ReclaimFilter{IDs: []string{"rs-a1"}}); !slices.Equal(got, []string{"rs-a1"}) {
 		t.Fatalf("reclaim(--id rs-a1) = %v, want [rs-a1]", got)
 	}
 	if !inProgress("rs-a2") {
 		t.Fatalf("id-scoped reclaim disturbed rs-a2")
 	}
+}
 
+func assertReclaimExcludeScope(t *testing.T, reclaim func(types.ReclaimFilter) []string, inProgress func(string) bool) {
 	// --exclude-label: rs-a2 is the only stale lease left, and it carries the
 	// excluded label, so the reaper reverts nothing (fail-closed on no match).
 	if got := reclaim(types.ReclaimFilter{ExcludeLabels: []string{"tier:opus"}}); len(got) != 0 {
@@ -90,7 +110,9 @@ func testReclaimScoped(t *testing.T, f Factory) {
 	if !inProgress("rs-a2") {
 		t.Fatalf("exclude-label reclaim wrongly reverted the excluded rs-a2")
 	}
+}
 
+func assertReclaimLabelAnyScope(t *testing.T, s storage.DoltStorage, inProgress func(string) bool) {
 	// --label-any: OR-set matches rs-a2 via lane-a; the previous owner is reported.
 	got, err := s.ReclaimExpiredLeases(ctx(), -time.Hour, types.ReclaimFilter{LabelsAny: []string{"lane-a", "lane-z"}}, "reaper")
 	must(t, err)

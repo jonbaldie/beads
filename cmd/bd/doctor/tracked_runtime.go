@@ -81,60 +81,72 @@ const corruptBackupDirFragment = ".corrupt.backup/"
 // current .beads/.gitignore patterns existed.
 // repoPath is the project root directory.
 func CheckTrackedRuntimeFiles(repoPath string) DoctorCheck {
-	beadsDir := ResolveBeadsDirForRepo(repoPath)
-	repoRoot := resolvedBeadsRepoRoot(repoPath)
+	trackedFiles, check, skip := listTrackedBeadsFiles(repoPath)
+	if skip {
+		return check
+	}
+	flagged, hasSensitive := collectFlaggedTrackedFiles(trackedFiles, ResolveBeadsDirForRepo(repoPath), resolvedBeadsRepoRoot(repoPath))
+	return reportTrackedRuntimeFiles(flagged, hasSensitive)
+}
 
-	// Get all files tracked by git under .beads/
+func listTrackedBeadsFiles(repoPath string) (string, DoctorCheck, bool) {
+	repoRoot := resolvedBeadsRepoRoot(repoPath)
 	cmd := exec.Command("git", "ls-files", ".beads") // #nosec G204 - args are constructed from known parts
 	cmd.Dir = repoRoot
 	output, err := cmd.Output()
 	if err != nil {
-		return DoctorCheck{
+		return "", DoctorCheck{
 			Name:     "Tracked Runtime Files",
 			Status:   StatusOK,
 			Message:  "N/A (not a git repository)",
 			Category: CategoryGit,
-		}
+		}, true
 	}
-
 	trackedFiles := strings.TrimSpace(string(output))
 	if trackedFiles == "" {
-		return DoctorCheck{
+		return "", DoctorCheck{
 			Name:     "Tracked Runtime Files",
 			Status:   StatusOK,
 			Message:  "No .beads/ files tracked by git",
 			Category: CategoryGit,
-		}
+		}, true
 	}
+	return trackedFiles, DoctorCheck{}, false
+}
 
+func collectFlaggedTrackedFiles(trackedFiles, beadsDir, repoRoot string) ([]string, bool) {
 	var flagged []string
 	var hasSensitive bool
-
 	for _, line := range strings.Split(trackedFiles, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-
-		// Get the path relative to .beads/
 		rel, err := filepath.Rel(beadsDir, filepath.Join(repoRoot, line))
 		if err != nil {
 			continue
 		}
-
-		if shouldFlagTrackedFile(rel) {
-			flagged = append(flagged, line)
-
-			// Check for sensitive files
-			base := filepath.Base(rel)
-			for _, sensitive := range sensitiveFileNames {
-				if base == sensitive {
-					hasSensitive = true
-				}
-			}
+		if !shouldFlagTrackedFile(rel) {
+			continue
+		}
+		flagged = append(flagged, line)
+		if isSensitiveTrackedBase(filepath.Base(rel)) {
+			hasSensitive = true
 		}
 	}
+	return flagged, hasSensitive
+}
 
+func isSensitiveTrackedBase(base string) bool {
+	for _, sensitive := range sensitiveFileNames {
+		if base == sensitive {
+			return true
+		}
+	}
+	return false
+}
+
+func reportTrackedRuntimeFiles(flagged []string, hasSensitive bool) DoctorCheck {
 	if len(flagged) == 0 {
 		return DoctorCheck{
 			Name:     "Tracked Runtime Files",
@@ -143,19 +155,16 @@ func CheckTrackedRuntimeFiles(repoPath string) DoctorCheck {
 			Category: CategoryGit,
 		}
 	}
-
 	status := StatusWarning
 	message := fmt.Sprintf("%d runtime/sensitive file(s) tracked by git", len(flagged))
 	if hasSensitive {
 		status = StatusError
 		message = fmt.Sprintf("%d tracked file(s) include sensitive data (credential key)", len(flagged))
 	}
-
 	detail := strings.Join(flagged, ", ")
 	if len(detail) > 200 {
 		detail = fmt.Sprintf("%s... (%d total)", strings.Join(flagged[:3], ", "), len(flagged))
 	}
-
 	return DoctorCheck{
 		Name:     "Tracked Runtime Files",
 		Status:   status,

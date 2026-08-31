@@ -168,6 +168,12 @@ func RunJournalPagesAreSeqAscendingAndSinceExclusive(t *testing.T, ctx context.C
 	ids := journalSeedCreates(t, ctx, fixture, "asc", 3)
 
 	page := journalRead(t, ctx, fixture, baseline, 0)
+	assertJournalAscendingPage(t, page, baseline, ids)
+	assertJournalResumeIsExclusive(t, ctx, fixture, page, ids)
+}
+
+func assertJournalAscendingPage(t *testing.T, page journalops.Page, baseline int64, ids []string) {
+	t.Helper()
 	if len(page.Rows) != len(ids) {
 		t.Fatalf("read %d records above the baseline, want the %d this case created: %+v",
 			len(page.Rows), len(ids), journalOpsOf(page.Rows))
@@ -190,7 +196,10 @@ func RunJournalPagesAreSeqAscendingAndSinceExclusive(t *testing.T, ctx context.C
 				"mutations committed in", i, row.IssueID, ids[i])
 		}
 	}
+}
 
+func assertJournalResumeIsExclusive(t *testing.T, ctx context.Context, fixture JournalFixture, page journalops.Page, ids []string) {
+	t.Helper()
 	// Resume from a record the caller has been served. Under an inclusive
 	// boundary this answer repeats it.
 	resumed := journalRead(t, ctx, fixture, page.Rows[0].Seq, 0)
@@ -221,6 +230,13 @@ func RunJournalHeadArrivesWithItsRowsAndDetectsCaughtUp(t *testing.T, ctx contex
 	journalSeedCreates(t, ctx, fixture, "head", 2)
 
 	page := journalRead(t, ctx, fixture, baseline, 0)
+	assertJournalHeadPage(t, page)
+	assertJournalCaughtUpAtHead(t, ctx, fixture, page.Head)
+	assertJournalHeadAdvances(t, ctx, fixture, page.Head)
+}
+
+func assertJournalHeadPage(t *testing.T, page journalops.Page) {
+	t.Helper()
 	if len(page.Rows) != 2 {
 		t.Fatalf("read %d records, want the 2 this case created: %+v", len(page.Rows), journalOpsOf(page.Rows))
 	}
@@ -232,32 +248,37 @@ func RunJournalHeadArrivesWithItsRowsAndDetectsCaughtUp(t *testing.T, ctx contex
 	if page.Head != last {
 		t.Errorf("head = %d, want %d: nothing else wrote, so the head is the last record", page.Head, last)
 	}
+}
 
-	caughtUp := journalRead(t, ctx, fixture, page.Head, 0)
+func assertJournalCaughtUpAtHead(t *testing.T, ctx context.Context, fixture JournalFixture, head int64) {
+	t.Helper()
+	caughtUp := journalRead(t, ctx, fixture, head, 0)
 	if len(caughtUp.Rows) != 0 {
 		t.Errorf("reading from the head returned %d records, want none", len(caughtUp.Rows))
 	}
-	if caughtUp.Head != page.Head {
-		t.Errorf("head moved from %d to %d with nothing written between the two reads", page.Head, caughtUp.Head)
+	if caughtUp.Head != head {
+		t.Errorf("head moved from %d to %d with nothing written between the two reads", head, caughtUp.Head)
 	}
 
 	// A checkpoint the journal has never reached is caught up, not an error.
 	// This is the property journalHead is built on.
-	beyond := journalRead(t, ctx, fixture, page.Head+1000, 0)
-	if len(beyond.Rows) != 0 || beyond.Head != page.Head {
-		t.Errorf("reading from a checkpoint above the head = %d records and head %d, want none and %d",
-			len(beyond.Rows), beyond.Head, page.Head)
+	beyond := journalRead(t, ctx, fixture, head+1000, 0)
+	if len(beyond.Rows) != 0 || beyond.Head != head {
+		t.Errorf("reading from a checkpoint above the head = %d records and head %d, want none and %d", len(beyond.Rows), beyond.Head, head)
 	}
+}
 
+func assertJournalHeadAdvances(t *testing.T, ctx context.Context, fixture JournalFixture, previous int64) {
+	t.Helper()
 	// One more mutation, and the head follows it.
 	journalSeedCreates(t, ctx, fixture, "head-again", 1)
-	advanced := journalRead(t, ctx, fixture, page.Head, 0)
+	advanced := journalRead(t, ctx, fixture, previous, 0)
 	if len(advanced.Rows) != 1 {
 		t.Fatalf("read %d records after one more mutation, want 1", len(advanced.Rows))
 	}
-	if advanced.Head != advanced.Rows[0].Seq || advanced.Head <= page.Head {
+	if advanced.Head != advanced.Rows[0].Seq || advanced.Head <= previous {
 		t.Errorf("head = %d after a record at seq %d (was %d): the head has to move with what it describes",
-			advanced.Head, advanced.Rows[0].Seq, page.Head)
+			advanced.Head, advanced.Rows[0].Seq, previous)
 	}
 }
 
@@ -333,6 +354,12 @@ func RunJournalTruncationIsTypedAndNamesTheWindow(t *testing.T, ctx context.Cont
 
 	trunc := journalRequireTruncated(t, "reading from a pruned checkpoint",
 		journalReadErr(ctx, fixture, baseline, 0))
+	assertJournalTruncationWindow(t, trunc, baseline, firstRetained, head)
+	assertJournalTruncationResumes(t, ctx, fixture, trunc, baseline, firstRetained)
+}
+
+func assertJournalTruncationWindow(t *testing.T, trunc *journalops.TruncatedError, baseline, firstRetained, head int64) {
+	t.Helper()
 	if trunc.Since != baseline {
 		t.Errorf("Since = %d, want the caller's own checkpoint %d: the nearest hole is the one a "+
 			"consumer has to decide about first", trunc.Since, baseline)
@@ -344,7 +371,10 @@ func RunJournalTruncationIsTypedAndNamesTheWindow(t *testing.T, ctx context.Cont
 		t.Errorf("Head = %d, want %d: the highest seq ever assigned, which a prune does not move",
 			trunc.Head, head)
 	}
+}
 
+func assertJournalTruncationResumes(t *testing.T, ctx context.Context, fixture JournalFixture, trunc *journalops.TruncatedError, baseline, firstRetained int64) {
+	t.Helper()
 	// The window is RESUMABLE: Floor-1 is a checkpoint the implementation can
 	// serve, and it serves everything retained.
 	resumed := journalRead(t, ctx, fixture, trunc.Floor-1, 0)

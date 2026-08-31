@@ -43,5 +43,5 @@ func resolvedBeadsRepoRoot(repoPath string) string {
 }
 
 func clearResolveBeadsDirCache() {
-	resolveBeadsDirCache = sync.Map{}
+	resolveBeadsDirCache.Clear()
 }

@@ -480,11 +480,17 @@ func TestCreateIssueFromFormValues(t *testing.T) {
 	t.Run("DiscoveredFromInheritsSourceRepo", func(t *testing.T) {
 		// Create a parent issue with a custom source_repo
 		parent := &types.Issue{
-			Title:      "Parent with source repo",
-			Priority:   1,
-			Status:     types.StatusOpen,
-			IssueType:  types.TypeTask,
-			SourceRepo: "/path/to/custom/repo",
+			IssueContent: types.IssueContent{
+				Title: "Parent with source repo",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  1,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
+			IssueGraph: types.IssueGraph{
+				SourceRepo: "/path/to/custom/repo",
+			},
 		}
 
 		if err := s.CreateIssue(ctx, parent, "test"); err != nil {

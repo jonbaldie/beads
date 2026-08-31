@@ -19,12 +19,12 @@ import (
 // consult FIRST, so a proxied `bd config set types.custom` reported success and
 // never took effect.
 func proxiedWorkspaceConfig() (issueops.WorkspaceConfig, error) {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return nil, errors.New("proxied-server UOW provider not initialized")
 	}
-	src, ok := uowProvider.(uow.WorkspaceConfigSource)
+	src, ok := getUOWProvider().(uow.WorkspaceConfigSource)
 	if !ok {
-		return nil, fmt.Errorf("proxied-server provider %T does not offer the workspace-settings surface", uowProvider)
+		return nil, fmt.Errorf("proxied-server provider %T does not offer the workspace-settings surface", getUOWProvider())
 	}
 	return src.WorkspaceConfig()
 }
@@ -44,11 +44,11 @@ func runConfigSetManyProxiedServer(ctx context.Context, keys, values []string) e
 	if len(keys) == 0 {
 		return nil
 	}
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return HandleErrorRespectJSON("proxied-server UOW provider not initialized")
 	}
 
-	return uow.RunTx(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) (string, error) {
+	return uow.RunTx(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) (string, error) {
 		cfgUC := uw.ConfigUseCase()
 		for i, k := range keys {
 			if err := cfgUC.SetConfig(ctx, k, values[i]); err != nil {

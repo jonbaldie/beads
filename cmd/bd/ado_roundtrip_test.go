@@ -306,12 +306,18 @@ func TestADORoundTripCoreFields(t *testing.T) {
 	sourceIssueIDs := make([]string, 0, len(seeds))
 	for i, s := range seeds {
 		issue := &types.Issue{
-			ID:          fmt.Sprintf("bd-rt-%d", i),
-			Title:       s.title,
-			Description: s.description,
-			Priority:    s.priority,
-			Status:      s.status,
-			IssueType:   s.issueType,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("bd-rt-%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title:       s.title,
+				Description: s.description,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  s.priority,
+				Status:    s.status,
+				IssueType: s.issueType,
+			},
 		}
 		if s.status == types.StatusClosed {
 			now := time.Now()
@@ -467,11 +473,17 @@ func TestADORoundTripBlockedStatus(t *testing.T) {
 
 	// Create a blocked issue
 	issue := &types.Issue{
-		ID:        "bd-blocked-1",
-		Title:     "Blocked on upstream fix",
-		Status:    types.StatusBlocked,
-		IssueType: types.TypeTask,
-		Priority:  2,
+		IssueID: types.IssueID{
+			ID: "bd-blocked-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocked on upstream fix",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusBlocked,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
 	}
 	if err := sourceStore.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -549,11 +561,17 @@ func TestADORoundTripLossyPriority(t *testing.T) {
 	// Create issues with priority 3 (Low) and 4 (Backlog) — both map to ADO 4
 	for _, p := range []int{3, 4} {
 		issue := &types.Issue{
-			ID:        fmt.Sprintf("bd-lossy-p%d", p),
-			Title:     fmt.Sprintf("Priority %d issue", p),
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
-			Priority:  p,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("bd-lossy-p%d", p),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Priority %d issue", p),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+				Priority:  p,
+			},
 		}
 		if err := sourceStore.CreateIssue(ctx, issue, "test-actor"); err != nil {
 			t.Fatalf("CreateIssue(p%d): %v", p, err)
@@ -641,12 +659,20 @@ func TestADORoundTripLabels(t *testing.T) {
 	}
 
 	issue := &types.Issue{
-		ID:        "bd-labels-1",
-		Title:     "Issue with labels",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeBug,
-		Priority:  1,
-		Labels:    []string{"backend", "urgent", "api"},
+		IssueID: types.IssueID{
+			ID: "bd-labels-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Issue with labels",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeBug,
+			Priority:  1,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"backend", "urgent", "api"},
+		},
 	}
 	if err := sourceStore.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)

@@ -164,10 +164,14 @@ func TestContributorRoutingTracer(t *testing.T) {
 
 		// Create a test issue in planning store (simulating what Phase 2 will do)
 		issue := &types.Issue{
-			Title:     "Test contributor issue",
-			IssueType: types.TypeTask,
-			Status:    types.StatusOpen,
-			Priority:  2,
+			IssueContent: types.IssueContent{
+				Title: "Test contributor issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				IssueType: types.TypeTask,
+				Status:    types.StatusOpen,
+				Priority:  2,
+			},
 		}
 
 		if err := planningStore.CreateIssue(ctx, issue, "test"); err != nil {
@@ -384,10 +388,14 @@ func verifyIssueRouting(
 
 	// Create issue in target store
 	issue := &types.Issue{
-		Title:     "Test " + description,
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		Priority:  2,
+		IssueContent: types.IssueContent{
+			Title: "Test " + description,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+			Priority:  2,
+		},
 	}
 
 	if err := targetStore.CreateIssue(ctx, issue, "test"); err != nil {
@@ -541,10 +549,14 @@ func TestContributorRoutingDaemon(t *testing.T) {
 
 	// Verify we can create issue directly in planning store (simulating daemon bypass)
 	issue := &types.Issue{
-		Title:     "Test daemon mode routing bypass",
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		Priority:  2,
+		IssueContent: types.IssueContent{
+			Title: "Test daemon mode routing bypass",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+			Priority:  2,
+		},
 	}
 
 	if err := planningStore.CreateIssue(env.ctx, issue, "test"); err != nil {
@@ -621,10 +633,14 @@ func TestMaintainerRoutingUnaffected(t *testing.T) {
 
 	// Create issue in project store (maintainer's issue stays local)
 	issue := &types.Issue{
-		Title:     "Test maintainer issue stays local",
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		Priority:  2,
+		IssueContent: types.IssueContent{
+			Title: "Test maintainer issue stays local",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+			Priority:  2,
+		},
 	}
 
 	if err := projectStore.CreateIssue(env.ctx, issue, "test"); err != nil {
@@ -698,10 +714,14 @@ func TestExplicitRepoOverride(t *testing.T) {
 
 	// Create issue in override store
 	issue := &types.Issue{
-		Title:     "Test explicit override",
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		Priority:  2,
+		IssueContent: types.IssueContent{
+			Title: "Test explicit override",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+			Priority:  2,
+		},
 	}
 
 	if err := overrideStore.CreateIssue(env.ctx, issue, "test"); err != nil {
@@ -763,10 +783,14 @@ func TestBEADS_DIRPrecedence(t *testing.T) {
 
 	// Create issue in external store
 	issue := &types.Issue{
-		Title:     "Test BEADS_DIR precedence",
-		IssueType: types.TypeTask,
-		Status:    types.StatusOpen,
-		Priority:  2,
+		IssueContent: types.IssueContent{
+			Title: "Test BEADS_DIR precedence",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+			Priority:  2,
+		},
 	}
 
 	if err := externalStore.CreateIssue(env.ctx, issue, "test"); err != nil {

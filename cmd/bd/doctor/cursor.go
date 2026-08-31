@@ -187,22 +187,32 @@ func CheckCursorHookCompleteness(repoPath string) DoctorCheck {
 // a Cursor hook/agent, the cursor CLI is on PATH, a project .cursor/ dir exists,
 // or the user has a ~/.cursor/ directory.
 func isCursorPresent(repoPath string) bool {
-	// Set by Cursor when running hooks/agents (see Cursor hooks env vars).
-	if os.Getenv("CURSOR_PROJECT_DIR") != "" || os.Getenv("CURSOR_TRACE_ID") != "" {
-		return true
-	}
+	return cursorEnvPresent() || cursorBinaryPresent() || cursorDirPresent(repoPath) || cursorHomeDirPresent()
+}
+
+func cursorEnvPresent() bool {
+	return os.Getenv("CURSOR_PROJECT_DIR") != "" || os.Getenv("CURSOR_TRACE_ID") != ""
+}
+
+func cursorBinaryPresent() bool {
 	for _, bin := range []string{"cursor-agent", "cursor"} {
 		if _, err := exec.LookPath(bin); err == nil {
 			return true
 		}
 	}
-	if info, err := os.Stat(filepath.Join(repoPath, ".cursor")); err == nil && info.IsDir() {
-		return true
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		if info, err := os.Stat(filepath.Join(home, ".cursor")); err == nil && info.IsDir() {
-			return true
-		}
-	}
 	return false
+}
+
+func cursorDirPresent(repoPath string) bool {
+	info, err := os.Stat(filepath.Join(repoPath, ".cursor"))
+	return err == nil && info.IsDir()
+}
+
+func cursorHomeDirPresent() bool {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(home, ".cursor"))
+	return err == nil && info.IsDir()
 }

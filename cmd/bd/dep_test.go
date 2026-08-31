@@ -30,20 +30,36 @@ func TestDependencySuite(t *testing.T) {
 		// Create test issues
 		issues := []*types.Issue{
 			{
-				ID:        "test-1",
-				Title:     "Task 1",
-				Status:    types.StatusOpen,
-				Priority:  1,
-				IssueType: types.TypeTask,
-				CreatedAt: time.Now(),
+				IssueID: types.IssueID{
+					ID: "test-1",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Task 1",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  1,
+					IssueType: types.TypeTask,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: time.Now(),
+				},
 			},
 			{
-				ID:        "test-2",
-				Title:     "Task 2",
-				Status:    types.StatusOpen,
-				Priority:  1,
-				IssueType: types.TypeTask,
-				CreatedAt: time.Now(),
+				IssueID: types.IssueID{
+					ID: "test-2",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Task 2",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  1,
+					IssueType: types.TypeTask,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: time.Now(),
+				},
 			},
 		}
 
@@ -84,12 +100,20 @@ func TestDependencySuite(t *testing.T) {
 		// Create test issues
 		for i := 1; i <= 4; i++ {
 			issue := &types.Issue{
-				ID:        fmt.Sprintf("test-types-%d", i),
-				Title:     fmt.Sprintf("Task %d", i),
-				Status:    types.StatusOpen,
-				Priority:  1,
-				IssueType: types.TypeTask,
-				CreatedAt: time.Now(),
+				IssueID: types.IssueID{
+					ID: fmt.Sprintf("test-types-%d", i),
+				},
+				IssueContent: types.IssueContent{
+					Title: fmt.Sprintf("Task %d", i),
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  1,
+					IssueType: types.TypeTask,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: time.Now(),
+				},
 			}
 			if err := s.CreateIssue(ctx, issue, "test"); err != nil {
 				t.Fatal(err)
@@ -126,12 +150,20 @@ func TestDependencySuite(t *testing.T) {
 		// Create test issues
 		for i := 1; i <= 3; i++ {
 			issue := &types.Issue{
-				ID:        fmt.Sprintf("test-cycle-%d", i),
-				Title:     fmt.Sprintf("Task %d", i),
-				Status:    types.StatusOpen,
-				Priority:  1,
-				IssueType: types.TypeTask,
-				CreatedAt: time.Now(),
+				IssueID: types.IssueID{
+					ID: fmt.Sprintf("test-cycle-%d", i),
+				},
+				IssueContent: types.IssueContent{
+					Title: fmt.Sprintf("Task %d", i),
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  1,
+					IssueType: types.TypeTask,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: time.Now(),
+				},
 			}
 			if err := s.CreateIssue(ctx, issue, "test"); err != nil {
 				t.Fatal(err)
@@ -186,20 +218,36 @@ func TestDependencySuite(t *testing.T) {
 		// Create test issues
 		issues := []*types.Issue{
 			{
-				ID:        "test-remove-1",
-				Title:     "Task 1",
-				Status:    types.StatusOpen,
-				Priority:  1,
-				IssueType: types.TypeTask,
-				CreatedAt: time.Now(),
+				IssueID: types.IssueID{
+					ID: "test-remove-1",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Task 1",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  1,
+					IssueType: types.TypeTask,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: time.Now(),
+				},
 			},
 			{
-				ID:        "test-remove-2",
-				Title:     "Task 2",
-				Status:    types.StatusOpen,
-				Priority:  1,
-				IssueType: types.TypeTask,
-				CreatedAt: time.Now(),
+				IssueID: types.IssueID{
+					ID: "test-remove-2",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Task 2",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  1,
+					IssueType: types.TypeTask,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: time.Now(),
+				},
 			},
 		}
 
@@ -240,8 +288,8 @@ func TestDependencySuite(t *testing.T) {
 	// Merged from TestDepBlocksFlagFunctionality — tests --blocks flag semantics
 	t.Run("BlocksFlagFunctionality", func(t *testing.T) {
 		issues := []*types.Issue{
-			{ID: "test-blocks-1", Title: "Blocker Issue", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, CreatedAt: time.Now()},
-			{ID: "test-blocks-2", Title: "Blocked Issue", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, CreatedAt: time.Now()},
+			{IssueID: types.IssueID{ID: "test-blocks-1"}, IssueContent: types.IssueContent{Title: "Blocker Issue"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}, IssueTimes: types.IssueTimes{CreatedAt: time.Now()}},
+			{IssueID: types.IssueID{ID: "test-blocks-2"}, IssueContent: types.IssueContent{Title: "Blocked Issue"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}, IssueTimes: types.IssueTimes{CreatedAt: time.Now()}},
 		}
 		for _, issue := range issues {
 			if err := s.CreateIssue(ctx, issue, "test"); err != nil {
@@ -287,8 +335,20 @@ func TestDependencySuite(t *testing.T) {
 	// that FK constraint violations produce user-friendly error messages.
 	t.Run("FKError_InvalidFromID", func(t *testing.T) {
 		validIssue := &types.Issue{
-			ID: "test-fk-valid", Title: "Valid Issue", Status: types.StatusOpen,
-			Priority: 1, IssueType: types.TypeTask, CreatedAt: time.Now(),
+			IssueID: types.IssueID{
+				ID: "test-fk-valid",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Valid Issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Now(),
+			},
 		}
 		if err := s.CreateIssue(ctx, validIssue, "test"); err != nil {
 			t.Fatal(err)
@@ -382,8 +442,8 @@ func TestDependencySuite(t *testing.T) {
 
 	t.Run("FKError_RemoveNonexistent", func(t *testing.T) {
 		// Create issues and dep for removal test
-		issue1 := &types.Issue{ID: "test-fk-remove-1", Title: "Issue 1", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, CreatedAt: time.Now()}
-		issue2 := &types.Issue{ID: "test-fk-remove-2", Title: "Issue 2", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, CreatedAt: time.Now()}
+		issue1 := &types.Issue{IssueID: types.IssueID{ID: "test-fk-remove-1"}, IssueContent: types.IssueContent{Title: "Issue 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}, IssueTimes: types.IssueTimes{CreatedAt: time.Now()}}
+		issue2 := &types.Issue{IssueID: types.IssueID{ID: "test-fk-remove-2"}, IssueContent: types.IssueContent{Title: "Issue 2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}, IssueTimes: types.IssueTimes{CreatedAt: time.Now()}}
 		if err := s.CreateIssue(ctx, issue1, "test"); err != nil {
 			t.Fatal(err)
 		}
@@ -559,12 +619,12 @@ func TestOutputMermaidTree(t *testing.T) {
 			name: "single dependency",
 			tree: []*types.TreeNode{
 				{
-					Issue:    types.Issue{ID: "test-1", Title: "Task 1", Status: types.StatusInProgress},
+					Issue:    types.Issue{IssueID: types.IssueID{ID: "test-1"}, IssueContent: types.IssueContent{Title: "Task 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress}},
 					Depth:    0,
 					ParentID: "",
 				},
 				{
-					Issue:    types.Issue{ID: "test-2", Title: "Task 2", Status: types.StatusClosed},
+					Issue:    types.Issue{IssueID: types.IssueID{ID: "test-2"}, IssueContent: types.IssueContent{Title: "Task 2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}},
 					Depth:    1,
 					ParentID: "test-1",
 				},
@@ -581,17 +641,17 @@ func TestOutputMermaidTree(t *testing.T) {
 			name: "multiple dependencies",
 			tree: []*types.TreeNode{
 				{
-					Issue:    types.Issue{ID: "test-1", Title: "Main", Status: types.StatusOpen},
+					Issue:    types.Issue{IssueID: types.IssueID{ID: "test-1"}, IssueContent: types.IssueContent{Title: "Main"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 					Depth:    0,
 					ParentID: "",
 				},
 				{
-					Issue:    types.Issue{ID: "test-2", Title: "Sub 1", Status: types.StatusClosed},
+					Issue:    types.Issue{IssueID: types.IssueID{ID: "test-2"}, IssueContent: types.IssueContent{Title: "Sub 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}},
 					Depth:    1,
 					ParentID: "test-1",
 				},
 				{
-					Issue:    types.Issue{ID: "test-3", Title: "Sub 2", Status: types.StatusBlocked},
+					Issue:    types.Issue{IssueID: types.IssueID{ID: "test-3"}, IssueContent: types.IssueContent{Title: "Sub 2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusBlocked}},
 					Depth:    1,
 					ParentID: "test-1",
 				},
@@ -644,27 +704,27 @@ func TestOutputMermaidTree_Siblings(t *testing.T) {
 	//       └── BD-5 (child of BD-3)
 	tree := []*types.TreeNode{
 		{
-			Issue:    types.Issue{ID: "BD-1", Title: "Parent", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "BD-1"}, IssueContent: types.IssueContent{Title: "Parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    0,
 			ParentID: "",
 		},
 		{
-			Issue:    types.Issue{ID: "BD-2", Title: "Sibling 1", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "BD-2"}, IssueContent: types.IssueContent{Title: "Sibling 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    1,
 			ParentID: "BD-1",
 		},
 		{
-			Issue:    types.Issue{ID: "BD-3", Title: "Sibling 2", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "BD-3"}, IssueContent: types.IssueContent{Title: "Sibling 2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    1,
 			ParentID: "BD-1",
 		},
 		{
-			Issue:    types.Issue{ID: "BD-4", Title: "Child of Sibling 1", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "BD-4"}, IssueContent: types.IssueContent{Title: "Child of Sibling 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    2,
 			ParentID: "BD-2",
 		},
 		{
-			Issue:    types.Issue{ID: "BD-5", Title: "Child of Sibling 2", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "BD-5"}, IssueContent: types.IssueContent{Title: "Child of Sibling 2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    2,
 			ParentID: "BD-3",
 		},
@@ -755,10 +815,16 @@ func TestFormatTreeNode(t *testing.T) {
 			name: "open issue at depth 0 shows READY",
 			node: &types.TreeNode{
 				Issue: types.Issue{
-					ID:       "BD-1",
-					Title:    "Test Issue",
-					Status:   types.StatusOpen,
-					Priority: 2,
+					IssueID: types.IssueID{
+						ID: "BD-1",
+					},
+					IssueContent: types.IssueContent{
+						Title: "Test Issue",
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Status:   types.StatusOpen,
+						Priority: 2,
+					},
 				},
 				Depth: 0,
 			},
@@ -768,10 +834,16 @@ func TestFormatTreeNode(t *testing.T) {
 			name: "open issue at depth 1 does not show READY",
 			node: &types.TreeNode{
 				Issue: types.Issue{
-					ID:       "BD-2",
-					Title:    "Child Issue",
-					Status:   types.StatusOpen,
-					Priority: 1,
+					IssueID: types.IssueID{
+						ID: "BD-2",
+					},
+					IssueContent: types.IssueContent{
+						Title: "Child Issue",
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Status:   types.StatusOpen,
+						Priority: 1,
+					},
 				},
 				Depth: 1,
 			},
@@ -781,10 +853,16 @@ func TestFormatTreeNode(t *testing.T) {
 			name: "closed issue",
 			node: &types.TreeNode{
 				Issue: types.Issue{
-					ID:       "BD-3",
-					Title:    "Done Issue",
-					Status:   types.StatusClosed,
-					Priority: 3,
+					IssueID: types.IssueID{
+						ID: "BD-3",
+					},
+					IssueContent: types.IssueContent{
+						Title: "Done Issue",
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Status:   types.StatusClosed,
+						Priority: 3,
+					},
 				},
 				Depth: 0,
 			},
@@ -814,10 +892,16 @@ func TestFormatTreeNode(t *testing.T) {
 	t.Run("blocked root shows BLOCKED not READY", func(t *testing.T) {
 		node := &types.TreeNode{
 			Issue: types.Issue{
-				ID:       "BD-10",
-				Title:    "Blocked Root",
-				Status:   types.StatusOpen,
-				Priority: 1,
+				IssueID: types.IssueID{
+					ID: "BD-10",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Blocked Root",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:   types.StatusOpen,
+					Priority: 1,
+				},
 			},
 			Depth: 0,
 		}
@@ -840,7 +924,7 @@ func TestFormatTreeNodeShowsDependencyType(t *testing.T) {
 		{
 			name: "blocks edge",
 			node: &types.TreeNode{
-				Issue:          types.Issue{ID: "BD-2", Title: "Blocked task", Status: types.StatusOpen, Priority: 1},
+				Issue:          types.Issue{IssueID: types.IssueID{ID: "BD-2"}, IssueContent: types.IssueContent{Title: "Blocked task"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1}},
 				Depth:          1,
 				ParentID:       "BD-1",
 				EdgeFromParent: types.DepBlocks,
@@ -850,7 +934,7 @@ func TestFormatTreeNodeShowsDependencyType(t *testing.T) {
 		{
 			name: "parent-child edge",
 			node: &types.TreeNode{
-				Issue:          types.Issue{ID: "BD-3", Title: "Child task", Status: types.StatusOpen, Priority: 2},
+				Issue:          types.Issue{IssueID: types.IssueID{ID: "BD-3"}, IssueContent: types.IssueContent{Title: "Child task"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2}},
 				Depth:          1,
 				ParentID:       "BD-1",
 				EdgeFromParent: types.DepParentChild,
@@ -860,7 +944,7 @@ func TestFormatTreeNodeShowsDependencyType(t *testing.T) {
 		{
 			name: "root has no edge label",
 			node: &types.TreeNode{
-				Issue:          types.Issue{ID: "BD-1", Title: "Root", Status: types.StatusOpen, Priority: 0},
+				Issue:          types.Issue{IssueID: types.IssueID{ID: "BD-1"}, IssueContent: types.IssueContent{Title: "Root"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 0}},
 				Depth:          0,
 				EdgeFromParent: types.DepBlocks,
 			},
@@ -888,22 +972,22 @@ func TestRenderTreeOutput(t *testing.T) {
 	// Test tree with proper connectors
 	tree := []*types.TreeNode{
 		{
-			Issue:    types.Issue{ID: "BD-1", Title: "Root", Status: types.StatusOpen, Priority: 1},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "BD-1"}, IssueContent: types.IssueContent{Title: "Root"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1}},
 			Depth:    0,
 			ParentID: "",
 		},
 		{
-			Issue:    types.Issue{ID: "BD-2", Title: "Child 1", Status: types.StatusOpen, Priority: 2},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "BD-2"}, IssueContent: types.IssueContent{Title: "Child 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2}},
 			Depth:    1,
 			ParentID: "BD-1",
 		},
 		{
-			Issue:    types.Issue{ID: "BD-3", Title: "Child 2", Status: types.StatusClosed, Priority: 2},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "BD-3"}, IssueContent: types.IssueContent{Title: "Child 2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed, Priority: 2}},
 			Depth:    1,
 			ParentID: "BD-1",
 		},
 		{
-			Issue:    types.Issue{ID: "BD-4", Title: "Grandchild", Status: types.StatusOpen, Priority: 3},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "BD-4"}, IssueContent: types.IssueContent{Title: "Grandchild"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 3}},
 			Depth:    2,
 			ParentID: "BD-2",
 		},
@@ -939,12 +1023,12 @@ func TestRenderTreeOutput(t *testing.T) {
 func TestRenderTreeOutputShowsDependencyTypeLabelsInMixedGraph(t *testing.T) {
 	downTree := []*types.TreeNode{
 		{
-			Issue:    types.Issue{ID: "BD-root", Title: "Root", Status: types.StatusOpen, Priority: 1},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "BD-root"}, IssueContent: types.IssueContent{Title: "Root"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1}},
 			Depth:    0,
 			ParentID: "",
 		},
 		{
-			Issue:          types.Issue{ID: "BD-child", Title: "Child", Status: types.StatusOpen, Priority: 2},
+			Issue:          types.Issue{IssueID: types.IssueID{ID: "BD-child"}, IssueContent: types.IssueContent{Title: "Child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2}},
 			Depth:          1,
 			ParentID:       "BD-root",
 			EdgeFromParent: types.DepParentChild,
@@ -952,12 +1036,12 @@ func TestRenderTreeOutputShowsDependencyTypeLabelsInMixedGraph(t *testing.T) {
 	}
 	upTree := []*types.TreeNode{
 		{
-			Issue:    types.Issue{ID: "BD-root", Title: "Root", Status: types.StatusOpen, Priority: 1},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "BD-root"}, IssueContent: types.IssueContent{Title: "Root"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1}},
 			Depth:    0,
 			ParentID: "",
 		},
 		{
-			Issue:          types.Issue{ID: "BD-dependent", Title: "Dependent", Status: types.StatusOpen, Priority: 3},
+			Issue:          types.Issue{IssueID: types.IssueID{ID: "BD-dependent"}, IssueContent: types.IssueContent{Title: "Dependent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 3}},
 			Depth:          1,
 			ParentID:       "BD-root",
 			EdgeFromParent: types.DepBlocks,
@@ -987,7 +1071,7 @@ func TestRenderTreeOutputShowsDependencyTypeLabelsInMixedGraph(t *testing.T) {
 
 func TestTreeNodeJSONIncludesEdgeFromParent(t *testing.T) {
 	node := types.TreeNode{
-		Issue:          types.Issue{ID: "BD-child", Title: "Child", Status: types.StatusOpen, Priority: 2},
+		Issue:          types.Issue{IssueID: types.IssueID{ID: "BD-child"}, IssueContent: types.IssueContent{Title: "Child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2}},
 		Depth:          1,
 		ParentID:       "BD-root",
 		EdgeFromParent: types.DepParentChild,
@@ -1138,11 +1222,17 @@ func TestDepRoutedTargetOpensReadOnly(t *testing.T) {
 	rigDBPath := filepath.Join(rigBeadsDir, "dolt")
 	rigStore := newTestStoreIsolatedDB(t, rigDBPath, "gt")
 	if err := rigStore.CreateIssue(ctx, &types.Issue{
-		ID:        "gt-target1",
-		Title:     "Routed dep target",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "gt-target1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Routed dep target",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}, "test"); err != nil {
 		t.Fatalf("create rig issue: %v", err)
 	}
@@ -1246,18 +1336,30 @@ func TestDepListCrossRigRouting(t *testing.T) {
 
 	// Create test issues in rig database with a dependency
 	parent := &types.Issue{
-		ID:        "gt-parent1",
-		Title:     "Parent Issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "gt-parent1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Parent Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	child := &types.Issue{
-		ID:        "gt-child1",
-		Title:     "Child Issue",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "gt-child1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Child Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := rigStore.CreateIssue(ctx, parent, "test"); err != nil {
 		t.Fatalf("Failed to create parent issue: %v", err)

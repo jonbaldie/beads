@@ -294,21 +294,12 @@ func TestADOSyncPullPushConflict(t *testing.T) {
 	t.Setenv("AZURE_DEVOPS_ORG", "testorg")
 	t.Setenv("AZURE_DEVOPS_PROJECT", "testproj")
 
-	// Save and restore the global flag state
-	oldPullOnly := adoSyncPullOnly
-	oldPushOnly := adoSyncPushOnly
-	oldDryRun := adoSyncDryRun
-	t.Cleanup(func() {
-		adoSyncPullOnly = oldPullOnly
-		adoSyncPushOnly = oldPushOnly
-		adoSyncDryRun = oldDryRun
-	})
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("dry-run", true, "") // avoid readonly check
+	cmd.Flags().Bool("pull-only", true, "")
+	cmd.Flags().Bool("push-only", true, "")
 
-	adoSyncPullOnly = true
-	adoSyncPushOnly = true
-	adoSyncDryRun = true // avoid readonly check
-
-	err := runADOSync(&cobra.Command{}, nil)
+	err := runADOSync(cmd, nil)
 	if err == nil {
 		t.Fatal("runADOSync() should fail with both --pull-only and --push-only")
 	}
@@ -898,7 +889,7 @@ func TestBuildADOPushHooks_TypeFilter(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			issue := &types.Issue{IssueType: tt.issueTyp, Status: types.StatusOpen}
+			issue := &types.Issue{IssueWorkflow: types.IssueWorkflow{IssueType: tt.issueTyp, Status: types.StatusOpen}}
 			if got := hooks.ShouldPush(issue); got != tt.want {
 				t.Errorf("ShouldPush(%s) = %v, want %v", tt.issueTyp, got, tt.want)
 			}
@@ -928,7 +919,7 @@ func TestBuildADOPushHooks_StateFilter(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			issue := &types.Issue{IssueType: types.TypeTask, Status: tt.status}
+			issue := &types.Issue{IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: tt.status}}
 			if got := hooks.ShouldPush(issue); got != tt.want {
 				t.Errorf("ShouldPush(status=%s) = %v, want %v", tt.status, got, tt.want)
 			}
@@ -962,7 +953,7 @@ func TestBuildADOPushHooks_NoCreate(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			issue := &types.Issue{IssueType: types.TypeTask, Status: types.StatusOpen, ExternalRef: tt.ref}
+			issue := &types.Issue{IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}, IssueMeta: types.IssueMeta{ExternalRef: tt.ref}}
 			if got := hooks.ShouldPush(issue); got != tt.want {
 				t.Errorf("ShouldPush(ref=%v) = %v, want %v", tt.ref, got, tt.want)
 			}
@@ -1001,7 +992,7 @@ func TestBuildADOPushHooks_Combined(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			issue := &types.Issue{IssueType: tt.issueTyp, Status: tt.status, ExternalRef: tt.ref}
+			issue := &types.Issue{IssueWorkflow: types.IssueWorkflow{IssueType: tt.issueTyp, Status: tt.status}, IssueMeta: types.IssueMeta{ExternalRef: tt.ref}}
 			if got := hooks.ShouldPush(issue); got != tt.want {
 				t.Errorf("ShouldPush() = %v, want %v", got, tt.want)
 			}

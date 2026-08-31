@@ -63,19 +63,23 @@ func createIssueWithDeps(ctx context.Context, st storage.DoltStorage, issue *typ
 	}
 
 	return transactHonoringAutoCommit(ctx, st, commitMsg, func(tx storage.Transaction) error {
-		if err := tx.CreateIssue(ctx, issue, actor); err != nil {
-			return err
-		}
-		// issue.ID is only reserved after tx.CreateIssue for auto-minted IDs, so
-		// the edge helpers run after the create.
-		if err := addParentEdge(ctx, tx, issue.ID, edges.parentID, actor); err != nil {
-			return err
-		}
-		if err := addDepSpecEdges(ctx, tx, issue.ID, edges.specs, actor); err != nil {
-			return err
-		}
-		return addWaitsForEdge(ctx, tx, issue.ID, edges.waitsFor, actor)
+		return persistIssueWithDeps(ctx, tx, issue, actor, edges)
 	})
+}
+
+func persistIssueWithDeps(ctx context.Context, tx storage.Transaction, issue *types.Issue, actor string, edges createDepEdges) error {
+	if err := tx.CreateIssue(ctx, issue, actor); err != nil {
+		return err
+	}
+	// issue.ID is only reserved after tx.CreateIssue for auto-minted IDs, so
+	// the edge helpers run after the create.
+	if err := addParentEdge(ctx, tx, issue.ID, edges.parentID, actor); err != nil {
+		return err
+	}
+	if err := addDepSpecEdges(ctx, tx, issue.ID, edges.specs, actor); err != nil {
+		return err
+	}
+	return addWaitsForEdge(ctx, tx, issue.ID, edges.waitsFor, actor)
 }
 
 // addParentEdge adds the --parent parent-child edge, if requested.

@@ -56,7 +56,11 @@ func TestBeadMutatingFixJournalsIntoTheWorkspace(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	setup, err := dolt.NewFromConfigWithOptions(ctx, beadsDir, &dolt.Config{CreateIfMissing: true})
+	setup, err := dolt.NewFromConfigWithOptions(ctx, beadsDir, &dolt.Config{
+		RemoteOptions: dolt.RemoteOptions{
+			CreateIfMissing: true,
+		},
+	})
 	if err != nil {
 		t.Fatalf("open setup store: %v", err)
 	}
@@ -68,7 +72,14 @@ func TestBeadMutatingFixJournalsIntoTheWorkspace(t *testing.T) {
 	// are the ones the repair wrote.
 	for _, title := range []string{"Digest: mol-abc-patrol", "Session ended: cleanup check", "Normal issue should remain"} {
 		if err := setup.CreateIssue(ctx, &types.Issue{
-			Title: title, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask,
+			IssueContent: types.IssueContent{
+				Title: title,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}, "test"); err != nil {
 			_ = setup.Close()
 			t.Fatalf("create %q: %v", title, err)

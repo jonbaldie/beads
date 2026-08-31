@@ -35,10 +35,10 @@ import (
 // commits without a Dolt commit (its whole point for the leases table), which
 // would persist these writes while silently bypassing Dolt history.
 func runBatchProxiedServer(ctx context.Context, ops []batchOp, commitMsg string) ([]batchOpResult, error) {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return nil, HandleErrorRespectJSON("proxied-server UOW provider not initialized")
 	}
-	return uow.RunTxResult(ctx, uowProvider, func(ctx context.Context, uw uow.UnitOfWork) ([]batchOpResult, string, error) {
+	return uow.RunTxResult(ctx, getUOWProvider(), func(ctx context.Context, uw uow.UnitOfWork) ([]batchOpResult, string, error) {
 		// Built per attempt, not per call: a retried batch must report the
 		// results of the attempt that actually committed.
 		results := make([]batchOpResult, 0, len(ops))
@@ -64,158 +64,177 @@ func runBatchProxiedServer(ctx context.Context, ops []batchOp, commitMsg string)
 // this transaction's own snapshot) and then calls the matching verb, so a batch
 // line that touches a wisp touches the wisp tables on both backends.
 func runBatchOpUOW(ctx context.Context, uw uow.UnitOfWork, op batchOp) (batchOpResult, error) {
-	actorName := getActor()
 	result := batchOpResult{Line: op.line, Op: op.cmd}
-	issues := uw.IssueUseCase()
-
 	switch op.cmd {
 	case "close":
-		if len(op.args) < 1 {
-			return result, fmt.Errorf("close requires <id>")
-		}
-		id := op.args[0]
-		reason := "Closed"
-		if len(op.args) > 1 {
-			reason = strings.Join(op.args[1:], " ")
-		}
-		resolved, isWisp, err := batchResolveOpTarget(ctx, uw, id)
-		if err != nil {
-			return result, err
-		}
-		// Deliberately the UNCHECKED close, matching the classic batch's
-		// issueops.CloseIssueInTx: `close <id>` in a batch does not apply close
-		// policy at all (the asymmetry with `update status=closed` is documented
-		// in the command's help and is contract, not oversight).
-		params := domain.CloseIssueParams{Reason: reason}
-		if isWisp {
-			_, err = issues.CloseWisp(ctx, resolved, params, actorName)
-		} else {
-			_, err = issues.CloseIssue(ctx, resolved, params, actorName)
-		}
-		if err != nil {
-			return result, err
-		}
-		result.Target = id
-		return result, nil
-
+		return runBatchCloseUOW(ctx, uw, op, result)
 	case "update":
-		if len(op.args) < 2 {
-			return result, fmt.Errorf("update requires <id> and at least one key=value")
-		}
-		id := op.args[0]
-		updates, err := parseUpdateKVs(op.args[1:])
-		if err != nil {
-			return result, err
-		}
-		resolved, isWisp, err := batchResolveOpTarget(ctx, uw, id)
-		if err != nil {
-			return result, err
-		}
-		if isWisp {
-			err = issues.UpdateWisp(ctx, resolved, updates, actorName)
-		} else {
-			err = issues.UpdateIssue(ctx, resolved, updates, actorName)
-		}
-		if err != nil {
-			return result, err
-		}
-		result.Target = id
-		return result, nil
-
+		return runBatchUpdateUOW(ctx, uw, op, result)
 	case "create":
-		if len(op.args) < 3 {
-			return result, fmt.Errorf("create requires <type> <priority> <title>")
-		}
-		issueType := types.IssueType(op.args[0])
-		if strings.TrimSpace(op.args[0]) == "" {
-			return result, fmt.Errorf("create: type cannot be empty")
-		}
-		priority, err := strconv.Atoi(op.args[1])
-		if err != nil {
-			return result, fmt.Errorf("create: invalid priority %q: %w", op.args[1], err)
-		}
-		title := strings.Join(op.args[2:], " ")
-		if strings.TrimSpace(title) == "" {
-			return result, fmt.Errorf("create: title cannot be empty")
-		}
-		issue := &types.Issue{
-			Title:     title,
-			IssueType: issueType,
+		return runBatchCreateUOW(ctx, uw, op, result)
+	case "dep.add":
+		return runBatchDepAddUOW(ctx, uw, op, result)
+	case "dep.remove":
+		return runBatchDepRemoveUOW(ctx, uw, op, result)
+	default:
+		return result, fmt.Errorf("internal: unhandled batch op %q", op.cmd)
+	}
+}
+
+func runBatchCloseUOW(ctx context.Context, uw uow.UnitOfWork, op batchOp, result batchOpResult) (batchOpResult, error) {
+	if len(op.args) < 1 {
+		return result, fmt.Errorf("close requires <id>")
+	}
+	id := op.args[0]
+	reason := "Closed"
+	if len(op.args) > 1 {
+		reason = strings.Join(op.args[1:], " ")
+	}
+	resolved, isWisp, err := batchResolveOpTarget(ctx, uw, id)
+	if err != nil {
+		return result, err
+	}
+	// Deliberately the UNCHECKED close, matching the classic batch's
+	// issueops.CloseIssueInTx: `close <id>` in a batch does not apply close
+	// policy at all (the asymmetry with `update status=closed` is documented
+	// in the command's help and is contract, not oversight).
+	params := domain.CloseIssueParams{Reason: reason}
+	issues := uw.IssueUseCase()
+	if isWisp {
+		_, err = issues.CloseWisp(ctx, resolved, params, getActor())
+	} else {
+		_, err = issues.CloseIssue(ctx, resolved, params, getActor())
+	}
+	if err != nil {
+		return result, err
+	}
+	result.Target = id
+	return result, nil
+}
+
+func runBatchUpdateUOW(ctx context.Context, uw uow.UnitOfWork, op batchOp, result batchOpResult) (batchOpResult, error) {
+	if len(op.args) < 2 {
+		return result, fmt.Errorf("update requires <id> and at least one key=value")
+	}
+	id := op.args[0]
+	updates, err := parseUpdateKVs(op.args[1:])
+	if err != nil {
+		return result, err
+	}
+	resolved, isWisp, err := batchResolveOpTarget(ctx, uw, id)
+	if err != nil {
+		return result, err
+	}
+	issues := uw.IssueUseCase()
+	if isWisp {
+		err = issues.UpdateWisp(ctx, resolved, updates, getActor())
+	} else {
+		err = issues.UpdateIssue(ctx, resolved, updates, getActor())
+	}
+	if err != nil {
+		return result, err
+	}
+	result.Target = id
+	return result, nil
+}
+
+func runBatchCreateUOW(ctx context.Context, uw uow.UnitOfWork, op batchOp, result batchOpResult) (batchOpResult, error) {
+	if len(op.args) < 3 {
+		return result, fmt.Errorf("create requires <type> <priority> <title>")
+	}
+	if strings.TrimSpace(op.args[0]) == "" {
+		return result, fmt.Errorf("create: type cannot be empty")
+	}
+	priority, err := strconv.Atoi(op.args[1])
+	if err != nil {
+		return result, fmt.Errorf("create: invalid priority %q: %w", op.args[1], err)
+	}
+	title := strings.Join(op.args[2:], " ")
+	if strings.TrimSpace(title) == "" {
+		return result, fmt.Errorf("create: title cannot be empty")
+	}
+	issue := &types.Issue{
+		IssueContent: types.IssueContent{
+			Title: title,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.IssueType(op.args[0]),
 			Status:    types.StatusOpen,
 			Priority:  priority,
-		}
-		created, err := issues.CreateIssue(ctx, domain.CreateIssueParams{Issue: issue}, actorName)
-		if err != nil {
-			return result, err
-		}
-		// The classic path reports the id the store minted into the caller's
-		// struct; the use case hands the same row back as a result.
-		if created.Issue != nil {
-			result.Target = created.Issue.ID
-		} else {
-			result.Target = issue.ID
-		}
-		return result, nil
-
-	case "dep.add":
-		if len(op.args) < 2 {
-			return result, fmt.Errorf("dep add requires <from-id> <to-id>")
-		}
-		from, to := op.args[0], op.args[1]
-		depType := "blocks"
-		if len(op.args) >= 3 {
-			depType = op.args[2]
-		}
-		dt := types.DependencyType(depType)
-		if !dt.IsValid() {
-			return result, fmt.Errorf("dep add: invalid dependency type %q", depType)
-		}
-		dep := &types.Dependency{
-			IssueID:     from,
-			DependsOnID: to,
-			Type:        dt,
-		}
-		// AddDependencies (not the single-edge AddDependency) because it lands
-		// each edge in the plane its own SOURCE lives in, which is the routing
-		// the classic transaction does from isActiveWisp. One edge is still one
-		// edge, and the per-edge cycle probe runs.
-		//
-		// KNOWN DIVERGENCE, in the HISTORY only: every domain edge verb records
-		// a dependency_added event, while the classic batch reaches
-		// storage.Transaction.AddDependency, whose zero DependencyAddOptions
-		// leaves EmitEvent false — the "structural, quiet" setting meant for
-		// create-with-deps and reparenting, not for a verb a user typed. So a
-		// batched `dep add` shows up in `bd history` here and does not there.
-		// The edge itself, its plane, its type and the cycle verdict are
-		// identical; `bd dep add` at the CLI emits the event on BOTH backends,
-		// which is why the classic batch's silence reads as the outlier.
-		// Silencing it here would need a quiet variant on the use case that
-		// nothing else wants, so this port takes the event and names it rather
-		// than growing the domain surface to reproduce an inconsistency.
-		if _, err := uw.DependencyUseCase().AddDependencies(ctx, []*types.Dependency{dep}, actorName, domain.BulkAddDepsOpts{}); err != nil {
-			return result, err
-		}
-		result.Target = fmt.Sprintf("%s->%s", from, to)
-		return result, nil
-
-	case "dep.remove":
-		if len(op.args) < 2 {
-			return result, fmt.Errorf("dep remove requires <from-id> <to-id>")
-		}
-		from, to := op.args[0], op.args[1]
-		// BySource for the same reason dep.add uses the bulk verb: the edge is
-		// removed from the plane its source lives in. A missing edge is not an
-		// error on either backend — the removal is idempotent, and a batch that
-		// re-runs must not roll back on an edge already gone. The
-		// dependency_removed event carries the same divergence, and the same
-		// reasoning, as the added one above.
-		if _, err := uw.DependencyUseCase().RemoveDependencyBySource(ctx, from, to, actorName); err != nil {
-			return result, err
-		}
-		result.Target = fmt.Sprintf("%s->%s", from, to)
-		return result, nil
+		},
 	}
-	return result, fmt.Errorf("internal: unhandled batch op %q", op.cmd)
+	created, err := uw.IssueUseCase().CreateIssue(ctx, domain.CreateIssueParams{Issue: issue}, getActor())
+	if err != nil {
+		return result, err
+	}
+	// The classic path reports the id the store minted into the caller's
+	// struct; the use case hands the same row back as a result.
+	if created.Issue != nil {
+		result.Target = created.Issue.ID
+	} else {
+		result.Target = issue.ID
+	}
+	return result, nil
+}
+
+func runBatchDepAddUOW(ctx context.Context, uw uow.UnitOfWork, op batchOp, result batchOpResult) (batchOpResult, error) {
+	if len(op.args) < 2 {
+		return result, fmt.Errorf("dep add requires <from-id> <to-id>")
+	}
+	from, to := op.args[0], op.args[1]
+	depType := "blocks"
+	if len(op.args) >= 3 {
+		depType = op.args[2]
+	}
+	dt := types.DependencyType(depType)
+	if !dt.IsValid() {
+		return result, fmt.Errorf("dep add: invalid dependency type %q", depType)
+	}
+	dep := &types.Dependency{
+		IssueID:     from,
+		DependsOnID: to,
+		Type:        dt,
+	}
+	// AddDependencies (not the single-edge AddDependency) because it lands
+	// each edge in the plane its own SOURCE lives in, which is the routing
+	// the classic transaction does from isActiveWisp. One edge is still one
+	// edge, and the per-edge cycle probe runs.
+	//
+	// KNOWN DIVERGENCE, in the HISTORY only: every domain edge verb records
+	// a dependency_added event, while the classic batch reaches
+	// storage.Transaction.AddDependency, whose zero DependencyAddOptions
+	// leaves EmitEvent false — the "structural, quiet" setting meant for
+	// create-with-deps and reparenting, not for a verb a user typed. So a
+	// batched `dep add` shows up in `bd history` here and does not there.
+	// The edge itself, its plane, its type and the cycle verdict are
+	// identical; `bd dep add` at the CLI emits the event on BOTH backends,
+	// which is why the classic batch's silence reads as the outlier.
+	// Silencing it here would need a quiet variant on the use case that
+	// nothing else wants, so this port takes the event and names it rather
+	// than growing the domain surface to reproduce an inconsistency.
+	if _, err := uw.DependencyUseCase().AddDependencies(ctx, []*types.Dependency{dep}, getActor(), domain.BulkAddDepsOpts{}); err != nil {
+		return result, err
+	}
+	result.Target = fmt.Sprintf("%s->%s", from, to)
+	return result, nil
+}
+
+func runBatchDepRemoveUOW(ctx context.Context, uw uow.UnitOfWork, op batchOp, result batchOpResult) (batchOpResult, error) {
+	if len(op.args) < 2 {
+		return result, fmt.Errorf("dep remove requires <from-id> <to-id>")
+	}
+	from, to := op.args[0], op.args[1]
+	// BySource for the same reason dep.add uses the bulk verb: the edge is
+	// removed from the plane its source lives in. A missing edge is not an
+	// error on either backend — the removal is idempotent, and a batch that
+	// re-runs must not roll back on an edge already gone. The
+	// dependency_removed event carries the same divergence, and the same
+	// reasoning, as the added one above.
+	if _, err := uw.DependencyUseCase().RemoveDependencyBySource(ctx, from, to, getActor()); err != nil {
+		return result, err
+	}
+	result.Target = fmt.Sprintf("%s->%s", from, to)
+	return result, nil
 }
 
 // batchResolveOpTarget resolves an id an op names to the row it is about and

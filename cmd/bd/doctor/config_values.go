@@ -146,27 +146,44 @@ func validateRoutingPaths(v *viper.Viper) []string {
 // validateRepoPaths validates repos.primary and repos.additional paths.
 func validateRepoPaths(v *viper.Viper) []string {
 	var issues []string
-	if v.IsSet("repos.primary") {
-		primary := v.GetString("repos.primary")
-		if primary != "" {
-			expandedPath := expandPath(primary)
-			if info, err := os.Stat(expandedPath); err == nil {
-				if !info.IsDir() {
-					issues = append(issues, fmt.Sprintf("repos.primary: %q is not a directory", primary))
-				}
-			} else if !os.IsNotExist(err) {
-				issues = append(issues, fmt.Sprintf("repos.primary: cannot access %q: %v", primary, err))
-			}
-		}
+	issues = append(issues, validatePrimaryRepoPath(v)...)
+	issues = append(issues, validateAdditionalRepoPaths(v)...)
+	return issues
+}
+
+func validatePrimaryRepoPath(v *viper.Viper) []string {
+	if !v.IsSet("repos.primary") {
+		return nil
 	}
-	if v.IsSet("repos.additional") {
-		for _, path := range v.GetStringSlice("repos.additional") {
-			if path != "" {
-				expandedPath := expandPath(path)
-				if info, err := os.Stat(expandedPath); err == nil && !info.IsDir() {
-					issues = append(issues, fmt.Sprintf("repos.additional: %q is not a directory", path))
-				}
-			}
+	primary := v.GetString("repos.primary")
+	if primary == "" {
+		return nil
+	}
+	info, err := os.Stat(expandPath(primary))
+	if err == nil {
+		if !info.IsDir() {
+			return []string{fmt.Sprintf("repos.primary: %q is not a directory", primary)}
+		}
+		return nil
+	}
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return []string{fmt.Sprintf("repos.primary: cannot access %q: %v", primary, err)}
+}
+
+func validateAdditionalRepoPaths(v *viper.Viper) []string {
+	if !v.IsSet("repos.additional") {
+		return nil
+	}
+	var issues []string
+	for _, path := range v.GetStringSlice("repos.additional") {
+		if path == "" {
+			continue
+		}
+		info, err := os.Stat(expandPath(path))
+		if err == nil && !info.IsDir() {
+			issues = append(issues, fmt.Sprintf("repos.additional: %q is not a directory", path))
 		}
 	}
 	return issues
@@ -174,125 +191,118 @@ func validateRepoPaths(v *viper.Viper) []string {
 
 // checkYAMLConfigValues validates values in config.yaml
 func checkYAMLConfigValues(repoPath string) []string {
-	var issues []string
-
 	configPath := findConfigPath(repoPath)
 	if configPath == "" {
-		return issues
+		return nil
 	}
-
 	v := viper.New()
 	v.SetConfigType("yaml")
 	v.SetConfigFile(configPath)
 	if err := v.ReadInConfig(); err != nil {
-		issues = append(issues, fmt.Sprintf("config.yaml: failed to parse: %v", err))
-		return issues
+		return []string{fmt.Sprintf("config.yaml: failed to parse: %v", err)}
 	}
-
-	// Validate issue-prefix (should be alphanumeric with dashes/underscores, reasonably short)
-	if v.IsSet("issue-prefix") {
-		prefix := v.GetString("issue-prefix")
-		if prefix != "" {
-			if len(prefix) > 20 {
-				issues = append(issues, fmt.Sprintf("issue-prefix: %q is too long (max 20 characters)", prefix))
-			}
-			if !regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`).MatchString(prefix) {
-				issues = append(issues, fmt.Sprintf("issue-prefix: %q is invalid (must start with letter, contain only letters, numbers, dashes, underscores)", prefix))
-			}
-		}
-	}
-
-	// Validate routing.mode (should be "auto", "maintainer", or "contributor")
-	if v.IsSet("routing.mode") {
-		mode := v.GetString("routing.mode")
-		if mode != "" && !validRoutingModes[mode] {
-			validModes := make([]string, 0, len(validRoutingModes))
-			for m := range validRoutingModes {
-				validModes = append(validModes, m)
-			}
-			issues = append(issues, fmt.Sprintf("routing.mode: %q is invalid (valid values: %s)", mode, strings.Join(validModes, ", ")))
-		}
-
-		// Validate routing + hydration consistency (bd-fix-routing)
-		// When routing.mode=auto with routing targets, those targets should be in repos.additional
-		// so routed issues are visible in bd list via multi-repo hydration
-		if mode == "auto" {
-			contributorRepo := v.GetString("routing.contributor")
-			maintainerRepo := v.GetString("routing.maintainer")
-
-			// Check if routing targets are configured (exclude "." which means current repo)
-			hasRoutingTargets := (contributorRepo != "" && contributorRepo != ".") || (maintainerRepo != "" && maintainerRepo != ".")
-
-			if hasRoutingTargets {
-				// Check if hydration is configured
-				additional := v.GetStringSlice("repos.additional")
-				hasHydration := len(additional) > 0
-
-				if !hasHydration {
-					issues = append(issues,
-						"routing.mode=auto with routing targets but repos.additional not configured. "+
-							"Issues created via routing will not be visible in bd list. "+
-							"Run 'bd repo add <routing-target>' to enable hydration.")
-				} else {
-					// Check if routing targets are in hydration list
-					additionalSet := make(map[string]bool)
-					for _, path := range additional {
-						additionalSet[expandPath(path)] = true
-					}
-
-					if contributorRepo != "" {
-						expandedContributor := expandPath(contributorRepo)
-						if !additionalSet[expandedContributor] {
-							issues = append(issues, fmt.Sprintf(
-								"routing.contributor=%q is not in repos.additional. "+
-									"Run 'bd repo add %s' to make routed issues visible.",
-								contributorRepo, contributorRepo))
-						}
-					}
-
-					if maintainerRepo != "" && maintainerRepo != "." {
-						expandedMaintainer := expandPath(maintainerRepo)
-						if !additionalSet[expandedMaintainer] {
-							issues = append(issues, fmt.Sprintf(
-								"routing.maintainer=%q is not in repos.additional. "+
-									"Run 'bd repo add %s' to make routed issues visible.",
-								maintainerRepo, maintainerRepo))
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// Validate routing paths exist if set
+	var issues []string
+	issues = append(issues, checkYAMLIssuePrefix(v)...)
+	issues = append(issues, checkYAMLRouting(v)...)
 	issues = append(issues, validateRoutingPaths(v)...)
+	issues = append(issues, checkYAMLActorAndDB(v)...)
+	issues = append(issues, validateBooleanConfigs(v, []string{"json", "no-db", "sync.require_confirmation_on_mass_delete"})...)
+	issues = append(issues, validateRepoPaths(v)...)
+	return issues
+}
 
-	// Validate actor (should be alphanumeric with common special chars if set)
+func checkYAMLIssuePrefix(v *viper.Viper) []string {
+	if !v.IsSet("issue-prefix") {
+		return nil
+	}
+	prefix := v.GetString("issue-prefix")
+	if prefix == "" {
+		return nil
+	}
+	var issues []string
+	if len(prefix) > 20 {
+		issues = append(issues, fmt.Sprintf("issue-prefix: %q is too long (max 20 characters)", prefix))
+	}
+	if !regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`).MatchString(prefix) {
+		issues = append(issues, fmt.Sprintf("issue-prefix: %q is invalid (must start with letter, contain only letters, numbers, dashes, underscores)", prefix))
+	}
+	return issues
+}
+
+func checkYAMLRouting(v *viper.Viper) []string {
+	if !v.IsSet("routing.mode") {
+		return nil
+	}
+	mode := v.GetString("routing.mode")
+	var issues []string
+	if mode != "" && !validRoutingModes[mode] {
+		validModes := make([]string, 0, len(validRoutingModes))
+		for m := range validRoutingModes {
+			validModes = append(validModes, m)
+		}
+		issues = append(issues, fmt.Sprintf("routing.mode: %q is invalid (valid values: %s)", mode, strings.Join(validModes, ", ")))
+	}
+	if mode == "auto" {
+		issues = append(issues, checkYAMLRoutingHydration(v)...)
+	}
+	return issues
+}
+
+func checkYAMLRoutingHydration(v *viper.Viper) []string {
+	// When routing.mode=auto with routing targets, those targets should be in repos.additional
+	// so routed issues are visible in bd list via multi-repo hydration (bd-fix-routing).
+	contributorRepo := v.GetString("routing.contributor")
+	maintainerRepo := v.GetString("routing.maintainer")
+	hasRoutingTargets := (contributorRepo != "" && contributorRepo != ".") || (maintainerRepo != "" && maintainerRepo != ".")
+	if !hasRoutingTargets {
+		return nil
+	}
+	additional := v.GetStringSlice("repos.additional")
+	if len(additional) == 0 {
+		return []string{
+			"routing.mode=auto with routing targets but repos.additional not configured. " +
+				"Issues created via routing will not be visible in bd list. " +
+				"Run 'bd repo add <routing-target>' to enable hydration.",
+		}
+	}
+	return checkYAMLRoutingTargetsHydrated(contributorRepo, maintainerRepo, additional)
+}
+
+func checkYAMLRoutingTargetsHydrated(contributorRepo, maintainerRepo string, additional []string) []string {
+	additionalSet := make(map[string]bool)
+	for _, path := range additional {
+		additionalSet[expandPath(path)] = true
+	}
+	var issues []string
+	if contributorRepo != "" && !additionalSet[expandPath(contributorRepo)] {
+		issues = append(issues, fmt.Sprintf(
+			"routing.contributor=%q is not in repos.additional. "+
+				"Run 'bd repo add %s' to make routed issues visible.",
+			contributorRepo, contributorRepo))
+	}
+	if maintainerRepo != "" && maintainerRepo != "." && !additionalSet[expandPath(maintainerRepo)] {
+		issues = append(issues, fmt.Sprintf(
+			"routing.maintainer=%q is not in repos.additional. "+
+				"Run 'bd repo add %s' to make routed issues visible.",
+			maintainerRepo, maintainerRepo))
+	}
+	return issues
+}
+
+func checkYAMLActorAndDB(v *viper.Viper) []string {
+	var issues []string
 	if v.IsSet("actor") {
 		actor := v.GetString("actor")
 		if actor != "" && !validActorRegex.MatchString(actor) {
 			issues = append(issues, fmt.Sprintf("actor: %q is invalid (must start with letter/number, contain only letters, numbers, dashes, underscores, dots, or @)", actor))
 		}
 	}
-
-	// Validate db path (should be a valid file path if set)
 	if v.IsSet("db") {
 		dbPath := v.GetString("db")
-		if dbPath != "" {
-			// Check for invalid path characters (null bytes, etc.)
-			if strings.ContainsAny(dbPath, "\x00") {
-				issues = append(issues, fmt.Sprintf("db: %q contains invalid characters", dbPath))
-			}
+		if dbPath != "" && strings.ContainsAny(dbPath, "\x00") {
+			issues = append(issues, fmt.Sprintf("db: %q contains invalid characters", dbPath))
 		}
 	}
-
-	// Validate boolean config values
-	boolKeys := []string{"json", "no-db", "sync.require_confirmation_on_mass_delete"}
-	issues = append(issues, validateBooleanConfigs(v, boolKeys)...)
-
-	// Validate repos paths
-	issues = append(issues, validateRepoPaths(v)...)
-
 	return issues
 }
 
@@ -320,58 +330,66 @@ func expandPath(path string) string {
 
 // checkMetadataConfigValues validates values in metadata.json
 func checkMetadataConfigValues(repoPath string) []string {
-	var issues []string
-
 	beadsDir := ResolveBeadsDirForRepo(repoPath)
 	cfg, err := configfile.Load(beadsDir)
 	if err != nil {
-		issues = append(issues, fmt.Sprintf("metadata.json: failed to load: %v", err))
-		return issues
+		return []string{fmt.Sprintf("metadata.json: failed to load: %v", err)}
 	}
-
 	if cfg == nil {
-		// No metadata.json, that's OK
+		return nil
+	}
+	var issues []string
+	issues = append(issues, checkMetadataDatabaseName(cfg)...)
+	issues = append(issues, checkMetadataDoltDatabase(cfg)...)
+	if cfg.DeletionsRetentionDays < 0 {
+		issues = append(issues, fmt.Sprintf("metadata.json deletions_retention_days: %d is invalid (must be >= 0)", cfg.DeletionsRetentionDays))
+	}
+	return issues
+}
+
+func checkMetadataDatabaseName(cfg *configfile.Config) []string {
+	if cfg.Database == "" {
+		return nil
+	}
+	var issues []string
+	if strings.Contains(cfg.Database, string(os.PathSeparator)) || strings.Contains(cfg.Database, "/") {
+		issues = append(issues, fmt.Sprintf("metadata.json database: %q should be a filename, not a path", cfg.Database))
+	}
+	if cfg.GetBackend() != configfile.BackendDolt {
 		return issues
 	}
+	return append(issues, checkMetadataDoltDatabaseFilename(cfg.Database)...)
+}
 
-	// Validate database filename
-	if cfg.Database != "" {
-		if strings.Contains(cfg.Database, string(os.PathSeparator)) || strings.Contains(cfg.Database, "/") {
-			issues = append(issues, fmt.Sprintf("metadata.json database: %q should be a filename, not a path", cfg.Database))
-		}
-		backend := cfg.GetBackend()
-		if backend == configfile.BackendDolt {
-			// Dolt is directory-backed; `database` should point to a directory (typically "dolt").
-			if strings.HasSuffix(cfg.Database, ".db") || strings.HasSuffix(cfg.Database, ".sqlite") || strings.HasSuffix(cfg.Database, ".sqlite3") {
-				issues = append(issues, fmt.Sprintf("metadata.json database: %q looks like a SQLite file, but backend is dolt (expected a directory like %q)", cfg.Database, "dolt"))
-			}
-			if cfg.Database == beads.CanonicalDatabaseName {
-				issues = append(issues, fmt.Sprintf("metadata.json database: %q is misleading for dolt backend (expected %q)", cfg.Database, "dolt"))
-			}
-		}
+func checkMetadataDoltDatabaseFilename(database string) []string {
+	var issues []string
+	// Dolt is directory-backed; `database` should point to a directory (typically "dolt").
+	if strings.HasSuffix(database, ".db") || strings.HasSuffix(database, ".sqlite") || strings.HasSuffix(database, ".sqlite3") {
+		issues = append(issues, fmt.Sprintf("metadata.json database: %q looks like a SQLite file, but backend is dolt (expected a directory like %q)", database, "dolt"))
 	}
+	if database == beads.CanonicalDatabaseName {
+		issues = append(issues, fmt.Sprintf("metadata.json database: %q is misleading for dolt backend (expected %q)", database, "dolt"))
+	}
+	return issues
+}
 
+func checkMetadataDoltDatabase(cfg *configfile.Config) []string {
 	// Validate dolt_database for embedded-mode compatibility (GH#3231).
 	// Hyphens and dots are allowed by server mode but rejected by the
 	// embedded Dolt engine because database names are interpolated into
 	// system variable identifiers (@@<db>_head_ref) where only
 	// [a-zA-Z_][a-zA-Z0-9_]* is valid.
-	if cfg.DoltDatabase != "" && !cfg.IsDoltServerMode() {
-		sanitized := strings.ReplaceAll(cfg.DoltDatabase, "-", "_")
-		sanitized = strings.ReplaceAll(sanitized, ".", "_")
-		if sanitized != cfg.DoltDatabase {
-			issues = append(issues, fmt.Sprintf(
-				"metadata.json dolt_database: %q contains characters invalid in embedded mode — "+
-					"replace with %q or set dolt_mode to \"server\" (GH#3231)", cfg.DoltDatabase, sanitized))
-		}
+	if cfg.DoltDatabase == "" || cfg.IsDoltServerMode() {
+		return nil
 	}
-
-	// Validate deletions_retention_days
-	if cfg.DeletionsRetentionDays < 0 {
-		issues = append(issues, fmt.Sprintf("metadata.json deletions_retention_days: %d is invalid (must be >= 0)", cfg.DeletionsRetentionDays))
+	sanitized := strings.ReplaceAll(cfg.DoltDatabase, "-", "_")
+	sanitized = strings.ReplaceAll(sanitized, ".", "_")
+	if sanitized == cfg.DoltDatabase {
+		return nil
 	}
-
-	return issues
+	return []string{fmt.Sprintf(
+		"metadata.json dolt_database: %q contains characters invalid in embedded mode — "+
+			"replace with %q or set dolt_mode to \"server\" (GH#3231)", cfg.DoltDatabase, sanitized)}
 }
 
 // checkDatabaseConfigValues validates configuration values stored in the database
@@ -417,7 +435,12 @@ func checkDatabaseConfigValues(repoPath string) []string {
 }
 
 func configValidationStoreOptions() *dolt.Config {
-	return &dolt.Config{ReadOnly: true, DisableAutoStart: true}
+	return &dolt.Config{
+		ReadOnly: true,
+		ServerOptions: dolt.ServerOptions{
+			DisableAutoStart: true,
+		},
+	}
 }
 
 func checkDatabaseConfigValuesWithStore(store *dolt.DoltStore) []string {

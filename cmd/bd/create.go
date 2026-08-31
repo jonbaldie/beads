@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,17 +12,12 @@ import (
 
 	"github.com/jonbaldie/beads/internal/config"
 	"github.com/jonbaldie/beads/internal/configfile"
-	"github.com/jonbaldie/beads/internal/debug"
-	"github.com/jonbaldie/beads/internal/metrics"
 	"github.com/jonbaldie/beads/internal/remotecache"
 	"github.com/jonbaldie/beads/internal/routing"
 	"github.com/jonbaldie/beads/internal/storage"
 	"github.com/jonbaldie/beads/internal/storage/dolt"
-	"github.com/jonbaldie/beads/internal/timeparsing"
 	"github.com/jonbaldie/beads/internal/types"
 	"github.com/jonbaldie/beads/internal/ui"
-	"github.com/jonbaldie/beads/internal/validation"
-	"github.com/jonbaldie/beads/issueops"
 	"github.com/spf13/cobra"
 )
 
@@ -50,641 +44,58 @@ var createCmd = &cobra.Command{
 	Args:          cobra.MatchAll(cobra.MaximumNArgs(1), validateCreateArgs),
 	SilenceUsage:  true,
 	SilenceErrors: true,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		CheckReadonly("create")
-
-		evt := metrics.NewCommandEvent("create")
-		defer func() {
-			if c := metrics.Global(); c != nil {
-				c.CloseEventAndAdd(evt)
-			}
-		}()
-
-		if usesProxiedServer() {
-			in, err := gatherCreateInput(cmd, args)
-			if err != nil {
-				return err
-			}
-			return runCreateProxiedServer(cmd, rootCtx, in)
-		}
-		file, _ := cmd.Flags().GetString("file")
-		graphFile, _ := cmd.Flags().GetString("graph")
-
-		if file != "" {
-			// gatherCreateInput repeats the --file argument checks and applies
-			// the plan-wide flags this route used to accept and ignore
-			// (--ephemeral, --no-history, --mol-type, --validate). It is the
-			// same input the proxied route reads, which is what lets both build
-			// one issueops.CreateBatchRequest.
-			in, err := gatherCreateInput(cmd, args)
-			if err != nil {
-				return err
-			}
-			return createIssuesFromMarkdown(rootCtx, in)
-		}
-
-		if graphFile != "" {
-			if len(args) > 0 {
-				return HandleError("cannot specify both title and --graph flag")
-			}
-			graphDryRun, _ := cmd.Flags().GetBool("dry-run")
-			graphOpts := graphApplyOptionsFromFlags(cmd)
-			if err := graphOpts.Validate(); err != nil {
-				return HandleError("invalid graph options: %v", err)
-			}
-			if err := rejectSingleIssueFlagsForGraph(cmd); err != nil {
-				return err
-			}
-			return createIssuesFromGraph(graphFile, graphDryRun, graphOpts)
-		}
-
-		titleFlag, _ := cmd.Flags().GetString("title")
-		title, err := resolveTitle(args, titleFlag, "", "")
-		if err != nil {
-			return err
-		}
-
-		// Get silent flag
-		silent, _ := cmd.Flags().GetBool("silent")
-
-		// Warn if creating a test issue in a database with existing issues.
-		// A brand-new repo with zero issues is not a "production database" (#2898).
-		// store is nil here for `create --repo=<remote URL>` from a directory with
-		// no local .beads/: PersistentPreRunE skips local store init entirely for
-		// that path, so this check is best-effort only.
-		if store != nil && isTestIssue(title) && !silent && !debug.IsQuiet() {
-			if stats, err := store.GetStatistics(context.Background()); err == nil && stats != nil && stats.TotalIssues >= 5 {
-				fmt.Fprintf(os.Stderr, "%s Creating test issue in production database\n", ui.RenderWarn("⚠"))
-				fmt.Fprintf(os.Stderr, "  Title: %q appears to be test data\n", title)
-				fmt.Fprintf(os.Stderr, "  Recommendation: Use isolated test database with --db\n")
-				fmt.Fprintf(os.Stderr, "    bd --db /tmp/test-beads create %q\n", title)
-			}
-		}
-
-		description, descriptionChanged, err := getDescriptionFlag(cmd)
-		if err != nil {
-			return err
-		}
-		if err := validateDescriptionUpdate(cmd, description, descriptionChanged); err != nil {
-			return HandleError("%v", err)
-		}
-
-		skills, _ := cmd.Flags().GetString("skills")
-		if skills != "" {
-			if description != "" {
-				description += "\n\n"
-			}
-			description += "## Required Skills\n" + skills
-		}
-
-		ctxStr, _ := cmd.Flags().GetString("context")
-		if ctxStr != "" {
-			if description != "" {
-				description += "\n\n"
-			}
-			description += "## Context\n" + ctxStr
-		}
-
-		if description == "" && !isTestIssue(title) {
-			if config.GetBool("create.require-description") {
-				return HandleError("description is required (set create.require-description: false in config.yaml to disable)")
-			}
-		}
-
-		design, _, err := getDesignFlag(cmd)
-		if err != nil {
-			return err
-		}
-		acceptance, _ := cmd.Flags().GetString("acceptance")
-		notes, _ := cmd.Flags().GetString("notes")
-		specID, _ := cmd.Flags().GetString("spec-id")
-
-		priorityStr, _ := cmd.Flags().GetString("priority")
-		priority, err := validation.ValidatePriority(priorityStr)
-		if err != nil {
-			return HandleError("%v", err)
-		}
-
-		issueType, _ := cmd.Flags().GetString("type")
-		assignee, _ := cmd.Flags().GetString("assignee")
-		statusFlag, _ := cmd.Flags().GetString("status")
-		if statusFlag != "" {
-			if !types.Status(statusFlag).IsValidWithCustom(loadEmbeddedCustomStatuses()) {
-				return HandleErrorRespectJSON("invalid status %q (built-in: open, in_progress, blocked, deferred, closed, pinned, hooked; or configure custom statuses via 'bd config set status.custom')", statusFlag)
-			}
-		}
-
-		labels, _ := cmd.Flags().GetStringSlice("labels")
-		labelAlias, _ := cmd.Flags().GetStringSlice("label")
-		if len(labelAlias) > 0 {
-			labels = append(labels, labelAlias...)
-		}
-
-		explicitID, _ := cmd.Flags().GetString("id")
-		parentID, _ := cmd.Flags().GetString("parent")
-		externalRef, _ := cmd.Flags().GetString("external-ref")
-		deps, _ := cmd.Flags().GetStringSlice("deps")
-		waitsFor, _ := cmd.Flags().GetString("waits-for")
-		waitsForGate, _ := cmd.Flags().GetString("waits-for-gate")
-		forceCreate, _ := cmd.Flags().GetBool("force")
-		repoOverride, _ := cmd.Flags().GetString("repo")
-		wisp, _ := cmd.Flags().GetBool("ephemeral")
-		noHistory, _ := cmd.Flags().GetBool("no-history")
-		if wisp && noHistory {
-			return HandleError("--ephemeral and --no-history are mutually exclusive")
-		}
-		storageClassFlag, _ := cmd.Flags().GetString("storage-class")
-		storageClass, err := resolveStorageClass(storageClassFlag, types.IssueType(issueType).Normalize())
-		if err != nil {
-			return HandleError("%v", err)
-		}
-		// --storage-class ephemeral is the spelled-out spelling of --ephemeral
-		// (Protocol v0.1 C1.4: the wisp plane is today's ephemeral-class
-		// implementation). It routes to the wisp path exactly like the flag;
-		// the --no-history mutual exclusion above still applies.
-		if storageClass == types.StorageClassEphemeral {
-			if noHistory {
-				return HandleError("--storage-class ephemeral and --no-history are mutually exclusive")
-			}
-			wisp = true
-			storageClass = "" // wisp-plane rows derive ephemeral class (C1.2); no marker cell needed
-		}
-		molTypeStr, _ := cmd.Flags().GetString("mol-type")
-		var molType types.MolType
-		if molTypeStr != "" {
-			molType = types.MolType(molTypeStr)
-			if !molType.IsValid() {
-				return HandleError("invalid mol-type %q (must be swarm, patrol, or work)", molTypeStr)
-			}
-		}
-
-		wispTypeStr, _ := cmd.Flags().GetString("wisp-type")
-		var wispType types.WispType
-		if wispTypeStr != "" {
-			wispType = types.WispType(wispTypeStr)
-			if !wispType.IsValid() {
-				return HandleError("invalid wisp-type %q (must be heartbeat, ping, patrol, gc_report, recovery, error, or escalation)", wispTypeStr)
-			}
-		}
-
-		eventCategory, _ := cmd.Flags().GetString("event-category")
-		eventActor, _ := cmd.Flags().GetString("event-actor")
-		eventTarget, _ := cmd.Flags().GetString("event-target")
-		eventPayload, _ := cmd.Flags().GetString("event-payload")
-
-		if (eventCategory != "" || eventActor != "" || eventTarget != "" || eventPayload != "") && issueType != "event" {
-			return HandleError("--event-category, --event-actor, --event-target, and --event-payload flags require --type=event")
-		}
-
-		var dueAt *time.Time
-		dueStr, _ := cmd.Flags().GetString("due")
-		if dueStr != "" {
-			t, err := timeparsing.ParseRelativeTime(dueStr, time.Now())
-			if err != nil {
-				return HandleError("invalid --due format %q. Examples: +6h, tomorrow, next monday, 2025-01-15", dueStr)
-			}
-			dueAt = &t
-		}
-
-		var deferUntil *time.Time
-		deferStr, _ := cmd.Flags().GetString("defer")
-		if deferStr != "" {
-			t, err := timeparsing.ParseRelativeTime(deferStr, time.Now())
-			if err != nil {
-				return HandleError("invalid --defer format %q. Examples: +1h, tomorrow, next monday, 2025-01-15", deferStr)
-			}
-			// Warn if defer date is in the past (user probably meant future)
-			if t.Before(time.Now()) && !silent && !debug.IsQuiet() {
-				fmt.Fprintf(os.Stderr, "%s Defer date %q is in the past. Issue will appear in bd ready immediately.\n",
-					ui.RenderWarn("!"), t.Local().Format("2006-01-02 15:04"))
-				fmt.Fprintf(os.Stderr, "  Did you mean a future date? Use --defer=+1h or --defer=tomorrow\n")
-			}
-			deferUntil = &t
-		}
-
-		var metadata json.RawMessage
-		if cmd.Flags().Changed("metadata") {
-			metadataValue, _ := cmd.Flags().GetString("metadata")
-			var metadataJSON string
-			if strings.HasPrefix(metadataValue, "@") {
-				filePath := metadataValue[1:]
-				// #nosec G304 -- user explicitly provides file path via @file.json syntax
-				data, err := os.ReadFile(filePath)
-				if err != nil {
-					return HandleError("failed to read metadata file %s: %v", filePath, err)
-				}
-				metadataJSON = string(data)
-			} else {
-				metadataJSON = metadataValue
-			}
-			if !json.Valid([]byte(metadataJSON)) {
-				return HandleError("invalid JSON in --metadata: must be valid JSON")
-			}
-			metadata = json.RawMessage(metadataJSON)
-		}
-
-		validateTemplate, _ := cmd.Flags().GetBool("validate")
-		validationMode := config.GetString("validation.on-create")
-		if validateTemplate || validationMode == "error" || validationMode == "warn" {
-			lintIssue := &types.Issue{
-				IssueType:          types.IssueType(issueType).Normalize(),
-				Description:        description,
-				AcceptanceCriteria: acceptance,
-			}
-			if err := validation.LintIssue(lintIssue); err != nil {
-				if validateTemplate || validationMode == "error" {
-					return HandleError("%v", err)
-				}
-				fmt.Fprintf(os.Stderr, "%s %v\n", ui.RenderWarn("⚠"), err)
-			}
-		}
-
-		dryRun, _ := cmd.Flags().GetBool("dry-run")
-
-		var estimatedMinutes *int
-		if cmd.Flags().Changed("estimate") {
-			est, _ := cmd.Flags().GetInt("estimate")
-			if est < 0 {
-				return HandleError("estimate must be a non-negative number of minutes")
-			}
-			estimatedMinutes = &est
-		}
-
-		// Use global jsonOutput set by PersistentPreRun
-
-		// Determine target repository using routing logic
-		repoPath := "." // default to current directory
-		if cmd.Flags().Changed("repo") {
-			// Explicit --repo flag overrides auto-routing
-			repoPath = repoOverride
-		} else {
-			// Auto-routing based on user role
-			userRole, err := routing.DetectUserRole(".")
-			if err != nil {
-				debug.Logf("Warning: failed to detect user role: %v\n", err)
-			}
-
-			// Build routing config with backward compatibility for legacy contributor.* keys.
-			// Prefer config.yaml values, but fall back to DB config values set by bd init --contributor.
-			routingMode := getRoutingConfigValue(rootCtx, store, "routing.mode")
-			contributorRepo := getRoutingConfigValue(rootCtx, store, "routing.contributor")
-
-			// NFR-001: Backward compatibility - fall back to legacy contributor.* keys
-			if routingMode == "" {
-				if getRoutingConfigValue(rootCtx, store, "contributor.auto_route") == "true" {
-					routingMode = "auto"
-				}
-			}
-			if contributorRepo == "" {
-				contributorRepo = getRoutingConfigValue(rootCtx, store, "contributor.planning_repo")
-			}
-
-			routingConfig := &routing.RoutingConfig{
-				Mode:             routingMode,
-				DefaultRepo:      getRoutingConfigValue(rootCtx, store, "routing.default"),
-				MaintainerRepo:   getRoutingConfigValue(rootCtx, store, "routing.maintainer"),
-				ContributorRepo:  contributorRepo,
-				ExplicitOverride: repoOverride,
-			}
-
-			repoPath = routing.DetermineTargetRepo(routingConfig, userRole, ".")
-		}
-
-		renderDryRun := func() error {
-			previewIssue := buildCreateIssue(createIssueParams{
-				ID:                 explicitID,
-				Title:              title,
-				Description:        description,
-				Design:             design,
-				AcceptanceCriteria: acceptance,
-				Notes:              notes,
-				SpecID:             specID,
-				Priority:           priority,
-				IssueType:          types.IssueType(issueType).Normalize(),
-				Assignee:           assignee,
-				ExternalRef:        externalRef,
-				EstimatedMinutes:   estimatedMinutes,
-				Ephemeral:          wisp,
-				NoHistory:          noHistory,
-				StorageClass:       storageClass,
-				CreatedBy:          getActorWithGit(),
-				Owner:              getOwner(),
-				Labels:             labels,
-				MolType:            molType,
-				WispType:           wispType,
-				InitialStatus:      statusFlag,
-				DueAt:              dueAt,
-				DeferUntil:         deferUntil,
-				Metadata:           metadata,
-				EventKind:          eventCategory,
-				Actor:              eventActor,
-				Target:             eventTarget,
-				Payload:            eventPayload,
-			})
-
-			if jsonOutput {
-				return outputJSON(previewIssue)
-			}
-			renderCreateDryRunPreview(previewIssue, labels, deps)
-			return nil
-		}
-
-		if dryRun && parentID == "" {
-			return renderDryRun()
-		}
-
-		var targetStore storage.DoltStorage
-		var remoteCache *remotecache.Cache
-		if !dryRun && repoPath != "." {
-			if remotecache.IsRemoteURL(repoPath) {
-				var err error
-				remoteCache, err = remotecache.DefaultCache()
-				if err != nil {
-					return HandleError("failed to initialize remote cache: %v", err)
-				}
-				if _, err := remoteCache.Ensure(rootCtx, repoPath); err != nil {
-					return HandleError("failed to sync remote %s: %v", repoPath, err)
-				}
-				targetStore, err = remoteCache.OpenStore(rootCtx, repoPath, newDoltStoreFromConfig)
-				if err != nil {
-					return HandleError("failed to open remote store: %v", err)
-				}
-			} else {
-				targetBeadsDir := routing.ExpandPath(repoPath)
-				debug.Logf("DEBUG: Routing to target repo: %s\n", targetBeadsDir)
-
-				if err := ensureBeadsDirForPath(rootCtx, targetBeadsDir, store); err != nil {
-					return HandleError("failed to initialize target repo: %v", err)
-				}
-
-				targetBeadsDirPath := filepath.Join(targetBeadsDir, ".beads")
-				var err error
-				targetStore, err = newDoltStoreFromConfig(rootCtx, targetBeadsDirPath)
-				if err != nil {
-					return HandleError("failed to open target store: %v", err)
-				}
-			}
-
-			// Close the original store before replacing it (it won't be used anymore)
-			// Note: We don't defer-close targetStore here because PersistentPostRun
-			// will close whatever store is assigned to the global `store` variable.
-			// This fixes the "database is closed" error during auto-flush (GH#routing-close-bug).
-			if store != nil {
-				_ = store.Close() // Best effort cleanup on error path
-			}
-
-			// Replace store for remainder of create operation.
-			// Must use setStore to sync cmdCtx.Store — a bare `store = targetStore`
-			// leaves cmdCtx.Store pointing at the closed original, which causes
-			// "store is closed" in PostRun tip auto-commit (GH#tip-closed-bug).
-			setStore(targetStore)
-		}
-
-		if explicitID != "" && parentID != "" {
-			return HandleError("cannot specify both --id and --parent flags")
-		}
-
-		parentLookupStore := store
-		if dryRun && repoPath != "." {
-			var err error
-			parentLookupStore, err = openDryRunTargetStore(rootCtx, repoPath)
-			if err != nil {
-				return HandleError("%v", err)
-			}
-			defer func() { _ = parentLookupStore.Close() }()
-		}
-
-		var inheritedLabels []string
-		if parentID != "" {
-			ctx := rootCtx
-			_, err := parentLookupStore.GetIssue(ctx, parentID)
-			if err != nil {
-				if errors.Is(err, storage.ErrNotFound) {
-					return HandleError("parent issue %s not found", parentID)
-				}
-				return HandleError("failed to check parent issue: %v", err)
-			}
-
-			noInheritLabels, _ := cmd.Flags().GetBool("no-inherit-labels")
-			if !noInheritLabels {
-				inheritedLabels, _ = parentLookupStore.GetLabels(ctx, parentID)
-			}
-		}
-
-		labels = mergeCreateLabels(labels, inheritedLabels)
-
-		if dryRun {
-			return renderDryRun()
-		}
-
-		// Parse every requested dependency edge BEFORE reserving a child ID
-		// or creating anything so a malformed spec aborts with no burned
-		// child ID and no orphan issue behind it.
-		depSpecs, err := parseDepSpecs(deps)
-		if err != nil {
-			return HandleErrorRespectJSON("%v", err)
-		}
-		waitsForSpec, err := buildWaitsFor(waitsFor, waitsForGate, cmd.Flags().Changed("waits-for-gate"))
-		if err != nil {
-			return HandleError("%v", err)
-		}
-
-		createCtx := rootCtx
-		if parentID != "" {
-			childID, err := store.GetNextChildID(rootCtx, parentID)
-			if err != nil {
-				return HandleError("%v", err)
-			}
-			explicitID = childID
-			createCtx = storage.WithReservedChildCounter(createCtx, parentID, childID)
-		}
-
-		if explicitID != "" {
-			_, err := validation.ValidateIDFormat(explicitID)
-			if err != nil {
-				return HandleError("%v", err)
-			}
-
-			// Validate prefix matches database prefix (YAML config takes
-			// precedence over DB, except under --global — see
-			// loadEmbeddedIDPrefixes).
-			dbPrefix, allowedPrefixes := loadEmbeddedIDPrefixes()
-
-			if err := validation.ValidateIDPrefixAllowed(explicitID, dbPrefix, allowedPrefixes, forceCreate); err != nil {
-				return HandleError("%v", err)
-			}
-		}
-
-		issue := buildCreateIssue(createIssueParams{
-			ID:                 explicitID,
-			Title:              title,
-			Description:        description,
-			Design:             design,
-			AcceptanceCriteria: acceptance,
-			Notes:              notes,
-			SpecID:             specID,
-			Priority:           priority,
-			IssueType:          types.IssueType(issueType).Normalize(),
-			Assignee:           assignee,
-			ExternalRef:        externalRef,
-			EstimatedMinutes:   estimatedMinutes,
-			Ephemeral:          wisp,
-			NoHistory:          noHistory,
-			StorageClass:       storageClass,
-			CreatedBy:          getActorWithGit(),
-			Owner:              getOwner(),
-			Labels:             labels,
-			MolType:            molType,
-			WispType:           wispType,
-			EventKind:          eventCategory,
-			Actor:              eventActor,
-			Target:             eventTarget,
-			Payload:            eventPayload,
-			InitialStatus:      statusFlag,
-			DueAt:              dueAt,
-			DeferUntil:         deferUntil,
-			Metadata:           metadata,
-		})
-
-		ctx := createCtx
-
-		// Resolve partial --deps targets the way `bd dep add` does, so a bare
-		// slug becomes a qualified id rather than a dangling edge, and an
-		// unknown target fails closed here instead of reaching the write.
-		resolvedDepSpecs, resolveErr := resolveDepSpecTargets(ctx, store, depSpecs)
-		if resolveErr != nil {
-			return HandleErrorRespectJSON("%v", resolveErr)
-		}
-		depSpecs = resolvedDepSpecs
-
-		// If a discovered-from dependency is present, inherit source_repo
-		// from the referenced parent issue. Reuse the already-parsed specs
-		// (not the raw --deps strings) so this can't drift from parseDepSpec's
-		// normalization rules.
-		if dfParent := discoveredFromParentSpec(depSpecs); dfParent != "" {
-			parentIssue, err := store.GetIssue(ctx, dfParent)
-			if err == nil && parentIssue.SourceRepo != "" {
-				issue.SourceRepo = parentIssue.SourceRepo
-			}
-			// If error getting parent or parent has no source_repo, continue with default
-		}
-
-		ops, err := writeOps(store)
-		if err != nil {
-			return HandleErrorRespectJSON("%v", err)
-		}
-		opsCtx, err := issueOpsContext(ctx)
-		if err != nil {
-			return HandleErrorRespectJSON("%v", err)
-		}
-		// Label inheritance stays CLI-side (mergeCreateLabels above) because the
-		// dry-run preview needs it too; asking the facade to inherit as well
-		// would append the parent's labels a second time.
-		result, err := ops.Create(opsCtx, issueops.CreateRequest{
-			Actor:         actor,
-			Issue:         issue,
-			ParentID:      parentID,
-			Dependencies:  createDependencyRequests(depSpecs),
-			WaitsFor:      waitsForRequest(waitsForSpec),
-			ForceIDPrefix: forceCreate,
-			IDPrefix:      createIDPrefixOverride(),
-		})
-		if err != nil {
-			// RULING R1: an occupied --id is a refusal, not a silent full-row
-			// upsert reported as success.
-			if errors.Is(err, storage.ErrAlreadyExists) && explicitID != "" {
-				return HandleErrorRespectJSON("%s already exists; use bd update, or bd import for upsert semantics", explicitID)
-			}
-			return HandleErrorRespectJSON("%v", err)
-		}
-		// Every post-write read comes from the facade's result snapshot, never
-		// from the local struct: the facade clones its request, so the local
-		// struct still has no ID for an auto-minted create and no persisted
-		// timestamps. Dependencies and comments are dropped because `bd create`
-		// has never printed them.
-		created := result.Issue
-		created.Dependencies = nil
-		created.Comments = nil
-
-		edges := createDepEdges{parentID: parentID, specs: depSpecs, waitsFor: waitsForSpec}
-		if edges.empty() {
-			// Bare create: preserve the embedded-mode follow-up Dolt commit.
-			// The deps path commits inside its transaction instead.
-			shouldCommit, err := shouldCommitCreatePostWrites(created, false)
-			if err != nil {
-				return HandleError("dolt auto-commit failed: %v", err)
-			}
-			if shouldCommit {
-				commitMsg := fmt.Sprintf("bd: create %s", created.ID)
-				if err := store.Commit(ctx, commitMsg); err != nil && !isDoltNothingToCommit(err) {
-					WarnError("failed to commit: %v", err)
-				}
-			}
-		}
-
-		if repoPath != "." && targetStore != nil {
-			if err := commitPendingIfEmbedded(ctx, targetStore, actor, doltAutoCommitParams{
-				Command:  "create",
-				IssueIDs: []string{created.ID},
-			}); err != nil {
-				debug.Logf("warning: failed to commit routed repo: %v", err)
-			}
-		}
-
-		if remoteCache != nil {
-			if pushErr := remoteCache.Push(rootCtx, repoPath); pushErr != nil {
-				return HandleError("failed to push to %s: %v\nThe issue was created locally but not synced to the remote.", repoPath, pushErr)
-			}
-		}
-
-		if jsonOutput {
-			if err := outputJSON(created); err != nil {
-				return err
-			}
-		} else if silent {
-			fmt.Println(created.ID)
-		} else {
-			debug.PrintNormal("%s Created issue: %s\n", ui.RenderPass("✓"), formatFeedbackID(created.ID, created.Title))
-			debug.PrintNormal("  Priority: P%d\n", created.Priority)
-			debug.PrintNormal("  Status: %s\n", created.Status)
-
-			maybeShowTip(store)
-		}
-
-		SetLastTouchedID(created.ID)
-		return nil
-	},
+	RunE:          runCreate,
 }
 
-type createIssueParams struct {
-	ID                 string
-	Title              string
+type createIssueIdentity struct {
+	ID          string
+	Title       string
+	SpecID      string
+	Assignee    string
+	ExternalRef string
+	CreatedBy   string
+	Owner       string
+}
+
+type createIssueBody struct {
 	Description        string
 	Design             string
 	AcceptanceCriteria string
 	Notes              string
-	SpecID             string
-	Priority           int
-	IssueType          types.IssueType
-	Assignee           string
-	ExternalRef        string
-	EstimatedMinutes   *int
-	Ephemeral          bool
-	NoHistory          bool
-	StorageClass       types.StorageClass
-	CreatedBy          string
-	Owner              string
 	Labels             []string
-	MolType            types.MolType
-	WispType           types.WispType
-	EventKind          string
-	Actor              string
-	Target             string
-	Payload            string
-	InitialStatus      string
-	DueAt              *time.Time
-	DeferUntil         *time.Time
 	Metadata           json.RawMessage
+}
+
+type createIssueClass struct {
+	Priority      int
+	IssueType     types.IssueType
+	Ephemeral     bool
+	NoHistory     bool
+	StorageClass  types.StorageClass
+	MolType       types.MolType
+	WispType      types.WispType
+	InitialStatus string
+}
+
+type createIssueSchedule struct {
+	EstimatedMinutes *int
+	DueAt            *time.Time
+	DeferUntil       *time.Time
+}
+
+type createIssueEvent struct {
+	EventKind string
+	Actor     string
+	Target    string
+	Payload   string
+}
+
+type createIssueParams struct {
+	ident    createIssueIdentity
+	body     createIssueBody
+	class    createIssueClass
+	schedule createIssueSchedule
+	event    createIssueEvent
 }
 
 // resolveStorageClass resolves the effective storage class at create time
@@ -717,46 +128,66 @@ func resolveStorageClass(explicit string, issueType types.IssueType) (types.Stor
 
 func buildCreateIssue(params createIssueParams) *types.Issue {
 	var externalRefPtr *string
-	if params.ExternalRef != "" {
-		externalRefPtr = &params.ExternalRef
+	if params.ident.ExternalRef != "" {
+		externalRefPtr = &params.ident.ExternalRef
 	}
 
 	status := types.StatusOpen
-	if params.InitialStatus != "" {
-		status = types.Status(params.InitialStatus)
-	} else if params.DeferUntil != nil && params.DeferUntil.After(time.Now()) {
+	if params.class.InitialStatus != "" {
+		status = types.Status(params.class.InitialStatus)
+	} else if params.schedule.DeferUntil != nil && params.schedule.DeferUntil.After(time.Now()) {
 		status = types.StatusDeferred
 	}
 
 	return &types.Issue{
-		ID:                 params.ID,
-		Title:              params.Title,
-		Description:        params.Description,
-		Design:             params.Design,
-		AcceptanceCriteria: params.AcceptanceCriteria,
-		Notes:              params.Notes,
-		SpecID:             params.SpecID,
-		Status:             status,
-		Priority:           params.Priority,
-		IssueType:          params.IssueType,
-		Assignee:           params.Assignee,
-		ExternalRef:        externalRefPtr,
-		EstimatedMinutes:   params.EstimatedMinutes,
-		Ephemeral:          params.Ephemeral,
-		NoHistory:          params.NoHistory,
-		StorageClass:       params.StorageClass,
-		CreatedBy:          params.CreatedBy,
-		Owner:              params.Owner,
-		Labels:             append([]string(nil), params.Labels...),
-		MolType:            params.MolType,
-		WispType:           params.WispType,
-		EventKind:          params.EventKind,
-		Actor:              params.Actor,
-		Target:             params.Target,
-		Payload:            params.Payload,
-		DueAt:              params.DueAt,
-		DeferUntil:         params.DeferUntil,
-		Metadata:           params.Metadata,
+		IssueID: types.IssueID{
+			ID: params.ident.ID,
+		},
+		IssueContent: types.IssueContent{
+			Title:              params.ident.Title,
+			Description:        params.body.Description,
+			Design:             params.body.Design,
+			AcceptanceCriteria: params.body.AcceptanceCriteria,
+			Notes:              params.body.Notes,
+			SpecID:             params.ident.SpecID,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:           status,
+			Priority:         params.class.Priority,
+			IssueType:        params.class.IssueType,
+			Assignee:         params.ident.Assignee,
+			EstimatedMinutes: params.schedule.EstimatedMinutes,
+			Owner:            params.ident.Owner,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedBy: params.ident.CreatedBy,
+		},
+		IssueLease: types.IssueLease{
+			DueAt:      params.schedule.DueAt,
+			DeferUntil: params.schedule.DeferUntil,
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: externalRefPtr,
+			Metadata:    params.body.Metadata,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: append([]string(nil), params.body.Labels...),
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral:    params.class.Ephemeral,
+			NoHistory:    params.class.NoHistory,
+			StorageClass: params.class.StorageClass,
+			WispType:     params.class.WispType,
+		},
+		IssueCoord: types.IssueCoord{
+			MolType: params.class.MolType,
+		},
+		IssueEvent: types.IssueEvent{
+			EventKind: params.event.EventKind,
+			Actor:     params.event.Actor,
+			Target:    params.event.Target,
+			Payload:   params.event.Payload,
+		},
 	}
 }
 
@@ -793,7 +224,7 @@ func mergeCreateLabels(labels, inheritedLabels []string) []string {
 // as CreateRequest.IDPrefix. Empty means "the substrate's prefix is right",
 // which is the ordinary case.
 func createIDPrefixOverride() string {
-	if globalFlag {
+	if isGlobalFlag() {
 		return ""
 	}
 	return overlayYAMLPrefix("")
@@ -959,57 +390,60 @@ func openDryRunTargetStore(ctx context.Context, repoPath string) (storage.DoltSt
 func ensureBeadsDirForPath(ctx context.Context, targetPath string, sourceStore storage.DoltStorage) error {
 	beadsDir := filepath.Join(targetPath, ".beads")
 	metadataPath := filepath.Join(beadsDir, "metadata.json")
-
 	// Check if beads directory already exists with a Dolt database.
 	// metadata.json is the canonical marker for an initialized beads dir.
 	if _, err := os.Stat(metadataPath); err == nil {
 		return nil
 	}
-
-	// Create .beads directory
 	if err := os.MkdirAll(beadsDir, 0750); err != nil {
 		return fmt.Errorf("cannot create .beads directory: %w", err)
 	}
+	return inheritPrefixIntoBeadsDir(ctx, beadsDir, sourceStore)
+}
 
-	// Initialize database via NewFromConfigWithOptions to respect Dolt config.
-	// Set the prefix if source store has one (T012: prefix inheritance).
-	if sourceStore != nil {
-		sourcePrefix, err := sourceStore.GetConfig(ctx, "issue_prefix")
-		if err == nil && sourcePrefix != "" {
-			// Sanitize prefix for SQL database name (same as bd init).
-			dbName := strings.ReplaceAll(sourcePrefix, "-", "_")
-
-			// Open target store temporarily to set prefix.
-			// Use newDoltStore with explicit config since the target .beads
-			// directory was just created and has no metadata.json yet.
-			tempStore, err := newDoltStore(ctx, &dolt.Config{
-				BeadsDir:        beadsDir,
-				Database:        dbName,
-				CreateIfMissing: true,
-			})
-			if err != nil {
-				return fmt.Errorf("failed to initialize target database: %w", err)
-			}
-			if err := tempStore.SetConfig(ctx, "issue_prefix", sourcePrefix); err != nil {
-				_ = tempStore.Close() // Best effort cleanup on error path
-				return fmt.Errorf("failed to set prefix in target store: %w", err)
-			}
-			if err := tempStore.Close(); err != nil {
-				return fmt.Errorf("failed to close target store: %w", err)
-			}
-
-			// Write metadata.json so newDoltStoreFromConfig can find the
-			// correct database name on subsequent opens (GH#2988).
-			cfg := configfile.DefaultConfig()
-			cfg.Backend = configfile.BackendDolt
-			cfg.DoltDatabase = dbName
-			cfg.DoltMode = configfile.DoltModeEmbedded
-			cfg.ProjectID = configfile.GenerateProjectID()
-			if err := cfg.Save(beadsDir); err != nil {
-				return fmt.Errorf("failed to write metadata.json: %w", err)
-			}
-		}
+func inheritPrefixIntoBeadsDir(ctx context.Context, beadsDir string, sourceStore storage.DoltStorage) error {
+	if sourceStore == nil {
+		return nil
 	}
+	sourcePrefix, err := sourceStore.GetConfig(ctx, "issue_prefix")
+	if err != nil || sourcePrefix == "" {
+		return nil
+	}
+	// Sanitize prefix for SQL database name (same as bd init).
+	dbName := strings.ReplaceAll(sourcePrefix, "-", "_")
+	// Open target store temporarily to set prefix.
+	// Use newDoltStore with explicit config since the target .beads
+	// directory was just created and has no metadata.json yet.
+	tempStore, err := newDoltStore(ctx, &dolt.Config{
+		BeadsDir: beadsDir,
+		Database: dbName,
+		RemoteOptions: dolt.RemoteOptions{
+			CreateIfMissing: true,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to initialize target database: %w", err)
+	}
+	if err := tempStore.SetConfig(ctx, "issue_prefix", sourcePrefix); err != nil {
+		_ = tempStore.Close() // Best effort cleanup on error path
+		return fmt.Errorf("failed to set prefix in target store: %w", err)
+	}
+	if err := tempStore.Close(); err != nil {
+		return fmt.Errorf("failed to close target store: %w", err)
+	}
+	return writeInheritedBeadsMetadata(beadsDir, dbName)
+}
 
+func writeInheritedBeadsMetadata(beadsDir, dbName string) error {
+	// Write metadata.json so newDoltStoreFromConfig can find the
+	// correct database name on subsequent opens (GH#2988).
+	cfg := configfile.DefaultConfig()
+	cfg.Backend = configfile.BackendDolt
+	cfg.DoltDatabase = dbName
+	cfg.DoltMode = configfile.DoltModeEmbedded
+	cfg.ProjectID = configfile.GenerateProjectID()
+	if err := cfg.Save(beadsDir); err != nil {
+		return fmt.Errorf("failed to write metadata.json: %w", err)
+	}
 	return nil
 }

@@ -172,10 +172,12 @@ func TestContextInfo_ProjectIDPresent(t *testing.T) {
 
 	// Verify it would populate ContextInfo correctly
 	info := ContextInfo{
-		Backend:   configfile.BackendDolt,
-		DoltMode:  loaded.GetDoltMode(),
-		Database:  loaded.GetDoltDatabase(),
-		ProjectID: loaded.ProjectID,
+		ContextBackendInfo: ContextBackendInfo{
+			Backend:   configfile.BackendDolt,
+			DoltMode:  loaded.GetDoltMode(),
+			Database:  loaded.GetDoltDatabase(),
+			ProjectID: loaded.ProjectID,
+		},
 	}
 	if info.ProjectID != "proj-deadbeef-1234" {
 		t.Errorf("ContextInfo.ProjectID: got %q, want %q", info.ProjectID, "proj-deadbeef-1234")
@@ -240,11 +242,13 @@ func TestContextInfo_EnvVarOverrides(t *testing.T) {
 	// Build a ContextInfo the same way context_cmd.go does and verify
 	// it reflects the env-overridden values (the "effective" identity)
 	info := ContextInfo{
-		Backend:    configfile.BackendDolt,
-		DoltMode:   loaded.GetDoltMode(),
-		ServerHost: loaded.GetDoltServerHost(),
-		ServerPort: loaded.GetDoltServerPort(),
-		Database:   loaded.GetDoltDatabase(),
+		ContextBackendInfo: ContextBackendInfo{
+			Backend:    configfile.BackendDolt,
+			DoltMode:   loaded.GetDoltMode(),
+			ServerHost: loaded.GetDoltServerHost(),
+			ServerPort: loaded.GetDoltServerPort(),
+			Database:   loaded.GetDoltDatabase(),
+		},
 	}
 	if info.ServerHost != "10.0.0.99" {
 		t.Errorf("ContextInfo.ServerHost: got %q, want %q", info.ServerHost, "10.0.0.99")

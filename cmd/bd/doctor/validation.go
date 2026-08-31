@@ -252,12 +252,13 @@ func CheckTestPollution(path string) DoctorCheck {
 // For legacy backends, scans JSONL files for git conflict markers.
 func CheckGitConflicts(path string) DoctorCheck {
 	backend, beadsDir := getBackendAndBeadsDir(path)
-
-	// Dolt backend: check for unresolved Dolt merge conflicts
 	if backend == configfile.BackendDolt {
 		return checkDoltConflicts(beadsDir)
 	}
+	return checkJSONLConflicts(beadsDir)
+}
 
+func checkJSONLConflicts(beadsDir string) DoctorCheck {
 	if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
 		return DoctorCheck{
 			Name:    "Git Conflicts",
@@ -265,8 +266,6 @@ func CheckGitConflicts(path string) DoctorCheck {
 			Message: "N/A (no .beads directory)",
 		}
 	}
-
-	// Legacy: scan JSONL files for conflict markers
 	matches, err := filepath.Glob(filepath.Join(beadsDir, "*.jsonl"))
 	if err != nil || len(matches) == 0 {
 		return DoctorCheck{
@@ -275,32 +274,43 @@ func CheckGitConflicts(path string) DoctorCheck {
 			Message: "No JSONL files to check",
 		}
 	}
+	return reportJSONLConflicts(scanJSONLConflictFiles(beadsDir, matches))
+}
 
+func scanJSONLConflictFiles(beadsDir string, matches []string) []string {
 	var conflictFiles []string
 	for _, fpath := range matches {
-		f, err := os.Open(fpath) // #nosec G304 - path constructed from beadsDir
-		if err != nil {
-			continue
-		}
-		scanner := bufio.NewScanner(f)
-		hasConflict := false
-		for scanner.Scan() {
-			line := scanner.Text()
-			if strings.HasPrefix(line, "<<<<<<<") || strings.HasPrefix(line, ">>>>>>>") || strings.HasPrefix(line, "=======") {
-				hasConflict = true
-				break
-			}
-		}
-		_ = f.Close()
-		if hasConflict {
-			if rel, err := filepath.Rel(beadsDir, fpath); err == nil {
-				conflictFiles = append(conflictFiles, rel)
-			} else {
-				conflictFiles = append(conflictFiles, filepath.Base(fpath))
-			}
+		if jsonlFileHasConflictMarkers(fpath) {
+			conflictFiles = append(conflictFiles, conflictFileName(beadsDir, fpath))
 		}
 	}
+	return conflictFiles
+}
 
+func jsonlFileHasConflictMarkers(fpath string) bool {
+	f, err := os.Open(fpath) // #nosec G304 - path constructed from beadsDir
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "<<<<<<<") || strings.HasPrefix(line, ">>>>>>>") || strings.HasPrefix(line, "=======") {
+			return true
+		}
+	}
+	return false
+}
+
+func conflictFileName(beadsDir, fpath string) string {
+	if rel, err := filepath.Rel(beadsDir, fpath); err == nil {
+		return rel
+	}
+	return filepath.Base(fpath)
+}
+
+func reportJSONLConflicts(conflictFiles []string) DoctorCheck {
 	if len(conflictFiles) == 0 {
 		return DoctorCheck{
 			Name:    "Git Conflicts",
@@ -308,7 +318,6 @@ func CheckGitConflicts(path string) DoctorCheck {
 			Message: "No conflict markers found",
 		}
 	}
-
 	return DoctorCheck{
 		Name:    "Git Conflicts",
 		Status:  StatusError,
@@ -339,15 +348,13 @@ func CheckChildParentDependencies(path string) DoctorCheck {
 
 // checkDoltConflicts queries the Dolt server for unresolved merge conflicts (GH-2249).
 func checkDoltConflicts(beadsDir string) DoctorCheck {
-	doltPath := getDatabasePath(beadsDir)
-	if _, err := os.Stat(doltPath); os.IsNotExist(err) {
+	if _, err := os.Stat(getDatabasePath(beadsDir)); os.IsNotExist(err) {
 		return DoctorCheck{
 			Name:    "Git Conflicts",
 			Status:  StatusOK,
 			Message: "N/A (no Dolt database)",
 		}
 	}
-
 	db, store, err := openStoreDB(beadsDir)
 	if err != nil {
 		return DoctorCheck{
@@ -357,28 +364,27 @@ func checkDoltConflicts(beadsDir string) DoctorCheck {
 		}
 	}
 	defer func() { _ = store.Close() }()
+	return reportDoltConflicts(scanDoltConflictRows(db))
+}
 
+func scanDoltConflictRows(db *sql.DB) (tables []string, totalConflicts int, check DoctorCheck, failed bool) {
 	rows, err := db.Query("SELECT `table`, num_conflicts FROM dolt_conflicts")
 	if err != nil {
-		// Table may not exist in older Dolt versions — not an error
 		if strings.Contains(err.Error(), "no such table") || strings.Contains(err.Error(), "doesn't exist") {
-			return DoctorCheck{
+			return nil, 0, DoctorCheck{
 				Name:    "Git Conflicts",
 				Status:  StatusOK,
 				Message: "No conflicts",
-			}
+			}, true
 		}
-		return DoctorCheck{
+		return nil, 0, DoctorCheck{
 			Name:    "Git Conflicts",
 			Status:  StatusWarning,
 			Message: "Unable to check Dolt conflicts",
 			Detail:  err.Error(),
-		}
+		}, true
 	}
 	defer rows.Close()
-
-	var tables []string
-	totalConflicts := 0
 	for rows.Next() {
 		var tableName string
 		var numConflicts int
@@ -388,14 +394,20 @@ func checkDoltConflicts(beadsDir string) DoctorCheck {
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return DoctorCheck{
+		return nil, 0, DoctorCheck{
 			Name:    "Git Conflicts",
 			Status:  StatusWarning,
 			Message: "Error reading Dolt conflicts",
 			Detail:  err.Error(),
-		}
+		}, true
 	}
+	return tables, totalConflicts, DoctorCheck{}, false
+}
 
+func reportDoltConflicts(tables []string, totalConflicts int, check DoctorCheck, failed bool) DoctorCheck {
+	if failed {
+		return check
+	}
 	if totalConflicts == 0 {
 		return DoctorCheck{
 			Name:    "Git Conflicts",
@@ -403,7 +415,6 @@ func checkDoltConflicts(beadsDir string) DoctorCheck {
 			Message: "No Dolt merge conflicts",
 		}
 	}
-
 	return DoctorCheck{
 		Name:    "Git Conflicts",
 		Status:  StatusError,

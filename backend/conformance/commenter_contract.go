@@ -311,7 +311,13 @@ func RunCommenterTakesTheClockWhenTheThreadIsBehindIt(t *testing.T, ctx context.
 	}
 	anchor := fixture.IssuePrefix + "-behind"
 	seedCommenterIssue(t, ctx, fixture, anchor)
+	behind := seedCommenterBehindClock(t, ctx, fixture, anchor)
+	addCommenterBehindClock(t, ctx, fixture, anchor, behind)
+	assertCommenterBehindOrder(t, ctx, fixture, anchor)
+}
 
+func seedCommenterBehindClock(t *testing.T, ctx context.Context, fixture CommenterFixture, anchor string) time.Time {
+	t.Helper()
 	const seeded = "seeded an hour behind the clock"
 	behind := time.Now().UTC().Truncate(time.Second).Add(-time.Hour)
 	if err := fixture.SeedCommentAt(ctx, anchor, "importer", seeded, behind); err != nil {
@@ -321,7 +327,11 @@ func RunCommenterTakesTheClockWhenTheThreadIsBehindIt(t *testing.T, ctx context.
 		t.Fatalf("the seeded comment is stored at %s, want %s verbatim: a seed level with the clock cannot show that a live add declines to advance past it",
 			stored, behind)
 	}
+	return behind
+}
 
+func addCommenterBehindClock(t *testing.T, ctx context.Context, fixture CommenterFixture, anchor string, behind time.Time) {
+	t.Helper()
 	// The bound is taken around the call, not guessed: floor before, ceiling
 	// after, both at the column's whole-second precision.
 	floor := time.Now().UTC().Truncate(time.Second)
@@ -349,7 +359,11 @@ func RunCommenterTakesTheClockWhenTheThreadIsBehindIt(t *testing.T, ctx context.
 	if resultStamp := result.Comment.CreatedAt.UTC(); !resultStamp.Equal(got) {
 		t.Errorf("AddComment returned created_at %s while the row holds %s: the result must carry the stamp the row got", resultStamp, got)
 	}
+}
 
+func assertCommenterBehindOrder(t *testing.T, ctx context.Context, fixture CommenterFixture, anchor string) {
+	t.Helper()
+	const seeded = "seeded an hour behind the clock"
 	// The order still has to come out right, which is the reason the rule
 	// exists at all: an unconditional advance would sort the live comment an
 	// hour BEFORE the import it was written after.
@@ -692,12 +706,20 @@ func seedCommenterWisp(t *testing.T, ctx context.Context, fixture CommenterFixtu
 
 func commenterSeed(id string, ephemeral bool) *types.Issue {
 	return &types.Issue{
-		ID:        id,
-		Title:     id,
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: ephemeral,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: ephemeral,
+		},
 	}
 }
 

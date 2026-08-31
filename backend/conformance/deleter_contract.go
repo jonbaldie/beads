@@ -147,7 +147,12 @@ func RunDeleterRefusesAnAbsentID(t *testing.T, ctx context.Context, fixture Dele
 	t.Helper()
 	stored := deleterSeedIssue(t, ctx, fixture, "gone", "real")
 	absent := fixture.IssuePrefix + "-gone-nosuchrow"
+	assertDeleterAbsentPair(t, ctx, fixture, stored, absent)
+	assertDeleterAbsentVersion(t, ctx, fixture, absent)
+}
 
+func assertDeleterAbsentPair(t *testing.T, ctx context.Context, fixture DeleterFixture, stored, absent string) {
+	t.Helper()
 	for _, dryRun := range []bool{false, true} {
 		result, err := fixture.Deleter.Delete(ctx, publicops.DeleteRequest{
 			IDs:    []string{stored, absent},
@@ -169,7 +174,10 @@ func RunDeleterRefusesAnAbsentID(t *testing.T, ctx context.Context, fixture Dele
 		}
 		deleterAssertIssueRows(t, ctx, fixture, 1, stored)
 	}
+}
 
+func assertDeleterAbsentVersion(t *testing.T, ctx context.Context, fixture DeleterFixture, absent string) {
+	t.Helper()
 	// The version the request carries is deliberately a plausible one rather
 	// than a sentinel: the subject is WHICH refusal comes back, so a token that
 	// looked obviously wrong would leave a reader unsure whether the existence
@@ -689,6 +697,18 @@ func RunDeleterDryRunChangesNothing(t *testing.T, ctx context.Context, fixture D
 
 	request := publicops.DeleteRequest{IDs: []string{first, second}, Actor: "deleter-contract"}
 	preview := deleterDelete(t, ctx, fixture, deleterWithDryRun(request, true))
+	assertDeleterDryRunPreview(t, preview, first, second)
+	deleterAssertIssueRows(t, ctx, fixture, 2, first, second)
+	deleterAssertLabelRows(t, ctx, fixture, 2, first)
+
+	actual := deleterDelete(t, ctx, fixture, request)
+	assertDeleterDryRunMatches(t, preview, actual)
+	deleterAssertIssueRows(t, ctx, fixture, 0, first, second)
+	deleterAssertLabelRows(t, ctx, fixture, 0, first)
+}
+
+func assertDeleterDryRunPreview(t *testing.T, preview publicops.DeleteResult, first, second string) {
+	t.Helper()
 	if !preview.DryRun {
 		t.Errorf("preview.DryRun = false, want the request echoed")
 	}
@@ -704,10 +724,10 @@ func RunDeleterDryRunChangesNothing(t *testing.T, ctx context.Context, fixture D
 	if preview.ReferencesUpdated != 0 {
 		t.Errorf("preview.ReferencesUpdated = %d, want 0: a preview rewrites nothing", preview.ReferencesUpdated)
 	}
-	deleterAssertIssueRows(t, ctx, fixture, 2, first, second)
-	deleterAssertLabelRows(t, ctx, fixture, 2, first)
+}
 
-	actual := deleterDelete(t, ctx, fixture, request)
+func assertDeleterDryRunMatches(t *testing.T, preview, actual publicops.DeleteResult) {
+	t.Helper()
 	if actual.Deleted != preview.Deleted {
 		t.Errorf("Deleted: preview said %d, the run said %d", preview.Deleted, actual.Deleted)
 	}
@@ -718,8 +738,6 @@ func RunDeleterDryRunChangesNothing(t *testing.T, ctx context.Context, fixture D
 		t.Errorf("Labels/Events: preview said %d/%d, the run said %d/%d",
 			preview.Labels, preview.Events, actual.Labels, actual.Events)
 	}
-	deleterAssertIssueRows(t, ctx, fixture, 0, first, second)
-	deleterAssertLabelRows(t, ctx, fixture, 0, first)
 }
 
 // RunDeleterRecordsExactlyOneHistoryEntry pins the versioning clause
@@ -838,13 +856,13 @@ func RunDeleterSettlesTheSurvivorsOfADeletedBlocker(t *testing.T, ctx context.Co
 	deleterAddEdge(t, ctx, fixture, controlDepender, controlBlocker)
 
 	probe := newBlockedStateProbe(ctx, fixture.QueryScalar)
-	probe.requirePlaneResidency(t, blockedWisp(wispDepender))
-	probe.requireBlockedByOpenBlocker(t, blockedIssue(depender), blockedIssue(blocker), "the direct depender of the row about to be deleted")
-	probe.requireBlockedByOpenBlocker(t, blockedWisp(wispDepender), blockedIssue(blocker), "the cross-plane depender")
-	probe.requireBlockedWithNoDirectBlockerEdges(t, blockedIssue(child), "the child inherits and holds no blocker of its own")
-	probe.requireBlockedByOpenBlocker(t, blockedIssue(controlDepender), blockedIssue(controlBlocker), "the control's blocker is not deleted")
+	requirePlaneResidency(probe, t, blockedWisp(wispDepender))
+	requireBlockedByOpenBlocker(probe, t, blockedIssue(depender), blockedIssue(blocker), "the direct depender of the row about to be deleted")
+	requireBlockedByOpenBlocker(probe, t, blockedWisp(wispDepender), blockedIssue(blocker), "the cross-plane depender")
+	requireBlockedWithNoDirectBlockerEdges(probe, t, blockedIssue(child), "the child inherits and holds no blocker of its own")
+	requireBlockedByOpenBlocker(probe, t, blockedIssue(controlDepender), blockedIssue(controlBlocker), "the control's blocker is not deleted")
 
-	flip := probe.watchFlip(t,
+	flip := watchFlip(probe, t,
 		[]blockedStateRow{blockedIssue(depender), blockedIssue(child), blockedWisp(wispDepender)},
 		[]blockedStateRow{blockedIssue(controlDepender)})
 
@@ -856,7 +874,7 @@ func RunDeleterSettlesTheSurvivorsOfADeletedBlocker(t *testing.T, ctx context.Co
 		t.Fatalf("Deleted = %d, want the 1 named row", result.Deleted)
 	}
 
-	flip.requireFlippedTo(t, 0, "a survivor whose only blocker was erased is left unblocked, and so is everything that inherited from it")
+	requireFlippedTo(flip, t, 0, "a survivor whose only blocker was erased is left unblocked, and so is everything that inherited from it")
 }
 
 // RunDeleterSettlesTheChildrenOfADeletedParent is the other arm of the same
@@ -880,10 +898,10 @@ func RunDeleterSettlesTheChildrenOfADeletedParent(t *testing.T, ctx context.Cont
 	deleterAddParentChildEdge(t, ctx, fixture, controlChild, controlParent)
 
 	probe := newBlockedStateProbe(ctx, fixture.QueryScalar)
-	probe.requireBlockedWithNoDirectBlockerEdges(t, blockedIssue(child), "the child is blocked only through the parent about to be deleted")
-	probe.requireBlockedWithNoDirectBlockerEdges(t, blockedIssue(controlChild), "the control child's parent stays")
+	requireBlockedWithNoDirectBlockerEdges(probe, t, blockedIssue(child), "the child is blocked only through the parent about to be deleted")
+	requireBlockedWithNoDirectBlockerEdges(probe, t, blockedIssue(controlChild), "the control child's parent stays")
 
-	flip := probe.watchFlip(t, []blockedStateRow{blockedIssue(child)}, []blockedStateRow{blockedIssue(controlChild)})
+	flip := watchFlip(probe, t, []blockedStateRow{blockedIssue(child)}, []blockedStateRow{blockedIssue(controlChild)})
 
 	if _, err := fixture.Deleter.Delete(ctx, publicops.DeleteRequest{IDs: []string{parent}, Force: true, Actor: "deleter"}); err != nil {
 		t.Fatalf("force-delete the blocked parent %s: %v", parent, err)
@@ -896,7 +914,7 @@ func RunDeleterSettlesTheChildrenOfADeletedParent(t *testing.T, ctx context.Cont
 		t.Fatalf("child %s has %d rows after a forced delete of its parent, want the orphaned survivor this case is about", child, survives)
 	}
 
-	flip.requireFlippedTo(t, 0, "a child orphaned from a blocked parent inherits nothing, and the deleting transaction settles it")
+	requireFlippedTo(flip, t, 0, "a child orphaned from a blocked parent inherits nothing, and the deleting transaction settles it")
 }
 
 // RunDeleterSettlesTheSurvivorsOfADeletedWispBlocker is the same obligation
@@ -943,19 +961,19 @@ func RunDeleterSettlesTheSurvivorsOfADeletedWispBlocker(t *testing.T, ctx contex
 	// Residency is asserted on the row being deleted above all: a "wisp" that
 	// had leaked a durable row would make this case a second copy of its
 	// sibling.
-	probe.requirePlaneResidency(t, blockedWisp(wispBlocker))
-	probe.requirePlaneResidency(t, blockedWisp(wispDepender))
-	probe.requirePlaneResidency(t, blockedIssue(depender))
-	probe.requireBlockedByOpenBlocker(t, blockedIssue(depender), blockedWisp(wispBlocker),
+	requirePlaneResidency(probe, t, blockedWisp(wispBlocker))
+	requirePlaneResidency(probe, t, blockedWisp(wispDepender))
+	requirePlaneResidency(probe, t, blockedIssue(depender))
+	requireBlockedByOpenBlocker(probe, t, blockedIssue(depender), blockedWisp(wispBlocker),
 		"the DURABLE depender of the ephemeral row about to be deleted")
-	probe.requireBlockedByOpenBlocker(t, blockedWisp(wispDepender), blockedWisp(wispBlocker),
+	requireBlockedByOpenBlocker(probe, t, blockedWisp(wispDepender), blockedWisp(wispBlocker),
 		"the same-plane depender, whose edge lives in the ephemeral table")
-	probe.requireBlockedWithNoDirectBlockerEdges(t, blockedIssue(child),
+	requireBlockedWithNoDirectBlockerEdges(probe, t, blockedIssue(child),
 		"the child inherits across the plane boundary and holds no blocker of its own")
-	probe.requireBlockedByOpenBlocker(t, blockedIssue(controlDepender), blockedIssue(controlBlocker),
+	requireBlockedByOpenBlocker(probe, t, blockedIssue(controlDepender), blockedIssue(controlBlocker),
 		"the control's blocker is a durable row this delete never names")
 
-	flip := probe.watchFlip(t,
+	flip := watchFlip(probe, t,
 		[]blockedStateRow{blockedIssue(depender), blockedIssue(child), blockedWisp(wispDepender)},
 		[]blockedStateRow{blockedIssue(controlDepender)})
 
@@ -977,7 +995,7 @@ func RunDeleterSettlesTheSurvivorsOfADeletedWispBlocker(t *testing.T, ctx contex
 		t.Fatalf("wisp %s still has %d row(s) after a forced delete, want it gone", wispBlocker, survives)
 	}
 
-	flip.requireFlippedTo(t, 0,
+	requireFlippedTo(flip, t, 0,
 		"a survivor whose only blocker was an erased WISP is left unblocked, in both planes, and so is everything that inherited from it")
 }
 
@@ -1235,12 +1253,20 @@ func deleterAddParentChildEdge(t *testing.T, ctx context.Context, fixture Delete
 
 func deleterIssue(fixture DeleterFixture, tag, name string, ephemeral bool) *types.Issue {
 	return &types.Issue{
-		ID:        fmt.Sprintf("%s-%s-%s", fixture.IssuePrefix, tag, name),
-		Title:     tag + " " + name,
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: ephemeral,
+		IssueID: types.IssueID{
+			ID: fmt.Sprintf("%s-%s-%s", fixture.IssuePrefix, tag, name),
+		},
+		IssueContent: types.IssueContent{
+			Title: tag + " " + name,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: ephemeral,
+		},
 	}
 }
 

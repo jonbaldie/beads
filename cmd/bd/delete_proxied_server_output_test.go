@@ -19,21 +19,15 @@ func TestOutputDeleteProxiedPreviewIsPayloadBlind(t *testing.T) {
 	result := deletePreviewResult{
 		preview: domain.DeletePreview{
 			Issues: map[string]*types.Issue{
-				"test-target": {
-					ID:          "test-target",
-					Title:       titleMarker,
+				"test-target": {IssueID: types.IssueID{ID: "test-target"}, IssueContent: types.IssueContent{Title: titleMarker,
 					Description: descriptionMarker,
-					Notes:       notesMarker,
-					Metadata:    json.RawMessage(`{"marker":"` + payloadMarker + `"}`),
+					Notes:       notesMarker}, IssueMeta: types.IssueMeta{Metadata: json.RawMessage(`{"marker":"` + payloadMarker + `"}`)},
 				},
 			},
 			ConnectedIssues: map[string]*types.Issue{
-				"test-connected": {
-					ID:          "test-connected",
-					Title:       titleMarker,
+				"test-connected": {IssueID: types.IssueID{ID: "test-connected"}, IssueContent: types.IssueContent{Title: titleMarker,
 					Description: descriptionMarker,
-					Notes:       notesMarker,
-					Metadata:    json.RawMessage(`{"marker":"` + payloadMarker + `"}`),
+					Notes:       notesMarker}, IssueMeta: types.IssueMeta{Metadata: json.RawMessage(`{"marker":"` + payloadMarker + `"}`)},
 				},
 			},
 		},
@@ -75,11 +69,11 @@ func TestOutputDeleteProxiedPreviewExactContracts(t *testing.T) {
 	result := deletePreviewResult{
 		preview: domain.DeletePreview{
 			Issues: map[string]*types.Issue{
-				"bd-target": {ID: "bd-target", Title: "Target"},
+				"bd-target": {IssueID: types.IssueID{ID: "bd-target"}, IssueContent: types.IssueContent{Title: "Target"}},
 			},
 			ConnectedIssues: map[string]*types.Issue{
-				"bd-zulu":  {ID: "bd-zulu", Title: "Zulu"},
-				"bd-alpha": {ID: "bd-alpha", Title: "Alpha"},
+				"bd-zulu":  {IssueID: types.IssueID{ID: "bd-zulu"}, IssueContent: types.IssueContent{Title: "Zulu"}},
+				"bd-alpha": {IssueID: types.IssueID{ID: "bd-alpha"}, IssueContent: types.IssueContent{Title: "Alpha"}},
 			},
 		},
 		res: issueops.DeleteResult{Deleted: 3, Dependencies: 4, Labels: 2, Events: 5},

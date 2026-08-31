@@ -43,14 +43,20 @@ func TestCheckMigrationContentSkew_RealDolt(t *testing.T) {
 	dbName := "skewtest_" + hex.EncodeToString(buf)
 
 	store, err := dolt.New(ctx, &dolt.Config{
-		Path:            t.TempDir(),
-		ServerHost:      "127.0.0.1",
-		ServerPort:      port,
-		Database:        dbName,
-		CommitterName:   "test",
-		CommitterEmail:  "test@example.com",
-		CreateIfMissing: true,
-		MaxOpenConns:    1,
+		Path: t.TempDir(),
+		ServerOptions: dolt.ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: port,
+		},
+		Database:       dbName,
+		CommitterName:  "test",
+		CommitterEmail: "test@example.com",
+		RemoteOptions: dolt.RemoteOptions{
+			CreateIfMissing: true,
+		},
+		PoolOptions: dolt.PoolOptions{
+			MaxOpenConns: 1,
+		},
 	})
 	if err != nil {
 		t.Fatalf("dolt.New: %v", err)

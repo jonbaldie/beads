@@ -16,30 +16,41 @@ import (
 	"github.com/jonbaldie/beads/internal/storage/doltutil"
 )
 
-// DoltPerfMetrics holds performance metrics for Dolt operations
-type DoltPerfMetrics struct {
+// DoltPerfIdentity identifies the backend and runtime under test.
+type DoltPerfIdentity struct {
 	Backend      string // "dolt-server"
 	ServerMode   bool   // always true (server-only operation)
 	ServerStatus string // "running" or "not running"
 	Platform     string // OS/arch
 	GoVersion    string // Go runtime version
 	DoltVersion  string // Dolt version if available
+}
+
+// DoltPerfCounts holds issue and database size counts.
+type DoltPerfCounts struct {
 	TotalIssues  int    // Total issue count
 	OpenIssues   int    // Open issue count
 	ClosedIssues int    // Closed issue count
 	Dependencies int    // Dependency count
 	DatabaseSize string // Size of .dolt directory
+}
 
-	// Timing metrics (milliseconds)
+// DoltPerfTimings holds query timings in milliseconds.
+type DoltPerfTimings struct {
 	ConnectionTime   int64 // Time to establish connection
 	ReadyWorkTime    int64 // Time for GetReadyWork equivalent
 	ListOpenTime     int64 // Time to list open issues
 	ShowIssueTime    int64 // Time to get single issue
 	ComplexQueryTime int64 // Time for complex filter query
 	CommitLogTime    int64 // Time to query dolt_log
+}
 
-	// Profile file path if profiling was enabled
-	ProfilePath string
+// DoltPerfMetrics holds performance metrics for Dolt operations
+type DoltPerfMetrics struct {
+	DoltPerfIdentity
+	DoltPerfCounts
+	DoltPerfTimings
+	ProfilePath string // Profile file path if profiling was enabled
 }
 
 // RunDoltPerformanceDiagnostics runs performance diagnostics for Dolt backend
@@ -53,8 +64,10 @@ func RunDoltPerformanceDiagnostics(path string, enableProfiling bool) (*DoltPerf
 	}
 
 	metrics := &DoltPerfMetrics{
-		Platform:  fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
-		GoVersion: runtime.Version(),
+		DoltPerfIdentity: DoltPerfIdentity{
+			Platform:  fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
+			GoVersion: runtime.Version(),
+		},
 	}
 
 	// Resolve server config (handles standalone ephemeral ports)
@@ -153,29 +166,37 @@ func runDoltServerDiagnostics(metrics *DoltPerfMetrics, host string, port int, d
 
 // runDoltDiagnosticQueries runs the diagnostic queries and populates metrics
 func runDoltDiagnosticQueries(ctx context.Context, db *sql.DB, metrics *DoltPerfMetrics) error {
-	// Get issue counts
+	if err := scanDoltIssueCounts(ctx, db, metrics); err != nil {
+		return err
+	}
+	scanDoltOptionalCounts(ctx, db, metrics)
+	measureDoltQueryTimes(ctx, db, metrics)
+	return nil
+}
+
+func scanDoltIssueCounts(ctx context.Context, db *sql.DB, metrics *DoltPerfMetrics) error {
 	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM issues").Scan(&metrics.TotalIssues); err != nil {
 		return fmt.Errorf("failed to count issues: %w", err)
 	}
+	return nil
+}
 
+func scanDoltOptionalCounts(ctx context.Context, db *sql.DB, metrics *DoltPerfMetrics) {
 	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM issues WHERE status != 'closed'").Scan(&metrics.OpenIssues); err != nil {
-		metrics.OpenIssues = -1 // Mark as unavailable
+		metrics.OpenIssues = -1
 	}
-
 	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM issues WHERE status = 'closed'").Scan(&metrics.ClosedIssues); err != nil {
 		metrics.ClosedIssues = -1
 	}
-
 	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM dependencies").Scan(&metrics.Dependencies); err != nil {
 		metrics.Dependencies = -1
 	}
-
-	// Try to get Dolt version
 	if err := db.QueryRowContext(ctx, "SELECT dolt_version()").Scan(&metrics.DoltVersion); err != nil {
 		metrics.DoltVersion = "unknown"
 	}
+}
 
-	// Measure GetReadyWork equivalent
+func measureDoltQueryTimes(ctx context.Context, db *sql.DB, metrics *DoltPerfMetrics) {
 	metrics.ReadyWorkTime = measureQueryTime(ctx, db, `
 		SELECT id FROM issues
 		WHERE status IN ('open', 'in_progress')
@@ -185,34 +206,12 @@ func runDoltDiagnosticQueries(ctx context.Context, db *sql.DB, metrics *DoltPerf
 		)
 		LIMIT 100
 	`)
-
-	// Measure list open issues
 	metrics.ListOpenTime = measureQueryTime(ctx, db, `
 		SELECT id, title, status FROM issues
 		WHERE status != 'closed'
 		LIMIT 100
 	`)
-
-	// Measure show single issue (get a random one first)
-	var issueID string
-	if err := db.QueryRowContext(ctx, "SELECT id FROM issues LIMIT 1").Scan(&issueID); err == nil && issueID != "" {
-		start := time.Now()
-		rows, qErr := db.QueryContext(ctx, "SELECT * FROM issues WHERE id = ?", issueID)
-		if qErr != nil {
-			metrics.ShowIssueTime = -1
-		} else {
-			for rows.Next() {
-			}
-			if rows.Err() != nil {
-				metrics.ShowIssueTime = -1
-			} else {
-				metrics.ShowIssueTime = time.Since(start).Milliseconds()
-			}
-			_ = rows.Close()
-		}
-	}
-
-	// Measure complex query with filters
+	metrics.ShowIssueTime = measureShowIssueTime(ctx, db)
 	metrics.ComplexQueryTime = measureQueryTime(ctx, db, `
 		SELECT i.id, i.title, i.status, i.priority
 		FROM issues i
@@ -222,15 +221,30 @@ func runDoltDiagnosticQueries(ctx context.Context, db *sql.DB, metrics *DoltPerf
 		GROUP BY i.id
 		LIMIT 100
 	`)
-
-	// Measure Dolt-specific: commit log query
 	metrics.CommitLogTime = measureQueryTime(ctx, db, `
 		SELECT commit_hash, committer, message
 		FROM dolt_log
 		LIMIT 10
 	`)
+}
 
-	return nil
+func measureShowIssueTime(ctx context.Context, db *sql.DB) int64 {
+	var issueID string
+	if err := db.QueryRowContext(ctx, "SELECT id FROM issues LIMIT 1").Scan(&issueID); err != nil || issueID == "" {
+		return 0
+	}
+	start := time.Now()
+	rows, qErr := db.QueryContext(ctx, "SELECT * FROM issues WHERE id = ?", issueID)
+	if qErr != nil {
+		return -1
+	}
+	defer rows.Close()
+	for rows.Next() {
+	}
+	if rows.Err() != nil {
+		return -1
+	}
+	return time.Since(start).Milliseconds()
 }
 
 // measureQueryTime measures how long a query takes to execute

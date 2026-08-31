@@ -55,9 +55,11 @@ func setupDoltWorkspace(t *testing.T) string {
 	ctx := context.Background()
 	doltPath := filepath.Join(beadsDir, "dolt")
 	store, err := dolt.New(ctx, &dolt.Config{
-		Path:            doltPath,
-		Database:        "beads",
-		CreateIfMissing: true,
+		Path:     doltPath,
+		Database: "beads",
+		RemoteOptions: dolt.RemoteOptions{
+			CreateIfMissing: true,
+		},
 	})
 	if err != nil {
 		t.Fatalf("dolt.New: %v", err)

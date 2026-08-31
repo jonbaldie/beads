@@ -526,16 +526,22 @@ func counterScope(ids ...string) publicops.CountRequest {
 		}
 		filter += id
 	}
-	return publicops.CountRequest{IDFilter: filter}
+	return publicops.CountRequest{CountTextFilters: publicops.CountTextFilters{IDFilter: filter}}
 }
 
 func counterSeed(id string) *types.Issue {
 	return &types.Issue{
-		ID:        id,
-		Title:     id,
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 }
 

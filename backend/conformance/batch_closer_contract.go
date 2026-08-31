@@ -201,66 +201,9 @@ func RunBatchCloserPerItemRefusalIsAResultAndSurvivorsCommit(t *testing.T, ctx c
 	if len(result.Outcomes) != len(items) {
 		t.Fatalf("outcomes = %d for %d items, want one per item", len(result.Outcomes), len(items))
 	}
-	for i, item := range items {
-		if result.Outcomes[i].IssueID != item.IssueID {
-			t.Fatalf("outcome %d echoes %q, want %q", i, result.Outcomes[i].IssueID, item.IssueID)
-		}
-	}
-
-	for _, survivor := range []struct {
-		index  int
-		id     string
-		reason string
-	}{{0, alpha, alphaReason}, {4, beta, betaReason}} {
-		outcome := result.Outcomes[survivor.index]
-		if outcome.Err != nil {
-			t.Errorf("outcome %d (%s) = %v, want a success: the survivors of a mixed batch commit", survivor.index, survivor.id, outcome.Err)
-			continue
-		}
-		if outcome.Issue == nil {
-			t.Errorf("outcome %d (%s) has a nil Issue with a nil Err — Issue is nil exactly when Err is set", survivor.index, survivor.id)
-			continue
-		}
-		if !outcome.Changed {
-			t.Errorf("outcome %d (%s) Changed = false on a first close, want true", survivor.index, survivor.id)
-		}
-		if outcome.Issue.Status != types.StatusClosed {
-			t.Errorf("outcome %d (%s) snapshot status = %q, want %q", survivor.index, survivor.id, outcome.Issue.Status, types.StatusClosed)
-		}
-		if outcome.Issue.CloseReason != survivor.reason {
-			t.Errorf("outcome %d (%s) snapshot CloseReason = %q, want %q — reasons are per item, not per request",
-				survivor.index, survivor.id, outcome.Issue.CloseReason, survivor.reason)
-		}
-		if outcome.Issue.ClosedBySession != session {
-			t.Errorf("outcome %d (%s) snapshot ClosedBySession = %q, want %q — the session is recorded against every item",
-				survivor.index, survivor.id, outcome.Issue.ClosedBySession, session)
-		}
-		assertBatchCloserClosedRow(t, ctx, fixture, survivor.id, survivor.reason, session)
-	}
-
-	if !errors.Is(result.Outcomes[1].Err, publicops.ErrNotFound) {
-		t.Errorf("outcome 1 (%s) = %v, want ErrNotFound", missing, result.Outcomes[1].Err)
-	}
-	if !errors.Is(result.Outcomes[2].Err, publicops.ErrCloseBlocked) {
-		t.Errorf("outcome 2 (%s, blocked by open %s) = %v, want ErrCloseBlocked", blocked, blocker, result.Outcomes[2].Err)
-	}
-	var openChildren *publicops.CloseOpenChildrenError
-	if !errors.As(result.Outcomes[3].Err, &openChildren) {
-		t.Errorf("outcome 3 (%s, one open child) = %v, want *CloseOpenChildrenError", parent, result.Outcomes[3].Err)
-	} else {
-		if openChildren.OpenChildren != 1 {
-			t.Errorf("open-children refusal for %s carries OpenChildren = %d, want 1", parent, openChildren.OpenChildren)
-		}
-		if openChildren.IssueID != parent {
-			t.Errorf("open-children refusal names %q, want %q", openChildren.IssueID, parent)
-		}
-	}
-	for _, refused := range []int{1, 2, 3} {
-		if result.Outcomes[refused].Issue != nil {
-			t.Errorf("outcome %d (%s) carries an Issue beside its Err — Issue is nil exactly when Err is set",
-				refused, result.Outcomes[refused].IssueID)
-		}
-	}
+	assertBatchCloserOutcomeIDs(t, result, items)
+	assertBatchCloserMixedSurvivors(t, ctx, fixture, result, alpha, beta, session, alphaReason, betaReason)
+	assertBatchCloserMixedRefusals(t, result, missing, blocked, blocker, parent)
 	assertBatchCloserStatus(t, ctx, fixture, blocked, types.StatusOpen)
 	assertBatchCloserStatus(t, ctx, fixture, parent, types.StatusOpen)
 }
@@ -304,17 +247,7 @@ func RunBatchCloserOutcomeSnapshotIsTheDocumentedShape(t *testing.T, ctx context
 	if outcome.Issue == nil {
 		t.Fatalf("outcome 0 (%s) has a nil Issue with a nil Err", closeable)
 	}
-	if len(outcome.Issue.Labels) != 1 || outcome.Issue.Labels[0] != label {
-		t.Errorf("snapshot labels = %v, want exactly [%s] — the snapshot carries labels", outcome.Issue.Labels, label)
-	}
-	if len(outcome.Issue.Dependencies) != 1 {
-		t.Errorf("snapshot dependency records = %d, want 1 — the snapshot carries dependency records", len(outcome.Issue.Dependencies))
-	} else if outcome.Issue.Dependencies[0].DependsOnID != target {
-		t.Errorf("snapshot dependency record points at %q, want %q", outcome.Issue.Dependencies[0].DependsOnID, target)
-	}
-	if len(outcome.Issue.Comments) != 0 {
-		t.Errorf("snapshot carries %d comments, want none: comments are omitted, as they are for CloseResult", len(outcome.Issue.Comments))
-	}
+	assertBatchCloserSnapshotShape(t, outcome, label, target)
 }
 
 // RunBatchCloserRequestValidationReturnsZeroResultAndChangesNothing pins the
@@ -495,38 +428,13 @@ func RunBatchCloserIdempotentRecloseIsAPerItemSuccess(t *testing.T, ctx context.
 	if err != nil {
 		t.Fatalf("first CloseBatch: %v", err)
 	}
-	for i, outcome := range first.Outcomes {
-		if outcome.Err != nil {
-			t.Fatalf("first close outcome %d (%s) = %v, want a success", i, outcome.IssueID, outcome.Err)
-		}
-		if !outcome.Changed {
-			t.Errorf("first close outcome %d (%s) Changed = false, want true", i, outcome.IssueID)
-		}
-	}
-	if first.Outcomes[1].OpenChildren != 1 {
-		t.Errorf("forced close of %s reports OpenChildren = %d, want 1", parent, first.Outcomes[1].OpenChildren)
-	}
+	assertBatchCloserFirstReclose(t, first, parent)
 
 	second, err := fixture.Closer.CloseBatch(ctx, request)
 	if err != nil {
 		t.Fatalf("re-close CloseBatch returned an error of the batch: %v — an idempotent re-close is a success", err)
 	}
-	for i, outcome := range second.Outcomes {
-		if outcome.Err != nil {
-			t.Errorf("re-close outcome %d (%s) = %v, want a per-item success", i, outcome.IssueID, outcome.Err)
-			continue
-		}
-		if outcome.Issue == nil {
-			t.Errorf("re-close outcome %d (%s) has a nil Issue with a nil Err", i, outcome.IssueID)
-		}
-		if outcome.Changed {
-			t.Errorf("re-close outcome %d (%s) Changed = true, want false: nothing was mutated", i, outcome.IssueID)
-		}
-	}
-	if second.Outcomes[1].OpenChildren != 1 {
-		t.Errorf("forced re-close of %s reports OpenChildren = %d, want 1 — it is reported even for an idempotent re-close",
-			parent, second.Outcomes[1].OpenChildren)
-	}
+	assertBatchCloserSecondReclose(t, second, parent)
 }
 
 // RunBatchCloserAllIdempotentBatchLandsNothing pins the two consequences of
@@ -572,27 +480,11 @@ func RunBatchCloserAllIdempotentBatchLandsNothing(t *testing.T, ctx context.Cont
 	if err != nil {
 		t.Fatalf("all-idempotent CloseBatch returned an error of the batch: %v — a re-close is a per-item success", err)
 	}
-	if second.Outcomes[0].Err != nil {
-		t.Fatalf("re-close outcome 0 (%s) = %v, want a per-item success", closeable, second.Outcomes[0].Err)
-	}
-	if second.Outcomes[0].Changed {
-		t.Fatalf("re-close outcome 0 (%s) Changed = true, want false — this case is about a batch that mutated nothing", closeable)
-	}
-	if second.ClaimedNext != nil {
-		t.Errorf("ClaimedNext = %s after a batch whose only item was already closed, want nil: landed means Changed, and a claim handed out by a request that closed nothing is one the caller never earned",
-			second.ClaimedNext.ID)
-	}
-	if got := batchCloserAssignee(t, ctx, fixture, candidate); got != "" {
-		t.Errorf("durable assignee of the eligible %s = %q, want it untouched", candidate, got)
-	}
 	after, err := fixture.CountHistory(ctx)
 	if err != nil {
 		t.Fatalf("CountHistory after the re-close: %v", err)
 	}
-	if after != before {
-		t.Errorf("history entries went %d -> %d across a batch whose items were all already closed, want no change: none at all when nothing landed",
-			before, after)
-	}
+	assertBatchCloserAllIdempotentResult(t, ctx, fixture, second, closeable, candidate, before, after)
 }
 
 // RunBatchCloserDuplicateItemRecloseAtItsOwnIndex pins what the SECOND
@@ -633,20 +525,7 @@ func RunBatchCloserDuplicateItemRecloseAtItsOwnIndex(t *testing.T, ctx context.C
 		t.Fatalf("outcomes = %d for 2 items (%v), want one per item: every item appears in Outcomes at the same index",
 			len(result.Outcomes), batchCloserOutcomeIDs(result.Outcomes))
 	}
-	for i, outcome := range result.Outcomes {
-		if outcome.IssueID != duplicated {
-			t.Fatalf("outcome %d echoes %q, want %q", i, outcome.IssueID, duplicated)
-		}
-		if outcome.Err != nil {
-			t.Fatalf("outcome %d (%s) = %v, want a per-item success at both indices", i, duplicated, outcome.Err)
-		}
-	}
-	if !result.Outcomes[0].Changed {
-		t.Errorf("outcome 0 (%s) Changed = false, want true — the first occurrence is the one that closed it", duplicated)
-	}
-	if result.Outcomes[1].Changed {
-		t.Errorf("outcome 1 (%s) Changed = true, want false — the second occurrence is an idempotent re-close of the first", duplicated)
-	}
+	assertBatchCloserDuplicateOutcomes(t, result, duplicated)
 	assertBatchCloserClosedRow(t, ctx, fixture, duplicated, firstReason, session)
 	after, err := fixture.CountHistory(ctx)
 	if err != nil {
@@ -854,25 +733,7 @@ func RunBatchCloserClaimNextHydratesWhenSomethingClosed(t *testing.T, ctx contex
 	if err != nil {
 		t.Fatalf("CloseBatch with a claim: %v", err)
 	}
-	if result.Outcomes[0].Err != nil {
-		t.Fatalf("the close the claim is earned by refused: %v", result.Outcomes[0].Err)
-	}
-	if result.ClaimedNext == nil {
-		t.Fatalf("ClaimedNext is nil after a batch that closed %s with %s ready under label %q", closeable, candidate, label)
-	}
-	if result.ClaimedNext.Issue == nil {
-		t.Fatalf("ClaimedNext carries a nil Issue")
-	}
-	if result.ClaimedNext.ID != candidate {
-		t.Errorf("ClaimedNext = %s, want the only row under label %q, %s", result.ClaimedNext.ID, label, candidate)
-	}
-	if result.ClaimedNext.Assignee != "claimer" {
-		t.Errorf("ClaimedNext assignee = %q, want the batch's actor %q", result.ClaimedNext.Assignee, "claimer")
-	}
-	if result.ClaimedNext.DependentCount != 1 {
-		t.Errorf("ClaimedNext DependentCount = %d, want 1 — the row is hydrated with its cardinalities, not returned bare",
-			result.ClaimedNext.DependentCount)
-	}
+	assertBatchCloserClaimHitResult(t, result, closeable, candidate, label)
 	if got := batchCloserAssignee(t, ctx, fixture, candidate); got != "claimer" {
 		t.Errorf("durable assignee of %s = %q, want %q — the claim committed with the closes", candidate, got, "claimer")
 	}
@@ -975,10 +836,7 @@ func RunBatchCloserClaimNextSeesAnUnblockingFromItsOwnBatch(t *testing.T, ctx co
 	if err != nil {
 		t.Fatalf("control CloseBatch: %v", err)
 	}
-	if control.ClaimedNext != nil {
-		t.Fatalf("control batch claimed %s while its blocker %s was still open — the candidate was not actually blocked",
-			control.ClaimedNext.ID, blocker)
-	}
+	assertBatchCloserControlClaimEmpty(t, control, blocker)
 
 	result, err := fixture.Closer.CloseBatch(ctx, publicops.CloseBatchRequest{
 		Actor:     "claimer",
@@ -988,16 +846,7 @@ func RunBatchCloserClaimNextSeesAnUnblockingFromItsOwnBatch(t *testing.T, ctx co
 	if err != nil {
 		t.Fatalf("CloseBatch closing the blocker with a claim: %v", err)
 	}
-	if result.Outcomes[0].Err != nil {
-		t.Fatalf("closing the blocker %s refused: %v", blocker, result.Outcomes[0].Err)
-	}
-	if result.ClaimedNext == nil {
-		t.Fatalf("ClaimedNext is nil after the same request closed %s, the candidate's only blocker — the claim did not run after the closes",
-			blocker)
-	}
-	if result.ClaimedNext.ID != candidate {
-		t.Errorf("ClaimedNext = %s, want %s", result.ClaimedNext.ID, candidate)
-	}
+	assertBatchCloserUnblockClaim(t, result, blocker, candidate)
 	if got := batchCloserAssignee(t, ctx, fixture, candidate); got != "claimer" {
 		t.Errorf("durable assignee of %s = %q, want %q — the unblocking and the claim committed together", candidate, got, "claimer")
 	}
@@ -1106,11 +955,13 @@ func RunBatchCloserDoesNotMutateTheCallerRequest(t *testing.T, ctx context.Conte
 				{IssueID: closeable, Reason: "snapshot reason"},
 			},
 			ClaimNext: &publicops.ReadyRequest{
-				Labels:        []string{"  " + label + "  ", label},
-				ExcludeLabels: []string{" " + label + "-excluded "},
-				ExcludeTypes:  []string{" chore , chore "},
-				Priority:      &priority,
-				Sort:          "priority",
+				Labels: []string{"  " + label + "  ", label},
+				ReadyRequestFilters: publicops.ReadyRequestFilters{
+					ExcludeLabels: []string{" " + label + "-excluded "},
+					ExcludeTypes:  []string{" chore , chore "},
+				},
+				Priority: &priority,
+				Sort:     "priority",
 			},
 		}
 	}
@@ -1197,13 +1048,13 @@ func RunBatchCloserSettlesTheDependersOfWhatItClosed(t *testing.T, ctx context.C
 	seedBatchCloserEdge(t, ctx, fixture, controlDepender, controlBlocker, types.DepBlocks)
 
 	probe := newBlockedStateProbe(ctx, fixture.QueryScalar)
-	probe.requirePlaneResidency(t, blockedWisp(wispDepender))
-	probe.requireBlockedByOpenBlocker(t, blockedIssue(depender), blockedIssue(blocker), "the direct depender of a batch item")
-	probe.requireBlockedByOpenBlocker(t, blockedWisp(wispDepender), blockedIssue(blocker), "the cross-plane depender of a batch item")
-	probe.requireBlockedWithNoDirectBlockerEdges(t, blockedIssue(child), "the child's block is inherited from the depender")
-	probe.requireBlockedByOpenBlocker(t, blockedIssue(controlDepender), blockedIssue(controlBlocker), "the control's blocker is in no batch")
+	requirePlaneResidency(probe, t, blockedWisp(wispDepender))
+	requireBlockedByOpenBlocker(probe, t, blockedIssue(depender), blockedIssue(blocker), "the direct depender of a batch item")
+	requireBlockedByOpenBlocker(probe, t, blockedWisp(wispDepender), blockedIssue(blocker), "the cross-plane depender of a batch item")
+	requireBlockedWithNoDirectBlockerEdges(probe, t, blockedIssue(child), "the child's block is inherited from the depender")
+	requireBlockedByOpenBlocker(probe, t, blockedIssue(controlDepender), blockedIssue(controlBlocker), "the control's blocker is in no batch")
 
-	flip := probe.watchFlip(t,
+	flip := watchFlip(probe, t,
 		[]blockedStateRow{blockedIssue(depender), blockedIssue(child), blockedWisp(wispDepender)},
 		[]blockedStateRow{blockedIssue(controlDepender)})
 
@@ -1220,18 +1071,240 @@ func RunBatchCloserSettlesTheDependersOfWhatItClosed(t *testing.T, ctx context.C
 		}
 	}
 
-	flip.requireFlippedTo(t, 0, "a batch settles the dependers of every item that landed, in the transaction the batch commits")
+	requireFlippedTo(flip, t, 0, "a batch settles the dependers of every item that landed, in the transaction the batch commits")
+}
+
+func assertBatchCloserOutcomeIDs(t *testing.T, result publicops.CloseBatchResult, items []publicops.BatchCloseItem) {
+	t.Helper()
+	for i, item := range items {
+		if result.Outcomes[i].IssueID != item.IssueID {
+			t.Fatalf("outcome %d echoes %q, want %q", i, result.Outcomes[i].IssueID, item.IssueID)
+		}
+	}
+}
+
+func assertBatchCloserMixedSurvivors(t *testing.T, ctx context.Context, fixture BatchCloserFixture, result publicops.CloseBatchResult, alpha, beta, session, alphaReason, betaReason string) {
+	t.Helper()
+	survivors := []struct {
+		index  int
+		id     string
+		reason string
+	}{{0, alpha, alphaReason}, {4, beta, betaReason}}
+	for _, survivor := range survivors {
+		assertBatchCloserMixedSurvivor(t, ctx, fixture, result.Outcomes[survivor.index], survivor.index, survivor.id, survivor.reason, session)
+	}
+}
+
+func assertBatchCloserMixedSurvivor(t *testing.T, ctx context.Context, fixture BatchCloserFixture, outcome publicops.CloseOutcome, index int, id, reason, session string) {
+	t.Helper()
+	if outcome.Err != nil {
+		t.Errorf("outcome %d (%s) = %v, want a success: the survivors of a mixed batch commit", index, id, outcome.Err)
+		return
+	}
+	if outcome.Issue == nil {
+		t.Errorf("outcome %d (%s) has a nil Issue with a nil Err — Issue is nil exactly when Err is set", index, id)
+		return
+	}
+	if !outcome.Changed {
+		t.Errorf("outcome %d (%s) Changed = false on a first close, want true", index, id)
+	}
+	if outcome.Issue.Status != types.StatusClosed {
+		t.Errorf("outcome %d (%s) snapshot status = %q, want %q", index, id, outcome.Issue.Status, types.StatusClosed)
+	}
+	if outcome.Issue.CloseReason != reason {
+		t.Errorf("outcome %d (%s) snapshot CloseReason = %q, want %q — reasons are per item, not per request",
+			index, id, outcome.Issue.CloseReason, reason)
+	}
+	if outcome.Issue.ClosedBySession != session {
+		t.Errorf("outcome %d (%s) snapshot ClosedBySession = %q, want %q — the session is recorded against every item",
+			index, id, outcome.Issue.ClosedBySession, session)
+	}
+	assertBatchCloserClosedRow(t, ctx, fixture, id, reason, session)
+}
+
+func assertBatchCloserMixedRefusals(t *testing.T, result publicops.CloseBatchResult, missing, blocked, blocker, parent string) {
+	t.Helper()
+	if !errors.Is(result.Outcomes[1].Err, publicops.ErrNotFound) {
+		t.Errorf("outcome 1 (%s) = %v, want ErrNotFound", missing, result.Outcomes[1].Err)
+	}
+	if !errors.Is(result.Outcomes[2].Err, publicops.ErrCloseBlocked) {
+		t.Errorf("outcome 2 (%s, blocked by open %s) = %v, want ErrCloseBlocked", blocked, blocker, result.Outcomes[2].Err)
+	}
+	var openChildren *publicops.CloseOpenChildrenError
+	if !errors.As(result.Outcomes[3].Err, &openChildren) {
+		t.Errorf("outcome 3 (%s, one open child) = %v, want *CloseOpenChildrenError", parent, result.Outcomes[3].Err)
+	} else {
+		assertBatchCloserOpenChildrenRefusal(t, openChildren, parent)
+	}
+	for _, refused := range []int{1, 2, 3} {
+		if result.Outcomes[refused].Issue != nil {
+			t.Errorf("outcome %d (%s) carries an Issue beside its Err — Issue is nil exactly when Err is set",
+				refused, result.Outcomes[refused].IssueID)
+		}
+	}
+}
+
+func assertBatchCloserOpenChildrenRefusal(t *testing.T, refusal *publicops.CloseOpenChildrenError, parent string) {
+	t.Helper()
+	if refusal.OpenChildren != 1 {
+		t.Errorf("open-children refusal for %s carries OpenChildren = %d, want 1", parent, refusal.OpenChildren)
+	}
+	if refusal.IssueID != parent {
+		t.Errorf("open-children refusal names %q, want %q", refusal.IssueID, parent)
+	}
+}
+
+func assertBatchCloserSnapshotShape(t *testing.T, outcome publicops.CloseOutcome, label, target string) {
+	t.Helper()
+	if len(outcome.Issue.Labels) != 1 || outcome.Issue.Labels[0] != label {
+		t.Errorf("snapshot labels = %v, want exactly [%s] — the snapshot carries labels", outcome.Issue.Labels, label)
+	}
+	if len(outcome.Issue.Dependencies) != 1 {
+		t.Errorf("snapshot dependency records = %d, want 1 — the snapshot carries dependency records", len(outcome.Issue.Dependencies))
+	} else if outcome.Issue.Dependencies[0].DependsOnID != target {
+		t.Errorf("snapshot dependency record points at %q, want %q", outcome.Issue.Dependencies[0].DependsOnID, target)
+	}
+	if len(outcome.Issue.Comments) != 0 {
+		t.Errorf("snapshot carries %d comments, want none: comments are omitted, as they are for CloseResult", len(outcome.Issue.Comments))
+	}
+}
+
+func assertBatchCloserFirstReclose(t *testing.T, result publicops.CloseBatchResult, parent string) {
+	t.Helper()
+	for i, outcome := range result.Outcomes {
+		if outcome.Err != nil {
+			t.Fatalf("first close outcome %d (%s) = %v, want a success", i, outcome.IssueID, outcome.Err)
+		}
+		if !outcome.Changed {
+			t.Errorf("first close outcome %d (%s) Changed = false, want true", i, outcome.IssueID)
+		}
+	}
+	if result.Outcomes[1].OpenChildren != 1 {
+		t.Errorf("forced close of %s reports OpenChildren = %d, want 1", parent, result.Outcomes[1].OpenChildren)
+	}
+}
+
+func assertBatchCloserSecondReclose(t *testing.T, result publicops.CloseBatchResult, parent string) {
+	t.Helper()
+	for i, outcome := range result.Outcomes {
+		if outcome.Err != nil {
+			t.Errorf("re-close outcome %d (%s) = %v, want a per-item success", i, outcome.IssueID, outcome.Err)
+			continue
+		}
+		if outcome.Issue == nil {
+			t.Errorf("re-close outcome %d (%s) has a nil Issue with a nil Err", i, outcome.IssueID)
+		}
+		if outcome.Changed {
+			t.Errorf("re-close outcome %d (%s) Changed = true, want false: nothing was mutated", i, outcome.IssueID)
+		}
+	}
+	if result.Outcomes[1].OpenChildren != 1 {
+		t.Errorf("forced re-close of %s reports OpenChildren = %d, want 1 — it is reported even for an idempotent re-close",
+			parent, result.Outcomes[1].OpenChildren)
+	}
+}
+
+func assertBatchCloserAllIdempotentResult(t *testing.T, ctx context.Context, fixture BatchCloserFixture, result publicops.CloseBatchResult, closeable, candidate string, before, after int) {
+	t.Helper()
+	if result.Outcomes[0].Err != nil {
+		t.Fatalf("re-close outcome 0 (%s) = %v, want a per-item success", closeable, result.Outcomes[0].Err)
+	}
+	if result.Outcomes[0].Changed {
+		t.Fatalf("re-close outcome 0 (%s) Changed = true, want false — this case is about a batch that mutated nothing", closeable)
+	}
+	if result.ClaimedNext != nil {
+		t.Errorf("ClaimedNext = %s after a batch whose only item was already closed, want nil: landed means Changed, and a claim handed out by a request that closed nothing is one the caller never earned",
+			result.ClaimedNext.ID)
+	}
+	if got := batchCloserAssignee(t, ctx, fixture, candidate); got != "" {
+		t.Errorf("durable assignee of the eligible %s = %q, want it untouched", candidate, got)
+	}
+	if after != before {
+		t.Errorf("history entries went %d -> %d across a batch whose items were all already closed, want no change: none at all when nothing landed",
+			before, after)
+	}
+}
+
+func assertBatchCloserDuplicateOutcomes(t *testing.T, result publicops.CloseBatchResult, duplicated string) {
+	t.Helper()
+	for i, outcome := range result.Outcomes {
+		if outcome.IssueID != duplicated {
+			t.Fatalf("outcome %d echoes %q, want %q", i, outcome.IssueID, duplicated)
+		}
+		if outcome.Err != nil {
+			t.Fatalf("outcome %d (%s) = %v, want a per-item success at both indices", i, duplicated, outcome.Err)
+		}
+	}
+	if !result.Outcomes[0].Changed {
+		t.Errorf("outcome 0 (%s) Changed = false, want true — the first occurrence is the one that closed it", duplicated)
+	}
+	if result.Outcomes[1].Changed {
+		t.Errorf("outcome 1 (%s) Changed = true, want false — the second occurrence is an idempotent re-close of the first", duplicated)
+	}
+}
+
+func assertBatchCloserClaimHitResult(t *testing.T, result publicops.CloseBatchResult, closeable, candidate, label string) {
+	t.Helper()
+	if result.Outcomes[0].Err != nil {
+		t.Fatalf("the close the claim is earned by refused: %v", result.Outcomes[0].Err)
+	}
+	if result.ClaimedNext == nil {
+		t.Fatalf("ClaimedNext is nil after a batch that closed %s with %s ready under label %q", closeable, candidate, label)
+	}
+	if result.ClaimedNext.Issue == nil {
+		t.Fatalf("ClaimedNext carries a nil Issue")
+	}
+	if result.ClaimedNext.ID != candidate {
+		t.Errorf("ClaimedNext = %s, want the only row under label %q, %s", result.ClaimedNext.ID, label, candidate)
+	}
+	if result.ClaimedNext.Assignee != "claimer" {
+		t.Errorf("ClaimedNext assignee = %q, want the batch's actor %q", result.ClaimedNext.Assignee, "claimer")
+	}
+	if result.ClaimedNext.DependentCount != 1 {
+		t.Errorf("ClaimedNext DependentCount = %d, want 1 — the row is hydrated with its cardinalities, not returned bare",
+			result.ClaimedNext.DependentCount)
+	}
+}
+
+func assertBatchCloserControlClaimEmpty(t *testing.T, result publicops.CloseBatchResult, blocker string) {
+	t.Helper()
+	if result.ClaimedNext != nil {
+		t.Fatalf("control batch claimed %s while its blocker %s was still open — the candidate was not actually blocked",
+			result.ClaimedNext.ID, blocker)
+	}
+}
+
+func assertBatchCloserUnblockClaim(t *testing.T, result publicops.CloseBatchResult, blocker, candidate string) {
+	t.Helper()
+	if result.Outcomes[0].Err != nil {
+		t.Fatalf("closing the blocker %s refused: %v", blocker, result.Outcomes[0].Err)
+	}
+	if result.ClaimedNext == nil {
+		t.Fatalf("ClaimedNext is nil after the same request closed %s, the candidate's only blocker — the claim did not run after the closes",
+			blocker)
+	}
+	if result.ClaimedNext.ID != candidate {
+		t.Errorf("ClaimedNext = %s, want %s", result.ClaimedNext.ID, candidate)
+	}
 }
 
 func seedBatchCloserIssue(t *testing.T, ctx context.Context, fixture BatchCloserFixture, id string, labels ...string) {
 	t.Helper()
 	issue := &types.Issue{
-		ID:        id,
-		Title:     id,
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Labels:    labels,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: labels,
+		},
 	}
 	if err := fixture.CreateIssue(ctx, issue, "seed"); err != nil {
 		t.Fatalf("seed issue %s: %v", id, err)
@@ -1241,13 +1314,23 @@ func seedBatchCloserIssue(t *testing.T, ctx context.Context, fixture BatchCloser
 func seedBatchCloserWisp(t *testing.T, ctx context.Context, fixture BatchCloserFixture, id string, labels ...string) {
 	t.Helper()
 	if err := fixture.CreateWisp(ctx, &types.Issue{
-		ID:        id,
-		Title:     id,
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Labels:    labels,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: labels,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}, "seed"); err != nil {
 		t.Fatalf("seed wisp %s: %v", id, err)
 	}

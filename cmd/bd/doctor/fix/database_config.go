@@ -63,38 +63,35 @@ func findActualDBFile(beadsDir string) string {
 	if err != nil {
 		return ""
 	}
-
-	var candidates []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-
-		// Must end with .db
-		if !strings.HasSuffix(name, ".db") {
-			continue
-		}
-
-		// Skip backups and vc.db
-		if strings.Contains(name, "backup") || name == "vc.db" {
-			continue
-		}
-
-		candidates = append(candidates, name)
-	}
-
+	candidates := sqliteDBFileCandidates(entries)
 	if len(candidates) == 0 {
 		return ""
 	}
-
-	// Prefer beads.db (canonical name)
 	for _, name := range candidates {
 		if name == "beads.db" {
 			return name
 		}
 	}
-
-	// Fall back to first candidate
 	return candidates[0]
+}
+
+func isSQLiteDBCandidate(entry os.DirEntry) bool {
+	if entry.IsDir() {
+		return false
+	}
+	name := entry.Name()
+	if !strings.HasSuffix(name, ".db") {
+		return false
+	}
+	return !strings.Contains(name, "backup") && name != "vc.db"
+}
+
+func sqliteDBFileCandidates(entries []os.DirEntry) []string {
+	var candidates []string
+	for _, entry := range entries {
+		if isSQLiteDBCandidate(entry) {
+			candidates = append(candidates, entry.Name())
+		}
+	}
+	return candidates
 }

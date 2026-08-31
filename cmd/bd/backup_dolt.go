@@ -57,10 +57,10 @@ After adding, run 'bd backup sync' to push your data.`,
 			}
 		}()
 
-		ctx := rootCtx
+		ctx := getRootContext()
 		rawPath := args[0]
 
-		if store == nil {
+		if getStore() == nil {
 			return fmt.Errorf("no store available")
 		}
 
@@ -68,7 +68,7 @@ After adding, run 'bd backup sync' to push your data.`,
 		// DoltHub URLs are passed through as-is.
 		backupURL := resolveDoltBackupURL(rawPath)
 
-		bs, ok := storage.UnwrapStore(store).(storage.BackupStore)
+		bs, ok := storage.UnwrapStore(getStore()).(storage.BackupStore)
 		if !ok {
 			return fmt.Errorf("storage backend does not support backup operations")
 		}
@@ -99,7 +99,7 @@ After adding, run 'bd backup sync' to push your data.`,
 
 		commandDidWrite.Store(true)
 
-		if jsonOutput {
+		if isJSONOutput() {
 			return outputJSON(map[string]interface{}{
 				"backup_url":  backupURL,
 				"backup_name": defaultDoltBackupName,
@@ -135,21 +135,21 @@ Run 'bd backup init <path>' first to configure a destination.`,
 			}
 		}()
 
-		ctx := rootCtx
-		if store == nil {
+		ctx := getRootContext()
+		if getStore() == nil {
 			return fmt.Errorf("no store available")
 		}
 
-		bs, ok := storage.UnwrapStore(store).(storage.BackupStore)
+		bs, ok := storage.UnwrapStore(getStore()).(storage.BackupStore)
 		if !ok {
 			return fmt.Errorf("storage backend does not support backup operations")
 		}
 
 		// First, commit any pending changes so they're included in the backup
-		if err := store.Commit(ctx, "bd: pre-backup commit"); err != nil && !isDoltNothingToCommit(err) {
+		if err := getStore().Commit(ctx, "bd: pre-backup commit"); err != nil && !isDoltNothingToCommit(err) {
 			fmt.Fprintf(os.Stderr, "Warning: failed to commit pending changes: %v\n", err)
 		}
-		commandDidExplicitDoltCommit = true
+		setCommandDidExplicitDoltCommit(true)
 
 		start := time.Now()
 
@@ -169,7 +169,7 @@ Run 'bd backup init <path>' first to configure a destination.`,
 			fmt.Fprintf(os.Stderr, "Warning: backup synced but failed to update state: %v\n", err)
 		}
 
-		if jsonOutput {
+		if isJSONOutput() {
 			return outputJSON(map[string]interface{}{
 				"synced":   true,
 				"duration": elapsed.String(),
@@ -359,10 +359,10 @@ func showDoltBackupStatusJSON() map[string]interface{} {
 // instance can measure its storage locally. Unsupported backends preserve the
 // optional status-field contract instead of failing the command.
 func doltBackupSize(ctx context.Context) (int64, bool, error) {
-	if store == nil {
+	if getStore() == nil {
 		return 0, false, fmt.Errorf("no storage backend is open")
 	}
-	return doltBackupSizeForStore(ctx, store)
+	return doltBackupSizeForStore(ctx, getStore())
 }
 
 func doltBackupSizeForStore(ctx context.Context, candidate storage.DoltStorage) (int64, bool, error) {
@@ -417,12 +417,12 @@ backup configuration. The backup data at the destination is not deleted.`,
 			}
 		}()
 
-		ctx := rootCtx
-		if store == nil {
+		ctx := getRootContext()
+		if getStore() == nil {
 			return fmt.Errorf("no store available")
 		}
 
-		bs, ok := storage.UnwrapStore(store).(storage.BackupStore)
+		bs, ok := storage.UnwrapStore(getStore()).(storage.BackupStore)
 		if !ok {
 			return fmt.Errorf("storage backend does not support backup operations")
 		}
@@ -445,7 +445,7 @@ backup configuration. The backup data at the destination is not deleted.`,
 			_ = os.Remove(path)
 		}
 
-		if jsonOutput {
+		if isJSONOutput() {
 			return outputJSON(map[string]interface{}{"removed": true})
 		}
 

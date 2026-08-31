@@ -23,16 +23,26 @@ import (
 // need to be rewritten to pick it up.
 func CheckBtrfsNoCOW(path string) DoctorCheck {
 	const name = "Btrfs NoCOW (dolt)"
+	if skip, ok := btrfsNoCOWSkip(path, name); ok {
+		return skip
+	}
+	beadsDir := ResolveBeadsDirForRepo(path)
+	missing, anyBtrfs, fail := scanBtrfsNoCOWTargets(name, collectBtrfsNoCOWTargets(beadsDir))
+	if fail != nil {
+		return *fail
+	}
+	return reportBtrfsNoCOW(name, missing, anyBtrfs)
+}
 
+func btrfsNoCOWSkip(path, name string) (DoctorCheck, bool) {
 	if runtime.GOOS != "linux" {
 		return DoctorCheck{
 			Name:     name,
 			Status:   StatusOK,
 			Message:  "Not applicable (non-Linux platform)",
 			Category: CategoryPerformance,
-		}
+		}, true
 	}
-
 	beadsDir := ResolveBeadsDirForRepo(path)
 	if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
 		return DoctorCheck{
@@ -40,28 +50,30 @@ func CheckBtrfsNoCOW(path string) DoctorCheck {
 			Status:   StatusOK,
 			Message:  "No .beads directory to check",
 			Category: CategoryPerformance,
-		}
+		}, true
 	}
+	return DoctorCheck{}, false
+}
 
+func collectBtrfsNoCOWTargets(beadsDir string) []string {
 	// The dolt data directory is what actually matters for the hot write
 	// path, but FS_NOCOW_FL on .beads/ itself is enough because new subdirs
 	// inherit it. We check both: the ancestor (`.beads/`) is the one init
 	// sets, and any existing dolt data dir is what dolt is actively writing
 	// to. If either is missing the flag, warn.
 	targets := []string{beadsDir}
-	doltDir := filepath.Join(beadsDir, "dolt")
-	if _, err := os.Stat(doltDir); err == nil {
-		targets = append(targets, doltDir)
+	for _, sub := range []string{"dolt", "embeddeddolt"} {
+		p := filepath.Join(beadsDir, sub)
+		if _, err := os.Stat(p); err == nil {
+			targets = append(targets, p)
+		}
 	}
-	embeddedDir := filepath.Join(beadsDir, "embeddeddolt")
-	if _, err := os.Stat(embeddedDir); err == nil {
-		targets = append(targets, embeddedDir)
-	}
+	return targets
+}
 
+func scanBtrfsNoCOWTargets(name string, targets []string) (missing []string, anyBtrfs bool, fail *DoctorCheck) {
 	// Only warn for paths that live on btrfs — the flag is meaningless on
 	// ext4/xfs/tmpfs and reporting would just be noise.
-	var missing []string
-	anyBtrfs := false
 	for _, t := range targets {
 		onBtrfs, err := isBtrfs(t)
 		if err != nil || !onBtrfs {
@@ -72,19 +84,23 @@ func CheckBtrfsNoCOW(path string) DoctorCheck {
 		if err != nil {
 			// Real ioctl failure (not "unsupported"). Report as warning so
 			// the user knows something is off, but don't error out.
-			return DoctorCheck{
+			check := DoctorCheck{
 				Name:     name,
 				Status:   StatusWarning,
 				Message:  fmt.Sprintf("Failed to read FS_NOCOW_FL on %s", t),
 				Detail:   err.Error(),
 				Category: CategoryPerformance,
 			}
+			return nil, true, &check
 		}
 		if !set {
 			missing = append(missing, t)
 		}
 	}
+	return missing, anyBtrfs, nil
+}
 
+func reportBtrfsNoCOW(name string, missing []string, anyBtrfs bool) DoctorCheck {
 	if !anyBtrfs {
 		return DoctorCheck{
 			Name:     name,
@@ -93,7 +109,6 @@ func CheckBtrfsNoCOW(path string) DoctorCheck {
 			Category: CategoryPerformance,
 		}
 	}
-
 	if len(missing) == 0 {
 		return DoctorCheck{
 			Name:     name,
@@ -102,7 +117,6 @@ func CheckBtrfsNoCOW(path string) DoctorCheck {
 			Category: CategoryPerformance,
 		}
 	}
-
 	detail := "btrfs transparent compression causes kworker thrashing on dolt's\n" +
 		"append-only write path. Affected paths:\n"
 	for _, m := range missing {
@@ -111,7 +125,6 @@ func CheckBtrfsNoCOW(path string) DoctorCheck {
 	detail += "\nNote: setting the flag only affects newly-created files. Existing\n" +
 		"files inside the directory must be rewritten (e.g. mv away and back)\n" +
 		"to pick up the new flag."
-
 	return DoctorCheck{
 		Name:     name,
 		Status:   StatusWarning,
@@ -131,39 +144,50 @@ func CheckBtrfsNoCOW(path string) DoctorCheck {
 // On non-Linux or non-btrfs this is a no-op and returns a message to that
 // effect.
 func FixBtrfsNoCOW(path string) (string, error) {
+	beadsDir, skip, err := prepareBtrfsNoCOWFix(path)
+	if err != nil {
+		return "", err
+	}
+	if skip != "" {
+		return skip, nil
+	}
+	applied, err := applyBtrfsNoCOWTargets(collectBtrfsNoCOWTargets(beadsDir))
+	if err != nil {
+		return "", err
+	}
+	return reportBtrfsNoCOWFix(applied), nil
+}
+
+func prepareBtrfsNoCOWFix(path string) (beadsDir, skip string, err error) {
 	if runtime.GOOS != "linux" {
-		return "FS_NOCOW_FL fix skipped: not on Linux", nil
+		return "", "FS_NOCOW_FL fix skipped: not on Linux", nil
 	}
-
-	beadsDir := ResolveBeadsDirForRepo(path)
+	beadsDir = ResolveBeadsDirForRepo(path)
 	if _, err := os.Stat(beadsDir); os.IsNotExist(err) {
-		return "", fmt.Errorf(".beads directory not found at %s", beadsDir)
+		return "", "", fmt.Errorf(".beads directory not found at %s", beadsDir)
 	}
-
 	onBtrfs, err := isBtrfs(beadsDir)
 	if err != nil {
-		return "", fmt.Errorf("failed to statfs %s: %w", beadsDir, err)
+		return "", "", fmt.Errorf("failed to statfs %s: %w", beadsDir, err)
 	}
 	if !onBtrfs {
-		return "FS_NOCOW_FL fix skipped: not on btrfs", nil
+		return "", "FS_NOCOW_FL fix skipped: not on btrfs", nil
 	}
+	return beadsDir, "", nil
+}
 
-	targets := []string{beadsDir}
-	for _, sub := range []string{"dolt", "embeddeddolt"} {
-		p := filepath.Join(beadsDir, sub)
-		if _, err := os.Stat(p); err == nil {
-			targets = append(targets, p)
-		}
-	}
-
+func applyBtrfsNoCOWTargets(targets []string) ([]string, error) {
 	var applied []string
 	for _, t := range targets {
 		if err := applyNoCOW(t); err != nil {
-			return "", fmt.Errorf("failed to set FS_NOCOW_FL on %s: %w", t, err)
+			return nil, fmt.Errorf("failed to set FS_NOCOW_FL on %s: %w", t, err)
 		}
 		applied = append(applied, t)
 	}
+	return applied, nil
+}
 
+func reportBtrfsNoCOWFix(applied []string) string {
 	msg := fmt.Sprintf("Applied FS_NOCOW_FL to %d path(s):\n", len(applied))
 	for _, a := range applied {
 		msg += "  " + a + "\n"
@@ -172,5 +196,5 @@ func FixBtrfsNoCOW(path string) (string, error) {
 		"old compression state. To fully benefit, relocate and restore the data:\n" +
 		"  mv .beads/dolt /tmp/beads-dolt-reloc && mv /tmp/beads-dolt-reloc .beads/dolt\n" +
 		"Stop the dolt server first if it is running."
-	return msg, nil
+	return msg
 }

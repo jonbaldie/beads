@@ -481,9 +481,7 @@ func RunBatchApplyEndGateRefusesAHierarchyTheRequestBuilt(t *testing.T, ctx cont
 	grand := fixture.IssuePrefix + "-endgate-grand"
 	parent := fixture.IssuePrefix + "-endgate-parent"
 	child := fixture.IssuePrefix + "-endgate-child"
-	for _, id := range []string{grand, parent, child} {
-		batchApplySeedIssue(t, ctx, fixture, id, types.StatusOpen)
-	}
+	batchApplySeedIssues(t, ctx, fixture, types.StatusOpen, grand, parent, child)
 
 	gateBatch := func(first publicops.DependencyType) publicops.ApplyBatchRequest {
 		return publicops.ApplyBatchRequest{
@@ -495,7 +493,12 @@ func RunBatchApplyEndGateRefusesAHierarchyTheRequestBuilt(t *testing.T, ctx cont
 			},
 		}
 	}
+	assertBatchApplyHierarchyEndGateRefusal(t, ctx, fixture, gateBatch, child, parent, grand)
+	assertBatchApplyHierarchyEndGatePositive(t, ctx, fixture, gateBatch, child, parent, grand)
+}
 
+func assertBatchApplyHierarchyEndGateRefusal(t *testing.T, ctx context.Context, fixture BatchApplyFixture, gateBatch func(publicops.DependencyType) publicops.ApplyBatchRequest, child, parent, grand string) {
+	t.Helper()
 	_, err := fixture.BatchApplier.ApplyBatch(ctx, gateBatch(publicops.DepBlocks))
 	var conflict *publicops.DependencyHierarchyConflictError
 	if !errors.As(err, &conflict) {
@@ -520,7 +523,10 @@ func RunBatchApplyEndGateRefusesAHierarchyTheRequestBuilt(t *testing.T, ctx cont
 	for _, edge := range [][2]string{{child, grand}, {child, parent}, {parent, grand}} {
 		assertBatchApplyEdgeCount(t, ctx, fixture, edge[0], edge[1], 0)
 	}
+}
 
+func assertBatchApplyHierarchyEndGatePositive(t *testing.T, ctx context.Context, fixture BatchApplyFixture, gateBatch func(publicops.DependencyType) publicops.ApplyBatchRequest, child, parent, grand string) {
+	t.Helper()
 	batchApplyMust(t, ctx, fixture, gateBatch(publicops.DepRelated))
 	for _, edge := range [][2]string{{child, grand}, {child, parent}, {parent, grand}} {
 		assertBatchApplyEdgeCount(t, ctx, fixture, edge[0], edge[1], 1)
@@ -1124,13 +1130,22 @@ func RunBatchApplyRecordsOneEntryForAWriteThatLandedNothing(t *testing.T, ctx co
 	}
 	batchApplyMust(t, ctx, fixture, reAdd(types.WaitsForAllChildren))
 
-	settled := fixture.CountHistory != nil && fixture.CommitPending != nil
-	before := 0
-	if settled {
-		batchApplySettle(t, ctx, fixture)
-		before = batchApplyHistory(t, ctx, fixture)
-	}
+	settled, before := batchApplyHistoryBaseline(t, ctx, fixture)
+	assertBatchApplyWriteWithoutLanding(t, ctx, fixture, reAdd, source, spawner)
+	assertBatchApplyWriteHistory(t, ctx, fixture, settled, before)
+}
 
+func batchApplyHistoryBaseline(t *testing.T, ctx context.Context, fixture BatchApplyFixture) (bool, int) {
+	t.Helper()
+	if fixture.CountHistory == nil || fixture.CommitPending == nil {
+		return false, 0
+	}
+	batchApplySettle(t, ctx, fixture)
+	return true, batchApplyHistory(t, ctx, fixture)
+}
+
+func assertBatchApplyWriteWithoutLanding(t *testing.T, ctx context.Context, fixture BatchApplyFixture, reAdd func(string) publicops.ApplyBatchRequest, source, spawner string) {
+	t.Helper()
 	result := batchApplyMust(t, ctx, fixture, reAdd(types.WaitsForAnyChildren))
 	if result.Items[0].Changed {
 		t.Fatalf("a same-type re-add reported Changed true; this case is about a write NO item calls a landing")
@@ -1145,7 +1160,10 @@ func RunBatchApplyRecordsOneEntryForAWriteThatLandedNothing(t *testing.T, ctx co
 		t.Errorf("stored gate = %q (metadata %q), want %q: the re-add's metadata write must survive the commit, "+
 			"and an empty commit message is what rolls it back", meta.Gate, stored, types.WaitsForAnyChildren)
 	}
+}
 
+func assertBatchApplyWriteHistory(t *testing.T, ctx context.Context, fixture BatchApplyFixture, settled bool, before int) {
+	t.Helper()
 	if !settled {
 		return
 	}
@@ -1856,9 +1874,20 @@ func RunBatchApplyDoesNotMutateTheCallerRequest(t *testing.T, ctx context.Contex
 
 	build := func() publicops.ApplyBatchRequest {
 		created := &types.Issue{
-			Title: "caller owned", Status: types.StatusOpen, Priority: 2,
-			IssueType: types.TypeTask, Labels: []string{"kept"},
-			Metadata: json.RawMessage(`{"caller":"owned"}`),
+			IssueContent: types.IssueContent{
+				Title: "caller owned",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueMeta: types.IssueMeta{
+				Metadata: json.RawMessage(`{"caller":"owned"}`),
+			},
+			IssueGraph: types.IssueGraph{
+				Labels: []string{"kept"},
+			},
 		}
 		return publicops.ApplyBatchRequest{
 			Actor:      "apply-writer",
@@ -1955,13 +1984,13 @@ func RunBatchApplyRefusesAnUnusableRequest(t *testing.T, ctx context.Context, fi
 // name their rows. Every request carrying one also carries ForceIDPrefix, since
 // the fixture prefix is not the workspace's configured one.
 func batchApplyIssue(id, title string) *types.Issue {
-	return &types.Issue{ID: id, Title: title, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	return &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: title}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 }
 
 // batchApplyMintedIssue is an issue with NO id, for the cases about the ids the
 // role mints — Keys, the item bound and the replay property.
 func batchApplyMintedIssue(title string) *types.Issue {
-	return &types.Issue{Title: title, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	return &types.Issue{IssueContent: types.IssueContent{Title: title}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 }
 
 func batchApplyCreate(key string, issue *types.Issue) publicops.ApplyItem {
@@ -2019,6 +2048,13 @@ func batchApplySeedIssue(t *testing.T, ctx context.Context, fixture BatchApplyFi
 	issue.Status = status
 	if err := fixture.CreateIssue(ctx, issue, "apply-seed"); err != nil {
 		t.Fatalf("seeding %s: %v", id, err)
+	}
+}
+
+func batchApplySeedIssues(t *testing.T, ctx context.Context, fixture BatchApplyFixture, status types.Status, ids ...string) {
+	t.Helper()
+	for _, id := range ids {
+		batchApplySeedIssue(t, ctx, fixture, id, status)
 	}
 }
 

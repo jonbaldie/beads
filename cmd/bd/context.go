@@ -5,11 +5,14 @@ package main
 
 import (
 	"context"
+	"math/rand"
 	"os"
 	"time"
 
 	"github.com/jonbaldie/beads/internal/hooks"
 	"github.com/jonbaldie/beads/internal/storage"
+	"github.com/jonbaldie/beads/internal/storage/uow"
+	"github.com/jonbaldie/beads/internal/workspacegate"
 )
 
 // CommandContext holds all runtime state for command execution.
@@ -18,39 +21,144 @@ import (
 // - Clearer state ownership (all state in one place)
 // - Reduced global count (20+ globals → 1 context)
 // - Thread safety (mutexes grouped with the data they protect)
-type CommandContext struct {
-	// Configuration (derived from flags and config)
-	DBPath       string
-	Actor        string
-	JSONOutput   bool
-	SandboxMode  bool
-	ReadonlyMode bool
-	LockTimeout  time.Duration
-	Verbose      bool
-	Quiet        bool
+type commandContextConfig struct {
+	ChangeDir         string
+	DBPath            string
+	DatabaseFlag      string
+	Actor             string
+	SandboxMode       bool
+	GlobalFlag        bool
+	ReadonlyMode      bool
+	IgnoreSchemaSkew  bool
+	LockTimeout       time.Duration
+	CPUProfileEnabled bool
+	MemProfilePath    string
+	DoltAutoCommit    string
+	commandContextOutput
+}
 
+type commandContextOutput struct {
+	JSONOutput  bool
+	NoColorFlag bool
+	Verbose     bool
+	Quiet       bool
+}
+
+type commandContextMode struct {
 	ServerMode        bool
 	ProxiedServerMode bool
+}
 
-	// Runtime state
-	Store      storage.DoltStorage
-	RootCtx    context.Context
-	RootCancel context.CancelFunc
-	HookRunner *hooks.Runner
+type commandContextRuntime struct {
+	Store                      storage.DoltStorage
+	UOWProvider                uow.UnitOfWorkProvider
+	StoreActive                bool
+	RootCtx                    context.Context
+	RootCancel                 context.CancelFunc
+	HookRunner                 *hooks.Runner
+	ChangeDirEnvSnapshot       map[string]envSnapshotValue
+	ChangeDirOrigWD            string
+	CommandDidExplicitCommit   bool
+	CommandDidWriteTipMetadata bool
+	CommandTipIDsShown         map[string]struct{}
+	WorkspaceGateHandle        *workspacegate.MultiHandle
+}
 
-	// Version tracking
+type commandContextVersion struct {
 	VersionUpgradeDetected bool
 	PreviousVersion        string
 	UpgradeAcknowledged    bool
+}
 
-	// Profiling
+type commandContextProfile struct {
 	ProfileFile *os.File
 	TraceFile   *os.File
 }
 
+// persistentFlagValues is kept separately from the per-command context because
+// Cobra parses flags before PersistentPreRunE creates that context. The pointer
+// is held by the flag package for the lifetime of the process, while each
+// command receives a snapshot in initCommandContext.
+type persistentFlagValues struct {
+	ChangeDir         string
+	DBPath            string
+	DatabaseFlag      string
+	Actor             string
+	JSONOutput        bool
+	NoColorFlag       bool
+	SandboxMode       bool
+	GlobalFlag        bool
+	ReadonlyMode      bool
+	IgnoreSchemaSkew  bool
+	CPUProfileEnabled bool
+	MemProfilePath    string
+	Verbose           bool
+	Quiet             bool
+	DoltAutoCommit    string
+}
+
+var persistentFlags = func() func() *persistentFlagValues {
+	var values persistentFlagValues
+	return func() *persistentFlagValues { return &values }
+}()
+
+// commandContextState owns the process-level command state without exposing a
+// mutable package variable. A command is executed serially, so a single
+// context is sufficient; tests can still install the legacy context pointer
+// when they explicitly exercise that compatibility path.
+var commandContextState = func() func() *CommandContext {
+	state := &CommandContext{}
+	return func() *CommandContext { return state }
+}()
+
+// legacyStateCallbacks are installed by the test package so setters continue
+// to keep the legacy test variables in sync. Production has no callbacks, so
+// the compatibility bridge is zero-cost and does not mutate package globals.
+type legacyStateCallbacks struct {
+	storeValue    func() storage.DoltStorage
+	store         func(storage.DoltStorage)
+	actorValue    func() string
+	actor         func(string)
+	uowProvider   func(uow.UnitOfWorkProvider)
+	storeActive   func(bool)
+	dbPath        func(string)
+	rootContext   func(context.Context, context.CancelFunc)
+	workspaceGate func(*workspacegate.MultiHandle)
+	Tips          func([]Tip)
+	TipRand       func(*rand.Rand)
+	tipMetadata   func(bool)
+	tipIDs        func(map[string]struct{})
+	mode          legacyModeCallbacks
+}
+
+type legacyModeCallbacks struct {
+	commandContext func(*CommandContext)
+	changeDirEnv   func(map[string]envSnapshotValue)
+	changeDirWD    func(string)
+	jsonOutput     func(bool)
+	readonlyMode   func(bool)
+	doltAutoCommit func(string)
+	serverMode     func(bool)
+	proxiedMode    func(bool)
+}
+
+var legacyCallbacks = func() func() *legacyStateCallbacks {
+	callbacks := &legacyStateCallbacks{}
+	return func() *legacyStateCallbacks { return callbacks }
+}()
+
+// CommandContext holds all runtime state for command execution.
+type CommandContext struct {
+	commandContextConfig
+	commandContextMode
+	commandContextRuntime
+	commandContextVersion
+	commandContextProfile
+}
+
 // cmdCtx is the global CommandContext instance.
 // Commands access state through this single point instead of scattered globals.
-var cmdCtx *CommandContext
+var cmdCtx = commandContextState()
 
 // testModeUseGlobals when true forces accessor functions to use legacy globals.
 // This ensures backward compatibility with tests that manipulate globals directly.
@@ -59,32 +167,57 @@ var testModeUseGlobals bool
 // initCommandContext creates and initializes a new CommandContext.
 // Called from PersistentPreRun to set up runtime state.
 func initCommandContext() {
-	cmdCtx = &CommandContext{}
+	ctx := commandContext()
+	*ctx = CommandContext{
+		commandContextConfig: commandContextConfig{
+			ChangeDir:         persistentFlags().ChangeDir,
+			DBPath:            persistentFlags().DBPath,
+			DatabaseFlag:      persistentFlags().DatabaseFlag,
+			Actor:             persistentFlags().Actor,
+			SandboxMode:       persistentFlags().SandboxMode,
+			GlobalFlag:        persistentFlags().GlobalFlag,
+			ReadonlyMode:      persistentFlags().ReadonlyMode,
+			IgnoreSchemaSkew:  persistentFlags().IgnoreSchemaSkew,
+			LockTimeout:       lockTimeout,
+			CPUProfileEnabled: persistentFlags().CPUProfileEnabled,
+			MemProfilePath:    persistentFlags().MemProfilePath,
+			DoltAutoCommit:    persistentFlags().DoltAutoCommit,
+			commandContextOutput: commandContextOutput{
+				JSONOutput:  persistentFlags().JSONOutput,
+				NoColorFlag: persistentFlags().NoColorFlag,
+				Verbose:     persistentFlags().Verbose,
+				Quiet:       persistentFlags().Quiet,
+			},
+		},
+		commandContextMode:    commandContextMode{},
+		commandContextRuntime: commandContextRuntime{},
+		commandContextVersion: commandContextVersion{},
+		commandContextProfile: commandContextProfile{},
+	}
+	if callback := legacyCallbacks().mode.commandContext; callback != nil {
+		callback(ctx)
+	}
 }
 
 // GetCommandContext returns the current CommandContext.
 // Returns nil if called before initialization (e.g., during init() or help).
 func GetCommandContext() *CommandContext {
-	return cmdCtx
+	return commandContext()
 }
 
-// resetCommandContext clears the CommandContext for testing.
-// This ensures tests that manipulate globals directly work correctly.
-// Only call this in tests, never in production code.
-func resetCommandContext() {
-	cmdCtx = nil
-}
-
-// enableTestModeGlobals forces accessor functions to use legacy globals.
-// This ensures backward compatibility with tests that manipulate globals directly.
-func enableTestModeGlobals() {
-	testModeUseGlobals = true
-	cmdCtx = nil
+// commandContext returns the active execution context. The raw cmdCtx pointer
+// is a test-only compatibility override; normal command execution uses the
+// closure-owned state above.
+func commandContext() *CommandContext {
+	if !testModeUseGlobals && cmdCtx != nil {
+		return cmdCtx
+	}
+	return commandContextState()
 }
 
 // shouldUseGlobals returns true if accessor functions should use globals.
 func shouldUseGlobals() bool {
-	return testModeUseGlobals || cmdCtx == nil
+	return testModeUseGlobals
 }
 
 // The following accessor functions provide backward-compatible access
@@ -96,33 +229,106 @@ func shouldUseGlobals() bool {
 // This is the primary way commands should access storage.
 func getStore() storage.DoltStorage {
 	if shouldUseGlobals() {
-		return store // fallback to legacy global during transition
+		if callback := legacyCallbacks().storeValue; callback != nil {
+			return callback()
+		}
+		return nil
 	}
-	return cmdCtx.Store
+	return commandContext().Store
+}
+
+func getChangeDir() string {
+	if shouldUseGlobals() {
+		return changeDir
+	}
+	return commandContext().ChangeDir
+}
+
+func setChangeDir(value string) {
+	commandContext().ChangeDir = value
+	persistentFlags().ChangeDir = value
+}
+
+func getDatabaseFlag() string {
+	if shouldUseGlobals() {
+		return databaseFlag
+	}
+	return commandContext().DatabaseFlag
+}
+
+func setDatabaseFlag(value string) {
+	commandContext().DatabaseFlag = value
+	persistentFlags().DatabaseFlag = value
+}
+
+func getChangeDirEnvSnapshot() map[string]envSnapshotValue {
+	if shouldUseGlobals() {
+		return changeDirEnvSnapshot
+	}
+	return commandContext().ChangeDirEnvSnapshot
+}
+
+func setChangeDirEnvSnapshot(snapshot map[string]envSnapshotValue) {
+	commandContext().ChangeDirEnvSnapshot = snapshot
+	if callback := legacyCallbacks().mode.changeDirEnv; callback != nil {
+		callback(snapshot)
+	}
+}
+
+func getChangeDirOrigWD() string {
+	if shouldUseGlobals() {
+		return changeDirOrigWD
+	}
+	return commandContext().ChangeDirOrigWD
+}
+
+func setChangeDirOrigWD(value string) {
+	commandContext().ChangeDirOrigWD = value
+	if callback := legacyCallbacks().mode.changeDirWD; callback != nil {
+		callback(value)
+	}
 }
 
 // setStore updates the storage backend in the CommandContext.
 func setStore(s storage.DoltStorage) {
-	if cmdCtx != nil {
-		cmdCtx.Store = s
+	commandContext().Store = s
+	if callback := legacyCallbacks().store; callback != nil {
+		callback(s)
 	}
-	store = s // keep legacy global in sync during transition
+}
+
+func getUOWProvider() uow.UnitOfWorkProvider {
+	if shouldUseGlobals() {
+		return uowProvider
+	}
+	return commandContext().UOWProvider
+}
+
+func setUOWProvider(provider uow.UnitOfWorkProvider) {
+	commandContext().UOWProvider = provider
+	if callback := legacyCallbacks().uowProvider; callback != nil {
+		callback(provider)
+	}
 }
 
 // getActor returns the current actor name for audit trail.
 func getActor() string {
 	if shouldUseGlobals() {
-		return actor
+		if callback := legacyCallbacks().actorValue; callback != nil {
+			return callback()
+		}
+		return ""
 	}
-	return cmdCtx.Actor
+	return commandContext().Actor
 }
 
 // setActor updates the actor name in the CommandContext.
 func setActor(a string) {
-	if cmdCtx != nil {
-		cmdCtx.Actor = a
+	commandContext().Actor = a
+	persistentFlags().Actor = a
+	if callback := legacyCallbacks().actor; callback != nil {
+		callback(a)
 	}
-	actor = a
 }
 
 // isJSONOutput returns true if JSON output mode is enabled.
@@ -130,15 +336,16 @@ func isJSONOutput() bool {
 	if shouldUseGlobals() {
 		return jsonOutput
 	}
-	return cmdCtx.JSONOutput
+	return commandContext().JSONOutput
 }
 
 // setJSONOutput updates the JSON output flag.
 func setJSONOutput(j bool) {
-	if cmdCtx != nil {
-		cmdCtx.JSONOutput = j
+	commandContext().JSONOutput = j
+	persistentFlags().JSONOutput = j
+	if callback := legacyCallbacks().mode.jsonOutput; callback != nil {
+		callback(j)
 	}
-	jsonOutput = j
 }
 
 // getDBPath returns the database path.
@@ -146,15 +353,16 @@ func getDBPath() string {
 	if shouldUseGlobals() {
 		return dbPath
 	}
-	return cmdCtx.DBPath
+	return commandContext().DBPath
 }
 
 // setDBPath updates the database path.
 func setDBPath(p string) {
-	if cmdCtx != nil {
-		cmdCtx.DBPath = p
+	commandContext().DBPath = p
+	if callback := legacyCallbacks().dbPath; callback != nil {
+		callback(p)
 	}
-	dbPath = p
+	persistentFlags().DBPath = p
 }
 
 // getRootContext returns the signal-aware root context.
@@ -164,7 +372,7 @@ func getRootContext() context.Context {
 	if shouldUseGlobals() {
 		ctx = rootCtx
 	} else {
-		ctx = cmdCtx.RootCtx
+		ctx = commandContext().RootCtx
 	}
 	if ctx == nil {
 		return context.Background()
@@ -174,12 +382,18 @@ func getRootContext() context.Context {
 
 // setRootContext updates the root context and cancel function.
 func setRootContext(ctx context.Context, cancel context.CancelFunc) {
-	if cmdCtx != nil {
-		cmdCtx.RootCtx = ctx
-		cmdCtx.RootCancel = cancel
+	commandContext().RootCtx = ctx
+	commandContext().RootCancel = cancel
+	if callback := legacyCallbacks().rootContext; callback != nil {
+		callback(ctx, cancel)
 	}
-	rootCtx = ctx
-	rootCancel = cancel
+}
+
+func getRootCancel() context.CancelFunc {
+	if shouldUseGlobals() {
+		return rootCancel
+	}
+	return commandContext().RootCancel
 }
 
 // getHookRunner returns the hook runner instance.
@@ -187,15 +401,12 @@ func getHookRunner() *hooks.Runner {
 	if shouldUseGlobals() {
 		return hookRunner
 	}
-	return cmdCtx.HookRunner
+	return commandContext().HookRunner
 }
 
 // setHookRunner updates the hook runner.
 func setHookRunner(h *hooks.Runner) {
-	if cmdCtx != nil {
-		cmdCtx.HookRunner = h
-	}
-	hookRunner = h
+	commandContext().HookRunner = h
 }
 
 // isReadonlyMode returns true if read-only mode is enabled.
@@ -203,7 +414,63 @@ func isReadonlyMode() bool {
 	if shouldUseGlobals() {
 		return readonlyMode
 	}
-	return cmdCtx.ReadonlyMode
+	return commandContext().ReadonlyMode
+}
+
+func setReadonlyMode(value bool) {
+	commandContext().ReadonlyMode = value
+	persistentFlags().ReadonlyMode = value
+	if callback := legacyCallbacks().mode.readonlyMode; callback != nil {
+		callback(value)
+	}
+}
+
+func isNoColorFlag() bool {
+	if shouldUseGlobals() {
+		return noColorFlag
+	}
+	return commandContext().NoColorFlag
+}
+
+func setNoColorFlag(value bool) {
+	commandContext().NoColorFlag = value
+	persistentFlags().NoColorFlag = value
+}
+
+func isGlobalFlag() bool {
+	if shouldUseGlobals() {
+		return globalFlag
+	}
+	return commandContext().GlobalFlag
+}
+
+func setGlobalFlag(value bool) {
+	commandContext().GlobalFlag = value
+	persistentFlags().GlobalFlag = value
+}
+
+func isIgnoreSchemaSkew() bool {
+	if shouldUseGlobals() {
+		return ignoreSchemaSkew
+	}
+	return commandContext().IgnoreSchemaSkew
+}
+
+func setIgnoreSchemaSkew(value bool) {
+	commandContext().IgnoreSchemaSkew = value
+	persistentFlags().IgnoreSchemaSkew = value
+}
+
+func isCPUProfileEnabled() bool {
+	if shouldUseGlobals() {
+		return cpuProfileEnabled
+	}
+	return commandContext().CPUProfileEnabled
+}
+
+func setCPUProfileEnabled(value bool) {
+	commandContext().CPUProfileEnabled = value
+	persistentFlags().CPUProfileEnabled = value
 }
 
 // getLockTimeout returns the SQLite lock timeout.
@@ -211,7 +478,7 @@ func getLockTimeout() time.Duration {
 	if shouldUseGlobals() {
 		return lockTimeout
 	}
-	return cmdCtx.LockTimeout
+	return commandContext().LockTimeout
 }
 
 // lockStore acquires the store mutex for thread-safe access.
@@ -226,12 +493,18 @@ func unlockStore() {
 
 // isStoreActive returns true if the store is currently available.
 func isStoreActive() bool {
-	return storeActive
+	if shouldUseGlobals() {
+		return storeActive
+	}
+	return commandContext().StoreActive
 }
 
 // setStoreActive updates the store active flag.
 func setStoreActive(active bool) {
-	storeActive = active
+	commandContext().StoreActive = active
+	if callback := legacyCallbacks().storeActive; callback != nil {
+		callback(active)
+	}
 }
 
 // isVerbose returns true if verbose mode is enabled.
@@ -239,7 +512,7 @@ func isVerbose() bool {
 	if shouldUseGlobals() {
 		return verboseFlag
 	}
-	return cmdCtx.Verbose
+	return commandContext().Verbose
 }
 
 // isQuiet returns true if quiet mode is enabled.
@@ -247,7 +520,7 @@ func isQuiet() bool {
 	if shouldUseGlobals() {
 		return quietFlag
 	}
-	return cmdCtx.Quiet
+	return commandContext().Quiet
 }
 
 // isSandboxMode returns true if sandbox mode is enabled.
@@ -255,15 +528,13 @@ func isSandboxMode() bool {
 	if shouldUseGlobals() {
 		return sandboxMode
 	}
-	return cmdCtx.SandboxMode
+	return commandContext().SandboxMode
 }
 
 // setSandboxMode updates the sandbox mode flag.
 func setSandboxMode(sm bool) {
-	if cmdCtx != nil {
-		cmdCtx.SandboxMode = sm
-	}
-	sandboxMode = sm
+	commandContext().SandboxMode = sm
+	persistentFlags().SandboxMode = sm
 }
 
 // isVersionUpgradeDetected returns true if a version upgrade was detected.
@@ -271,15 +542,12 @@ func isVersionUpgradeDetected() bool {
 	if shouldUseGlobals() {
 		return versionUpgradeDetected
 	}
-	return cmdCtx.VersionUpgradeDetected
+	return commandContext().VersionUpgradeDetected
 }
 
 // setVersionUpgradeDetected updates the version upgrade detected flag.
 func setVersionUpgradeDetected(detected bool) {
-	if cmdCtx != nil {
-		cmdCtx.VersionUpgradeDetected = detected
-	}
-	versionUpgradeDetected = detected
+	commandContext().VersionUpgradeDetected = detected
 }
 
 // getPreviousVersion returns the previous bd version.
@@ -287,15 +555,12 @@ func getPreviousVersion() string {
 	if shouldUseGlobals() {
 		return previousVersion
 	}
-	return cmdCtx.PreviousVersion
+	return commandContext().PreviousVersion
 }
 
 // setPreviousVersion updates the previous version.
 func setPreviousVersion(v string) {
-	if cmdCtx != nil {
-		cmdCtx.PreviousVersion = v
-	}
-	previousVersion = v
+	commandContext().PreviousVersion = v
 }
 
 // isUpgradeAcknowledged returns true if the upgrade notification was shown.
@@ -303,15 +568,12 @@ func isUpgradeAcknowledged() bool {
 	if shouldUseGlobals() {
 		return upgradeAcknowledged
 	}
-	return cmdCtx.UpgradeAcknowledged
+	return commandContext().UpgradeAcknowledged
 }
 
 // setUpgradeAcknowledged updates the upgrade acknowledged flag.
 func setUpgradeAcknowledged(ack bool) {
-	if cmdCtx != nil {
-		cmdCtx.UpgradeAcknowledged = ack
-	}
-	upgradeAcknowledged = ack
+	commandContext().UpgradeAcknowledged = ack
 }
 
 // getProfileFile returns the CPU profile file handle.
@@ -319,15 +581,12 @@ func getProfileFile() *os.File {
 	if shouldUseGlobals() {
 		return profileFile
 	}
-	return cmdCtx.ProfileFile
+	return commandContext().ProfileFile
 }
 
 // setProfileFile updates the CPU profile file handle.
 func setProfileFile(f *os.File) {
-	if cmdCtx != nil {
-		cmdCtx.ProfileFile = f
-	}
-	profileFile = f
+	commandContext().ProfileFile = f
 }
 
 // getTraceFile returns the trace file handle.
@@ -335,50 +594,127 @@ func getTraceFile() *os.File {
 	if shouldUseGlobals() {
 		return traceFile
 	}
-	return cmdCtx.TraceFile
+	return commandContext().TraceFile
 }
 
 // setTraceFile updates the trace file handle.
 func setTraceFile(f *os.File) {
-	if cmdCtx != nil {
-		cmdCtx.TraceFile = f
+	commandContext().TraceFile = f
+}
+
+func getMemProfilePath() string {
+	if shouldUseGlobals() {
+		return memProfilePath
 	}
-	traceFile = f
+	return commandContext().MemProfilePath
+}
+
+func setMemProfilePath(value string) {
+	commandContext().MemProfilePath = value
+	persistentFlags().MemProfilePath = value
+}
+
+func getDoltAutoCommit() string {
+	if shouldUseGlobals() {
+		return doltAutoCommit
+	}
+	return commandContext().DoltAutoCommit
+}
+
+func setDoltAutoCommit(value string) {
+	commandContext().DoltAutoCommit = value
+	persistentFlags().DoltAutoCommit = value
+	if callback := legacyCallbacks().mode.doltAutoCommit; callback != nil {
+		callback(value)
+	}
+}
+
+func isCommandDidExplicitDoltCommit() bool {
+	if shouldUseGlobals() {
+		return commandDidExplicitDoltCommit
+	}
+	return commandContext().CommandDidExplicitCommit
+}
+
+func setCommandDidExplicitDoltCommit(value bool) {
+	commandContext().CommandDidExplicitCommit = value
+}
+
+func isCommandDidWriteTipMetadata() bool {
+	if shouldUseGlobals() {
+		return commandDidWriteTipMetadata
+	}
+	return commandContext().CommandDidWriteTipMetadata
+}
+
+func setCommandDidWriteTipMetadata(value bool) {
+	commandContext().CommandDidWriteTipMetadata = value
+	if callback := legacyCallbacks().tipMetadata; callback != nil {
+		callback(value)
+	}
+}
+
+func getCommandTipIDsShown() map[string]struct{} {
+	if shouldUseGlobals() {
+		return commandTipIDsShown
+	}
+	return commandContext().CommandTipIDsShown
+}
+
+func setCommandTipIDsShown(ids map[string]struct{}) {
+	commandContext().CommandTipIDsShown = ids
+	if callback := legacyCallbacks().tipIDs; callback != nil {
+		callback(ids)
+	}
+}
+
+func getWorkspaceGateHandle() *workspacegate.MultiHandle {
+	if shouldUseGlobals() {
+		return workspaceGateHandle
+	}
+	return commandContext().WorkspaceGateHandle
+}
+
+func setWorkspaceGateHandle(handle *workspacegate.MultiHandle) {
+	commandContext().WorkspaceGateHandle = handle
+	if callback := legacyCallbacks().workspaceGate; callback != nil {
+		callback(handle)
+	}
+}
+
+func isServerMode() bool {
+	if shouldUseGlobals() {
+		return serverMode
+	}
+	return commandContext().ServerMode
+}
+
+func setServerMode(value bool) {
+	commandContext().ServerMode = value
+	if callback := legacyCallbacks().mode.serverMode; callback != nil {
+		callback(value)
+	}
+}
+
+func isProxiedServerMode() bool {
+	if shouldUseGlobals() {
+		return proxiedServerMode
+	}
+	return commandContext().ProxiedServerMode
+}
+
+func setProxiedServerMode(value bool) {
+	commandContext().ProxiedServerMode = value
+	if callback := legacyCallbacks().mode.proxiedMode; callback != nil {
+		callback(value)
+	}
 }
 
 // syncCommandContext copies all legacy global values to the CommandContext.
 // This is called after initialization is complete to ensure cmdCtx has all values.
 func syncCommandContext() {
-	if shouldUseGlobals() {
-		return
-	}
-
-	// Configuration
-	cmdCtx.DBPath = dbPath
-	cmdCtx.Actor = actor
-	cmdCtx.JSONOutput = jsonOutput
-	cmdCtx.SandboxMode = sandboxMode
-	cmdCtx.ReadonlyMode = readonlyMode
-	cmdCtx.LockTimeout = lockTimeout
-	cmdCtx.Verbose = verboseFlag
-	cmdCtx.Quiet = quietFlag
-
-	// Storage mode
-	cmdCtx.ServerMode = serverMode
-	cmdCtx.ProxiedServerMode = proxiedServerMode
-
-	// Runtime state
-	cmdCtx.Store = store
-	cmdCtx.RootCtx = rootCtx
-	cmdCtx.RootCancel = rootCancel
-	cmdCtx.HookRunner = hookRunner
-
-	// Version tracking
-	cmdCtx.VersionUpgradeDetected = versionUpgradeDetected
-	cmdCtx.PreviousVersion = previousVersion
-	cmdCtx.UpgradeAcknowledged = upgradeAcknowledged
-
-	// Profiling
-	cmdCtx.ProfileFile = profileFile
-	cmdCtx.TraceFile = traceFile
+	// State is updated through the accessors as each phase completes. This
+	// function remains as a compatibility hook for callers from older command
+	// paths, but it intentionally does not copy raw package variables into the
+	// active context.
 }

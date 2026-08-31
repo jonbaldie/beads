@@ -130,30 +130,24 @@ func TestShouldCommitResolutionHoldsTheCommit(t *testing.T) {
 // describing one is a user error rather than a silently ignored flag. --table
 // in particular would imply a scoped conclude that does not exist (review F8).
 func TestConcludeFlagValidation(t *testing.T) {
-	t.Cleanup(resetConcludeFlags)
-
 	cases := []struct {
 		name    string
 		args    []string
-		setup   func()
+		opts    conflictsResolveOptions
 		wantErr string
 	}{
 		{name: "bare --conclude"},
 		{name: "with an issue id", args: []string{"bd-1"}, wantErr: "takes no issue IDs"},
-		{name: "with --all", setup: func() { conflictsResolveAll = true }, wantErr: "takes no issue IDs"},
-		{name: "with --ours", setup: func() { conflictsResolveOurs = true }, wantErr: "takes no issue IDs"},
-		{name: "with --theirs", setup: func() { conflictsResolveTheirs = true }, wantErr: "takes no issue IDs"},
-		{name: "with --strategy", setup: func() { conflictsResolveStrat = "ours" }, wantErr: "takes no issue IDs"},
-		{name: "with --table", setup: func() { conflictsResolveTable = "config" }, wantErr: "takes no issue IDs"},
-		{name: "with --no-commit", setup: func() { conflictsNoCommit = true }, wantErr: "opposites"},
+		{name: "with --all", opts: conflictsResolveOptions{all: true}, wantErr: "takes no issue IDs"},
+		{name: "with --ours", opts: conflictsResolveOptions{ours: true}, wantErr: "takes no issue IDs"},
+		{name: "with --theirs", opts: conflictsResolveOptions{theirs: true}, wantErr: "takes no issue IDs"},
+		{name: "with --strategy", opts: conflictsResolveOptions{strategy: "ours"}, wantErr: "takes no issue IDs"},
+		{name: "with --table", opts: conflictsResolveOptions{table: "config"}, wantErr: "takes no issue IDs"},
+		{name: "with --no-commit", opts: conflictsResolveOptions{noCommit: true}, wantErr: "opposites"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			resetConcludeFlags()
-			if c.setup != nil {
-				c.setup()
-			}
-			err := concludeFlagConflict(c.args)
+			err := concludeFlagConflict(c.args, c.opts)
 			if c.wantErr == "" {
 				if err != nil {
 					t.Fatalf("concludeFlagConflict() = %v, want nil", err)
@@ -168,15 +162,6 @@ func TestConcludeFlagValidation(t *testing.T) {
 			}
 		})
 	}
-}
-
-func resetConcludeFlags() {
-	conflictsResolveOurs = false
-	conflictsResolveTheirs = false
-	conflictsResolveStrat = ""
-	conflictsResolveAll = false
-	conflictsResolveTable = ""
-	conflictsNoCommit = false
 }
 
 // TestWriteMergeBlockersRemedies asserts the diagnosis an operator gets, per

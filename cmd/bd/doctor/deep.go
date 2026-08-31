@@ -27,99 +27,84 @@ type DeepValidationResult struct {
 // RunDeepValidation runs all deep validation checks on the issue graph.
 // This may be slow on large databases.
 func RunDeepValidation(path string) DeepValidationResult {
-	result := DeepValidationResult{
-		OverallOK: true,
+	result := DeepValidationResult{OverallOK: true}
+	conn, skip := prepareDeepValidation(path, &result)
+	if skip {
+		return result
 	}
+	defer conn.Close()
+	fillDeepValidationCounts(conn.db, &result)
+	runDeepValidationChecks(conn.db, &result)
+	return result
+}
 
+func prepareDeepValidation(path string, result *DeepValidationResult) (*doltConn, bool) {
 	beadsDir := ResolveBeadsDirForRepo(path)
-
-	// Check backend
 	backend := configfile.BackendDolt
 	if cfg, err := configfile.Load(beadsDir); err == nil && cfg != nil {
 		backend = cfg.GetBackend()
 	}
-
 	if backend != configfile.BackendDolt {
-		check := DoctorCheck{
+		result.AllChecks = append(result.AllChecks, DoctorCheck{
 			Name:     "Deep Validation",
 			Status:   StatusWarning,
 			Message:  fmt.Sprintf("N/A (deep validation requires Dolt; configured backend is %q)", backend),
 			Category: CategoryMaintenance,
-		}
-		result.AllChecks = append(result.AllChecks, check)
-		return result
+		})
+		return nil, true
 	}
-
-	// Check if Dolt directory exists
 	doltPath := getDatabasePath(beadsDir)
 	if _, err := os.Stat(doltPath); os.IsNotExist(err) {
-		check := DoctorCheck{
+		result.AllChecks = append(result.AllChecks, DoctorCheck{
 			Name:     "Deep Validation",
 			Status:   StatusOK,
 			Message:  "N/A (no database)",
 			Category: CategoryMaintenance,
-		}
-		result.AllChecks = append(result.AllChecks, check)
-		return result
+		})
+		return nil, true
 	}
-
-	// Open Dolt connection
 	conn, err := openDoltConn(beadsDir)
 	if err != nil {
-		check := DoctorCheck{
+		result.AllChecks = append(result.AllChecks, DoctorCheck{
 			Name:     "Deep Validation",
 			Status:   StatusError,
 			Message:  "Unable to open database",
 			Detail:   err.Error(),
 			Category: CategoryMaintenance,
-		}
-		result.AllChecks = append(result.AllChecks, check)
+		})
 		result.OverallOK = false
-		return result
+		return nil, true
 	}
-	db := conn.db
-	defer conn.Close()
+	return conn, false
+}
 
-	// Get counts for progress reporting
+func fillDeepValidationCounts(db *sql.DB, result *DeepValidationResult) {
 	_ = db.QueryRow("SELECT COUNT(*) FROM issues").Scan(&result.TotalIssues)             // Best effort: zero counts are safe defaults for diagnostic display
 	_ = db.QueryRow("SELECT COUNT(*) FROM dependencies").Scan(&result.TotalDependencies) // Best effort: zero counts are safe defaults for diagnostic display
 	var wispDependencyCount int
 	if err := db.QueryRow("SELECT COUNT(*) FROM wisp_dependencies").Scan(&wispDependencyCount); err == nil {
 		result.TotalDependencies += wispDependencyCount
 	}
+}
 
-	// Run all deep checks
+func runDeepValidationChecks(db *sql.DB, result *DeepValidationResult) {
 	result.ParentConsistency = checkParentConsistency(db)
-	result.AllChecks = append(result.AllChecks, result.ParentConsistency)
-	if result.ParentConsistency.Status == StatusError {
-		result.OverallOK = false
-	}
-
+	appendDeepCheck(result, result.ParentConsistency)
 	result.DependencyIntegrity = checkDependencyIntegrity(db)
-	result.AllChecks = append(result.AllChecks, result.DependencyIntegrity)
-	if result.DependencyIntegrity.Status == StatusError {
-		result.OverallOK = false
-	}
-
+	appendDeepCheck(result, result.DependencyIntegrity)
 	result.EpicCompleteness = checkEpicCompleteness(db)
 	result.AllChecks = append(result.AllChecks, result.EpicCompleteness)
-	if result.EpicCompleteness.Status == StatusWarning {
-		// Epic completeness is informational, not an error
-	}
-
 	result.MailThreadIntegrity = checkMailThreadIntegrity(db)
-	result.AllChecks = append(result.AllChecks, result.MailThreadIntegrity)
-	if result.MailThreadIntegrity.Status == StatusError {
-		result.OverallOK = false
-	}
-
+	appendDeepCheck(result, result.MailThreadIntegrity)
 	result.MoleculeIntegrity = checkMoleculeIntegrity(db)
-	result.AllChecks = append(result.AllChecks, result.MoleculeIntegrity)
-	if result.MoleculeIntegrity.Status == StatusError {
+	appendDeepCheck(result, result.MoleculeIntegrity)
+}
+
+func appendDeepCheck(result *DeepValidationResult, check DoctorCheck) {
+	result.AllChecks = append(result.AllChecks, check)
+	if check.Status == StatusError {
 		result.OverallOK = false
 	}
-
-	return result
 }
 
 // checkParentConsistency verifies that all parent-child dependencies point to existing issues
@@ -393,27 +378,34 @@ func checkMoleculeIntegrity(db *sql.DB) DoctorCheck {
 		Name:     "Molecule Integrity",
 		Category: CategoryMetadata,
 	}
+	molecules, ok := loadMoleculesForIntegrity(db, &check)
+	if !ok {
+		return check
+	}
+	if len(molecules) == 0 {
+		check.Status = StatusOK
+		check.Message = "No molecules to validate"
+		return check
+	}
+	broken := findBrokenMolecules(db, molecules)
+	return reportMoleculeIntegrity(check, molecules, broken)
+}
 
-	// Find molecules (issue_type='molecule' or has beads:template label) with broken structures
-	// A molecule should have parent-child relationships forming a valid DAG
-
-	// First, find molecules
+func loadMoleculesForIntegrity(db *sql.DB, check *DoctorCheck) ([]moleculeInfo, bool) {
 	query := `
 		SELECT DISTINCT i.id, i.title
 		FROM issues i
 		LEFT JOIN labels l ON l.issue_id = i.id
 		WHERE (i.issue_type = 'molecule' OR l.label = 'beads:template')
 		LIMIT 100`
-
 	rows, err := db.Query(query)
 	if err != nil {
 		check.Status = StatusWarning
 		check.Message = "Unable to find molecules"
 		check.Detail = err.Error()
-		return check
+		return nil, false
 	}
 	defer rows.Close()
-
 	var molecules []moleculeInfo
 	for rows.Next() {
 		var mol moleculeInfo
@@ -425,34 +417,35 @@ func checkMoleculeIntegrity(db *sql.DB) DoctorCheck {
 		check.Status = StatusWarning
 		check.Message = "Row iteration error checking molecule integrity"
 		check.Detail = err.Error()
-		return check
+		return nil, false
 	}
+	return molecules, true
+}
 
-	if len(molecules) == 0 {
-		check.Status = StatusOK
-		check.Message = "No molecules to validate"
-		return check
-	}
-
-	// Find molecules with missing children using batched IN clauses
-	// to avoid full table scans on Dolt with large molecule sets.
+func findBrokenMolecules(db *sql.DB, molecules []moleculeInfo) []string {
+	// Batched IN clauses avoid full table scans on Dolt with large molecule sets.
 	const batchSize = 200
-	var brokenMolecules []string
-	for start := 0; start < len(molecules); start += batchSize {
+	var broken []string
+	nMolecules := len(molecules)
+	for start := 0; start < nMolecules; start += batchSize {
 		end := start + batchSize
 		if end > len(molecules) {
 			end = len(molecules)
 		}
-		batch := molecules[start:end]
-		molIDs := make([]interface{}, len(batch))
-		placeholders := make([]string, len(batch))
-		for i, mol := range batch {
-			molIDs[i] = mol.ID
-			placeholders[i] = "?"
-		}
+		broken = append(broken, scanBrokenMoleculeBatch(db, molecules[start:end])...)
+	}
+	return broken
+}
 
-		// nolint:gosec // G201: placeholders contains only ? markers, actual values passed via args
-		brokenQuery := fmt.Sprintf(`
+func scanBrokenMoleculeBatch(db *sql.DB, batch []moleculeInfo) []string {
+	molIDs := make([]interface{}, len(batch))
+	placeholders := make([]string, len(batch))
+	for i, mol := range batch {
+		molIDs[i] = mol.ID
+		placeholders[i] = "?"
+	}
+	// nolint:gosec // G201: placeholders contains only ? markers, actual values passed via args
+	brokenQuery := fmt.Sprintf(`
 			SELECT d.depends_on_id, COUNT(*) AS orphan_count
 			FROM (`+doctorDependencyUnionSQL()+`) d
 			WHERE d.depends_on_id IN (%s)
@@ -460,28 +453,30 @@ func checkMoleculeIntegrity(db *sql.DB) DoctorCheck {
 			  AND NOT EXISTS (SELECT 1 FROM issues WHERE id = d.issue_id)
 			  AND NOT EXISTS (SELECT 1 FROM wisps WHERE id = d.issue_id)
 			GROUP BY d.depends_on_id`, strings.Join(placeholders, ","))
-
-		brokenRows, err := db.Query(brokenQuery, molIDs...)
-		if err == nil {
-			for brokenRows.Next() {
-				var molID string
-				var orphanCount int
-				if err := brokenRows.Scan(&molID, &orphanCount); err == nil {
-					brokenMolecules = append(brokenMolecules, fmt.Sprintf("%s (%d missing children)", molID, orphanCount))
-				}
-			}
-			_ = brokenRows.Close()
+	brokenRows, err := db.Query(brokenQuery, molIDs...)
+	if err != nil {
+		return nil
+	}
+	defer brokenRows.Close()
+	var broken []string
+	for brokenRows.Next() {
+		var molID string
+		var orphanCount int
+		if err := brokenRows.Scan(&molID, &orphanCount); err == nil {
+			broken = append(broken, fmt.Sprintf("%s (%d missing children)", molID, orphanCount))
 		}
 	}
+	return broken
+}
 
-	if len(brokenMolecules) > 0 {
+func reportMoleculeIntegrity(check DoctorCheck, molecules []moleculeInfo, broken []string) DoctorCheck {
+	if len(broken) > 0 {
 		check.Status = StatusError
-		check.Message = fmt.Sprintf("Found %d molecules with missing children", len(brokenMolecules))
-		check.Detail = fmt.Sprintf("Examples: %s", strings.Join(brokenMolecules[:min(3, len(brokenMolecules))], ", "))
+		check.Message = fmt.Sprintf("Found %d molecules with missing children", len(broken))
+		check.Detail = fmt.Sprintf("Examples: %s", strings.Join(broken[:min(3, len(broken))], ", "))
 		check.Fix = "Run 'bd repair-deps' to clean up orphaned relationships"
 		return check
 	}
-
 	check.Status = StatusOK
 	check.Message = fmt.Sprintf("%d molecules validated", len(molecules))
 	return check

@@ -197,9 +197,15 @@ func RunReadyClaimerEmptyFrontIsNormal(t *testing.T, ctx context.Context, fixtur
 // a "not obviously empty".
 func RunReadyClaimerClaimsTheFrontRowAndReturnsThePostClaimState(t *testing.T, ctx context.Context, fixture ReadyClaimerFixture) {
 	t.Helper()
-	label := fixture.IssuePrefix + "-rcwin"
-	winner := fixture.IssuePrefix + "-rcwin-a"
-	runnerUp := fixture.IssuePrefix + "-rcwin-b"
+	label, winner, runnerUp := seedReadyClaimerWinningFront(t, ctx, fixture)
+	assertReadyClaimerWinningResult(t, ctx, fixture, label, winner, runnerUp)
+}
+
+func seedReadyClaimerWinningFront(t *testing.T, ctx context.Context, fixture ReadyClaimerFixture) (label, winner, runnerUp string) {
+	t.Helper()
+	label = fixture.IssuePrefix + "-rcwin"
+	winner = fixture.IssuePrefix + "-rcwin-a"
+	runnerUp = fixture.IssuePrefix + "-rcwin-b"
 	// A CLOSED blocker: it gives the winner a dependency to count without
 	// taking it off the ready front.
 	blocker := fixture.IssuePrefix + "-rcwin-blocker"
@@ -213,7 +219,17 @@ func RunReadyClaimerClaimsTheFrontRowAndReturnsThePostClaimState(t *testing.T, c
 	seedReadyClaimerIssue(t, ctx, fixture, readyClaimerIssue(dependent, 1, label+"-dependent"))
 	seedReadyClaimerEdge(t, ctx, fixture, winner, blocker)
 	seedReadyClaimerEdge(t, ctx, fixture, dependent, winner)
+	return label, winner, runnerUp
+}
 
+func assertReadyClaimerWinningResult(t *testing.T, ctx context.Context, fixture ReadyClaimerFixture, label, winner, runnerUp string) {
+	t.Helper()
+	result := claimReadyClaimerWinning(t, ctx, fixture, label)
+	assertReadyClaimerWinningPostState(t, ctx, fixture, result, winner, runnerUp)
+}
+
+func claimReadyClaimerWinning(t *testing.T, ctx context.Context, fixture ReadyClaimerFixture, label string) publicops.ClaimNextResult {
+	t.Helper()
 	result, err := fixture.Claimer.ClaimNext(ctx, publicops.ClaimNextRequest{
 		Actor:  "claimer",
 		Filter: publicops.ReadyRequest{Labels: []string{label}, Sort: readyClaimerSort},
@@ -224,6 +240,11 @@ func RunReadyClaimerClaimsTheFrontRowAndReturnsThePostClaimState(t *testing.T, c
 	if result.Claimed == nil {
 		t.Fatal("ClaimNext returned no row against a front holding two claimable issues")
 	}
+	return result
+}
+
+func assertReadyClaimerWinningPostState(t *testing.T, ctx context.Context, fixture ReadyClaimerFixture, result publicops.ClaimNextResult, winner, runnerUp string) {
+	t.Helper()
 	if result.Claimed.ID != winner {
 		t.Fatalf("claimed %s, want %s — the first row of the requested order", result.Claimed.ID, winner)
 	}
@@ -292,6 +313,13 @@ func RunReadyClaimerClaimsAnEphemeralRowTheFilterAdmits(t *testing.T, ctx contex
 		Sort:             readyClaimerSort,
 		IncludeEphemeral: true,
 	}
+	assertReadyClaimerEphemeralOffered(t, ctx, fixture, request, wisp)
+	before := readyClaimerHistoryCount(t, ctx, fixture)
+	assertReadyClaimerEphemeralClaim(t, ctx, fixture, request, wisp, before)
+}
+
+func assertReadyClaimerEphemeralOffered(t *testing.T, ctx context.Context, fixture ReadyClaimerFixture, request publicops.ReadyRequest, wisp string) {
+	t.Helper()
 	page, err := fixture.Reader.Ready(ctx, request)
 	if err != nil {
 		t.Fatalf("Reader.Ready over the seeded wisp: %v", err)
@@ -300,8 +328,10 @@ func RunReadyClaimerClaimsAnEphemeralRowTheFilterAdmits(t *testing.T, ctx contex
 		t.Fatalf("Reader.Ready did not offer the seeded ready wisp %s (page: %v); "+
 			"the case cannot say the claim took a row the front never held", wisp, readyClaimerPageIDs(page))
 	}
+}
 
-	before := readyClaimerHistoryCount(t, ctx, fixture)
+func assertReadyClaimerEphemeralClaim(t *testing.T, ctx context.Context, fixture ReadyClaimerFixture, request publicops.ReadyRequest, wisp string, before int) {
+	t.Helper()
 	result, err := fixture.Claimer.ClaimNext(ctx, publicops.ClaimNextRequest{Actor: "claimer", Filter: request})
 	if err != nil {
 		t.Fatalf("ClaimNext over a front holding one ready wisp: error = %v, want nil", err)
@@ -592,15 +622,17 @@ func RunReadyClaimerDoesNotMutateTheCallerRequest(t *testing.T, ctx context.Cont
 		return publicops.ClaimNextRequest{
 			Actor: "claimer",
 			Filter: publicops.ReadyRequest{
-				IssueType:      " Task ",
-				Labels:         []string{fixture.IssuePrefix + "-rcsnap ", fixture.IssuePrefix + "-rcsnap "},
-				LabelsAny:      []string{" " + fixture.IssuePrefix + "-rcsnap-any"},
-				ExcludeLabels:  []string{fixture.IssuePrefix + "-rcsnap-not "},
-				ExcludeTypes:   []string{"mr,epic", " chore "},
-				MetadataFields: map[string]string{"team": "conformance"},
-				HasMetadataKey: "team",
-				Priority:       &priority,
-				Sort:           readyClaimerSort,
+				IssueType: " Task ",
+				ReadyRequestFilters: publicops.ReadyRequestFilters{
+					ExcludeLabels:  []string{fixture.IssuePrefix + "-rcsnap-not "},
+					ExcludeTypes:   []string{"mr,epic", " chore "},
+					MetadataFields: map[string]string{"team": "conformance"},
+					HasMetadataKey: "team",
+				},
+				Labels:    []string{fixture.IssuePrefix + "-rcsnap ", fixture.IssuePrefix + "-rcsnap "},
+				LabelsAny: []string{" " + fixture.IssuePrefix + "-rcsnap-any"},
+				Priority:  &priority,
+				Sort:      readyClaimerSort,
 			},
 		}
 	}
@@ -791,9 +823,15 @@ func RunReadyClaimerFencesTheClaimByEveryLabelSetAndTheParentItWasGiven(t *testi
 // blocks-only ones, and a body answering 3 fails on exactly that.
 func RunReadyClaimerHydratesOnlyItsBlocksEdgesIntoTheCardinalities(t *testing.T, ctx context.Context, fixture ReadyClaimerFixture) {
 	t.Helper()
-	scope := fixture.IssuePrefix + "-rccount"
+	scope, winner := seedReadyClaimerCardinalityGraph(t, ctx, fixture)
+	assertReadyClaimerCardinalityResult(t, ctx, fixture, scope, winner)
+}
+
+func seedReadyClaimerCardinalityGraph(t *testing.T, ctx context.Context, fixture ReadyClaimerFixture) (scope, winner string) {
+	t.Helper()
+	scope = fixture.IssuePrefix + "-rccount"
 	offstage := scope + "-off"
-	winner := scope + "-a"
+	winner = scope + "-a"
 	blocker := scope + "-blocker"
 	dependent := scope + "-dependent"
 	relatedOut := scope + "-related-out"
@@ -832,7 +870,11 @@ func RunReadyClaimerHydratesOnlyItsBlocksEdgesIntoTheCardinalities(t *testing.T,
 	if in := readyClaimerEdgesTo(t, ctx, fixture, winner); in != 3 {
 		t.Fatalf("%s carries %d incoming edges, want the 3 this case seeded", winner, in)
 	}
+	return scope, winner
+}
 
+func assertReadyClaimerCardinalityResult(t *testing.T, ctx context.Context, fixture ReadyClaimerFixture, scope, winner string) {
+	t.Helper()
 	result, err := fixture.Claimer.ClaimNext(ctx, publicops.ClaimNextRequest{
 		Actor:  "claimer",
 		Filter: publicops.ReadyRequest{Labels: []string{scope}, Sort: readyClaimerSort},
@@ -917,12 +959,20 @@ const readyClaimerSort = "priority"
 
 func readyClaimerIssue(id string, priority int, labels ...string) *types.Issue {
 	return &types.Issue{
-		ID:        id,
-		Title:     id,
-		Status:    types.StatusOpen,
-		Priority:  priority,
-		IssueType: types.TypeTask,
-		Labels:    labels,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  priority,
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: labels,
+		},
 	}
 }
 

@@ -115,6 +115,16 @@ import (
 // config use case.
 func RunIssueOperationsCreateRoutesInfraTypesToWisps(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) {
 	t.Helper()
+	assertIssueOperationsInfraConfig(t, ctx, fixture)
+	assertIssueOperationsInfraCreate(t, ctx, fixture)
+	assertIssueOperationsInfraNoHistoryCreate(t, ctx, fixture)
+	assertIssueOperationsDurableCreate(t, ctx, fixture)
+	assertIssueOperationsEvictedInfraCreate(t, ctx, fixture)
+	assertIssueOperationsPromotedInfraCreate(t, ctx, fixture)
+}
+
+func assertIssueOperationsInfraConfig(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) {
+	t.Helper()
 	// "gate" is in the vocabulary from the start but not yet infra: the last
 	// arm needs a name that is creatable AND outside the built-in infra set, so
 	// that promoting it proves the configured value was read rather than
@@ -124,10 +134,13 @@ func RunIssueOperationsCreateRoutesInfraTypesToWisps(t *testing.T, ctx context.C
 			t.Fatalf("SetConfig(%s): %v", key, err)
 		}
 	}
+}
 
+func assertIssueOperationsInfraCreate(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) {
+	t.Helper()
 	result, err := fixture.Operations.Create(ctx, publicops.CreateRequest{
 		Actor: "writer",
-		Issue: &types.Issue{Title: "infra bead", Status: types.StatusOpen, Priority: 2, IssueType: types.IssueType("agent")},
+		Issue: &types.Issue{IssueContent: types.IssueContent{Title: "infra bead"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.IssueType("agent")}},
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -137,12 +150,15 @@ func RunIssueOperationsCreateRoutesInfraTypesToWisps(t *testing.T, ctx context.C
 	}
 	assertIssueOperationsRowCount(t, ctx, fixture, "wisps", result.Issue.ID, 1)
 	assertIssueOperationsRowCount(t, ctx, fixture, "issues", result.Issue.ID, 0)
+}
 
+func assertIssueOperationsInfraNoHistoryCreate(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) {
+	t.Helper()
 	// A no-history infra create keeps its no-history retention rather than
 	// being upgraded to ephemeral, matching CreateIssue.
 	noHistory, err := fixture.Operations.Create(ctx, publicops.CreateRequest{
 		Actor: "writer",
-		Issue: &types.Issue{Title: "infra no-history", Status: types.StatusOpen, Priority: 2, IssueType: types.IssueType("agent"), NoHistory: true},
+		Issue: &types.Issue{IssueContent: types.IssueContent{Title: "infra no-history"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.IssueType("agent")}, IssueWisp: types.IssueWisp{NoHistory: true}},
 	})
 	if err != nil {
 		t.Fatalf("Create no-history: %v", err)
@@ -152,11 +168,14 @@ func RunIssueOperationsCreateRoutesInfraTypesToWisps(t *testing.T, ctx context.C
 	}
 	assertIssueOperationsRowCount(t, ctx, fixture, "wisps", noHistory.Issue.ID, 1)
 	assertIssueOperationsRowCount(t, ctx, fixture, "issues", noHistory.Issue.ID, 0)
+}
 
+func assertIssueOperationsDurableCreate(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) {
+	t.Helper()
 	// A non-infra type is unaffected.
 	durable, err := fixture.Operations.Create(ctx, publicops.CreateRequest{
 		Actor: "writer",
-		Issue: &types.Issue{Title: "durable bead", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+		Issue: &types.Issue{IssueContent: types.IssueContent{Title: "durable bead"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
 	})
 	if err != nil {
 		t.Fatalf("Create durable: %v", err)
@@ -166,7 +185,10 @@ func RunIssueOperationsCreateRoutesInfraTypesToWisps(t *testing.T, ctx context.C
 	}
 	assertIssueOperationsRowCount(t, ctx, fixture, "issues", durable.Issue.ID, 1)
 	assertIssueOperationsRowCount(t, ctx, fixture, "wisps", durable.Issue.ID, 0)
+}
 
+func assertIssueOperationsEvictedInfraCreate(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) {
+	t.Helper()
 	// A configured set REPLACES the built-in one rather than adding to it. The
 	// workspace now says gate is its only infra type, so agent — a built-in
 	// infra name, and ephemeral in every arm above — has to come back durable.
@@ -175,7 +197,7 @@ func RunIssueOperationsCreateRoutesInfraTypesToWisps(t *testing.T, ctx context.C
 	}
 	evicted, err := fixture.Operations.Create(ctx, publicops.CreateRequest{
 		Actor: "writer",
-		Issue: &types.Issue{Title: "evicted infra type", Status: types.StatusOpen, Priority: 2, IssueType: types.IssueType("agent")},
+		Issue: &types.Issue{IssueContent: types.IssueContent{Title: "evicted infra type"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.IssueType("agent")}},
 	})
 	if err != nil {
 		t.Fatalf("Create agent once the configured infra set no longer names it: %v", err)
@@ -185,12 +207,15 @@ func RunIssueOperationsCreateRoutesInfraTypesToWisps(t *testing.T, ctx context.C
 	}
 	assertIssueOperationsRowCount(t, ctx, fixture, "issues", evicted.Issue.ID, 1)
 	assertIssueOperationsRowCount(t, ctx, fixture, "wisps", evicted.Issue.ID, 0)
+}
 
+func assertIssueOperationsPromotedInfraCreate(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) {
+	t.Helper()
 	// The control: without it, a backend that had simply stopped routing
 	// anything to the wisps plane would pass the arm above.
 	promoted, err := fixture.Operations.Create(ctx, publicops.CreateRequest{
 		Actor: "writer",
-		Issue: &types.Issue{Title: "promoted infra type", Status: types.StatusOpen, Priority: 2, IssueType: types.IssueType("gate")},
+		Issue: &types.Issue{IssueContent: types.IssueContent{Title: "promoted infra type"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.IssueType("gate")}},
 	})
 	if err != nil {
 		t.Fatalf("Create the newly configured infra type gate: %v", err)
@@ -271,7 +296,14 @@ func assertIssueOperationsMintedChildID(t *testing.T, ctx context.Context, fixtu
 		Actor:    "writer",
 		ParentID: parent,
 		Issue: &types.Issue{
-			Title: label, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask,
+			IssueContent: types.IssueContent{
+				Title: label,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		},
 	})
 	if err != nil {
@@ -295,8 +327,20 @@ func assertIssueOperationsMintedChildID(t *testing.T, ctx context.Context, fixtu
 func RunIssueOperationsUpdateFoldsMetadataIntoOneEvent(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) {
 	t.Helper()
 	issue := &types.Issue{
-		ID: fixture.IssuePrefix + "-metadata-event", Title: "metadata event", Status: types.StatusOpen,
-		Priority: 2, IssueType: types.TypeTask, Metadata: json.RawMessage(`{"keep":"old"}`),
+		IssueID: types.IssueID{
+			ID: fixture.IssuePrefix + "-metadata-event",
+		},
+		IssueContent: types.IssueContent{
+			Title: "metadata event",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"keep":"old"}`),
+		},
 	}
 	if err := fixture.CreateIssue(ctx, issue, "seed"); err != nil {
 		t.Fatalf("seed: %v", err)
@@ -352,7 +396,14 @@ func RunIssueOperationsUpdateFoldsMetadataIntoOneEvent(t *testing.T, ctx context
 // stored row on every backend catches that shape of divergence.
 func RunIssueOperationsUpdateClosedFieldsMatchClose(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) {
 	t.Helper()
+	assertIssueOperationsClosedFieldReclose(t, ctx, fixture)
+	assertIssueOperationsClosedFieldExplicitAndStale(t, ctx, fixture)
+	assertIssueOperationsClosedAtGuard(t, ctx, fixture)
+	assertIssueOperationsClosedFieldMove(t, ctx, fixture)
+}
 
+func assertIssueOperationsClosedFieldReclose(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) {
+	t.Helper()
 	// A generic close on a row a previous close stamped must not inherit that
 	// close's reason or session. This is the misattribution ga-kjkv1 fixes:
 	// `bd show` renders a stale closed_by_session as "Closed by session".
@@ -377,6 +428,10 @@ func RunIssueOperationsUpdateClosedFieldsMatchClose(t *testing.T, ctx context.Co
 	}
 	assertClosedFields(t, ctx, fixture, recloseID, "after generic re-close", "", "", true)
 
+}
+
+func assertIssueOperationsClosedFieldExplicitAndStale(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) {
+	t.Helper()
 	// An explicit key still wins over its default, so the CLI's own
 	// closed_by_session pass-through keeps working.
 	explicitID := fixture.IssuePrefix + "-closedfields-explicit"
@@ -409,6 +464,10 @@ func RunIssueOperationsUpdateClosedFieldsMatchClose(t *testing.T, ctx context.Co
 	}
 	assertClosedFields(t, ctx, fixture, staleID, "generic close over stale attribution", "", "", true)
 
+}
+
+func assertIssueOperationsClosedAtGuard(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) {
+	t.Helper()
 	// The coherence guard. Stamping closed_at on a row that stays open is
 	// refused by name, typed as a validation error, and writes nothing.
 	guardID := fixture.IssuePrefix + "-closedfields-guard"
@@ -435,7 +494,11 @@ func RunIssueOperationsUpdateClosedFieldsMatchClose(t *testing.T, ctx context.Co
 	}
 	assertClosePolicyStatus(t, ctx, fixture, guardID, types.StatusClosed)
 	assertClosedFields(t, ctx, fixture, guardID, "coherent close with explicit closed_at", "", "", true)
+	assertIssueOperationsClosedAtRepairTransitions(t, ctx, fixture, guardID, stamp)
+}
 
+func assertIssueOperationsClosedAtRepairTransitions(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture, guardID string, stamp time.Time) {
+	t.Helper()
 	// Restamping closed_at on a row that is already closed is the repair path
 	// for rows a pre-invariant close left blank; it stays open.
 	repaired := stamp.Add(time.Hour)
@@ -445,7 +508,7 @@ func RunIssueOperationsUpdateClosedFieldsMatchClose(t *testing.T, ctx context.Co
 
 	// Clearing closed_at while the status stays closed is the other incoherent
 	// half, and it is refused too.
-	err = fixture.UpdateRaw(ctx, guardID, map[string]any{"closed_at": nil}, "writer")
+	err := fixture.UpdateRaw(ctx, guardID, map[string]any{"closed_at": nil}, "writer")
 	assertClosedAtRefusal(t, err, "clearing closed_at on a closed row", guardID)
 	assertClosePolicyStatus(t, ctx, fixture, guardID, types.StatusClosed)
 	assertClosedFields(t, ctx, fixture, guardID, "after refused closed_at clear", "", "", true)
@@ -472,6 +535,10 @@ func RunIssueOperationsUpdateClosedFieldsMatchClose(t *testing.T, ctx context.Co
 	}
 	assertClosedFields(t, ctx, fixture, guardID, "reopen with explicit closed_at clear", "", "", false)
 
+}
+
+func assertIssueOperationsClosedFieldMove(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) {
+	t.Helper()
 	// CLOSE PROVENANCE SURVIVES A PERSISTENCE MOVE, which is the same columns
 	// asked a harder question. Everything above keeps a row in the issues
 	// plane; a persistence move DELETES the row from one plane and re-inserts it
@@ -511,7 +578,7 @@ func RunIssueOperationsUpdateClosedFieldsMatchClose(t *testing.T, ctx context.Co
 	} {
 		if _, err := fixture.Operations.Update(ctx, publicops.UpdateRequest{
 			Actor: "writer", IssueID: moveID,
-			Patch: publicops.IssuePatch{Persistence: publicops.Field[publicops.PersistenceMode]{Set: true, Value: move.mode}},
+			Patch: publicops.IssuePatch{IssuePatchDetails: publicops.IssuePatchDetails{Persistence: publicops.Field[publicops.PersistenceMode]{Set: true, Value: move.mode}}},
 		}); err != nil {
 			t.Fatalf("move %s to %s: %v", moveID, move.mode, err)
 		}
@@ -615,7 +682,7 @@ func seedIssueOperationsPlainIssue(t *testing.T, ctx context.Context, fixture Is
 	if _, err := fixture.Operations.Create(ctx, publicops.CreateRequest{
 		Actor:         "seed",
 		ForceIDPrefix: true,
-		Issue:         &types.Issue{ID: id, Title: id, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+		Issue:         &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
 	}); err != nil {
 		t.Fatalf("seed %s: %v", id, err)
 	}
@@ -716,7 +783,13 @@ func (c *issueOperationsEventCounter) assert(t *testing.T, label string, wantTot
 // a case over both spellings keeps the payload honest.
 func RunIssueOperationsUpdateClaimConflictCarriesTheLosingState(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) {
 	t.Helper()
+	assertIssueOperationsForeignClaimConflict(t, ctx, fixture)
+	assertIssueOperationsIneligibleClaimConflict(t, ctx, fixture)
+	assertIssueOperationsClaimVersionFence(t, ctx, fixture)
+}
 
+func assertIssueOperationsForeignClaimConflict(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) {
+	t.Helper()
 	heldID := fixture.IssuePrefix + "-claimconflict-held"
 	seedIssueOperationsPlainIssue(t, ctx, fixture, heldID)
 	if _, err := fixture.Operations.Update(ctx, publicops.UpdateRequest{Actor: "holder", IssueID: heldID, Claim: true}); err != nil {
@@ -746,6 +819,10 @@ func RunIssueOperationsUpdateClaimConflictCarriesTheLosingState(t *testing.T, ct
 	assertLiveAssignee(t, ctx, fixture, heldID, "holder")
 	events.assert(t, "refused foreign claim", 0, nil)
 
+}
+
+func assertIssueOperationsIneligibleClaimConflict(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) {
+	t.Helper()
 	// An ineligible status: nobody holds the issue, so the refusal carries the
 	// status rather than an assignee, and wears the other sentinel.
 	deferredID := fixture.IssuePrefix + "-claimconflict-deferred"
@@ -754,8 +831,8 @@ func RunIssueOperationsUpdateClaimConflictCarriesTheLosingState(t *testing.T, ct
 		t.Fatalf("defer %s: %v", deferredID, err)
 	}
 	deferredEvents := newIssueOperationsEventCounter(t, ctx, fixture, deferredID)
-	_, err = fixture.Operations.Update(ctx, publicops.UpdateRequest{Actor: "claimant", IssueID: deferredID, Claim: true})
-	conflict = assertIssueOperationsClaimConflict(t, err, "ineligible status claim", deferredID)
+	_, err := fixture.Operations.Update(ctx, publicops.UpdateRequest{Actor: "claimant", IssueID: deferredID, Claim: true})
+	conflict := assertIssueOperationsClaimConflict(t, err, "ineligible status claim", deferredID)
 	if conflict != nil {
 		if conflict.Status != types.StatusDeferred {
 			t.Errorf("ineligible-status conflict Status = %q, want %q", conflict.Status, types.StatusDeferred)
@@ -773,6 +850,10 @@ func RunIssueOperationsUpdateClaimConflictCarriesTheLosingState(t *testing.T, ct
 	assertIssueOperationsAssigneeAndStatus(t, ctx, fixture, deferredID, "", types.StatusDeferred)
 	deferredEvents.assert(t, "refused ineligible claim", 0, nil)
 
+}
+
+func assertIssueOperationsClaimVersionFence(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) {
+	t.Helper()
 	// CLAIM UNDER A STALE ExpectedVersion, which is the ONE legal claim/guard
 	// composition and was pinned by nothing.
 	//
@@ -890,11 +971,17 @@ func RunIssueOperationsUpdateClaimHonorsConfiguredActiveStatuses(t *testing.T, c
 // backends implement it in their shared execution body with no test at all.
 func RunIssueOperationsUpdateIssuePlaneOnlyRefusesWisps(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) {
 	t.Helper()
+	wispID := assertIssueOperationsPlaneOnlyWispRefusal(t, ctx, fixture)
+	assertIssueOperationsPlaneOnlyWispUpdate(t, ctx, fixture, wispID)
+	assertIssueOperationsPlaneOnlyDurableUpdate(t, ctx, fixture)
+}
 
+func assertIssueOperationsPlaneOnlyWispRefusal(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) string {
+	t.Helper()
 	wispID := fixture.IssuePrefix + "-planeonly-wisp"
 	if _, err := fixture.Operations.Create(ctx, publicops.CreateRequest{
 		Actor: "seed", ForceIDPrefix: true,
-		Issue: &types.Issue{ID: wispID, Title: "seeded title", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true},
+		Issue: &types.Issue{IssueID: types.IssueID{ID: wispID}, IssueContent: types.IssueContent{Title: "seeded title"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}},
 	}); err != nil {
 		t.Fatalf("seed wisp %s: %v", wispID, err)
 	}
@@ -915,10 +1002,16 @@ func RunIssueOperationsUpdateIssuePlaneOnlyRefusesWisps(t *testing.T, ctx contex
 		"SELECT title FROM wisps WHERE id = ?", []any{wispID})
 	assertIssueOperationsScalarValue(t, ctx, fixture, "wisp row lock after refused plane-only update", beforeRowLock,
 		"SELECT CAST(row_lock AS CHAR) FROM wisps WHERE id = ?", []any{wispID})
+	return wispID
+}
 
+func assertIssueOperationsPlaneOnlyWispUpdate(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture, wispID string) {
+	t.Helper()
 	// The zero value keeps the both-plane auto-resolve, so the same edit lands.
-	unrestricted := restricted
-	unrestricted.IssuePlaneOnly = false
+	unrestricted := publicops.UpdateRequest{
+		Actor: "writer", IssueID: wispID,
+		Patch: publicops.IssuePatch{Title: publicops.Field[string]{Set: true, Value: "restricted title"}},
+	}
 	landed, err := fixture.Operations.Update(ctx, unrestricted)
 	if err != nil {
 		t.Fatalf("both-plane update of wisp %s: %v", wispID, err)
@@ -928,7 +1021,10 @@ func RunIssueOperationsUpdateIssuePlaneOnlyRefusesWisps(t *testing.T, ctx contex
 	}
 	assertIssueOperationsScalarValue(t, ctx, fixture, "wisp title after both-plane update", "restricted title",
 		"SELECT title FROM wisps WHERE id = ?", []any{wispID})
+}
 
+func assertIssueOperationsPlaneOnlyDurableUpdate(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) {
+	t.Helper()
 	// The restriction is about the PLANE, not about the flag: a durable issue
 	// updates normally with it set.
 	durableID := fixture.IssuePrefix + "-planeonly-durable"
@@ -1013,10 +1109,16 @@ func RunIssueOperationsUpdateLabelPatchOrdering(t *testing.T, ctx context.Contex
 // entry apart from one that was written and then swept.
 func RunIssueOperationsUpdateLabelPatchValueRules(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) {
 	t.Helper()
-
 	id := fixture.IssuePrefix + "-labelvalues"
 	seedIssueOperationsLabeledIssue(t, ctx, fixture, id, "kept")
+	assertIssueOperationsOverlongLabel(t, ctx, fixture, id)
+	assertIssueOperationsDuplicateAndAbsentLabels(t, ctx, fixture, id)
+	assertIssueOperationsEmptyLabel(t, ctx, fixture, id)
+	assertIssueOperationsMixedLabels(t, ctx, fixture, id)
+}
 
+func assertIssueOperationsOverlongLabel(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture, id string) {
+	t.Helper()
 	overlong := strings.Repeat("x", types.MaxFieldLen+1)
 	if _, err := fixture.Operations.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: id, Patch: publicops.IssuePatch{
 		Labels: publicops.LabelPatch{Add: []string{overlong}},
@@ -1033,6 +1135,10 @@ func RunIssueOperationsUpdateLabelPatchValueRules(t *testing.T, ctx context.Cont
 	}
 	assertIssueOperationsLabels(t, ctx, fixture, id, "after the refused overlong add", "kept")
 
+}
+
+func assertIssueOperationsDuplicateAndAbsentLabels(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture, id string) {
+	t.Helper()
 	// The same value twice in one edit is applied once.
 	duplicated, err := fixture.Operations.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: id, Patch: publicops.IssuePatch{
 		Labels: publicops.LabelPatch{Add: []string{"twice", "twice"}},
@@ -1057,6 +1163,10 @@ func RunIssueOperationsUpdateLabelPatchValueRules(t *testing.T, ctx context.Cont
 	}
 	assertIssueOperationsLabels(t, ctx, fixture, id, "after removing an absent label", "kept", "twice")
 
+}
+
+func assertIssueOperationsEmptyLabel(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture, id string) {
+	t.Helper()
 	// An empty-string entry is dropped, and dropping it is a NO-OP: an Add
 	// carrying only "" must not move Changed, because a backend that wrote the
 	// row and swept it later would also leave the label set correct here.
@@ -1079,6 +1189,11 @@ func RunIssueOperationsUpdateLabelPatchValueRules(t *testing.T, ctx context.Cont
 	}
 	assertIssueOperationsLabels(t, ctx, fixture, id, "after adding an empty-string label", "kept", "twice")
 
+}
+
+func assertIssueOperationsMixedLabels(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture, id string) {
+	t.Helper()
+	var emptyRows int
 	// The same entry alongside a real one drops only itself, which is the
 	// reason dropping beat refusing: one stray value does not fail the edit.
 	mixed, err := fixture.Operations.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: id, Patch: publicops.IssuePatch{
@@ -1114,25 +1229,62 @@ func RunIssueOperationsUpdateLabelPatchValueRules(t *testing.T, ctx context.Cont
 // unable to write one filter that matches both ways of having no metadata.
 func RunIssueOperationsUpdateMetadataReplaceClearsAndValidates(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) {
 	t.Helper()
+	assertIssueOperationsMetadataBareCreate(t, ctx, fixture)
+	id := seedIssueOperationsMetadataTarget(t, ctx, fixture)
+	assertIssueOperationsMetadataInvalidReplacement(t, ctx, fixture, id)
+	assertIssueOperationsMetadataReplacement(t, ctx, fixture, id)
+	assertIssueOperationsMetadataClear(t, ctx, fixture, id)
+}
 
+func assertIssueOperationsMetadataBareCreate(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) {
+	t.Helper()
 	bare := fixture.IssuePrefix + "-metadata-bare"
 	if err := fixture.CreateIssue(ctx, &types.Issue{
-		ID: bare, Title: "no metadata at all", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: bare,
+		},
+		IssueContent: types.IssueContent{
+			Title: "no metadata at all",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}, "seed"); err != nil {
 		t.Fatalf("seed %s: %v", bare, err)
 	}
 	assertIssueOperationsStoredMetadata(t, ctx, fixture, bare, "created with no metadata", `{}`)
 	assertIssueOperationsMetadataIsNotNull(t, ctx, fixture, bare, "created with no metadata")
+}
 
+func seedIssueOperationsMetadataTarget(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) string {
+	t.Helper()
 	id := fixture.IssuePrefix + "-metadata-replace"
 	issue := &types.Issue{
-		ID: id, Title: "metadata replace", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask,
-		Metadata: json.RawMessage(`{"keep":"old","drop":"old"}`),
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: "metadata replace",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"keep":"old","drop":"old"}`),
+		},
 	}
 	if err := fixture.CreateIssue(ctx, issue, "seed"); err != nil {
 		t.Fatalf("seed %s: %v", id, err)
 	}
+	return id
+}
 
+func assertIssueOperationsMetadataInvalidReplacement(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture, id string) {
+	t.Helper()
 	// Invalid JSON is refused, and the stored document survives untouched.
 	events := newIssueOperationsEventCounter(t, ctx, fixture, id)
 	_, err := fixture.Operations.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: id, Patch: publicops.IssuePatch{
@@ -1143,7 +1295,10 @@ func RunIssueOperationsUpdateMetadataReplaceClearsAndValidates(t *testing.T, ctx
 	}
 	assertIssueOperationsStoredMetadata(t, ctx, fixture, id, "after refused replacement", `{"keep":"old","drop":"old"}`)
 	events.assert(t, "refused metadata replacement", 0, nil)
+}
 
+func assertIssueOperationsMetadataReplacement(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture, id string) {
+	t.Helper()
 	// A nonempty document replaces the whole value rather than merging into it.
 	replaced, err := fixture.Operations.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: id, Patch: publicops.IssuePatch{
 		Metadata: publicops.MetadataPatch{Replace: publicops.Field[json.RawMessage]{Set: true, Value: json.RawMessage(`{"fresh":"new"}`)}},
@@ -1156,7 +1311,10 @@ func RunIssueOperationsUpdateMetadataReplaceClearsAndValidates(t *testing.T, ctx
 	}
 	assertIssueOperationsMetadata(t, "metadata replacement", replaced.Issue.Metadata, `{"fresh":"new"}`)
 	assertIssueOperationsStoredMetadata(t, ctx, fixture, id, "after replacement", `{"fresh":"new"}`)
+}
 
+func assertIssueOperationsMetadataClear(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture, id string) {
+	t.Helper()
 	// A nil Value clears the document.
 	cleared, err := fixture.Operations.Update(ctx, publicops.UpdateRequest{Actor: "writer", IssueID: id, Patch: publicops.IssuePatch{
 		Metadata: publicops.MetadataPatch{Replace: publicops.Field[json.RawMessage]{Set: true, Value: nil}},
@@ -1203,7 +1361,12 @@ func RunIssueOperationsUpdateMetadataReplaceClearsAndValidates(t *testing.T, ctx
 // answered by all three.
 func RunIssueOperationsRequestValuesAreNotMutated(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) {
 	t.Helper()
+	createdID := assertIssueOperationsCreateSnapshot(t, ctx, fixture)
+	assertIssueOperationsUpdateSnapshot(t, ctx, fixture, createdID)
+}
 
+func assertIssueOperationsCreateSnapshot(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture) string {
+	t.Helper()
 	targetID := fixture.IssuePrefix + "-detach-target"
 	seedIssueOperationsPlainIssue(t, ctx, fixture, targetID)
 
@@ -1211,8 +1374,21 @@ func RunIssueOperationsRequestValuesAreNotMutated(t *testing.T, ctx context.Cont
 	callerLabels := []string{"caller-label"}
 	callerMetadata := json.RawMessage(`{"caller":"owned"}`)
 	callerIssue := &types.Issue{
-		Title: "caller title", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask,
-		Labels: callerLabels, Metadata: callerMetadata, ExternalRef: &externalRef,
+		IssueContent: types.IssueContent{
+			Title: "caller title",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata:    callerMetadata,
+			ExternalRef: &externalRef,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: callerLabels,
+		},
 	}
 	callerDependencies := []publicops.CreateDependency{{TargetID: targetID, Type: types.DepBlocks}}
 	created, err := fixture.Operations.Create(ctx, publicops.CreateRequest{
@@ -1222,6 +1398,15 @@ func RunIssueOperationsRequestValuesAreNotMutated(t *testing.T, ctx context.Cont
 		t.Fatalf("create from a caller-owned request: %v", err)
 	}
 
+	assertIssueOperationsCallerCreateValues(t, callerIssue, callerLabels, callerMetadata, externalRef, callerDependencies, targetID)
+
+	createdID := created.Issue.ID
+	assertIssueOperationsCreateResultDetached(t, ctx, fixture, created, callerLabels, createdID)
+	return createdID
+}
+
+func assertIssueOperationsCallerCreateValues(t *testing.T, callerIssue *types.Issue, callerLabels []string, callerMetadata json.RawMessage, externalRef string, callerDependencies []publicops.CreateDependency, targetID string) {
+	t.Helper()
 	// Nothing the caller handed over came back changed — including the ID field
 	// the create filled in on its own copy and the Dependencies field it built
 	// there.
@@ -1246,10 +1431,12 @@ func RunIssueOperationsRequestValuesAreNotMutated(t *testing.T, ctx context.Cont
 	if !reflect.DeepEqual(callerDependencies, []publicops.CreateDependency{{TargetID: targetID, Type: types.DepBlocks}}) {
 		t.Errorf("create mutated the caller's dependency slice: %#v", callerDependencies)
 	}
+}
 
+func assertIssueOperationsCreateResultDetached(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture, created publicops.CreateResult, callerLabels []string, createdID string) {
+	t.Helper()
 	// The result is a detached snapshot: corrupting it reaches neither the
 	// caller's own values nor the stored row.
-	createdID := created.Issue.ID
 	if len(created.Issue.Labels) != 1 {
 		t.Fatalf("create result labels = %v, want exactly the one requested label", created.Issue.Labels)
 	}
@@ -1259,7 +1446,10 @@ func RunIssueOperationsRequestValuesAreNotMutated(t *testing.T, ctx context.Cont
 	}
 	assertIssueOperationsLabels(t, ctx, fixture, createdID, "after corrupting the create result", "caller-label")
 	assertIssueOperationsStoredMetadata(t, ctx, fixture, createdID, "after corrupting the create result", `{"caller":"owned"}`)
+}
 
+func assertIssueOperationsUpdateSnapshot(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture, createdID string) {
+	t.Helper()
 	// The same for update: its patch carries caller-owned collections too.
 	patchAdd := []string{"added-label"}
 	patchRemove := []string{"caller-label"}
@@ -1359,8 +1549,22 @@ func RunIssueOperationsCreateClosedDerivesTheClosedStamp(t *testing.T, ctx conte
 				Actor:         "writer",
 				ForceIDPrefix: true,
 				Issue: &types.Issue{
-					ID: id, Title: id, Status: types.StatusClosed, Priority: 2, IssueType: types.TypeTask,
-					CreatedAt: test.createdAt, UpdatedAt: test.updatedAt, ClosedAt: test.closedAt,
+					IssueID: types.IssueID{
+						ID: id,
+					},
+					IssueContent: types.IssueContent{
+						Title: id,
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Status:    types.StatusClosed,
+						Priority:  2,
+						IssueType: types.TypeTask,
+					},
+					IssueTimes: types.IssueTimes{
+						CreatedAt: test.createdAt,
+						UpdatedAt: test.updatedAt,
+						ClosedAt:  test.closedAt,
+					},
 				},
 			}); err != nil {
 				t.Fatalf("create closed %s: %v", id, err)
@@ -1412,22 +1616,37 @@ func RunIssueOperationsUpdateWritesEveryScalarPatchField(t *testing.T, ctx conte
 	t.Helper()
 
 	id := fixture.IssuePrefix + "-scalarsurface"
+	seedIssueOperationsScalarSurface(t, ctx, fixture, id)
+	assertIssueOperationsScalarPatchAndRestatement(t, ctx, fixture, id)
+}
+
+func seedIssueOperationsScalarSurface(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture, id string) {
+	t.Helper()
 	seededMinutes := 11
 	seededRef := "seeded-ref"
 	seededDue := time.Date(2031, 5, 6, 7, 8, 9, 0, time.UTC)
 	seededDefer := time.Date(2031, 4, 5, 6, 7, 8, 0, time.UTC)
 	if err := fixture.CreateIssue(ctx, &types.Issue{
-		ID: id, Title: "seeded title", Description: "seeded description", Design: "seeded design",
-		AcceptanceCriteria: "seeded acceptance", Notes: "seeded notes",
-		SpecID: "seeded-spec", AwaitID: "seeded-await",
-		Status: types.StatusOpen, Priority: 3, IssueType: types.TypeTask,
-		Assignee: "seeded-assignee", Owner: "seeded-owner", ClosedBySession: "seeded-session",
-		EstimatedMinutes: &seededMinutes, ExternalRef: &seededRef,
-		DueAt: &seededDue, DeferUntil: &seededDefer,
+		IssueID: types.IssueID{ID: id},
+		IssueContent: types.IssueContent{
+			Title: "seeded title", Description: "seeded description", Design: "seeded design",
+			AcceptanceCriteria: "seeded acceptance", Notes: "seeded notes", SpecID: "seeded-spec",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status: types.StatusOpen, Priority: 3, IssueType: types.TypeTask,
+			Assignee: "seeded-assignee", Owner: "seeded-owner", EstimatedMinutes: &seededMinutes,
+		},
+		IssueTimes: types.IssueTimes{ClosedBySession: "seeded-session"},
+		IssueLease: types.IssueLease{DueAt: &seededDue, DeferUntil: &seededDefer},
+		IssueMeta:  types.IssueMeta{ExternalRef: &seededRef},
+		IssueCoord: types.IssueCoord{AwaitID: "seeded-await"},
 	}, "seed"); err != nil {
 		t.Fatalf("seed %s: %v", id, err)
 	}
+}
 
+func assertIssueOperationsScalarPatchAndRestatement(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture, id string) {
+	t.Helper()
 	patchedMinutes := 22
 	patchedRef := "patched-ref"
 	patchedDue := time.Date(2032, 5, 6, 7, 8, 9, 0, time.UTC)
@@ -1441,23 +1660,25 @@ func RunIssueOperationsUpdateWritesEveryScalarPatchField(t *testing.T, ctx conte
 	// that is not yet in progress, so the transfer fence stands down. Both are
 	// pinned by their own cases; this one is about the mapping.
 	patch := publicops.IssuePatch{
-		Title:              publicops.Field[string]{Set: true, Value: "patched title"},
-		Description:        publicops.Field[string]{Set: true, Value: "patched description"},
-		Design:             publicops.Field[string]{Set: true, Value: "patched design"},
-		AcceptanceCriteria: publicops.Field[string]{Set: true, Value: "patched acceptance"},
-		Notes:              publicops.Field[string]{Set: true, Value: "patched notes"},
-		SpecID:             publicops.Field[string]{Set: true, Value: "patched-spec"},
-		AwaitID:            publicops.Field[string]{Set: true, Value: "patched-await"},
-		Status:             publicops.Field[publicops.Status]{Set: true, Value: types.StatusInProgress},
-		Priority:           publicops.Field[int]{Set: true, Value: 1},
-		IssueType:          publicops.Field[publicops.IssueType]{Set: true, Value: types.TypeBug},
-		Assignee:           publicops.Field[string]{Set: true, Value: "patched-assignee"},
-		Owner:              publicops.Field[string]{Set: true, Value: "patched-owner"},
-		ClosedBySession:    publicops.Field[string]{Set: true, Value: "patched-session"},
-		EstimatedMinutes:   publicops.Field[*int]{Set: true, Value: &patchedMinutes},
-		ExternalRef:        publicops.Field[*string]{Set: true, Value: &patchedRef},
-		DueAt:              publicops.Field[*time.Time]{Set: true, Value: &patchedDue},
-		DeferUntil:         publicops.Field[*time.Time]{Set: true, Value: &patchedDefer},
+		Title:       publicops.Field[string]{Set: true, Value: "patched title"},
+		Description: publicops.Field[string]{Set: true, Value: "patched description"}, IssuePatchDetails: publicops.IssuePatchDetails{Design: publicops.Field[string]{Set: true, Value: "patched design"},
+			AcceptanceCriteria: publicops.Field[string]{Set: true, Value: "patched acceptance"},
+
+			SpecID:  publicops.Field[string]{Set: true, Value: "patched-spec"},
+			AwaitID: publicops.Field[string]{Set: true, Value: "patched-await"},
+
+			Owner:            publicops.Field[string]{Set: true, Value: "patched-owner"},
+			ClosedBySession:  publicops.Field[string]{Set: true, Value: "patched-session"},
+			EstimatedMinutes: publicops.Field[*int]{Set: true, Value: &patchedMinutes}}, Notes: publicops.Field[string]{Set: true, Value: "patched notes"},
+
+		Status:    publicops.Field[publicops.Status]{Set: true, Value: types.StatusInProgress},
+		Priority:  publicops.Field[int]{Set: true, Value: 1},
+		IssueType: publicops.Field[publicops.IssueType]{Set: true, Value: types.TypeBug},
+		Assignee:  publicops.Field[string]{Set: true, Value: "patched-assignee"},
+
+		ExternalRef: publicops.Field[*string]{Set: true, Value: &patchedRef},
+		DueAt:       publicops.Field[*time.Time]{Set: true, Value: &patchedDue},
+		DeferUntil:  publicops.Field[*time.Time]{Set: true, Value: &patchedDefer},
 	}
 	stored := []issueOperationsColumnValue{
 		{"title", "patched title"},
@@ -1492,6 +1713,11 @@ func RunIssueOperationsUpdateWritesEveryScalarPatchField(t *testing.T, ctx conte
 		t.Errorf("full scalar patch result Owner = %q, want %q", written.Issue.Owner, "patched-owner")
 	}
 	assertIssueOperationsStoredColumns(t, ctx, fixture, id, "after the full scalar patch", stored)
+	assertIssueOperationsScalarPatchRestatement(t, ctx, fixture, id, patch, stored)
+}
+
+func assertIssueOperationsScalarPatchRestatement(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture, id string, patch publicops.IssuePatch, stored []issueOperationsColumnValue) {
+	t.Helper()
 
 	// The restatement. Same patch, same values, and now they are what the row
 	// already holds.
@@ -1547,7 +1773,17 @@ func RunIssueOperationsUpdateStampsStartedAtOnceOnTheFirstInProgress(t *testing.
 
 	stamping := fixture.IssuePrefix + "-startstamp"
 	if err := fixture.CreateIssue(ctx, &types.Issue{
-		ID: stamping, Title: stamping, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: stamping,
+		},
+		IssueContent: types.IssueContent{
+			Title: stamping,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}, "seed"); err != nil {
 		t.Fatalf("seed %s: %v", stamping, err)
 	}
@@ -1567,8 +1803,20 @@ func RunIssueOperationsUpdateStampsStartedAtOnceOnTheFirstInProgress(t *testing.
 	preserving := fixture.IssuePrefix + "-startkeep"
 	seededStart := time.Date(2019, 3, 4, 5, 6, 7, 0, time.UTC)
 	if err := fixture.CreateIssue(ctx, &types.Issue{
-		ID: preserving, Title: preserving, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask,
-		StartedAt: &seededStart,
+		IssueID: types.IssueID{
+			ID: preserving,
+		},
+		IssueContent: types.IssueContent{
+			Title: preserving,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			StartedAt: &seededStart,
+		},
 	}, "seed"); err != nil {
 		t.Fatalf("seed %s: %v", preserving, err)
 	}
@@ -1632,8 +1880,20 @@ func RunIssueOperationsUpdateRawMetadataTakesTheFunnelsValueShapes(t *testing.T,
 
 	id := fixture.IssuePrefix + "-rawmeta"
 	if err := fixture.CreateIssue(ctx, &types.Issue{
-		ID: id, Title: id, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask,
-		Metadata: json.RawMessage(`{"team":"seeded"}`),
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"team":"seeded"}`),
+		},
 	}, "seed"); err != nil {
 		t.Fatalf("seed %s: %v", id, err)
 	}
@@ -1833,27 +2093,27 @@ func RunIssueOperationsUpdateStatusCrossingSettlesDependers(t *testing.T, ctx co
 	createIssueOperationsBlockedIssue(t, ctx, fixture, controlDepender, controlBlocker)
 
 	probe := newBlockedStateProbe(ctx, fixture.QueryScalar)
-	probe.requireBlockedByOpenBlocker(t, blockedIssue(depender), blockedIssue(blocker), "the create carried the edge and earned the flag")
-	probe.requireBlockedByOpenBlocker(t, blockedIssue(controlDepender), blockedIssue(controlBlocker), "the control's blocker never moves")
+	requireBlockedByOpenBlocker(probe, t, blockedIssue(depender), blockedIssue(blocker), "the create carried the edge and earned the flag")
+	requireBlockedByOpenBlocker(probe, t, blockedIssue(controlDepender), blockedIssue(controlBlocker), "the control's blocker never moves")
 
-	out := probe.watchFlip(t, []blockedStateRow{blockedIssue(depender)}, []blockedStateRow{blockedIssue(controlDepender)})
+	out := watchFlip(probe, t, []blockedStateRow{blockedIssue(depender)}, []blockedStateRow{blockedIssue(controlDepender)})
 	if _, err := fixture.Operations.Update(ctx, publicops.UpdateRequest{
 		Actor: "writer", IssueID: blocker,
 		Patch: publicops.IssuePatch{Status: publicops.Field[publicops.Status]{Set: true, Value: types.StatusPinned}},
 	}); err != nil {
 		t.Fatalf("update %s to pinned: %v", blocker, err)
 	}
-	out.requireFlippedTo(t, 0, "pinning a blocker takes it out of the active set, so its depender is no longer blocked")
+	requireFlippedTo(out, t, 0, "pinning a blocker takes it out of the active set, so its depender is no longer blocked")
 
-	back := probe.watchFlip(t, []blockedStateRow{blockedIssue(depender)}, []blockedStateRow{blockedIssue(controlDepender)})
+	back := watchFlip(probe, t, []blockedStateRow{blockedIssue(depender)}, []blockedStateRow{blockedIssue(controlDepender)})
 	if _, err := fixture.Operations.Update(ctx, publicops.UpdateRequest{
 		Actor: "writer", IssueID: blocker,
 		Patch: publicops.IssuePatch{Status: publicops.Field[publicops.Status]{Set: true, Value: types.StatusOpen}},
 	}); err != nil {
 		t.Fatalf("update %s back to open: %v", blocker, err)
 	}
-	back.requireFlippedTo(t, 1, "unpinning the blocker returns it to the active set and re-blocks its depender")
-	probe.requireBlockedByOpenBlocker(t, blockedIssue(depender), blockedIssue(blocker), "the postcondition is the flag AND the live blocker behind it")
+	requireFlippedTo(back, t, 1, "unpinning the blocker returns it to the active set and re-blocks its depender")
+	requireBlockedByOpenBlocker(probe, t, blockedIssue(depender), blockedIssue(blocker), "the postcondition is the flag AND the live blocker behind it")
 }
 
 // RunIssueOperationsUpdateStatusCrossingSettlesAConditionalBlocksDepender pins
@@ -1912,31 +2172,31 @@ func RunIssueOperationsUpdateStatusCrossingSettlesAConditionalBlocksDepender(t *
 	assertIssueOperationsEdgeTypeCount(t, ctx, fixture, depender, string(types.DepConditionalBlocks), 1)
 	assertIssueOperationsEdgeTypeCount(t, ctx, fixture, controlDepender, string(types.DepBlocks), 1)
 	assertIssueOperationsEdgeTypeCount(t, ctx, fixture, controlDepender, string(types.DepConditionalBlocks), 0)
-	probe.requireBlockedByOpenBlocker(t, blockedIssue(depender), blockedIssue(blocker),
+	requireBlockedByOpenBlocker(probe, t, blockedIssue(depender), blockedIssue(blocker),
 		"a conditional-blocks edge onto a live target blocks its source exactly as a blocks edge does")
-	probe.requireBlockedByOpenBlocker(t, blockedIssue(controlDepender), blockedIssue(controlBlocker),
+	requireBlockedByOpenBlocker(probe, t, blockedIssue(controlDepender), blockedIssue(controlBlocker),
 		"the control is blocked through the edge type this suite already covered")
 
-	out := probe.watchFlip(t, []blockedStateRow{blockedIssue(depender)}, []blockedStateRow{blockedIssue(controlDepender)})
+	out := watchFlip(probe, t, []blockedStateRow{blockedIssue(depender)}, []blockedStateRow{blockedIssue(controlDepender)})
 	if _, err := fixture.Operations.Update(ctx, publicops.UpdateRequest{
 		Actor: "writer", IssueID: blocker,
 		Patch: publicops.IssuePatch{Status: publicops.Field[publicops.Status]{Set: true, Value: types.StatusPinned}},
 	}); err != nil {
 		t.Fatalf("update %s to pinned: %v", blocker, err)
 	}
-	out.requireFlippedTo(t, 0,
+	requireFlippedTo(out, t, 0,
 		"pinning the target of a conditional-blocks edge takes it out of the active set, and the unmark template counts that type")
 
-	back := probe.watchFlip(t, []blockedStateRow{blockedIssue(depender)}, []blockedStateRow{blockedIssue(controlDepender)})
+	back := watchFlip(probe, t, []blockedStateRow{blockedIssue(depender)}, []blockedStateRow{blockedIssue(controlDepender)})
 	if _, err := fixture.Operations.Update(ctx, publicops.UpdateRequest{
 		Actor: "writer", IssueID: blocker,
 		Patch: publicops.IssuePatch{Status: publicops.Field[publicops.Status]{Set: true, Value: types.StatusOpen}},
 	}); err != nil {
 		t.Fatalf("update %s back to open: %v", blocker, err)
 	}
-	back.requireFlippedTo(t, 1,
+	requireFlippedTo(back, t, 1,
 		"unpinning re-blocks a row whose only cause is a conditional-blocks edge — the MARK template's own copy of the type list")
-	probe.requireBlockedByOpenBlocker(t, blockedIssue(depender), blockedIssue(blocker),
+	requireBlockedByOpenBlocker(probe, t, blockedIssue(depender), blockedIssue(blocker),
 		"the postcondition is the flag AND the live conditional blocker behind it")
 	assertIssueOperationsEdgeTypeCount(t, ctx, fixture, depender, string(types.DepBlocks), 0)
 }
@@ -1971,14 +2231,24 @@ func RunIssueOperationsCreateWithDependenciesSettlesInTheCreatingTransaction(t *
 	}
 
 	probe := newBlockedStateProbe(ctx, fixture.QueryScalar)
-	probe.requireUnblocked(t, blockedIssue(waiting), "the existing row is clean until the create points it at the new one")
+	requireUnblocked(probe, t, blockedIssue(waiting), "the existing row is clean until the create points it at the new one")
 
-	flip := probe.watchFlip(t, []blockedStateRow{blockedIssue(waiting)}, []blockedStateRow{blockedIssue(free)})
+	flip := watchFlip(probe, t, []blockedStateRow{blockedIssue(waiting)}, []blockedStateRow{blockedIssue(free)})
 	result, err := fixture.Operations.Create(ctx, publicops.CreateRequest{
 		Actor:         "writer",
 		ForceIDPrefix: true,
 		Issue: &types.Issue{
-			ID: created, Title: created, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: created,
+			},
+			IssueContent: types.IssueContent{
+				Title: created,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		},
 		Dependencies: []publicops.CreateDependency{
 			// The new issue is blocked by an existing one...
@@ -1994,8 +2264,8 @@ func RunIssueOperationsCreateWithDependenciesSettlesInTheCreatingTransaction(t *
 		t.Fatalf("create result = %#v, want the issue at %s", result.Issue, created)
 	}
 
-	flip.requireFlippedTo(t, 1, "a reverse edge created with an issue blocks the row it points at, inside the creating transaction")
-	probe.requireBlockedByOpenBlocker(t, blockedIssue(created), blockedIssue(blocker),
+	requireFlippedTo(flip, t, 1, "a reverse edge created with an issue blocks the row it points at, inside the creating transaction")
+	requireBlockedByOpenBlocker(probe, t, blockedIssue(created), blockedIssue(blocker),
 		"the created row settled against its own forward edge in the same transaction")
 
 	// The transitive half: a child created under the blocked new row inherits
@@ -2003,15 +2273,15 @@ func RunIssueOperationsCreateWithDependenciesSettlesInTheCreatingTransaction(t *
 	child, err := fixture.Operations.Create(ctx, publicops.CreateRequest{
 		Actor:         "writer",
 		ForceIDPrefix: true,
-		Issue:         &types.Issue{Title: "child of a blocked parent", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+		Issue:         &types.Issue{IssueContent: types.IssueContent{Title: "child of a blocked parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
 		ParentID:      created,
 	})
 	if err != nil {
 		t.Fatalf("create a child under the blocked %s: %v", created, err)
 	}
-	probe.requireBlockedWithNoDirectBlockerEdges(t, blockedIssue(child.Issue.ID),
+	requireBlockedWithNoDirectBlockerEdges(probe, t, blockedIssue(child.Issue.ID),
 		"a child created under a blocked parent inherits the block in its own creating transaction")
-	probe.requireUnblocked(t, blockedIssue(free), "the control never entered any affected set")
+	requireUnblocked(probe, t, blockedIssue(free), "the control never entered any affected set")
 }
 
 // RunIssueOperationsClaimLeavesBlockedStateAlone pins the last clause of
@@ -2043,7 +2313,17 @@ func RunIssueOperationsClaimLeavesBlockedStateAlone(t *testing.T, ctx context.Co
 		Actor:         "writer",
 		ForceIDPrefix: true,
 		Issue: &types.Issue{
-			ID: claimed, Title: claimed, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: claimed,
+			},
+			IssueContent: types.IssueContent{
+				Title: claimed,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		},
 		Dependencies: []publicops.CreateDependency{{TargetID: neighbor, Type: types.DepRelated}},
 	}); err != nil {
@@ -2051,13 +2331,15 @@ func RunIssueOperationsClaimLeavesBlockedStateAlone(t *testing.T, ctx context.Co
 	}
 
 	probe := newBlockedStateProbe(ctx, fixture.QueryScalar)
-	probe.requireBlockedByOpenBlocker(t, blockedIssue(blocked), blockedIssue(blocker), "the bystander is blocked for a reason the claim does not touch")
-	probe.requireUnblocked(t, blockedIssue(claimed), "a related edge onto an open issue is not a block")
+	requireBlockedByOpenBlocker(probe, t, blockedIssue(blocked), blockedIssue(blocker), "the bystander is blocked for a reason the claim does not touch")
+	requireUnblocked(probe, t, blockedIssue(claimed), "a related edge onto an open issue is not a block")
 
 	// claimed is a FLAG control, not an updated_at control: the claim writes that
 	// row on purpose.
-	unmoved := probe.watchControls(t, blockedIssue(blocked), blockedIssue(claimed), blockedIssue(neighbor)).
-		alsoWrites(blockedIssue(claimed))
+	unmoved := alsoWrites(
+		watchControls(probe, t, blockedIssue(blocked), blockedIssue(claimed), blockedIssue(neighbor)),
+		blockedIssue(claimed),
+	)
 	updated, err := fixture.Operations.Update(ctx, publicops.UpdateRequest{Actor: "claimer", IssueID: claimed, Claim: true})
 	if err != nil {
 		t.Fatalf("claim %s: %v", claimed, err)
@@ -2095,7 +2377,17 @@ func createIssueOperationsTypedBlockedIssue(
 		Actor:         "writer",
 		ForceIDPrefix: true,
 		Issue: &types.Issue{
-			ID: id, Title: id, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		},
 		Dependencies: []publicops.CreateDependency{{TargetID: blockerID, Type: depType}},
 	}); err != nil {
@@ -2126,7 +2418,7 @@ func assertIssueOperationsEdgeTypeCount(
 // so the labels are already durable state when the case under test runs.
 func seedIssueOperationsLabeledIssue(t *testing.T, ctx context.Context, fixture IssueOperationsStagingFixture, id string, labels ...string) {
 	t.Helper()
-	issue := &types.Issue{ID: id, Title: id, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Labels: labels}
+	issue := &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueGraph: types.IssueGraph{Labels: labels}}
 	if err := fixture.CreateIssue(ctx, issue, "seed"); err != nil {
 		t.Fatalf("seed labeled %s: %v", id, err)
 	}

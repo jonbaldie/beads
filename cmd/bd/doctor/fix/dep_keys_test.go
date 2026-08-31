@@ -52,10 +52,14 @@ func TestDependencyKeys_RekeysAndRemovesLeftovers(t *testing.T) {
 
 	ctx := context.Background()
 	store, err := dolt.New(ctx, &dolt.Config{
-		Path:            filepath.Join(beadsDir, "dolt"),
-		Database:        dbName,
-		CreateIfMissing: true,
-		MaxOpenConns:    1,
+		Path:     filepath.Join(beadsDir, "dolt"),
+		Database: dbName,
+		RemoteOptions: dolt.RemoteOptions{
+			CreateIfMissing: true,
+		},
+		PoolOptions: dolt.PoolOptions{
+			MaxOpenConns: 1,
+		},
 	})
 	if err != nil {
 		t.Fatalf("dolt.New: %v", err)
@@ -68,11 +72,17 @@ func TestDependencyKeys_RekeysAndRemovesLeftovers(t *testing.T) {
 
 	for _, id := range []string{"tst-1", "tst-2"} {
 		issue := &types.Issue{
-			ID:        id,
-			Title:     "dep key test " + id,
-			Priority:  2,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: "dep key test " + id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 			t.Fatalf("CreateIssue(%s): %v", id, err)

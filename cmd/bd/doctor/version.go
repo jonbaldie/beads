@@ -111,36 +111,41 @@ const localVersionFile = ".local_version"
 // GH#662: This was updated to check .local_version instead of metadata.json:LastBdVersion,
 // which is now deprecated.
 func CheckMetadataVersionTracking(path string, currentVersion string) DoctorCheck {
-	beadsDir := ResolveBeadsDirForRepo(path)
-	localVersionPath := filepath.Join(beadsDir, localVersionFile)
-
-	// Read .local_version file
-	// #nosec G304 - path is constructed from controlled beadsDir + constant
-	data, err := os.ReadFile(localVersionPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// File doesn't exist yet - will be created on next bd command
-			return DoctorCheck{
-				Name:    "Version Tracking",
-				Status:  StatusWarning,
-				Message: "Version tracking not initialized",
-				Detail:  "The .local_version file will be created on next bd command",
-				Fix:     "Run any bd command (e.g., 'bd ready') to initialize version tracking",
-			}
-		}
-		// Other error reading file
-		return DoctorCheck{
-			Name:    "Version Tracking",
-			Status:  StatusError,
-			Message: "Unable to read .local_version file",
-			Detail:  err.Error(),
-			Fix:     "Check file permissions on .beads/.local_version",
-		}
+	lastVersion, check, done := readLocalVersionFile(path)
+	if done {
+		return check
 	}
+	if check, done := validateLocalVersion(lastVersion); done {
+		return check
+	}
+	return compareLocalVersion(lastVersion, currentVersion)
+}
 
-	lastVersion := strings.TrimSpace(string(data))
+func readLocalVersionFile(path string) (string, DoctorCheck, bool) {
+	localVersionPath := filepath.Join(ResolveBeadsDirForRepo(path), localVersionFile)
+	data, err := os.ReadFile(localVersionPath) // #nosec G304 - path is constructed from controlled beadsDir + constant
+	if err == nil {
+		return strings.TrimSpace(string(data)), DoctorCheck{}, false
+	}
+	if os.IsNotExist(err) {
+		return "", DoctorCheck{
+			Name:    "Version Tracking",
+			Status:  StatusWarning,
+			Message: "Version tracking not initialized",
+			Detail:  "The .local_version file will be created on next bd command",
+			Fix:     "Run any bd command (e.g., 'bd ready') to initialize version tracking",
+		}, true
+	}
+	return "", DoctorCheck{
+		Name:    "Version Tracking",
+		Status:  StatusError,
+		Message: "Unable to read .local_version file",
+		Detail:  err.Error(),
+		Fix:     "Check file permissions on .beads/.local_version",
+	}, true
+}
 
-	// Check if file is empty
+func validateLocalVersion(lastVersion string) (DoctorCheck, bool) {
 	if lastVersion == "" {
 		return DoctorCheck{
 			Name:    "Version Tracking",
@@ -148,10 +153,8 @@ func CheckMetadataVersionTracking(path string, currentVersion string) DoctorChec
 			Message: ".local_version file is empty",
 			Detail:  "Version tracking will be initialized on next command",
 			Fix:     "Run any bd command to initialize version tracking",
-		}
+		}, true
 	}
-
-	// Validate that version is a valid semver-like string
 	if !IsValidSemver(lastVersion) {
 		return DoctorCheck{
 			Name:    "Version Tracking",
@@ -159,52 +162,47 @@ func CheckMetadataVersionTracking(path string, currentVersion string) DoctorChec
 			Message: fmt.Sprintf("Invalid version format in .local_version: %q", lastVersion),
 			Detail:  "Expected semver format like '0.24.2'",
 			Fix:     "Run any bd command to reset version tracking to current version",
+		}, true
+	}
+	return DoctorCheck{}, false
+}
+
+func compareLocalVersion(lastVersion, currentVersion string) DoctorCheck {
+	if CompareVersions(currentVersion, lastVersion) <= 0 {
+		return DoctorCheck{
+			Name:    "Version Tracking",
+			Status:  StatusOK,
+			Message: fmt.Sprintf("Version tracking active (version: %s)", lastVersion),
 		}
 	}
+	return warnIfLocalVersionStale(lastVersion, currentVersion)
+}
 
-	// Check if version is very old (> 10 versions behind)
-	versionDiff := CompareVersions(currentVersion, lastVersion)
-	if versionDiff > 0 {
-		// Current version is newer - check how far behind
-		currentParts := ParseVersionParts(currentVersion)
-		lastParts := ParseVersionParts(lastVersion)
-
-		// Guard against short version strings (e.g., "5" → [5] has no [1])
-		if len(currentParts) < 2 || len(lastParts) < 2 {
-			return DoctorCheck{
-				Name:    "Version Tracking",
-				Status:  StatusOK,
-				Message: fmt.Sprintf("Version tracking active (last: %s, current: %s)", lastVersion, currentVersion),
-			}
-		}
-
-		// Simple heuristic: warn if minor version is 10+ behind or major version differs by 1+
-		majorDiff := currentParts[0] - lastParts[0]
-		minorDiff := currentParts[1] - lastParts[1]
-
-		if majorDiff >= 1 || (majorDiff == 0 && minorDiff >= 10) {
-			return DoctorCheck{
-				Name:    "Version Tracking",
-				Status:  StatusWarning,
-				Message: fmt.Sprintf("Last recorded version is very old: %s (current: %s)", lastVersion, currentVersion),
-				Detail:  "You may have missed important upgrade notifications",
-				Fix:     "Run 'bd upgrade review' to see recent changes",
-			}
-		}
-
-		// Version is behind but not too old - this is normal after upgrade
+func warnIfLocalVersionStale(lastVersion, currentVersion string) DoctorCheck {
+	currentParts := ParseVersionParts(currentVersion)
+	lastParts := ParseVersionParts(lastVersion)
+	if len(currentParts) < 2 || len(lastParts) < 2 {
 		return DoctorCheck{
 			Name:    "Version Tracking",
 			Status:  StatusOK,
 			Message: fmt.Sprintf("Version tracking active (last: %s, current: %s)", lastVersion, currentVersion),
 		}
 	}
-
-	// Version is current or ahead
+	majorDiff := currentParts[0] - lastParts[0]
+	minorDiff := currentParts[1] - lastParts[1]
+	if majorDiff >= 1 || (majorDiff == 0 && minorDiff >= 10) {
+		return DoctorCheck{
+			Name:    "Version Tracking",
+			Status:  StatusWarning,
+			Message: fmt.Sprintf("Last recorded version is very old: %s (current: %s)", lastVersion, currentVersion),
+			Detail:  "You may have missed important upgrade notifications",
+			Fix:     "Run 'bd upgrade review' to see recent changes",
+		}
+	}
 	return DoctorCheck{
 		Name:    "Version Tracking",
 		Status:  StatusOK,
-		Message: fmt.Sprintf("Version tracking active (version: %s)", lastVersion),
+		Message: fmt.Sprintf("Version tracking active (last: %s, current: %s)", lastVersion, currentVersion),
 	}
 }
 

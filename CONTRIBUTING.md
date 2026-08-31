@@ -22,6 +22,13 @@ That script is the single resource-capped recipe. Do not run `go test`,
 `make` and `.buildflags` default to `CGO_ENABLED=0`. Use `CGO_ENABLED=1` only
 for embedded Dolt, and still run it through `scripts/dev-docker.sh`.
 
+After Docker-backed Go build, test, or lint work, clean up artifacts created by
+that session. In particular, check whether the `beads-gobuild` Docker volume
+grew, remove only files created during the session from that volume, preserve
+older reusable cache entries, and confirm host disk availability with `df -h`.
+Remove large generated binaries such as `bd` and transient reports such as
+`/tmp/beads-messgo-*` when they were created by the session.
+
 ### Getting Started
 
 ```bash

@@ -150,6 +150,18 @@ func RunClaimerClaimsAnUnassignedOpenIssueAndAnswersTheBareRow(t *testing.T, ctx
 	if err != nil {
 		t.Fatalf("Claim of an open, unassigned issue by an actor with no prior relationship to it: %v", err)
 	}
+	assertClaimerWinningResult(t, result)
+
+	// The snapshot IS the stored state, read as a raw row rather than back
+	// through the role.
+	assertClaimerRowState(t, ctx, fixture, id, string(result.Issue.Status), result.Issue.Assignee)
+	assertClaimerRowState(t, ctx, fixture, id, string(types.StatusInProgress), claimerStranger)
+	// The label the result omits is still on the issue.
+	assertClaimerLabelPreserved(t, ctx, fixture, id)
+}
+
+func assertClaimerWinningResult(t *testing.T, result publicops.ClaimResult) {
+	t.Helper()
 	if !result.Changed {
 		t.Error("Changed = false for a claim that moved an open issue to in-progress")
 	}
@@ -171,15 +183,12 @@ func RunClaimerClaimsAnUnassignedOpenIssueAndAnswersTheBareRow(t *testing.T, ctx
 	if result.Issue.Comments != nil {
 		t.Errorf("returned Issue.Comments = %v, want nil — ClaimResult.Issue is the bare issue row", result.Issue.Comments)
 	}
+}
 
-	// The snapshot IS the stored state, read as a raw row rather than back
-	// through the role.
-	assertClaimerRowState(t, ctx, fixture, id, string(result.Issue.Status), result.Issue.Assignee)
-	assertClaimerRowState(t, ctx, fixture, id, string(types.StatusInProgress), claimerStranger)
-	// The label the result omits is still on the issue.
+func assertClaimerLabelPreserved(t *testing.T, ctx context.Context, fixture ClaimerFixture, id string) {
+	t.Helper()
 	if got := claimerLabelCount(t, ctx, fixture, id); got != 1 {
-		t.Errorf("the claimed issue carries %d label row(s), want the 1 it was seeded with — "+
-			"the result omits labels, the claim must not DELETE them", got)
+		t.Errorf("the claimed issue carries %d label row(s), want the 1 it was seeded with — the result omits labels, the claim must not DELETE them", got)
 	}
 }
 
@@ -267,34 +276,37 @@ func RunClaimerReclaimsItsOwnInProgressIssueWithoutWriting(t *testing.T, ctx con
 		t.Fatalf("re-Claim by the actor that already holds the issue in progress: error = %v, want nil — "+
 			"an agent retrying after a transient failure must not have to classify an error", err)
 	}
-	if second.Changed {
-		t.Error("Changed = true for a re-claim that had nothing to change")
-	}
-	if second.Issue == nil {
-		t.Fatal("the idempotent re-claim returned a nil Issue")
-	}
-	if second.Issue.Status != types.StatusInProgress || second.Issue.Assignee != actor {
-		t.Errorf("returned row = (status %q, assignee %q), want the claim the actor already held (%q, %q)",
-			second.Issue.Status, second.Issue.Assignee, types.StatusInProgress, actor)
-	}
-
-	if got := claimerUpdatedAt(t, ctx, fixture, id); got != updatedBefore {
-		t.Errorf("updated_at moved %q -> %q across a re-claim that reported Changed false; "+
-			"the compare-and-set ran anyway", updatedBefore, got)
-	}
-	if second.Issue.ID != id {
-		t.Errorf("returned Issue.ID = %q, want %q", second.Issue.ID, id)
-	}
-	// THE LOAD-BEARING ASSERTION. The two checks above it both tie under a
-	// compare-and-set that re-runs on a row the actor already holds; this one
-	// does not, because the re-run records a second claim event whether or not
-	// anything was committed.
-	if got := claimerClaimEventCount(t, ctx, fixture, id); got != claimEventsBefore {
-		t.Errorf("claim events went %d -> %d across a re-claim that reported Changed false; "+
-			"the compare-and-set ran again", claimEventsBefore, got)
-	}
+	assertClaimerReclaimResult(t, second, id, actor)
+	assertClaimerReclaimUntouched(t, ctx, fixture, id, updatedBefore, claimEventsBefore)
 	assertClaimerRowState(t, ctx, fixture, id, string(types.StatusInProgress), actor)
 	assertClaimerCommittedNothing(t, ctx, fixture, before, "an idempotent re-claim")
+}
+
+func assertClaimerReclaimResult(t *testing.T, result publicops.ClaimResult, id, actor string) {
+	t.Helper()
+	if result.Changed {
+		t.Error("Changed = true for a re-claim that had nothing to change")
+	}
+	if result.Issue == nil {
+		t.Fatal("the idempotent re-claim returned a nil Issue")
+	}
+	if result.Issue.Status != types.StatusInProgress || result.Issue.Assignee != actor {
+		t.Errorf("returned row = (status %q, assignee %q), want the claim the actor already held (%q, %q)",
+			result.Issue.Status, result.Issue.Assignee, types.StatusInProgress, actor)
+	}
+	if result.Issue.ID != id {
+		t.Errorf("returned Issue.ID = %q, want %q", result.Issue.ID, id)
+	}
+}
+
+func assertClaimerReclaimUntouched(t *testing.T, ctx context.Context, fixture ClaimerFixture, id, updatedBefore string, claimEventsBefore int) {
+	t.Helper()
+	if got := claimerUpdatedAt(t, ctx, fixture, id); got != updatedBefore {
+		t.Errorf("updated_at moved %q -> %q across a re-claim that reported Changed false; the compare-and-set ran anyway", updatedBefore, got)
+	}
+	if got := claimerClaimEventCount(t, ctx, fixture, id); got != claimEventsBefore {
+		t.Errorf("claim events went %d -> %d across a re-claim that reported Changed false; the compare-and-set ran again", claimEventsBefore, got)
+	}
 }
 
 // RunClaimerReclaimsAcrossSpellingWithoutWriting pins ga-v2k49 (steveyegge's
@@ -661,30 +673,40 @@ func RunClaimerGrantsALiveLeaseOnTheRowItWonAndLeavesARefusedOneAlone(t *testing
 	rival := fixture.IssuePrefix + "-cllease-rival"
 	seedClaimerIssue(t, ctx, fixture, claimerIssue(won, types.StatusOpen))
 	seedClaimerIssue(t, ctx, fixture, claimerIssue(held, types.StatusOpen))
+	assertClaimerNoLeaseRows(t, ctx, fixture, won, held)
+	assertClaimerLeaseGrant(t, ctx, fixture, won)
+	assertClaimerRefusedLease(t, ctx, fixture, held, rival)
+}
+
+func assertClaimerNoLeaseRows(t *testing.T, ctx context.Context, fixture ClaimerFixture, ids ...string) {
+	t.Helper()
 	// Neither row is leased before anything claims it. Without this the "one
 	// lease row" below would also pass over a fixture that had inherited one,
 	// and the "still one, still the rival's" would pass over a table this
 	// query cannot reach.
-	for _, id := range []string{won, held} {
+	for _, id := range ids {
 		if leases := claimerLeaseCount(t, ctx, fixture, id); leases != 0 {
 			t.Fatalf("the seeded issue %s already holds %d lease row(s), want 0; "+
 				"the grant asserted below would then not be this claim's doing", id, leases)
 		}
 	}
+}
 
-	if _, err := fixture.Claimer.Claim(ctx, publicops.ClaimRequest{Actor: claimerStranger, IssueID: won}); err != nil {
+func assertClaimerLeaseGrant(t *testing.T, ctx context.Context, fixture ClaimerFixture, id string) {
+	t.Helper()
+	if _, err := fixture.Claimer.Claim(ctx, publicops.ClaimRequest{Actor: claimerStranger, IssueID: id}); err != nil {
 		t.Fatalf("Claim of an open, unassigned issue: %v", err)
 	}
-	assertClaimerRowState(t, ctx, fixture, won, string(types.StatusInProgress), claimerStranger)
-	if leases := claimerLeaseCount(t, ctx, fixture, won); leases != 1 {
+	assertClaimerRowState(t, ctx, fixture, id, string(types.StatusInProgress), claimerStranger)
+	if leases := claimerLeaseCount(t, ctx, fixture, id); leases != 1 {
 		t.Fatalf("the winning claim left %d lease row(s) for %s, want exactly 1 — a claim with no lease is work "+
 			"nothing can take back, because heartbeats have no handle to extend and lease-expiry recovery never sees it",
-			leases, won)
+			leases, id)
 	}
-	holder, live, beating := claimerLeaseGrant(t, ctx, fixture, won)
+	holder, live, beating := claimerLeaseGrant(t, ctx, fixture, id)
 	if holder != claimerStranger {
 		t.Errorf("the lease on %s is held by %q, want the claiming actor %q — a lease naming anyone else is reclaimed "+
-			"on the wrong worker's behalf", won, holder, claimerStranger)
+			"on the wrong worker's behalf", id, holder, claimerStranger)
 	}
 	if !live {
 		t.Error("the granted lease's lease_expires_at is not after its granted_at: the claim was born already expired, " +
@@ -694,24 +716,27 @@ func RunClaimerGrantsALiveLeaseOnTheRowItWonAndLeavesARefusedOneAlone(t *testing
 		t.Error("the granted lease's heartbeat_at is before its granted_at: a lease whose last heartbeat predates the " +
 			"grant is stale the moment it exists")
 	}
+}
 
+func assertClaimerRefusedLease(t *testing.T, ctx context.Context, fixture ClaimerFixture, id, rival string) {
+	t.Helper()
 	// A claim the role refuses neither mints a lease nor moves the one the
 	// real holder has.
-	if _, err := fixture.Claimer.Claim(ctx, publicops.ClaimRequest{Actor: rival, IssueID: held}); err != nil {
-		t.Fatalf("seed the rival's live claim on %s: %v", held, err)
+	if _, err := fixture.Claimer.Claim(ctx, publicops.ClaimRequest{Actor: rival, IssueID: id}); err != nil {
+		t.Fatalf("seed the rival's live claim on %s: %v", id, err)
 	}
 	before := claimerHistoryCount(t, ctx, fixture)
-	_, err := fixture.Claimer.Claim(ctx, publicops.ClaimRequest{Actor: claimerStranger, IssueID: held})
-	assertClaimerRefusal(t, err, publicops.ErrAlreadyClaimed, held, rival, types.StatusInProgress,
+	_, err := fixture.Claimer.Claim(ctx, publicops.ClaimRequest{Actor: claimerStranger, IssueID: id})
+	assertClaimerRefusal(t, err, publicops.ErrAlreadyClaimed, id, rival, types.StatusInProgress,
 		"an issue another actor holds in progress")
-	if leases := claimerLeaseCount(t, ctx, fixture, held); leases != 1 {
-		t.Errorf("the refused claim left %d lease row(s) for %s, want the 1 the rival won", leases, held)
+	if leases := claimerLeaseCount(t, ctx, fixture, id); leases != 1 {
+		t.Errorf("the refused claim left %d lease row(s) for %s, want the 1 the rival won", leases, id)
 	}
-	if holder, _, _ := claimerLeaseGrant(t, ctx, fixture, held); holder != rival {
+	if holder, _, _ := claimerLeaseGrant(t, ctx, fixture, id); holder != rival {
 		t.Errorf("after a refused claim the lease on %s is held by %q, want the rival %q that still holds the issue — "+
-			"a refusal that re-grants the lease hands recovery to the actor that lost", held, holder, rival)
+			"a refusal that re-grants the lease hands recovery to the actor that lost", id, holder, rival)
 	}
-	assertClaimerRowState(t, ctx, fixture, held, string(types.StatusInProgress), rival)
+	assertClaimerRowState(t, ctx, fixture, id, string(types.StatusInProgress), rival)
 	assertClaimerCommittedNothing(t, ctx, fixture, before, "a claim refused by a foreign holder")
 }
 
@@ -851,11 +876,17 @@ const claimerStranger = "a-stranger"
 
 func claimerIssue(id string, status types.Status) *types.Issue {
 	return &types.Issue{
-		ID:        id,
-		Title:     id,
-		Status:    status,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    status,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 }
 

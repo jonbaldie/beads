@@ -125,65 +125,75 @@ func classifyHookMigration(hook *HookMigrationHookPlan) {
 	if hook.ReadError != "" {
 		return
 	}
-
-	switch hook.MarkerState {
-	case hookMarkerStateValid:
-		hook.State = "marker_managed"
-		return
-	case hookMarkerStateBroken:
-		hook.State = "marker_broken"
-		hook.NeedsMigration = true
-		hook.SuggestedAction = "Repair BEGIN/END marker mismatch, then rerun hook migration."
+	if classifyHookMarkerState(hook) {
 		return
 	}
-
 	if hook.LegacyBDHook {
-		hook.NeedsMigration = true
-		switch {
-		case hook.HasOldSidecar && hook.HasBackupSidecar:
-			hook.State = "legacy_with_both_sidecars"
-			hook.SuggestedAction = "Prefer .old as preserved body, retain sidecars as migrated artifacts, inject managed section."
-		case hook.HasOldSidecar:
-			hook.State = "legacy_with_old_sidecar"
-			hook.SuggestedAction = "Restore preserved body from .old and inject managed section."
-		case hook.HasBackupSidecar:
-			hook.State = "legacy_with_backup_sidecar"
-			hook.SuggestedAction = "Restore preserved body from .backup and inject managed section."
-		default:
-			hook.State = "legacy_only"
-			hook.SuggestedAction = "Convert legacy hook in place to managed marker section."
-		}
+		classifyLegacyHookMigration(hook)
 		return
 	}
-
 	if !hook.Exists {
-		switch {
-		case hook.HasOldSidecar && hook.HasBackupSidecar:
-			hook.State = "missing_with_both_sidecars"
-			hook.NeedsMigration = true
-			hook.SuggestedAction = "Recreate hook from sidecar content and inject managed section."
-		case hook.HasOldSidecar:
-			hook.State = "missing_with_old_sidecar"
-			hook.NeedsMigration = true
-			hook.SuggestedAction = "Recreate hook from .old sidecar and inject managed section."
-		case hook.HasBackupSidecar:
-			hook.State = "missing_with_backup_sidecar"
-			hook.NeedsMigration = true
-			hook.SuggestedAction = "Recreate hook from .backup sidecar and inject managed section."
-		default:
-			hook.State = "missing_no_artifacts"
-		}
+		classifyMissingHookMigration(hook)
 		return
 	}
-
 	if hook.HasOldSidecar || hook.HasBackupSidecar {
 		hook.State = "custom_with_sidecars"
 		hook.NeedsMigration = true
 		hook.SuggestedAction = "Preserve custom hook body, inject managed section, retire sidecar artifacts."
 		return
 	}
-
 	hook.State = "unmanaged_custom"
+}
+
+func classifyHookMarkerState(hook *HookMigrationHookPlan) bool {
+	switch hook.MarkerState {
+	case hookMarkerStateValid:
+		hook.State = "marker_managed"
+		return true
+	case hookMarkerStateBroken:
+		hook.State = "marker_broken"
+		hook.NeedsMigration = true
+		hook.SuggestedAction = "Repair BEGIN/END marker mismatch, then rerun hook migration."
+		return true
+	}
+	return false
+}
+
+func classifyLegacyHookMigration(hook *HookMigrationHookPlan) {
+	hook.NeedsMigration = true
+	switch {
+	case hook.HasOldSidecar && hook.HasBackupSidecar:
+		hook.State = "legacy_with_both_sidecars"
+		hook.SuggestedAction = "Prefer .old as preserved body, retain sidecars as migrated artifacts, inject managed section."
+	case hook.HasOldSidecar:
+		hook.State = "legacy_with_old_sidecar"
+		hook.SuggestedAction = "Restore preserved body from .old and inject managed section."
+	case hook.HasBackupSidecar:
+		hook.State = "legacy_with_backup_sidecar"
+		hook.SuggestedAction = "Restore preserved body from .backup and inject managed section."
+	default:
+		hook.State = "legacy_only"
+		hook.SuggestedAction = "Convert legacy hook in place to managed marker section."
+	}
+}
+
+func classifyMissingHookMigration(hook *HookMigrationHookPlan) {
+	switch {
+	case hook.HasOldSidecar && hook.HasBackupSidecar:
+		hook.State = "missing_with_both_sidecars"
+		hook.NeedsMigration = true
+		hook.SuggestedAction = "Recreate hook from sidecar content and inject managed section."
+	case hook.HasOldSidecar:
+		hook.State = "missing_with_old_sidecar"
+		hook.NeedsMigration = true
+		hook.SuggestedAction = "Recreate hook from .old sidecar and inject managed section."
+	case hook.HasBackupSidecar:
+		hook.State = "missing_with_backup_sidecar"
+		hook.NeedsMigration = true
+		hook.SuggestedAction = "Recreate hook from .backup sidecar and inject managed section."
+	default:
+		hook.State = "missing_no_artifacts"
+	}
 }
 
 func detectHookMarkerState(content string) string {
@@ -229,36 +239,35 @@ func IsUnmodifiedLegacyHook(content string) bool {
 // legacy hook shims (thin shim format and inline hook format).
 func isKnownLegacyHookLine(line string) bool {
 	trimmed := strings.TrimSpace(line)
-
-	// Empty lines and shebangs
 	if trimmed == "" || strings.HasPrefix(trimmed, "#!") {
 		return true
 	}
-
-	// Shell control flow and builtins used in hook templates
 	switch trimmed {
 	case "fi", "then", "else", "exit 0", "exit 1":
 		return true
 	}
-
-	// Any comment line containing BD/beads identifiers
 	if strings.HasPrefix(trimmed, "#") {
-		lower := strings.ToLower(trimmed)
-		for _, keyword := range []string{"bd", "beads", "hook", "shim"} {
-			if strings.Contains(lower, keyword) {
-				return true
-			}
-		}
-		// Generic template comments (PATH, Install, Warning)
-		for _, keyword := range []string{"PATH", "Install", "Warning"} {
-			if strings.Contains(trimmed, keyword) {
-				return true
-			}
-		}
-		return false
+		return isKnownLegacyHookComment(trimmed)
 	}
+	return isKnownLegacyHookCommand(trimmed)
+}
 
-	// Known executable lines from legacy hook templates
+func isKnownLegacyHookComment(trimmed string) bool {
+	lower := strings.ToLower(trimmed)
+	for _, keyword := range []string{"bd", "beads", "hook", "shim"} {
+		if strings.Contains(lower, keyword) {
+			return true
+		}
+	}
+	for _, keyword := range []string{"PATH", "Install", "Warning"} {
+		if strings.Contains(trimmed, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func isKnownLegacyHookCommand(trimmed string) bool {
 	knownPrefixes := []string{
 		"exec bd hook",
 		"bd hooks run",
@@ -272,16 +281,11 @@ func isKnownLegacyHookLine(line string) bool {
 			return true
 		}
 	}
-
-	// echo lines with BD-related content (warnings about bd not being installed)
-	if strings.HasPrefix(trimmed, "echo") {
-		lower := strings.ToLower(trimmed)
-		if strings.Contains(lower, "bd") || strings.Contains(lower, "beads") {
-			return true
-		}
+	if !strings.HasPrefix(trimmed, "echo") {
+		return false
 	}
-
-	return false
+	lower := strings.ToLower(trimmed)
+	return strings.Contains(lower, "bd") || strings.Contains(lower, "beads")
 }
 
 func resolveGitHooksDir(path string) (repoRoot string, hooksDir string, err error) {

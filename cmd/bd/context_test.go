@@ -38,7 +38,7 @@ func TestGetRootContext_NilFallback(t *testing.T) {
 	t.Run("returns cmdCtx.RootCtx when globals disabled", func(t *testing.T) {
 		expected := context.WithValue(context.Background(), "cmd", "ctx")
 		rootCtx = nil
-		cmdCtx = &CommandContext{RootCtx: expected}
+		cmdCtx = &CommandContext{commandContextRuntime: commandContextRuntime{RootCtx: expected}}
 
 		ctx := getRootContext()
 		if ctx == nil {

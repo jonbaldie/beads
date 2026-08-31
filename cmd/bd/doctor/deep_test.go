@@ -52,7 +52,7 @@ func TestRunDeepValidationSQLiteIsNotAMigrationWarning(t *testing.T) {
 	if err := os.MkdirAll(beadsDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := (&configfile.Config{Backend: configfile.BackendSQLite, SQLitePath: "beads.db"}).Save(beadsDir); err != nil {
+	if err := (&configfile.Config{Backend: configfile.BackendSQLite, ConfigCompatibilityFields: configfile.ConfigCompatibilityFields{SQLitePath: "beads.db"}}).Save(beadsDir); err != nil {
 		t.Fatalf("save SQLite config: %v", err)
 	}
 
@@ -73,11 +73,19 @@ func TestCheckParentConsistency_OrphanedDeps(t *testing.T) {
 
 	// Create an issue
 	issue := &types.Issue{
-		ID:        "bd-1",
-		Title:     "Test Issue",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
-		CreatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "bd-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Test Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test"); err != nil {
 		t.Fatal(err)
@@ -114,11 +122,19 @@ func TestCheckEpicCompleteness_CompletedEpic(t *testing.T) {
 
 	// Insert an open epic
 	epic := &types.Issue{
-		ID:        "epic-1",
-		Title:     "Epic",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeEpic,
-		CreatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "epic-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Epic",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeEpic,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+		},
 	}
 	if err := store.CreateIssue(ctx, epic, "test"); err != nil {
 		t.Fatal(err)
@@ -126,12 +142,20 @@ func TestCheckEpicCompleteness_CompletedEpic(t *testing.T) {
 
 	// Insert a closed child task
 	task := &types.Issue{
-		ID:        "epic-1.1",
-		Title:     "Task",
-		Status:    types.StatusClosed,
-		IssueType: types.TypeTask,
-		ClosedAt:  ptrTime(time.Now()),
-		CreatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "epic-1.1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			ClosedAt:  ptrTime(time.Now()),
+			CreatedAt: time.Now(),
+		},
 	}
 	if err := store.CreateIssue(ctx, task, "test"); err != nil {
 		t.Fatal(err)
@@ -163,24 +187,42 @@ func TestCheckEpicCompleteness_CountsWispChildren(t *testing.T) {
 	ctx := context.Background()
 
 	epic := &types.Issue{
-		ID:        "epic-wisp",
-		Title:     "Epic",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeEpic,
-		CreatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "epic-wisp",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Epic",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeEpic,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+		},
 	}
 	if err := store.CreateIssue(ctx, epic, "test"); err != nil {
 		t.Fatal(err)
 	}
 
 	child := &types.Issue{
-		ID:        "epic-wisp.1",
-		Title:     "Wisp child",
-		Status:    types.StatusClosed,
-		IssueType: types.TypeTask,
-		ClosedAt:  ptrTime(time.Now()),
-		NoHistory: true,
-		CreatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "epic-wisp.1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Wisp child",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusClosed,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			ClosedAt:  ptrTime(time.Now()),
+			CreatedAt: time.Now(),
+		},
+		IssueWisp: types.IssueWisp{
+			NoHistory: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, child, "test"); err != nil {
 		t.Fatal(err)
@@ -208,23 +250,41 @@ func TestCheckEpicCompleteness_OpenWispChildPreventsCompletedEpic(t *testing.T) 
 	ctx := context.Background()
 
 	epic := &types.Issue{
-		ID:        "epic-open-wisp",
-		Title:     "Epic",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeEpic,
-		CreatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "epic-open-wisp",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Epic",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeEpic,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+		},
 	}
 	if err := store.CreateIssue(ctx, epic, "test"); err != nil {
 		t.Fatal(err)
 	}
 
 	child := &types.Issue{
-		ID:        "epic-open-wisp.1",
-		Title:     "Open wisp child",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
-		NoHistory: true,
-		CreatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "epic-open-wisp.1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Open wisp child",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+		},
+		IssueWisp: types.IssueWisp{
+			NoHistory: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, child, "test"); err != nil {
 		t.Fatal(err)
@@ -254,22 +314,38 @@ func TestCheckMailThreadIntegrity_ValidThreads(t *testing.T) {
 
 	// Insert issues
 	root := &types.Issue{
-		ID:        "thread-root",
-		Title:     "Thread Root",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
-		CreatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "thread-root",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Thread Root",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+		},
 	}
 	if err := store.CreateIssue(ctx, root, "test"); err != nil {
 		t.Fatal(err)
 	}
 
 	reply := &types.Issue{
-		ID:        "thread-reply",
-		Title:     "Reply",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
-		CreatedAt: time.Now(),
+		IssueID: types.IssueID{
+			ID: "thread-reply",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Reply",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now(),
+		},
 	}
 	if err := store.CreateIssue(ctx, reply, "test"); err != nil {
 		t.Fatal(err)

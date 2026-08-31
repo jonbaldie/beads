@@ -82,86 +82,93 @@ func writeAutoImportStamp(beadsDir string, info os.FileInfo) {
 // The function is best-effort: failures are logged as warnings but do not
 // prevent the store from being used.
 func maybeAutoImportJSONL(ctx context.Context, s storage.DoltStorage, beadsDir string) {
-	// Quick check: does the JSONL file exist and have content?
+	jsonlPath, info, ok := autoImportJSONLFile(beadsDir)
+	if !ok {
+		return
+	}
+	if !autoImportDatabaseEmpty(ctx, s) {
+		return
+	}
+	issues, configEntries, ok := autoImportParsedIssues(beadsDir, jsonlPath, info)
+	if !ok {
+		return
+	}
+	if importer, ok := s.(jsonlImporter); ok {
+		autoImportEmbedded(ctx, importer, beadsDir, jsonlPath, info, issues, configEntries)
+		return
+	}
+	autoImportFallback(ctx, s, beadsDir, jsonlPath, info)
+}
+
+func autoImportJSONLFile(beadsDir string) (string, os.FileInfo, bool) {
 	jsonlPath := configuredImportJSONLPath(beadsDir)
 	info, err := os.Stat(jsonlPath)
 	if err != nil || info.Size() == 0 {
-		return // no JSONL file or empty — nothing to import
+		return "", nil, false
 	}
 	if autoImportStampMatches(beadsDir, info) {
-		return // already attempted for this exact JSONL version — retry only when issues.jsonl changes
+		return "", nil, false
 	}
+	return jsonlPath, info, true
+}
 
+func autoImportDatabaseEmpty(ctx context.Context, s storage.DoltStorage) bool {
 	// Top-level emptiness guard (covers both embedded and fallback paths).
 	// Without this, the fallback path silently re-imposes stale JSONL on
 	// top of live Dolt rows via UPSERT semantics on every invocation.
 	stats, err := s.GetStatistics(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: auto-import: failed to check issue count: %v\n", err)
-		return
+		return false
 	}
 	if stats == nil {
 		fmt.Fprintf(os.Stderr, "warning: auto-import: issue count unavailable\n")
-		return
+		return false
 	}
-	if stats.TotalIssues > 0 {
-		return // database is not empty — nothing to do
-	}
+	return stats.TotalIssues == 0
+}
 
-	// Parse the JSONL file without touching the store.
+func autoImportParsedIssues(beadsDir, jsonlPath string, info os.FileInfo) ([]*types.Issue, map[string]string, bool) {
 	issues, configEntries, err := parseJSONLFile(jsonlPath)
 	if err != nil {
 		writeAutoImportStamp(beadsDir, info)
 		fmt.Fprintf(os.Stderr, "warning: auto-import: failed to parse %s: %v\n", jsonlPath, err)
-		return
+		return nil, nil, false
 	}
 	if len(issues) == 0 {
-		return // nothing to import
+		return nil, nil, false
 	}
+	return issues, configEntries, true
+}
 
+func autoImportEmbedded(ctx context.Context, importer jsonlImporter, beadsDir, jsonlPath string, info os.FileInfo, issues []*types.Issue, configEntries map[string]string) {
 	// Prefer single-transaction import (embedded mode) to avoid
 	// DOLT_COMMIT races with concurrent writers.
-	if importer, ok := s.(jsonlImporter); ok {
-		imported, err := importer.ImportJSONLData(ctx, issues, configEntries, "auto-import")
-		if err != nil {
-			writeAutoImportStamp(beadsDir, info)
-			fmt.Fprintf(os.Stderr, "warning: auto-import from %s failed: %v\n", jsonlPath, err)
-			fmt.Fprintf(os.Stderr, "\nYour issues are still safe in %s.\n", jsonlPath)
-			fmt.Fprintf(os.Stderr, "Try: bd init --from-jsonl   (re-initialize and import from the JSONL file)\n")
-			fmt.Fprintf(os.Stderr, "If this persists, please report at https://github.com/gastownhall/beads/issues\n\n")
-			return
-		}
-		if imported > 0 {
-			writeAutoImportStamp(beadsDir, info)
-			// Signal PersistentPostRun to auto-commit (no explicit DOLT_COMMIT here).
-			commandDidWrite.Store(true)
-			fmt.Fprintf(os.Stderr, "auto-imported %d issues", imported)
-			if len(configEntries) > 0 {
-				fmt.Fprintf(os.Stderr, " and %d config entries", len(configEntries))
-			}
-			fmt.Fprintf(os.Stderr, " from %s\n", jsonlPath)
-		}
+	imported, err := importer.ImportJSONLData(ctx, issues, configEntries, "auto-import")
+	if err != nil {
+		warnAutoImportFailed(beadsDir, jsonlPath, info, err)
 		return
 	}
+	if imported == 0 {
+		return
+	}
+	writeAutoImportStamp(beadsDir, info)
+	commandDidWrite.Store(true)
+	fmt.Fprintf(os.Stderr, "auto-imported %d issues", imported)
+	if len(configEntries) > 0 {
+		fmt.Fprintf(os.Stderr, " and %d config entries", len(configEntries))
+	}
+	fmt.Fprintf(os.Stderr, " from %s\n", jsonlPath)
+}
 
-	// Fallback for stores without a single-transaction importer.
+func autoImportFallback(ctx context.Context, s storage.DoltStorage, beadsDir, jsonlPath string, info os.FileInfo) {
 	fmt.Fprintf(os.Stderr, "auto-importing %d bytes from %s into empty database...\n", info.Size(), jsonlPath)
-
 	result, err := fallbackImporter(ctx, s, jsonlPath)
 	if err != nil {
-		writeAutoImportStamp(beadsDir, info)
-		fmt.Fprintf(os.Stderr, "warning: auto-import from %s failed: %v\n", jsonlPath, err)
-		fmt.Fprintf(os.Stderr, "\nYour issues are still safe in %s.\n", jsonlPath)
-		fmt.Fprintf(os.Stderr, "Try: bd init --from-jsonl   (re-initialize and import from the JSONL file)\n")
-		fmt.Fprintf(os.Stderr, "If this persists, please report at https://github.com/gastownhall/beads/issues\n\n")
+		warnAutoImportFailed(beadsDir, jsonlPath, info, err)
 		return
 	}
-
-	// Commit the imported data to Dolt history (fallback path only).
-	commitMsg := fmt.Sprintf("auto-import: %d issues from %s (upgrade recovery, GH#2994)", result.Issues, filepath.Base(jsonlPath))
-	if result.Memories > 0 {
-		commitMsg = fmt.Sprintf("auto-import: %d issues, %d memories from %s (upgrade recovery, GH#2994)", result.Issues, result.Memories, filepath.Base(jsonlPath))
-	}
+	commitMsg := autoImportFallbackCommitMsg(jsonlPath, result)
 	if err := s.Commit(ctx, commitMsg); err != nil {
 		writeAutoImportStamp(beadsDir, info)
 		fmt.Fprintf(os.Stderr, "warning: auto-import: dolt commit failed: %v\n", err)
@@ -170,10 +177,28 @@ func maybeAutoImportJSONL(ctx context.Context, s storage.DoltStorage, beadsDir s
 	if result.Issues > 0 || result.Memories > 0 {
 		writeAutoImportStamp(beadsDir, info)
 	}
+	reportAutoImportFallback(jsonlPath, result)
+}
 
+func autoImportFallbackCommitMsg(jsonlPath string, result *importLocalResult) string {
+	if result.Memories > 0 {
+		return fmt.Sprintf("auto-import: %d issues, %d memories from %s (upgrade recovery, GH#2994)", result.Issues, result.Memories, filepath.Base(jsonlPath))
+	}
+	return fmt.Sprintf("auto-import: %d issues from %s (upgrade recovery, GH#2994)", result.Issues, filepath.Base(jsonlPath))
+}
+
+func reportAutoImportFallback(jsonlPath string, result *importLocalResult) {
 	if result.Memories > 0 {
 		fmt.Fprintf(os.Stderr, "auto-imported %d issues and %d memories from %s\n", result.Issues, result.Memories, jsonlPath)
-	} else {
-		fmt.Fprintf(os.Stderr, "auto-imported %d issues from %s\n", result.Issues, jsonlPath)
+		return
 	}
+	fmt.Fprintf(os.Stderr, "auto-imported %d issues from %s\n", result.Issues, jsonlPath)
+}
+
+func warnAutoImportFailed(beadsDir, jsonlPath string, info os.FileInfo, err error) {
+	writeAutoImportStamp(beadsDir, info)
+	fmt.Fprintf(os.Stderr, "warning: auto-import from %s failed: %v\n", jsonlPath, err)
+	fmt.Fprintf(os.Stderr, "\nYour issues are still safe in %s.\n", jsonlPath)
+	fmt.Fprintf(os.Stderr, "Try: bd init --from-jsonl   (re-initialize and import from the JSONL file)\n")
+	fmt.Fprintf(os.Stderr, "If this persists, please report at https://github.com/gastownhall/beads/issues\n\n")
 }

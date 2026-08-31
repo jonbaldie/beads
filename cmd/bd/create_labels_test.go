@@ -10,10 +10,9 @@ import (
 func TestBuildCreateIssuePreservesLabels(t *testing.T) {
 	labels := []string{"gc:wisp", "status:pending"}
 	issue := buildCreateIssue(createIssueParams{
-		Title:     "labelled create",
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Labels:    labels,
+		ident: createIssueIdentity{Title: "labelled create"},
+		body:  createIssueBody{Labels: labels},
+		class: createIssueClass{Priority: 2, IssueType: types.TypeTask},
 	})
 
 	if !reflect.DeepEqual(issue.Labels, labels) {

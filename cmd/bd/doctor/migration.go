@@ -54,7 +54,6 @@ func DetectPendingMigrations(path string) []PendingMigration {
 // CheckPendingMigrations returns a doctor check summarizing all pending migrations
 func CheckPendingMigrations(path string) DoctorCheck {
 	pending := DetectPendingMigrations(path)
-
 	if len(pending) == 0 {
 		return DoctorCheck{
 			Name:     "Pending Migrations",
@@ -63,46 +62,49 @@ func CheckPendingMigrations(path string) DoctorCheck {
 			Category: CategoryMaintenance,
 		}
 	}
-
-	// Build message with count
-	message := fmt.Sprintf("%d available", len(pending))
-
-	// Build detail with list of migrations
-	var details []string
-	var fixes []string
-	for _, m := range pending {
-		priority := ""
-		switch m.Priority {
-		case 1:
-			priority = " [critical]"
-		case 2:
-			priority = " [recommended]"
-		case 3:
-			priority = " [optional]"
-		}
-		details = append(details, fmt.Sprintf("• %s: %s%s", m.Name, m.Description, priority))
-		fixes = append(fixes, m.Command)
-	}
-
-	// Determine status based on highest priority migration
-	status := StatusOK
-	for _, m := range pending {
-		if m.Priority == 1 {
-			status = StatusError
-			break
-		} else if m.Priority == 2 && status != StatusError {
-			status = StatusWarning
-		}
-	}
-
+	details, fixes := formatPendingMigrations(pending)
 	return DoctorCheck{
 		Name:     "Pending Migrations",
-		Status:   status,
-		Message:  message,
+		Status:   pendingMigrationStatus(pending),
+		Message:  fmt.Sprintf("%d available", len(pending)),
 		Detail:   strings.Join(details, "\n"),
 		Fix:      strings.Join(fixes, "\n"),
 		Category: CategoryMaintenance,
 	}
+}
+
+func pendingMigrationPriorityLabel(priority int) string {
+	switch priority {
+	case 1:
+		return " [critical]"
+	case 2:
+		return " [recommended]"
+	case 3:
+		return " [optional]"
+	}
+	return ""
+}
+
+func formatPendingMigrations(pending []PendingMigration) ([]string, []string) {
+	var details, fixes []string
+	for _, m := range pending {
+		details = append(details, fmt.Sprintf("• %s: %s%s", m.Name, m.Description, pendingMigrationPriorityLabel(m.Priority)))
+		fixes = append(fixes, m.Command)
+	}
+	return details, fixes
+}
+
+func pendingMigrationStatus(pending []PendingMigration) string {
+	status := StatusOK
+	for _, m := range pending {
+		if m.Priority == 1 {
+			return StatusError
+		}
+		if m.Priority == 2 && status != StatusError {
+			status = StatusWarning
+		}
+	}
+	return status
 }
 
 // hasGitRemote checks if the repository has a git remote

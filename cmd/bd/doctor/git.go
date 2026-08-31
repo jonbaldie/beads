@@ -1,19 +1,15 @@
 package doctor
 
 import (
-	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/jonbaldie/beads/cmd/bd/doctor/fix"
-	"github.com/jonbaldie/beads/internal/configfile"
 	"github.com/jonbaldie/beads/internal/git"
-	"github.com/jonbaldie/beads/internal/types"
 )
 
 // gitCmdTimeout is the timeout for git subprocess commands in doctor checks.
@@ -50,137 +46,149 @@ func CheckGitHooks(cliVersion string) DoctorCheck {
 			Message: "N/A (not a git repository)",
 		}
 	}
+	return inspectGitHooks(hooksDir, cliVersion)
+}
 
+type hookInventory struct {
+	missing   []string
+	installed []string
+}
+
+func inspectGitHooks(hooksDir, cliVersion string) DoctorCheck {
+	inventory := inspectRecommendedHooks(hooksDir)
+	repoRoot := git.GetRepoRoot()
+	externalManagers := fix.DetectExternalHookManagers(repoRoot)
+	if len(externalManagers) > 0 {
+		if check, ok := checkInstalledBdShims(hooksDir, cliVersion); ok {
+			return check
+		}
+		if check, ok := checkExternalHookManager(repoRoot, externalManagers); ok {
+			return check
+		}
+	}
+	return checkRecommendedHookStatus(hooksDir, cliVersion, inventory)
+}
+
+func inspectRecommendedHooks(hooksDir string) hookInventory {
 	// Recommended hooks and their purposes
 	recommendedHooks := map[string]string{
 		"pre-commit": "Syncs pending bd changes before commit",
 		"post-merge": "Syncs database after git pull/merge",
 		"pre-push":   "Validates database state before push",
 	}
-	var missingHooks []string
-	var installedHooks []string
+	var inventory hookInventory
 
 	for hookName := range recommendedHooks {
 		hookPath := filepath.Join(hooksDir, hookName)
 		if _, err := os.Stat(hookPath); os.IsNotExist(err) {
-			missingHooks = append(missingHooks, hookName)
+			inventory.missing = append(inventory.missing, hookName)
 		} else {
-			installedHooks = append(installedHooks, hookName)
+			inventory.installed = append(inventory.installed, hookName)
 		}
 	}
+	return inventory
+}
 
-	// Get repo root for external manager detection
-	repoRoot := git.GetRepoRoot()
-
-	// Check for external hook managers (lefthook, husky, etc.)
-	externalManagers := fix.DetectExternalHookManagers(repoRoot)
-	if len(externalManagers) > 0 {
-		// First, check if bd shims are installed (GH#946)
-		// If the actual hooks are bd shims, they're calling bd regardless of what
-		// the external manager config says (user may have leftover config files)
-		if hasBdShims, bdHooks := areBdShimsInstalled(hooksDir); hasBdShims {
-			if outdated, oldest := findOutdatedBDHookVersions(hooksDir, bdHooks, cliVersion); len(outdated) > 0 {
-				return DoctorCheck{
-					Name:    "Git Hooks",
-					Status:  StatusWarning,
-					Message: "Installed bd hooks are outdated",
-					Detail: fmt.Sprintf(
-						"Outdated: %s (oldest: %s, current: %s)",
-						strings.Join(outdated, ", "),
-						oldest,
-						cliVersion,
-					),
-					Fix: "Run 'bd hooks install --force' to update hooks",
-				}
-			}
-			return DoctorCheck{
-				Name:    "Git Hooks",
-				Status:  StatusOK,
-				Message: "bd shims installed (ignoring external manager config)",
-				Detail:  fmt.Sprintf("bd hooks run: %s", strings.Join(bdHooks, ", ")),
-			}
-		}
-
-		// External manager detected - check if it's configured to call bd
-		integration := fix.CheckExternalHookManagerIntegration(repoRoot)
-		if integration != nil {
-			// Detection-only managers - we can't verify their config
-			if integration.DetectionOnly {
-				return DoctorCheck{
-					Name:    "Git Hooks",
-					Status:  StatusOK,
-					Message: fmt.Sprintf("%s detected (cannot verify bd integration)", integration.Manager),
-					Detail:  "Ensure your hook config calls 'bd hooks run <hook>'",
-				}
-			}
-
-			if integration.Configured {
-				// Check if any hooks are missing bd integration
-				if len(integration.HooksWithoutBd) > 0 {
-					return DoctorCheck{
-						Name:    "Git Hooks",
-						Status:  StatusWarning,
-						Message: fmt.Sprintf("%s hooks not calling bd", integration.Manager),
-						Detail:  fmt.Sprintf("Missing bd: %s", strings.Join(integration.HooksWithoutBd, ", ")),
-						Fix:     "Add or upgrade to 'bd hooks run <hook>'. See " + hooksUpgradeURL,
-					}
-				}
-
-				// All hooks calling bd - success
-				return DoctorCheck{
-					Name:    "Git Hooks",
-					Status:  StatusOK,
-					Message: fmt.Sprintf("All hooks via %s", integration.Manager),
-					Detail:  fmt.Sprintf("bd hooks run: %s", strings.Join(integration.HooksWithBd, ", ")),
-				}
-			}
-
-			// External manager exists but doesn't call bd at all
-			return DoctorCheck{
-				Name:    "Git Hooks",
-				Status:  StatusWarning,
-				Message: fmt.Sprintf("%s not calling bd", fix.ManagerNames(externalManagers)),
-				Detail:  "Configure hooks to call bd commands",
-				Fix:     "Add or upgrade to 'bd hooks run <hook>'. See " + hooksUpgradeURL,
-			}
-		}
+func checkInstalledBdShims(hooksDir, cliVersion string) (DoctorCheck, bool) {
+	hasBdShims, bdHooks := areBdShimsInstalled(hooksDir)
+	if !hasBdShims {
+		return DoctorCheck{}, false
 	}
+	if outdated, oldest := findOutdatedBDHookVersions(hooksDir, bdHooks, cliVersion); len(outdated) > 0 {
+		return outdatedHooksCheck(outdated, oldest, cliVersion), true
+	}
+	return DoctorCheck{
+		Name:    "Git Hooks",
+		Status:  StatusOK,
+		Message: "bd shims installed (ignoring external manager config)",
+		Detail:  fmt.Sprintf("bd hooks run: %s", strings.Join(bdHooks, ", ")),
+	}, true
+}
 
-	if len(missingHooks) == 0 {
-		if outdated, oldest := findOutdatedBDHookVersions(hooksDir, installedHooks, cliVersion); len(outdated) > 0 {
-			return DoctorCheck{
-				Name:    "Git Hooks",
-				Status:  StatusWarning,
-				Message: "Installed bd hooks are outdated",
-				Detail: fmt.Sprintf(
-					"Outdated: %s (oldest: %s, current: %s)",
-					strings.Join(outdated, ", "),
-					oldest,
-					cliVersion,
-				),
-				Fix: "Run 'bd hooks install --force' to update hooks",
-			}
+func checkExternalHookManager(repoRoot string, externalManagers []fix.ExternalHookManager) (DoctorCheck, bool) {
+	integration := fix.CheckExternalHookManagerIntegration(repoRoot)
+	if integration == nil {
+		return DoctorCheck{}, false
+	}
+	if integration.DetectionOnly {
+		return DoctorCheck{
+			Name:    "Git Hooks",
+			Status:  StatusOK,
+			Message: fmt.Sprintf("%s detected (cannot verify bd integration)", integration.Manager),
+			Detail:  "Ensure your hook config calls 'bd hooks run <hook>'",
+		}, true
+	}
+	if integration.Configured {
+		return configuredExternalHookCheck(integration)
+	}
+	return DoctorCheck{
+		Name:    "Git Hooks",
+		Status:  StatusWarning,
+		Message: fmt.Sprintf("%s not calling bd", fix.ManagerNames(externalManagers)),
+		Detail:  "Configure hooks to call bd commands",
+		Fix:     "Add or upgrade to 'bd hooks run <hook>'. See " + hooksUpgradeURL,
+	}, true
+}
+
+func configuredExternalHookCheck(integration *fix.HookIntegrationStatus) (DoctorCheck, bool) {
+	if len(integration.HooksWithoutBd) > 0 {
+		return DoctorCheck{
+			Name:    "Git Hooks",
+			Status:  StatusWarning,
+			Message: fmt.Sprintf("%s hooks not calling bd", integration.Manager),
+			Detail:  fmt.Sprintf("Missing bd: %s", strings.Join(integration.HooksWithoutBd, ", ")),
+			Fix:     "Add or upgrade to 'bd hooks run <hook>'. See " + hooksUpgradeURL,
+		}, true
+	}
+	return DoctorCheck{
+		Name:    "Git Hooks",
+		Status:  StatusOK,
+		Message: fmt.Sprintf("All hooks via %s", integration.Manager),
+		Detail:  fmt.Sprintf("bd hooks run: %s", strings.Join(integration.HooksWithBd, ", ")),
+	}, true
+}
+
+func checkRecommendedHookStatus(hooksDir, cliVersion string, inventory hookInventory) DoctorCheck {
+	if len(inventory.missing) == 0 {
+		if outdated, oldest := findOutdatedBDHookVersions(hooksDir, inventory.installed, cliVersion); len(outdated) > 0 {
+			return outdatedHooksCheck(outdated, oldest, cliVersion)
 		}
 		return DoctorCheck{
 			Name:    "Git Hooks",
 			Status:  StatusOK,
 			Message: "All recommended hooks installed",
-			Detail:  fmt.Sprintf("Installed: %s", strings.Join(installedHooks, ", ")),
+			Detail:  fmt.Sprintf("Installed: %s", strings.Join(inventory.installed, ", ")),
 		}
 	}
+	return missingRecommendedHookCheck(inventory)
+}
 
+func outdatedHooksCheck(outdated []string, oldest, cliVersion string) DoctorCheck {
+	return DoctorCheck{
+		Name:    "Git Hooks",
+		Status:  StatusWarning,
+		Message: "Installed bd hooks are outdated",
+		Detail: fmt.Sprintf(
+			"Outdated: %s (oldest: %s, current: %s)",
+			strings.Join(outdated, ", "),
+			oldest,
+			cliVersion,
+		),
+		Fix: "Run 'bd hooks install --force' to update hooks",
+	}
+}
+
+func missingRecommendedHookCheck(inventory hookInventory) DoctorCheck {
 	hookInstallMsg := "Install hooks with 'bd hooks install'. See " + hooksExamplesURL
-
-	if len(installedHooks) > 0 {
+	if len(inventory.installed) > 0 {
 		return DoctorCheck{
 			Name:    "Git Hooks",
 			Status:  StatusWarning,
-			Message: fmt.Sprintf("Missing %d recommended hook(s)", len(missingHooks)),
-			Detail:  fmt.Sprintf("Missing: %s", strings.Join(missingHooks, ", ")),
+			Message: fmt.Sprintf("Missing %d recommended hook(s)", len(inventory.missing)),
+			Detail:  fmt.Sprintf("Missing: %s", strings.Join(inventory.missing, ", ")),
 			Fix:     hookInstallMsg,
 		}
 	}
-
 	return DoctorCheck{
 		Name:    "Git Hooks",
 		Status:  StatusWarning,
@@ -201,33 +209,42 @@ func findOutdatedBDHookVersions(
 	var outdated []string
 	var oldest string
 	for _, hookName := range hookNames {
-		hookPath := filepath.Join(hooksDir, hookName)
-		content, err := os.ReadFile(hookPath)
-		if err != nil {
+		hookLabel, hookVersion, ok := outdatedBDHookVersion(hooksDir, hookName, cliVersion)
+		if !ok {
 			continue
 		}
-		contentStr := string(content)
-		hookVersion, ok := parseBDHookVersion(contentStr)
-		if !ok || !IsValidSemver(hookVersion) {
-			// No version comment found. If this is a bd hook (has shim marker,
-			// inline marker, or calls bd hooks run), treat it as outdated since
-			// all current hook templates include a version comment. (GH#1466)
-			if isBdHookContent(contentStr) {
-				outdated = append(outdated, fmt.Sprintf("%s@unknown", hookName))
-				if oldest == "" {
-					oldest = "0.0.0"
-				}
+		outdated = append(outdated, hookLabel)
+		if hookVersion == "" {
+			if oldest == "" {
+				oldest = "0.0.0"
 			}
-			continue
-		}
-		if CompareVersions(hookVersion, cliVersion) < 0 {
-			outdated = append(outdated, fmt.Sprintf("%s@%s", hookName, hookVersion))
-			if oldest == "" || CompareVersions(hookVersion, oldest) < 0 {
-				oldest = hookVersion
-			}
+		} else if oldest == "" || CompareVersions(hookVersion, oldest) < 0 {
+			oldest = hookVersion
 		}
 	}
 	return outdated, oldest
+}
+
+func outdatedBDHookVersion(hooksDir, hookName, cliVersion string) (string, string, bool) {
+	content, err := os.ReadFile(filepath.Join(hooksDir, hookName))
+	if err != nil {
+		return "", "", false
+	}
+	contentStr := string(content)
+	hookVersion, ok := parseBDHookVersion(contentStr)
+	if !ok || !IsValidSemver(hookVersion) {
+		// No version comment found. If this is a bd hook (has shim marker,
+		// inline marker, or calls bd hooks run), treat it as outdated since
+		// all current hook templates include a version comment. (GH#1466)
+		if isBdHookContent(contentStr) {
+			return fmt.Sprintf("%s@unknown", hookName), "", true
+		}
+		return "", "", false
+	}
+	if CompareVersions(hookVersion, cliVersion) >= 0 {
+		return "", "", false
+	}
+	return fmt.Sprintf("%s@%s", hookName, hookVersion), hookVersion, true
 }
 
 // isBdHookContent checks if hook content is a bd hook (shim, inline, section-marker, or calls bd hooks run).
@@ -292,677 +309,4 @@ func areBdShimsInstalled(hooksDir string) (bool, []string) {
 	}
 
 	return len(bdHooks) > 0, bdHooks
-}
-
-// CheckGitWorkingTree checks if the git working tree is clean.
-// This helps prevent leaving work stranded (AGENTS.md: keep git state clean).
-func CheckGitWorkingTree(path string) DoctorCheck {
-	ctx, cancel := context.WithTimeout(context.Background(), gitCmdTimeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--git-dir")
-	cmd.Dir = path
-	if err := cmd.Run(); err != nil {
-		return DoctorCheck{
-			Name:    "Git Working Tree",
-			Status:  StatusOK,
-			Message: "N/A (not a git repository)",
-		}
-	}
-
-	cmd = exec.CommandContext(ctx, "git", "status", "--porcelain")
-	cmd.Dir = path
-	out, err := cmd.Output()
-	if err != nil {
-		return DoctorCheck{
-			Name:    "Git Working Tree",
-			Status:  StatusWarning,
-			Message: "Unable to check git status",
-			Detail:  err.Error(),
-			Fix:     "Run 'git status' and commit/stash changes before syncing",
-		}
-	}
-
-	status := strings.TrimSpace(string(out))
-	if status == "" {
-		return DoctorCheck{
-			Name:    "Git Working Tree",
-			Status:  StatusOK,
-			Message: "Clean",
-		}
-	}
-
-	// Parse raw porcelain lines preserving leading spaces for correct XY parsing.
-	// strings.TrimSpace above strips the leading space from the first " D ..."
-	// line, corrupting porcelain format. Use the raw output for line parsing.
-	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
-
-	// In redirect worktrees (.beads/redirect exists), deleted .beads/ files
-	// are expected — the actual data lives at the redirect target (the rig).
-	// Filter these out so they don't trigger a false warning.
-	redirectPath := filepath.Join(path, ".beads", "redirect")
-	if _, err := os.Stat(redirectPath); err == nil {
-		var filtered []string
-		for _, line := range lines {
-			if isExpectedRedirectChange(line) {
-				continue
-			}
-			filtered = append(filtered, line)
-		}
-		if len(filtered) == 0 {
-			return DoctorCheck{
-				Name:    "Git Working Tree",
-				Status:  StatusOK,
-				Message: "Clean (redirect worktree, .beads/ deletions expected)",
-			}
-		}
-		lines = filtered
-	}
-
-	// Show a small sample of paths for quick debugging.
-	maxLines := 8
-	if len(lines) > maxLines {
-		lines = append(lines[:maxLines], "…")
-	}
-
-	return DoctorCheck{
-		Name:    "Git Working Tree",
-		Status:  StatusWarning,
-		Message: "Uncommitted changes present",
-		Detail:  strings.Join(lines, "\n"),
-		Fix:     "Commit or stash changes, then follow AGENTS.md: git pull --rebase && git push",
-	}
-}
-
-// isExpectedRedirectChange returns true if a git status --porcelain line
-// represents an expected change in a redirect worktree: deleted .beads/ files
-// or the untracked .beads/redirect file itself.
-// Porcelain format: XY PATH where X=index status, Y=worktree status.
-// Deletions show as " D .beads/..." (unstaged) or "D  .beads/..." (staged).
-func isExpectedRedirectChange(line string) bool {
-	if len(line) < 4 {
-		return false
-	}
-	xy := line[:2]
-	filePath := line[3:]
-	if !strings.HasPrefix(filePath, ".beads/") {
-		return false
-	}
-	// Deleted .beads/ files (expected: data lives at redirect target)
-	if xy == " D" || xy == "D " || xy == "DD" {
-		return true
-	}
-	// Untracked .beads/redirect file (expected: the redirect marker itself)
-	if xy == "??" && filePath == ".beads/redirect" {
-		return true
-	}
-	return false
-}
-
-// CheckGitUpstream checks whether the current branch is up to date with its upstream.
-// This catches common "forgot to pull/push" failure modes (AGENTS.md: pull --rebase, push).
-func CheckGitUpstream(path string) DoctorCheck {
-	ctx, cancel := context.WithTimeout(context.Background(), gitCmdTimeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--git-dir")
-	cmd.Dir = path
-	if err := cmd.Run(); err != nil {
-		return DoctorCheck{
-			Name:    "Git Upstream",
-			Status:  StatusOK,
-			Message: "N/A (not a git repository)",
-		}
-	}
-
-	// Detect detached HEAD.
-	cmd = exec.CommandContext(ctx, "git", "symbolic-ref", "--short", "HEAD")
-	cmd.Dir = path
-	branchOut, err := cmd.Output()
-	if err != nil {
-		return DoctorCheck{
-			Name:    "Git Upstream",
-			Status:  StatusWarning,
-			Message: "Detached HEAD (no branch)",
-			Fix:     "Check out a branch before syncing",
-		}
-	}
-	branch := strings.TrimSpace(string(branchOut))
-
-	// Check if any remotes exist — no point warning about upstream if there's no remote
-	remoteCmd := exec.CommandContext(ctx, "git", "remote")
-	remoteCmd.Dir = path
-	remoteOut, err := remoteCmd.Output()
-	if err != nil || strings.TrimSpace(string(remoteOut)) == "" {
-		return DoctorCheck{
-			Name:    "Git Upstream",
-			Status:  StatusOK,
-			Message: "N/A — no remotes configured",
-		}
-	}
-
-	cmd = exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
-	cmd.Dir = path
-	upOut, err := cmd.Output()
-	if err != nil {
-		return DoctorCheck{
-			Name:    "Git Upstream",
-			Status:  StatusWarning,
-			Message: fmt.Sprintf("No upstream configured for %s", branch),
-			Fix:     fmt.Sprintf("Set upstream then push: git push -u origin %s", branch),
-		}
-	}
-	upstream := strings.TrimSpace(string(upOut))
-
-	ahead, aheadErr := gitRevListCount(ctx, path, "@{u}..HEAD")
-	behind, behindErr := gitRevListCount(ctx, path, "HEAD..@{u}")
-	if aheadErr != nil || behindErr != nil {
-		detailParts := []string{}
-		if aheadErr != nil {
-			detailParts = append(detailParts, "ahead: "+aheadErr.Error())
-		}
-		if behindErr != nil {
-			detailParts = append(detailParts, "behind: "+behindErr.Error())
-		}
-		return DoctorCheck{
-			Name:    "Git Upstream",
-			Status:  StatusWarning,
-			Message: fmt.Sprintf("Unable to compare with upstream (%s)", upstream),
-			Detail:  strings.Join(detailParts, "; "),
-			Fix:     "Run 'git fetch' then check: git status -sb",
-		}
-	}
-
-	if ahead == 0 && behind == 0 {
-		return DoctorCheck{
-			Name:    "Git Upstream",
-			Status:  StatusOK,
-			Message: fmt.Sprintf("Up to date (%s)", upstream),
-			Detail:  fmt.Sprintf("Branch: %s", branch),
-		}
-	}
-
-	if ahead > 0 && behind == 0 {
-		return DoctorCheck{
-			Name:    "Git Upstream",
-			Status:  StatusWarning,
-			Message: fmt.Sprintf("Ahead of upstream by %d commit(s)", ahead),
-			Detail:  fmt.Sprintf("Branch: %s, upstream: %s", branch, upstream),
-			Fix:     "Run 'git push' (AGENTS.md: git pull --rebase && git push)",
-		}
-	}
-
-	if behind > 0 && ahead == 0 {
-		return DoctorCheck{
-			Name:    "Git Upstream",
-			Status:  StatusWarning,
-			Message: fmt.Sprintf("Behind upstream by %d commit(s)", behind),
-			Detail:  fmt.Sprintf("Branch: %s, upstream: %s", branch, upstream),
-			Fix:     "Run 'git pull --rebase' (then re-run bd doctor)",
-		}
-	}
-
-	return DoctorCheck{
-		Name:    "Git Upstream",
-		Status:  StatusWarning,
-		Message: fmt.Sprintf("Diverged from upstream (ahead %d, behind %d)", ahead, behind),
-		Detail:  fmt.Sprintf("Branch: %s, upstream: %s", branch, upstream),
-		Fix:     "Run 'git pull --rebase' then 'git push'",
-	}
-}
-
-func gitRevListCount(ctx context.Context, path string, rangeExpr string) (int, error) {
-	cmd := exec.CommandContext(ctx, "git", "rev-list", "--count", rangeExpr) // #nosec G204 -- fixed args
-	cmd.Dir = path
-	out, err := cmd.Output()
-	if err != nil {
-		return 0, err
-	}
-	countStr := strings.TrimSpace(string(out))
-	if countStr == "" {
-		return 0, nil
-	}
-
-	var n int
-	if _, err := fmt.Sscanf(countStr, "%d", &n); err != nil {
-		return 0, err
-	}
-	return n, nil
-}
-
-// staleBdHookPattern matches the removed "bd hook <name>" command (not "bd hooks run").
-// This was removed in v0.58.0 and replaced by "bd hooks run".
-var staleBdHookPattern = regexp.MustCompile(`\bbd\s+hook\s+(?:pre-commit|post-merge|pre-push|post-checkout|prepare-commit-msg)\b`)
-
-// CheckStaleLegacyHooks detects *.legacy sidecar hooks (created by Python's pre-commit
-// framework) that still call the removed "bd hook" command. These cause "unknown command"
-// errors at runtime even though "bd hooks list" and "bd doctor" show green. (GH#2398)
-func CheckStaleLegacyHooks() DoctorCheck {
-	hooksDir, err := git.GetGitHooksDir()
-	if err != nil {
-		return DoctorCheck{
-			Name:    "Stale Legacy Hooks",
-			Status:  StatusOK,
-			Message: "N/A (not a git repository)",
-		}
-	}
-
-	entries, err := os.ReadDir(hooksDir)
-	if err != nil {
-		return DoctorCheck{
-			Name:    "Stale Legacy Hooks",
-			Status:  StatusOK,
-			Message: "N/A (cannot read hooks directory)",
-		}
-	}
-
-	var staleFiles []string
-	for _, entry := range entries {
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".legacy") {
-			continue
-		}
-		content, err := os.ReadFile(filepath.Join(hooksDir, name))
-		if err != nil {
-			continue
-		}
-		if staleBdHookPattern.Match(content) {
-			staleFiles = append(staleFiles, name)
-		}
-	}
-
-	if len(staleFiles) == 0 {
-		return DoctorCheck{
-			Name:    "Stale Legacy Hooks",
-			Status:  StatusOK,
-			Message: "No stale legacy hook sidecars",
-		}
-	}
-
-	return DoctorCheck{
-		Name:    "Stale Legacy Hooks",
-		Status:  StatusWarning,
-		Message: fmt.Sprintf("%d stale .legacy hook(s) calling removed 'bd hook' command", len(staleFiles)),
-		Detail:  fmt.Sprintf("Files: %s", strings.Join(staleFiles, ", ")),
-		Fix:     "Remove or update these files: rm " + strings.Join(staleFilePaths(hooksDir, staleFiles), " "),
-	}
-}
-
-func staleFilePaths(hooksDir string, names []string) []string {
-	paths := make([]string, len(names))
-	for i, name := range names {
-		paths[i] = filepath.Join(hooksDir, name)
-	}
-	return paths
-}
-
-// CheckHooksPath detects a dangling core.hooksPath: a git config value that
-// still points at a hooks directory which no longer exists. This happens
-// when a user manually deletes .beads/ (e.g. `rm -rf .beads/`) without
-// running `bd hooks uninstall` first — git keeps looking for the missing
-// directory, and beads' post-checkout import can recreate a stray .beads/
-// workspace as a side effect (GH#4440).
-func CheckHooksPath() DoctorCheck {
-	const name = "Hooks Path"
-
-	repoRoot, _ := git.GetMainRepoRoot()
-	if repoRoot == "" {
-		repoRoot = git.GetRepoRoot()
-	}
-	if repoRoot == "" {
-		return DoctorCheck{
-			Name:    name,
-			Status:  StatusOK,
-			Message: "N/A (not a git repository)",
-		}
-	}
-
-	hooksPath, ok := getConfiguredHooksPath(repoRoot)
-	if !ok || hooksPath == "" {
-		return DoctorCheck{
-			Name:    name,
-			Status:  StatusOK,
-			Message: "core.hooksPath is not set",
-		}
-	}
-
-	resolved := expandHookPathTilde(hooksPath)
-	if !filepath.IsAbs(resolved) {
-		resolved = filepath.Join(repoRoot, resolved)
-	}
-
-	if fileExists(resolved) {
-		return DoctorCheck{
-			Name:    name,
-			Status:  StatusOK,
-			Message: fmt.Sprintf("core.hooksPath is set to %s", hooksPath),
-		}
-	}
-
-	managed := IsBeadsManagedHooksPath(repoRoot, hooksPath)
-	var fix string
-	if managed {
-		fix = "Run 'bd doctor --fix' to unset core.hooksPath, or: git config --unset core.hooksPath"
-	} else {
-		fix = "core.hooksPath is not beads-managed; bd will not change it. Restore the missing directory, or unset it yourself: git config --unset core.hooksPath"
-	}
-
-	return DoctorCheck{
-		Name:    name,
-		Status:  StatusWarning,
-		Message: "core.hooksPath points at a missing directory",
-		Detail:  fmt.Sprintf("core.hooksPath=%s (resolved: %s)", hooksPath, resolved),
-		Fix:     fix,
-	}
-}
-
-// FixHooksPath unsets core.hooksPath ONLY when it is beads-managed and its
-// target is missing. It re-reads the current value and re-checks both
-// conditions immediately before acting, so it never mutates a third-party
-// hooksPath (e.g. husky) even if the check that triggered the fix pass is
-// stale.
-func FixHooksPath() error {
-	repoRoot, _ := git.GetMainRepoRoot()
-	if repoRoot == "" {
-		repoRoot = git.GetRepoRoot()
-	}
-	if repoRoot == "" {
-		return nil // not in a git repo
-	}
-
-	hooksPath, ok := getConfiguredHooksPath(repoRoot)
-	if !ok || hooksPath == "" {
-		return nil // nothing set
-	}
-
-	if !IsBeadsManagedHooksPath(repoRoot, hooksPath) {
-		return nil // never touch a third-party hooksPath
-	}
-
-	resolved := expandHookPathTilde(hooksPath)
-	if !filepath.IsAbs(resolved) {
-		resolved = filepath.Join(repoRoot, resolved)
-	}
-	if fileExists(resolved) {
-		return nil // target exists — nothing dangling to fix
-	}
-
-	cmd := exec.Command("git", "config", "--unset", "core.hooksPath")
-	cmd.Dir = repoRoot
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git config --unset core.hooksPath failed: %w (output: %s)", err, strings.TrimSpace(string(output)))
-	}
-	return nil
-}
-
-// getConfiguredHooksPath reads the raw core.hooksPath value from repoRoot.
-// The bool return is false when core.hooksPath is not set at all.
-func getConfiguredHooksPath(repoRoot string) (string, bool) {
-	cmd := exec.Command("git", "config", "--get", "core.hooksPath")
-	cmd.Dir = repoRoot
-	out, err := cmd.Output()
-	if err != nil {
-		return "", false
-	}
-	return strings.TrimSpace(string(out)), true
-}
-
-// IsBeadsManagedHooksPath reports whether hooksPath is one of the values bd
-// itself writes to core.hooksPath (.beads/hooks or .beads-hooks, relative or
-// absolute under repoRoot). It is the single matcher for that question;
-// resetHooksPathIfBeadsManaged (cmd/bd/hooks.go) calls it too, so the two
-// paths cannot drift apart.
-//
-// Absolute values are compared after symlink resolution. repoRoot comes from
-// git.GetMainRepoRoot, which canonicalizes the path, while the configured
-// core.hooksPath is whatever string the user or an older bd wrote. A raw
-// string compare therefore misses a genuinely beads-managed path any time the
-// repo is reached through a symlink — on macOS every repo under /var (which
-// is a symlink to /private/var, including all of t.TempDir()) hits this. The
-// false negative is not cosmetic: CheckHooksPath then reports the dangling
-// path as third-party and FixHooksPath deliberately refuses to unset it.
-func IsBeadsManagedHooksPath(repoRoot, hooksPath string) bool {
-	if hooksPath == ".beads/hooks" || hooksPath == ".beads-hooks" {
-		return true
-	}
-	if !filepath.IsAbs(hooksPath) {
-		return false
-	}
-	root := resolveExistingPrefix(repoRoot)
-	candidate := resolveExistingPrefix(hooksPath)
-	return candidate == filepath.Join(root, ".beads", "hooks") ||
-		candidate == filepath.Join(root, ".beads-hooks")
-}
-
-// resolveExistingPrefix returns path with its longest existing ancestor
-// replaced by that ancestor's symlink-resolved form, leaving any missing
-// trailing components untouched.
-//
-// filepath.EvalSymlinks alone is not enough here: the whole point of the
-// dangling-hooksPath check is that the leaf does not exist, so EvalSymlinks
-// on the full path fails and returns nothing usable. Walking up to the
-// deepest component that does exist still canonicalizes the symlinked prefix
-// (/var -> /private/var), which is where the divergence lives.
-func resolveExistingPrefix(path string) string {
-	if path == "" || !filepath.IsAbs(path) {
-		return path
-	}
-	current := filepath.Clean(path)
-	var trailing string
-	for {
-		if resolved, err := filepath.EvalSymlinks(current); err == nil {
-			return filepath.Join(resolved, trailing)
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			// Reached the filesystem root without finding an existing
-			// component; nothing to canonicalize against.
-			return filepath.Clean(path)
-		}
-		trailing = filepath.Join(filepath.Base(current), trailing)
-		current = parent
-	}
-}
-
-// CheckGitHooksDoltCompatibility checks if installed git hooks are compatible with Dolt backend.
-// Hooks installed before Dolt support was added don't have the backend check and will
-// fail with confusing errors on git pull/commit.
-func CheckGitHooksDoltCompatibility(path string) DoctorCheck {
-	backend, beadsDir := getBackendAndBeadsDir(path)
-
-	// Only relevant for Dolt backend
-	if backend != configfile.BackendDolt {
-		return DoctorCheck{
-			Name:    "Git Hooks Dolt Compatibility",
-			Status:  StatusOK,
-			Message: "N/A (not using Dolt backend)",
-		}
-	}
-
-	// Check if we're in a git repository
-	hooksDir, err := git.GetGitHooksDir()
-	if err != nil {
-		return DoctorCheck{
-			Name:    "Git Hooks Dolt Compatibility",
-			Status:  StatusOK,
-			Message: "N/A (not a git repository)",
-		}
-	}
-
-	// Check post-merge hook (most likely to cause issues with Dolt)
-	postMergePath := filepath.Join(hooksDir, "post-merge")
-	content, err := os.ReadFile(postMergePath)
-	if err != nil {
-		// No hook installed - that's fine
-		return DoctorCheck{
-			Name:    "Git Hooks Dolt Compatibility",
-			Status:  StatusOK,
-			Message: "N/A (no post-merge hook installed)",
-		}
-	}
-
-	contentStr := string(content)
-
-	// Section-marker hooks (GH#1380) delegate to 'bd hooks run' which handles Dolt correctly
-	if strings.Contains(contentStr, bdSectionMarkerPrefix) {
-		return DoctorCheck{
-			Name:    "Git Hooks Dolt Compatibility",
-			Status:  StatusOK,
-			Message: "Marker-managed hooks (Dolt handled by bd hooks run)",
-		}
-	}
-
-	// Shim hooks (bd-shim) delegate to 'bd hook' which handles Dolt correctly
-	if strings.Contains(contentStr, bdShimMarker) {
-		return DoctorCheck{
-			Name:    "Git Hooks Dolt Compatibility",
-			Status:  StatusOK,
-			Message: "Shim hooks (Dolt handled by bd hook command)",
-		}
-	}
-
-	// Check if it's a bd inline hook
-	if !strings.Contains(contentStr, bdInlineHookMarker) && !strings.Contains(contentStr, "bd") {
-		return DoctorCheck{
-			Name:    "Git Hooks Dolt Compatibility",
-			Status:  StatusOK,
-			Message: "N/A (not a bd hook)",
-		}
-	}
-
-	// Check if inline hook has the Dolt backend skip logic
-	if strings.Contains(contentStr, `"backend"`) && strings.Contains(contentStr, `"dolt"`) {
-		return DoctorCheck{
-			Name:    "Git Hooks Dolt Compatibility",
-			Status:  StatusOK,
-			Message: "Inline hooks have Dolt backend check",
-		}
-	}
-
-	// Hook exists but lacks Dolt check - this will cause errors
-	_ = beadsDir // silence unused warning
-	return DoctorCheck{
-		Name:    "Git Hooks Dolt Compatibility",
-		Status:  StatusError,
-		Message: "Git hooks incompatible with Dolt backend",
-		Detail:  "Installed hooks are outdated and incompatible with the Dolt backend.",
-		Fix:     "Run 'bd hooks install --force' to update hooks for Dolt compatibility",
-	}
-}
-
-// fixGitHooks fixes missing or broken git hooks by calling bd hooks install.
-func fixGitHooks(path string) error {
-	return fix.GitHooks(path)
-}
-
-// FindOrphanedIssues identifies issues referenced in git commits but still open in the database.
-// This is the shared core logic used by both 'bd orphans' and 'bd doctor' commands.
-// Returns empty slice if not a git repo, no issues from provider, or no orphans found (no error).
-//
-// Parameters:
-//   - gitPath: The directory to scan for git commits
-//   - provider: The issue provider to get open issues and prefix from
-func FindOrphanedIssues(gitPath string, provider types.IssueProvider) ([]OrphanIssue, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), gitCmdTimeout)
-	defer cancel()
-
-	// Skip if not in a git repo
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--git-dir")
-	cmd.Dir = gitPath
-	if err := cmd.Run(); err != nil {
-		return []OrphanIssue{}, nil // Not a git repo, return empty list
-	}
-
-	// Get issue prefix from provider
-	issuePrefix := provider.GetIssuePrefix()
-
-	// Get all open/in_progress issues from provider
-	issues, err := provider.GetOpenIssues(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("getting open issues: %w", err)
-	}
-
-	openIssues := make(map[string]*OrphanIssue)
-	for _, issue := range issues {
-		openIssues[issue.ID] = &OrphanIssue{
-			IssueID: issue.ID,
-			Title:   issue.Title,
-			Status:  string(issue.Status),
-		}
-	}
-
-	if len(openIssues) == 0 {
-		return []OrphanIssue{}, nil
-	}
-
-	// Get git log
-	cmd = exec.CommandContext(ctx, "git", "log", "--oneline", "--all")
-	cmd.Dir = gitPath
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("reading git log: %w", err)
-	}
-
-	// Parse commits for issue references
-	// Match pattern like (bd-xxx) or (bd-xxx.1) including hierarchical IDs
-	pattern := fmt.Sprintf(`\(%s-[a-z0-9.]+\)`, regexp.QuoteMeta(issuePrefix))
-	re := regexp.MustCompile(pattern)
-
-	var orphanedIssues []OrphanIssue
-	lines := strings.Split(string(output), "\n")
-
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-
-		// Extract commit hash and message
-		parts := strings.SplitN(line, " ", 2)
-		if len(parts) < 1 {
-			continue
-		}
-
-		commitHash := parts[0]
-		commitMsg := ""
-		if len(parts) > 1 {
-			commitMsg = parts[1]
-		}
-
-		// Find issue IDs in this commit
-		matches := re.FindAllString(line, -1)
-		for _, match := range matches {
-			issueID := strings.Trim(match, "()")
-			if orphan, exists := openIssues[issueID]; exists {
-				// Only record first (most recent) commit per issue
-				if orphan.LatestCommit == "" {
-					orphan.LatestCommit = commitHash
-					orphan.LatestCommitMessage = commitMsg
-				}
-			}
-		}
-	}
-
-	// Collect issues with commit references
-	for _, orphan := range openIssues {
-		if orphan.LatestCommit != "" {
-			orphanedIssues = append(orphanedIssues, *orphan)
-		}
-	}
-
-	return orphanedIssues, nil
-}
-
-// CheckOrphanedIssues detects issues referenced in git commits but still open.
-// This catches cases where someone implemented a fix with "(bd-xxx)" in the commit
-// message but forgot to run "bd close".
-func CheckOrphanedIssues(path string) DoctorCheck {
-	// Orphaned issue detection requires a local database provider which was removed
-	// during the Dolt-only migration. This check is disabled until reimplemented
-	// against the Dolt store.
-	return DoctorCheck{
-		Name:     "Orphaned Issues",
-		Status:   StatusOK,
-		Message:  "N/A (not yet implemented for Dolt backend)",
-		Category: CategoryGit,
-	}
 }

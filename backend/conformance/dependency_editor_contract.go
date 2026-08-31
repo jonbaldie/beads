@@ -1248,9 +1248,16 @@ func RunDependencyEditorWritesTheTargetIntoItsTypedColumn(t *testing.T, ctx cont
 // legal.
 func RunDependencyEditorRefusesBlockingEdgeAcrossAWispHierarchy(t *testing.T, ctx context.Context, fixture DependencyEditorFixture) {
 	t.Helper()
-	parent := fixture.IssuePrefix + "-whier-parent"
-	child := fixture.IssuePrefix + "-whier-child"
-	sibling := fixture.IssuePrefix + "-whier-sibling"
+	parent, child, sibling := seedDependencyEditorWispHierarchy(t, ctx, fixture)
+	assertDependencyEditorWispHierarchyRefusals(t, ctx, fixture, parent, child)
+	assertDependencyEditorWispSiblings(t, ctx, fixture, sibling, child)
+}
+
+func seedDependencyEditorWispHierarchy(t *testing.T, ctx context.Context, fixture DependencyEditorFixture) (parent, child, sibling string) {
+	t.Helper()
+	parent = fixture.IssuePrefix + "-whier-parent"
+	child = fixture.IssuePrefix + "-whier-child"
+	sibling = fixture.IssuePrefix + "-whier-sibling"
 	for _, id := range []string{parent, child, sibling} {
 		seedDependencyEditorWisp(t, ctx, fixture, id)
 	}
@@ -1263,7 +1270,11 @@ func RunDependencyEditorRefusesBlockingEdgeAcrossAWispHierarchy(t *testing.T, ct
 	}); err != nil {
 		t.Fatalf("seed the wisp hierarchy: %v", err)
 	}
+	return parent, child, sibling
+}
 
+func assertDependencyEditorWispHierarchyRefusals(t *testing.T, ctx context.Context, fixture DependencyEditorFixture, parent, child string) {
+	t.Helper()
 	_, err := fixture.Editor.AddDependencies(ctx, publicops.AddDependenciesRequest{
 		Actor: "writer",
 		Edges: []publicops.DependencyEdge{{IssueID: parent, DependsOnID: child, Type: publicops.DepBlocks}},
@@ -1296,7 +1307,10 @@ func RunDependencyEditorRefusesBlockingEdgeAcrossAWispHierarchy(t *testing.T, ct
 	if errors.As(err, &conflict) {
 		t.Errorf("error = %#v, want the hierarchy conflict: the deadlock is the reason, not the pre-existing row", conflict)
 	}
+}
 
+func assertDependencyEditorWispSiblings(t *testing.T, ctx context.Context, fixture DependencyEditorFixture, sibling, child string) {
+	t.Helper()
 	if _, err := fixture.Editor.AddDependencies(ctx, publicops.AddDependenciesRequest{
 		Actor: "writer",
 		Edges: []publicops.DependencyEdge{{IssueID: sibling, DependsOnID: child, Type: publicops.DepBlocks}},
@@ -1330,6 +1344,13 @@ func RunDependencyEditorRefusesBlockingEdgeAcrossAWispHierarchy(t *testing.T, ct
 // distinguish from.
 func RunDependencyEditorRefusesACycleThroughAParentChildHop(t *testing.T, ctx context.Context, fixture DependencyEditorFixture) {
 	t.Helper()
+	assertDependencyEditorBlockingClosingCycle(t, ctx, fixture)
+	assertDependencyEditorParentClosingCycle(t, ctx, fixture)
+	assertDependencyEditorAcyclicHopChain(t, ctx, fixture)
+}
+
+func assertDependencyEditorBlockingClosingCycle(t *testing.T, ctx context.Context, fixture DependencyEditorFixture) {
+	t.Helper()
 	// A closing BLOCKS edge: parentA -> childA -> parentB -> childB -> parentA,
 	// alternating parent-child and blocks hops.
 	parentA := fixture.IssuePrefix + "-pchop-b-pa"
@@ -1357,7 +1378,10 @@ func RunDependencyEditorRefusesACycleThroughAParentChildHop(t *testing.T, ctx co
 		t.Fatalf("a blocking edge closing a loop through parent-child hops: error = %v, want ErrDependencyCycle", err)
 	}
 	assertDependencyEditorNoEdgesFrom(t, ctx, fixture, parentA)
+}
 
+func assertDependencyEditorParentClosingCycle(t *testing.T, ctx context.Context, fixture DependencyEditorFixture) {
+	t.Helper()
 	// The same loop, with the PARENT-CHILD edge as the one that closes it.
 	pcParentA := fixture.IssuePrefix + "-pchop-p-pa"
 	pcParentB := fixture.IssuePrefix + "-pchop-p-pb"
@@ -1376,7 +1400,7 @@ func RunDependencyEditorRefusesACycleThroughAParentChildHop(t *testing.T, ctx co
 	}); err != nil {
 		t.Fatalf("seed the combined graph for the parent-child closing edge: %v", err)
 	}
-	_, err = fixture.Editor.AddDependencies(ctx, publicops.AddDependenciesRequest{
+	_, err := fixture.Editor.AddDependencies(ctx, publicops.AddDependenciesRequest{
 		Actor: "writer",
 		Edges: []publicops.DependencyEdge{{IssueID: pcChildB, DependsOnID: pcParentB, Type: publicops.DepParentChild}},
 	})
@@ -1384,7 +1408,10 @@ func RunDependencyEditorRefusesACycleThroughAParentChildHop(t *testing.T, ctx co
 		t.Fatalf("a parent-child edge closing a loop through blocking hops: error = %v, want ErrDependencyCycle", err)
 	}
 	assertDependencyEditorNoEdgesFrom(t, ctx, fixture, pcChildB)
+}
 
+func assertDependencyEditorAcyclicHopChain(t *testing.T, ctx context.Context, fixture DependencyEditorFixture) {
+	t.Helper()
 	// The acyclic shape the two refusals must not also refuse: each child gates
 	// an epic it does not belong to, and belongs to the next one along.
 	const levels = 4
@@ -1501,7 +1528,7 @@ func RunDependencyEditorAddMarksItsSourceInTheSameVerb(t *testing.T, ctx context
 	seedDependencyEditorIssueAtStatus(t, ctx, fixture, doneBlocker, types.StatusClosed)
 
 	probe := newBlockedStateProbe(ctx, fixture.QueryScalar)
-	flip := probe.watchFlip(t,
+	flip := watchFlip(probe, t,
 		[]blockedStateRow{blockedIssue(source)},
 		[]blockedStateRow{blockedIssue(twin), blockedIssue(control)})
 
@@ -1515,8 +1542,8 @@ func RunDependencyEditorAddMarksItsSourceInTheSameVerb(t *testing.T, ctx context
 		t.Fatalf("AddDependencies for the blocked-state add case: %v", err)
 	}
 
-	flip.requireFlippedTo(t, 1, "a blocks edge onto a live target blocks its source, and BlockedStateInvariant settles it in the writing transaction")
-	probe.requireBlockedByOpenBlocker(t, blockedIssue(source), blockedIssue(blocker),
+	requireFlippedTo(flip, t, 1, "a blocks edge onto a live target blocks its source, and BlockedStateInvariant settles it in the writing transaction")
+	requireBlockedByOpenBlocker(probe, t, blockedIssue(source), blockedIssue(blocker),
 		"the postcondition is the flag AND the reason behind it")
 
 	// The twin's zero is only worth anything if its edge actually landed.
@@ -1564,11 +1591,11 @@ func RunDependencyEditorRemoveUnmarksItsSourceAndDescendants(t *testing.T, ctx c
 	}
 
 	probe := newBlockedStateProbe(ctx, fixture.QueryScalar)
-	probe.requireBlockedByOpenBlocker(t, blockedIssue(parent), blockedIssue(blocker), "the parent holds the only cause in this hierarchy")
-	probe.requireBlockedWithNoDirectBlockerEdges(t, blockedIssue(child), "the child's block is INHERITED, which is what the removal has to reach")
-	probe.requireBlockedByOpenBlocker(t, blockedIssue(controlParent), blockedIssue(controlBlocker), "the control's cause is not the one being removed")
+	requireBlockedByOpenBlocker(probe, t, blockedIssue(parent), blockedIssue(blocker), "the parent holds the only cause in this hierarchy")
+	requireBlockedWithNoDirectBlockerEdges(probe, t, blockedIssue(child), "the child's block is INHERITED, which is what the removal has to reach")
+	requireBlockedByOpenBlocker(probe, t, blockedIssue(controlParent), blockedIssue(controlBlocker), "the control's cause is not the one being removed")
 
-	flip := probe.watchFlip(t,
+	flip := watchFlip(probe, t,
 		[]blockedStateRow{blockedIssue(parent), blockedIssue(child)},
 		[]blockedStateRow{blockedIssue(controlParent)})
 
@@ -1582,7 +1609,7 @@ func RunDependencyEditorRemoveUnmarksItsSourceAndDescendants(t *testing.T, ctx c
 		t.Fatalf("RemoveDependency %s -> %s reported Removed = false, want the seeded edge", parent, blocker)
 	}
 
-	flip.requireFlippedTo(t, 0,
+	requireFlippedTo(flip, t, 0,
 		"removing the last cause unblocks the source AND everything that inherited from it, per BlockedStateInvariant's local-write clause")
 }
 
@@ -1621,10 +1648,10 @@ func RunDependencyEditorMaintainsBlockedStateAcrossPlanes(t *testing.T, ctx cont
 		blockedIssue(issueTarget), blockedIssue(issueSource), blockedIssue(blockedParent), blockedIssue(freeIssue),
 		blockedWisp(wispSource), blockedWisp(wispTarget), blockedWisp(wispChild), blockedWisp(freeWisp),
 	} {
-		probe.requirePlaneResidency(t, row)
+		requirePlaneResidency(probe, t, row)
 	}
 
-	flip := probe.watchFlip(t,
+	flip := watchFlip(probe, t,
 		[]blockedStateRow{blockedWisp(wispSource), blockedIssue(issueSource), blockedIssue(blockedParent), blockedWisp(wispChild)},
 		[]blockedStateRow{blockedIssue(freeIssue), blockedWisp(freeWisp)})
 
@@ -1646,10 +1673,10 @@ func RunDependencyEditorMaintainsBlockedStateAcrossPlanes(t *testing.T, ctx cont
 		t.Fatalf("AddDependencies across both planes: %v", err)
 	}
 
-	flip.requireFlippedTo(t, 1, "blocking and inheritance cross the two planes in both directions")
-	probe.requireBlockedByOpenBlocker(t, blockedWisp(wispSource), blockedIssue(issueTarget), "a wisp is blocked by a live issue")
-	probe.requireBlockedByOpenBlocker(t, blockedIssue(issueSource), blockedWisp(wispTarget), "an issue is blocked by a live wisp")
-	probe.requireBlockedWithNoDirectBlockerEdges(t, blockedWisp(wispChild),
+	requireFlippedTo(flip, t, 1, "blocking and inheritance cross the two planes in both directions")
+	requireBlockedByOpenBlocker(probe, t, blockedWisp(wispSource), blockedIssue(issueTarget), "a wisp is blocked by a live issue")
+	requireBlockedByOpenBlocker(probe, t, blockedIssue(issueSource), blockedWisp(wispTarget), "an issue is blocked by a live wisp")
+	requireBlockedWithNoDirectBlockerEdges(probe, t, blockedWisp(wispChild),
 		"the wisp child's block is inherited across the plane boundary, not its own")
 }
 
@@ -1704,10 +1731,10 @@ func RunDependencyEditorClosedChildAddSatisfiesAnAnyChildrenGate(t *testing.T, c
 	}
 
 	probe := newBlockedStateProbe(ctx, fixture.QueryScalar)
-	probe.requireBlockedWithNoDirectBlockerEdges(t, blockedIssue(waiterAny), "the any-children waiter is gated, not edge-blocked")
-	probe.requireBlockedWithNoDirectBlockerEdges(t, blockedIssue(waiterAll), "the all-children waiter is gated, not edge-blocked")
+	requireBlockedWithNoDirectBlockerEdges(probe, t, blockedIssue(waiterAny), "the any-children waiter is gated, not edge-blocked")
+	requireBlockedWithNoDirectBlockerEdges(probe, t, blockedIssue(waiterAll), "the all-children waiter is gated, not edge-blocked")
 
-	flip := probe.watchFlip(t,
+	flip := watchFlip(probe, t,
 		[]blockedStateRow{blockedIssue(waiterAny)},
 		[]blockedStateRow{blockedIssue(waiterAll)})
 
@@ -1718,7 +1745,7 @@ func RunDependencyEditorClosedChildAddSatisfiesAnAnyChildrenGate(t *testing.T, c
 		t.Fatalf("add the already-closed child: %v", err)
 	}
 
-	flip.requireFlippedTo(t, 0,
+	requireFlippedTo(flip, t, 0,
 		"an already-closed child satisfies an any-children gate, so this ADD must UNBLOCK — the one add a mark-only pass cannot serve")
 
 	// The all-children control is only a control if its own gate is still
@@ -1777,7 +1804,7 @@ func RunDependencyEditorRelatesToAddLeavesItsSourceUnblocked(t *testing.T, ctx c
 	}
 
 	probe := newBlockedStateProbe(ctx, fixture.QueryScalar)
-	flip := probe.watchFlip(t,
+	flip := watchFlip(probe, t,
 		[]blockedStateRow{blockedIssue(mustFlip)},
 		[]blockedStateRow{blockedIssue(relatesTo), blockedIssue(related), blockedIssue(control)})
 
@@ -1792,9 +1819,9 @@ func RunDependencyEditorRelatesToAddLeavesItsSourceUnblocked(t *testing.T, ctx c
 		t.Fatalf("AddDependencies for the non-scheduling add case: %v", err)
 	}
 
-	flip.requireFlippedTo(t, 1,
+	requireFlippedTo(flip, t, 1,
 		"the blocking edge in the same request is the must-flip term: without it a zero on the others could be a body that marks nothing")
-	probe.requireBlockedByOpenBlocker(t, blockedIssue(mustFlip), blockedIssue(target),
+	requireBlockedByOpenBlocker(probe, t, blockedIssue(mustFlip), blockedIssue(target),
 		"the postcondition is the flag AND the live blocker behind it")
 
 	// The zeros are only worth anything if the edges landed, the sources carry
@@ -2080,12 +2107,20 @@ func seedDependencyEditorWisp(t *testing.T, ctx context.Context, fixture Depende
 
 func dependencyEditorSeed(id string, ephemeral bool) *types.Issue {
 	return &types.Issue{
-		ID:        id,
-		Title:     id,
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: ephemeral,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: ephemeral,
+		},
 	}
 }
 

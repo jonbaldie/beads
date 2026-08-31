@@ -646,9 +646,9 @@ func TestCookFormulaToSubgraph_GateBeads(t *testing.T) {
 				},
 			},
 			{
-				ID:        "verify",
-				Title:     "Verify deployment",
-				DependsOn: []string{"await-ci"},
+				ID:            "verify",
+				Title:         "Verify deployment",
+				StepExpansion: formula.StepExpansion{DependsOn: []string{"await-ci"}},
 			},
 		},
 	}

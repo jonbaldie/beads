@@ -1,9 +1,11 @@
 package conformance
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"github.com/jonbaldie/beads/internal/storage"
 	"github.com/jonbaldie/beads/internal/types"
 )
 
@@ -32,11 +34,15 @@ func auditEventsOfType(evs []*types.Event, typ types.EventType) []*types.Event {
 func testAuditEventValueNullability(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-dur", Title: "durable"}), "a"))
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-wisp", Title: "wisp", Ephemeral: true}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-dur"}, IssueContent: types.IssueContent{Title: "durable"}}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-wisp"}, IssueContent: types.IssueContent{Title: "wisp"}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
 	must(t, s.AddLabel(c, "test-dur", "bug", "a"))
 	must(t, s.AddLabel(c, "test-wisp", "bug", "a"))
+	assertDurableLabelEvent(t, s, c)
+	assertWispLabelEvent(t, s, c)
+}
 
+func assertDurableLabelEvent(t *testing.T, s storage.DoltStorage, c context.Context) {
 	evD, err := s.GetEvents(c, "test-dur", 0)
 	must(t, err)
 	la := auditEventsOfType(evD, types.EventLabelAdded)
@@ -53,7 +59,9 @@ func testAuditEventValueNullability(t *testing.T, f Factory) {
 	if ev.Comment == nil || *ev.Comment != "Added label: bug" {
 		t.Errorf("durable label_added Comment = %v, want \"Added label: bug\"", ev.Comment)
 	}
+}
 
+func assertWispLabelEvent(t *testing.T, s storage.DoltStorage, c context.Context) {
 	evW, err := s.GetEvents(c, "test-wisp", 0)
 	must(t, err)
 	law := auditEventsOfType(evW, types.EventLabelAdded)
@@ -78,7 +86,7 @@ func testAuditEventValueNullability(t *testing.T, f Factory) {
 func testAuditLabelEventNonIdempotent(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-i", Title: "I"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-i"}, IssueContent: types.IssueContent{Title: "I"}}), "a"))
 	must(t, s.AddLabel(c, "test-i", "x", "a"))
 	must(t, s.AddLabel(c, "test-i", "x", "a"))
 
@@ -93,14 +101,10 @@ func testAuditLabelEventNonIdempotent(t *testing.T, f Factory) {
 	if len(la) != 2 {
 		t.Fatalf("label_added events after double-add = %d, want 2 (event-level NON-idempotent)", len(la))
 	}
-	for _, e := range la {
-		if e.Comment == nil || *e.Comment != "Added label: x" {
-			t.Errorf("label_added Comment = %v, want \"Added label: x\"", e.Comment)
-		}
-	}
+	assertLabelAddedComments(t, la)
 
 	// Removing a never-present label: no error, but a spurious label_removed event.
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-j", Title: "J"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-j"}, IssueContent: types.IssueContent{Title: "J"}}), "a"))
 	must(t, s.RemoveLabel(c, "test-j", "never-added", "a"))
 	evsJ, err := s.GetEvents(c, "test-j", 0)
 	must(t, err)
@@ -113,6 +117,14 @@ func testAuditLabelEventNonIdempotent(t *testing.T, f Factory) {
 	}
 }
 
+func assertLabelAddedComments(t *testing.T, events []*types.Event) {
+	for _, e := range events {
+		if e.Comment == nil || *e.Comment != "Added label: x" {
+			t.Errorf("label_added Comment = %v, want \"Added label: x\"", e.Comment)
+		}
+	}
+}
+
 // testAuditCountCommentsWispAsymmetry pins the intentional route asymmetry:
 // GetIssueComments wisp-routes, but CountIssueComments always queries `comments`.
 // A wisp with structured comments returns them from GetIssueComments but reports 0
@@ -120,7 +132,7 @@ func testAuditLabelEventNonIdempotent(t *testing.T, f Factory) {
 func testAuditCountCommentsWispAsymmetry(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-w", Title: "wisp", Ephemeral: true}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-w"}, IssueContent: types.IssueContent{Title: "wisp"}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
 	ts := time.Date(2020, 1, 2, 3, 4, 5, 0, time.UTC)
 	if _, err := s.ImportIssueComment(c, "test-w", "a", "hi", ts); err != nil {
 		t.Fatalf("ImportIssueComment: %v", err)
@@ -147,7 +159,7 @@ func testAuditCountCommentsWispAsymmetry(t *testing.T, f Factory) {
 func testAuditLabelCollationOrder(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-i", Title: "I"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-i"}, IssueContent: types.IssueContent{Title: "I"}}), "a"))
 	must(t, s.AddLabel(c, "test-i", "Cherry", "a"))
 	must(t, s.AddLabel(c, "test-i", "apple", "a"))
 	must(t, s.AddLabel(c, "test-i", "Banana", "a"))
@@ -171,7 +183,7 @@ func testAuditLabelCollationOrder(t *testing.T, f Factory) {
 func testAuditEventsSinceStrictBoundary(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-i", Title: "I"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-i"}, IssueContent: types.IssueContent{Title: "I"}}), "a"))
 	must(t, s.AddComment(c, "test-i", "a", "hello"))
 
 	evs, err := s.GetEvents(c, "test-i", 0)
@@ -212,7 +224,7 @@ func auditContainsEventID(evs []*types.Event, id string) bool {
 func testAuditEventsLimitAndAll(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-i", Title: "I"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-i"}, IssueContent: types.IssueContent{Title: "I"}}), "a"))
 	must(t, s.AddLabel(c, "test-i", "a", "a"))
 	must(t, s.AddLabel(c, "test-i", "b", "a"))
 	must(t, s.AddLabel(c, "test-i", "c", "a"))
@@ -243,7 +255,7 @@ func testAuditEventsLimitAndAll(t *testing.T, f Factory) {
 func testAuditImportCommentSubSecond(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-i", Title: "I"}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-i"}, IssueContent: types.IssueContent{Title: "I"}}), "a"))
 	// Sub-second precision is intentionally backend-specific (Dolt datetime(0) rounds
 	// half-up; SQLite keeps the fraction), so we test the
 	// portable contract every backend honors: a whole-second UTC timestamp round-trips
@@ -269,7 +281,7 @@ func testAuditImportCommentSubSecond(t *testing.T, f Factory) {
 func testAuditDirectWispLabelComment(t *testing.T, f Factory) {
 	s := f(t)
 	c := ctx()
-	must(t, s.CreateIssue(c, withDefaults(&types.Issue{ID: "test-w", Title: "wisp", Ephemeral: true}), "a"))
+	must(t, s.CreateIssue(c, withDefaults(&types.Issue{IssueID: types.IssueID{ID: "test-w"}, IssueContent: types.IssueContent{Title: "wisp"}, IssueWisp: types.IssueWisp{Ephemeral: true}}), "a"))
 	must(t, s.AddLabel(c, "test-w", "z", "a"))
 	if _, err := s.AddIssueComment(c, "test-w", "a", "note"); err != nil {
 		t.Fatalf("AddIssueComment: %v", err)

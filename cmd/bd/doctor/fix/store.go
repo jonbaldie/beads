@@ -35,7 +35,11 @@ func openBeadMutatingStore(ctx context.Context, beadsDir string) (*dolt.DoltStor
 // into — that is the whole point of the fix, so it opts out of the create
 // guard rather than failing on an absent database.
 func openBeadMutatingStoreCreating(ctx context.Context, beadsDir string) (*dolt.DoltStore, error) {
-	store, err := dolt.NewFromConfigWithOptions(ctx, beadsDir, &dolt.Config{CreateIfMissing: true})
+	store, err := dolt.NewFromConfigWithOptions(ctx, beadsDir, &dolt.Config{
+		RemoteOptions: dolt.RemoteOptions{
+			CreateIfMissing: true,
+		},
+	})
 	return activated(beadsDir, store, err)
 }
 

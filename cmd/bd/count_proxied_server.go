@@ -13,12 +13,12 @@ import (
 // the same two-step proxiedCommenter performs, and for the same reason: the
 // accessor is where each layer is added.
 func proxiedCounter() (issueops.Counter, error) {
-	if uowProvider == nil {
+	if getUOWProvider() == nil {
 		return nil, errors.New("proxied-server UOW provider not initialized")
 	}
-	src, ok := uowProvider.(uow.CounterSource)
+	src, ok := getUOWProvider().(uow.CounterSource)
 	if !ok {
-		return nil, fmt.Errorf("proxied-server provider %T does not offer the issue-count surface", uowProvider)
+		return nil, fmt.Errorf("proxied-server provider %T does not offer the issue-count surface", getUOWProvider())
 	}
 	return src.Counter()
 }

@@ -588,7 +588,8 @@ func RunQuerierOffsetSkipsMatches(t *testing.T, ctx context.Context, fixture Que
 					t.Fatalf("Offset 0 returned %v, want the three seeded rows", unpaged)
 				}
 
-				for offset := 1; offset <= len(unpaged); offset++ {
+				unpagedCount := len(unpaged)
+				for offset := 1; offset <= unpagedCount; offset++ {
 					paged := request
 					paged.Offset = offset
 					page, err := fixture.Querier.Query(ctx, paged)
@@ -706,12 +707,20 @@ func querierLimit(n int) *int { return &n }
 
 func querierIssue(id string, issueType types.IssueType, priority int, labels ...string) *types.Issue {
 	return &types.Issue{
-		ID:        id,
-		Title:     id,
-		Status:    types.StatusOpen,
-		Priority:  priority,
-		IssueType: issueType,
-		Labels:    labels,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  priority,
+			IssueType: issueType,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: labels,
+		},
 	}
 }
 

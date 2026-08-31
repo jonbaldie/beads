@@ -31,69 +31,78 @@ func isTestIssue(title string) bool {
 }
 
 func detectTestPollution(issues []*types.Issue) []pollutionResult {
-	var results []pollutionResult
 	sequentialPattern := regexp.MustCompile(`^[a-z]+-\d+$`)
+	issuesByMinute := groupIssuesByMinute(issues)
+	var results []pollutionResult
+	for _, issue := range issues {
+		if result, polluted := scorePollutionIssue(issue, sequentialPattern, issuesByMinute); polluted {
+			results = append(results, result)
+		}
+	}
+	return results
+}
 
-	// Group issues by creation time to detect rapid succession
+func groupIssuesByMinute(issues []*types.Issue) map[int64][]*types.Issue {
+	// Group issues by creation time to detect rapid succession.
 	issuesByMinute := make(map[int64][]*types.Issue)
 	for _, issue := range issues {
 		minute := issue.CreatedAt.Unix() / 60
 		issuesByMinute[minute] = append(issuesByMinute[minute], issue)
 	}
+	return issuesByMinute
+}
 
-	for _, issue := range issues {
-		score := 0.0
-		var reasons []string
+func scorePollutionIssue(issue *types.Issue, sequentialPattern *regexp.Regexp, issuesByMinute map[int64][]*types.Issue) (pollutionResult, bool) {
+	score := 0.0
+	var reasons []string
 
-		title := strings.ToLower(issue.Title)
+	title := strings.ToLower(issue.Title)
 
-		// Check for test prefixes (strong signal)
-		if testPrefixPattern.MatchString(title) {
-			score += 0.7
-			reasons = append(reasons, "Title starts with test prefix")
-		}
-
-		// Check for sequential numbering (medium signal)
-		if sequentialPattern.MatchString(issue.ID) && len(issue.Description) < 20 {
-			score += 0.4
-			reasons = append(reasons, "Sequential ID with minimal description")
-		}
-
-		// Check for generic/empty description (weak signal)
-		if len(strings.TrimSpace(issue.Description)) == 0 {
-			score += 0.2
-			reasons = append(reasons, "No description")
-		} else if len(issue.Description) < 20 {
-			score += 0.1
-			reasons = append(reasons, "Very short description")
-		}
-
-		// Check for rapid creation (created with many others in same minute)
-		minute := issue.CreatedAt.Unix() / 60
-		if len(issuesByMinute[minute]) >= 10 {
-			score += 0.3
-			reasons = append(reasons, fmt.Sprintf("Created with %d other issues in same minute", len(issuesByMinute[minute])-1))
-		}
-
-		// Check for generic test titles
-		if strings.Contains(title, "issue for testing") ||
-			strings.Contains(title, "test issue") ||
-			strings.Contains(title, "sample issue") {
-			score += 0.5
-			reasons = append(reasons, "Generic test title")
-		}
-
-		// Only include if score is above threshold
-		if score >= 0.7 {
-			results = append(results, pollutionResult{
-				issue:   issue,
-				score:   score,
-				reasons: reasons,
-			})
-		}
+	// Check for test prefixes (strong signal)
+	if testPrefixPattern.MatchString(title) {
+		score += 0.7
+		reasons = append(reasons, "Title starts with test prefix")
 	}
 
-	return results
+	// Check for sequential numbering (medium signal)
+	if sequentialPattern.MatchString(issue.ID) && len(issue.Description) < 20 {
+		score += 0.4
+		reasons = append(reasons, "Sequential ID with minimal description")
+	}
+
+	// Check for generic/empty description (weak signal)
+	if len(strings.TrimSpace(issue.Description)) == 0 {
+		score += 0.2
+		reasons = append(reasons, "No description")
+	} else if len(issue.Description) < 20 {
+		score += 0.1
+		reasons = append(reasons, "Very short description")
+	}
+
+	// Check for rapid creation (created with many others in same minute)
+	minute := issue.CreatedAt.Unix() / 60
+	if len(issuesByMinute[minute]) >= 10 {
+		score += 0.3
+		reasons = append(reasons, fmt.Sprintf("Created with %d other issues in same minute", len(issuesByMinute[minute])-1))
+	}
+
+	// Check for generic test titles
+	if isGenericTestTitle(title) {
+		score += 0.5
+		reasons = append(reasons, "Generic test title")
+	}
+
+	// Only include if score is above threshold.
+	if score < 0.7 {
+		return pollutionResult{}, false
+	}
+	return pollutionResult{issue: issue, score: score, reasons: reasons}, true
+}
+
+func isGenericTestTitle(title string) bool {
+	return strings.Contains(title, "issue for testing") ||
+		strings.Contains(title, "test issue") ||
+		strings.Contains(title, "sample issue")
 }
 
 func backupPollutedIssues(polluted []pollutionResult, path string) error {
