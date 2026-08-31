@@ -102,44 +102,49 @@ func (c *Cache) Ensure(ctx context.Context, remoteURL string) (string, error) {
 	defer c.releaseLock(lock)
 
 	target := c.cloneTarget(remoteURL)
-	if err := c.ensureTarget(ctx, remoteURL, target); err != nil {
+	pulled, err := c.ensureTarget(ctx, remoteURL, target)
+	if err != nil {
 		return "", err
 	}
 
-	// Write metadata
-	meta := CacheMeta{
-		RemoteURL: remoteURL,
-		LastPull:  time.Now().UnixNano(),
+	// Write metadata only when a clone or pull actually happened. A warm,
+	// still-fresh cache must retain its original LastPull timestamp so callers
+	// can use it as the freshness boundary.
+	if pulled {
+		meta := CacheMeta{
+			RemoteURL: remoteURL,
+			LastPull:  time.Now().UnixNano(),
+		}
+		c.writeMeta(remoteURL, &meta)
 	}
-	c.writeMeta(remoteURL, &meta)
 
 	return entry, nil
 }
 
-func (c *Cache) ensureTarget(ctx context.Context, remoteURL, target string) error {
+func (c *Cache) ensureTarget(ctx context.Context, remoteURL, target string) (bool, error) {
 	if c.doltExists(target) {
 		return c.ensureWarm(ctx, remoteURL, target)
 	}
 	if err := c.doltClone(ctx, remoteURL, target); err != nil {
-		return fmt.Errorf("dolt clone failed for %s: %w", remoteURL, err)
+		return false, fmt.Errorf("dolt clone failed for %s: %w", remoteURL, err)
 	}
-	return nil
+	return true, nil
 }
 
-func (c *Cache) ensureWarm(ctx context.Context, remoteURL, target string) error {
+func (c *Cache) ensureWarm(ctx context.Context, remoteURL, target string) (bool, error) {
 	if c.FreshFor > 0 {
 		meta := c.readMeta(remoteURL)
 		age := time.Since(time.Unix(0, meta.LastPull))
 		if age < c.FreshFor {
 			debug.Logf("remotecache: skipping pull for %s (%.1fs old, fresh for %.0fs)\n",
 				remoteURL, age.Seconds(), c.FreshFor.Seconds())
-			return nil
+			return false, nil
 		}
 	}
 	if err := c.doltPull(ctx, target); err != nil {
-		return fmt.Errorf("dolt pull failed for %s: %w", remoteURL, err)
+		return false, fmt.Errorf("dolt pull failed for %s: %w", remoteURL, err)
 	}
-	return nil
+	return true, nil
 }
 
 // Push pushes local commits in the cached clone back to the remote.

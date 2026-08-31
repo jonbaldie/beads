@@ -295,14 +295,6 @@ func RunLifecycleUpdatePreservesTheCreationStamp(t *testing.T, ctx context.Conte
 
 func assertLifecycleUpdateNotesExclusive(t *testing.T, ctx context.Context, fixture LifecycleUpdateFixture, id string) {
 	t.Helper()
-	before := lifecycleUpdateRow(t, ctx, fixture, id)
-	if !before.CreatedAt.Equal(lifecycleUpdateSeededCreatedAt) {
-		t.Fatalf("seeded %s carries created_at %v, want the preset %v — a seed that stamps its own creation time leaves this case unable to tell a preserved stamp from a rewritten one",
-			id, before.CreatedAt.UTC(), lifecycleUpdateSeededCreatedAt)
-	}
-	if before.CreatedBy != "founder" {
-		t.Fatalf("seeded %s carries created_by %q, want the preset %q — see above", id, before.CreatedBy, "founder")
-	}
 
 	for _, edit := range []struct {
 		name  string

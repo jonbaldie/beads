@@ -91,6 +91,7 @@ func configuredBootstrapSyncPlan(plan BootstrapPlan) (BootstrapPlan, bool) {
 		// 1000% CPU and requires manual SIGKILL. Reject and surface the
 		// misconfiguration rather than attempting the clone.
 		fmt.Fprintf(os.Stderr, "error: sync.remote %q looks like a git code-repository URL, not a Dolt remote — skipping clone\n", syncRemote)
+		plan.Action = "none"
 		plan.Reason = fmt.Sprintf("sync.remote %q rejected: git code-repository URL (not a Dolt remote)", syncRemote)
 		return plan, true
 	}
@@ -192,11 +193,13 @@ func existingServerBootstrapDBPlan(plan BootstrapPlan, beadsDir string, cfg *con
 	}
 	result := probeBootstrapServerWithRetry(probeCfg, cfg.GetDoltDatabase())
 	if result.Err != nil {
+		plan.Action = "none"
 		plan.Reason = fmt.Sprintf("Could not verify existing server database %s: %v", cfg.GetDoltDatabase(), result.Err)
 		return plan, true
 	}
 	if result.Exists {
 		plan.HasExisting = true
+		plan.Action = "none"
 		plan.Reason = fmt.Sprintf("Database %s already exists on server at %s:%d", probeCfg.database, probeCfg.host, probeCfg.port)
 		return plan, true
 	}

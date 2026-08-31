@@ -548,6 +548,9 @@ func isVersionUpgradeDetected() bool {
 // setVersionUpgradeDetected updates the version upgrade detected flag.
 func setVersionUpgradeDetected(detected bool) {
 	commandContext().VersionUpgradeDetected = detected
+	if shouldUseGlobals() {
+		versionUpgradeDetected = detected
+	}
 }
 
 // getPreviousVersion returns the previous bd version.
@@ -561,6 +564,9 @@ func getPreviousVersion() string {
 // setPreviousVersion updates the previous version.
 func setPreviousVersion(v string) {
 	commandContext().PreviousVersion = v
+	if shouldUseGlobals() {
+		previousVersion = v
+	}
 }
 
 // isUpgradeAcknowledged returns true if the upgrade notification was shown.
@@ -574,6 +580,9 @@ func isUpgradeAcknowledged() bool {
 // setUpgradeAcknowledged updates the upgrade acknowledged flag.
 func setUpgradeAcknowledged(ack bool) {
 	commandContext().UpgradeAcknowledged = ack
+	if shouldUseGlobals() {
+		upgradeAcknowledged = ack
+	}
 }
 
 // getProfileFile returns the CPU profile file handle.
@@ -638,6 +647,9 @@ func isCommandDidExplicitDoltCommit() bool {
 
 func setCommandDidExplicitDoltCommit(value bool) {
 	commandContext().CommandDidExplicitCommit = value
+	if shouldUseGlobals() {
+		commandDidExplicitDoltCommit = value
+	}
 }
 
 func isCommandDidWriteTipMetadata() bool {
