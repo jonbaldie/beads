@@ -61,6 +61,83 @@ func TestPreparePolicyCleanlinessAndContainment(t *testing.T) {
 	}
 }
 
+func TestPrepareValidationBoundaries(t *testing.T) {
+	for _, mode := range []Mode{Normal, Force} {
+		if err := validateRequestMode(Request{Mode: mode}); err != nil {
+			t.Errorf("validateRequestMode(%v) = %v", mode, err)
+		}
+	}
+	if err := validateRequestMode(Request{Mode: Mode(255)}); err == nil {
+		t.Fatal("validateRequestMode accepted an unknown mode")
+	}
+
+	for _, target := range []TargetKind{PrimaryWorktree, CurrentWorktree, TargetKind(255)} {
+		facts := prepareFacts()
+		facts.Target = target
+		if err := validateTarget(facts); err == nil {
+			t.Errorf("validateTarget(%v) accepted an unsafe target", target)
+		}
+	}
+	if err := validateTarget(prepareFacts()); err != nil {
+		t.Fatalf("validateTarget(registered) = %v", err)
+	}
+
+	for _, comparator := range []ComparatorKind{ComparatorAvailable, ComparatorMissing, ComparatorNotRequired} {
+		if err := validateComparator(comparator); err != nil {
+			t.Errorf("validateComparator(%v) = %v", comparator, err)
+		}
+	}
+	if err := validateComparator(ComparatorKind(255)); err == nil {
+		t.Fatal("validateComparator accepted an unknown value")
+	}
+	for _, containment := range []Containment{Contained, NotContained, ContainmentNotRequired} {
+		if err := validateContainment(containment); err != nil {
+			t.Errorf("validateContainment(%v) = %v", containment, err)
+		}
+	}
+	if err := validateContainment(Containment(255)); err == nil {
+		t.Fatal("validateContainment accepted an unknown value")
+	}
+
+	forceFacts := forcePrepareFacts()
+	if err := validateForceObservations(forceFacts); err != nil {
+		t.Fatalf("valid force observations = %v", err)
+	}
+	forceFacts.Comparator = ComparatorAvailable
+	if err := validateForceObservations(forceFacts); err == nil {
+		t.Fatal("force observations accepted an active comparator")
+	}
+	forceFacts = forcePrepareFacts()
+	forceFacts.Containment = Contained
+	if err := validateForceObservations(forceFacts); err == nil {
+		t.Fatal("force observations accepted active containment")
+	}
+}
+
+func TestPreparedPlanExposesOnlyApprovedMutationAndCleanup(t *testing.T) {
+	facts := prepareFacts()
+	facts.ManagedIgnore = IgnoreManaged
+	facts.ManagedIgnoreEntry = "/exact/managed/entry"
+	plan := mustPrepare(t, Request{Mode: Normal}, facts)
+	if got := plan.Mutation(); got != (Mutation{TargetPath: facts.RegisteredPath}) {
+		t.Fatalf("Mutation() = %#v", got)
+	}
+	if got, ok := plan.Cleanup(); !ok || got != (Cleanup{Entry: facts.ManagedIgnoreEntry}) {
+		t.Fatalf("Cleanup() = (%#v, %v)", got, ok)
+	}
+
+	forcePlan := mustPrepare(t, Request{Mode: Force}, forcePrepareFacts())
+	if got := forcePlan.Mutation(); got != (Mutation{TargetPath: facts.RegisteredPath, Force: true}) {
+		t.Fatalf("force Mutation() = %#v", got)
+	}
+	if got, ok := forcePlan.Cleanup(); ok || got != (Cleanup{}) {
+		t.Fatalf("empty Cleanup() = (%#v, %v)", got, ok)
+	}
+	if (Plan{}).valid() {
+		t.Fatal("zero plan is valid")
+	}
+}
+
 func TestPrepareRefusesZeroValueOrIncompleteFacts(t *testing.T) {
 	if _, err := Prepare(Request{}, PrepareFacts{}); err == nil {
 		t.Fatal("Prepare() accepted zero-value request and facts")
@@ -186,7 +263,11 @@ func mustPrepare(t *testing.T, request Request, facts PrepareFacts) Plan {
 }
 
 func revalidationFacts(mode Mode) RevalidationFacts {
-	facts := RevalidationFacts{Registration: InvariantStable, LockPrune: InvariantStable, TargetPath: InvariantStable, TargetDirectory: InvariantStable, GitAdminDirectory: InvariantStable, GitAdminDirectoryBytes: InvariantStable, GitMarker: InvariantStable, GitMarkerBytes: InvariantStable, CommonDirectory: InvariantStable, Head: InvariantStable, Cleanliness: InvariantStable, StatusBytes: InvariantStable, DirtyFileFingerprint: InvariantStable, Comparator: InvariantStable, Containment: InvariantStable, ManagedIgnore: InvariantStable}
+	facts := RevalidationFacts{
+		RevalidationIdentityFacts: RevalidationIdentityFacts{Registration: InvariantStable, LockPrune: InvariantStable, TargetPath: InvariantStable, TargetDirectory: InvariantStable, CommonDirectory: InvariantStable, Head: InvariantStable},
+		RevalidationGitFacts:      RevalidationGitFacts{GitAdminDirectory: InvariantStable, GitAdminDirectoryBytes: InvariantStable, GitMarker: InvariantStable, GitMarkerBytes: InvariantStable, Cleanliness: InvariantStable, StatusBytes: InvariantStable, DirtyFileFingerprint: InvariantStable},
+		RevalidationOutcomeFacts:  RevalidationOutcomeFacts{Comparator: InvariantStable, Containment: InvariantStable, ManagedIgnore: InvariantStable},
+	}
 	if mode == Force {
 		facts.Comparator, facts.Containment = InvariantNotRequired, InvariantNotRequired
 	}

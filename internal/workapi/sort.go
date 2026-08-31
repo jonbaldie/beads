@@ -11,34 +11,58 @@ import (
 // CompareIssuesBy orders two issues by one of `bd list --sort`'s fields.
 // An unknown field compares equal, which leaves the underlying order intact.
 func CompareIssuesBy(a, b *types.Issue, sortBy string) int {
-	switch sortBy {
-	case "priority":
-		return cmp.Compare(a.Priority, b.Priority)
-	case "created":
-		return b.CreatedAt.Compare(a.CreatedAt)
-	case "updated":
-		return b.UpdatedAt.Compare(a.UpdatedAt)
-	case "closed":
-		if a.ClosedAt == nil && b.ClosedAt == nil {
-			return 0
-		} else if a.ClosedAt == nil {
-			return 1
-		} else if b.ClosedAt == nil {
-			return -1
-		}
-		return b.ClosedAt.Compare(*a.ClosedAt)
-	case "status":
-		return cmp.Compare(a.Status, b.Status)
-	case "id":
-		return utils.NaturalCompareIDs(a.ID, b.ID)
-	case "title":
-		return cmp.Compare(strings.ToLower(a.Title), strings.ToLower(b.Title))
-	case "type":
-		return cmp.Compare(a.IssueType, b.IssueType)
-	case "assignee":
-		return cmp.Compare(a.Assignee, b.Assignee)
+	if result, ok := compareIssueByNumbers(a, b, sortBy); ok {
+		return result
+	}
+	if result, ok := compareIssueByText(a, b, sortBy); ok {
+		return result
 	}
 	return 0
+}
+
+func compareIssueByNumbers(a, b *types.Issue, sortBy string) (int, bool) {
+	switch sortBy {
+	case "priority":
+		return cmp.Compare(a.Priority, b.Priority), true
+	case "created":
+		return b.CreatedAt.Compare(a.CreatedAt), true
+	case "updated":
+		return b.UpdatedAt.Compare(a.UpdatedAt), true
+	case "closed":
+		return compareClosedAt(a, b), true
+	default:
+		return 0, false
+	case "status":
+		return cmp.Compare(a.Status, b.Status), true
+	case "id":
+		return utils.NaturalCompareIDs(a.ID, b.ID), true
+	}
+}
+
+func compareIssueByText(a, b *types.Issue, sortBy string) (int, bool) {
+	switch sortBy {
+	case "title":
+		return cmp.Compare(strings.ToLower(a.Title), strings.ToLower(b.Title)), true
+	case "type":
+		return cmp.Compare(a.IssueType, b.IssueType), true
+	case "assignee":
+		return cmp.Compare(a.Assignee, b.Assignee), true
+	default:
+		return 0, false
+	}
+}
+
+func compareClosedAt(a, b *types.Issue) int {
+	if a.ClosedAt == nil && b.ClosedAt == nil {
+		return 0
+	}
+	if a.ClosedAt == nil {
+		return 1
+	}
+	if b.ClosedAt == nil {
+		return -1
+	}
+	return b.ClosedAt.Compare(*a.ClosedAt)
 }
 
 // ReadyFilterFromIssueFilter projects a list filter onto the ready-work
@@ -48,27 +72,31 @@ func CompareIssuesBy(a, b *types.Issue, sortBy string) int {
 // filter on.
 func ReadyFilterFromIssueFilter(filter types.IssueFilter) types.WorkFilter {
 	wf := types.WorkFilter{
-		Status:         types.StatusOpen,
-		Limit:          filter.Limit,
-		Offset:         filter.Offset,
-		Labels:         filter.Labels,
-		LabelsAny:      filter.LabelsAny,
-		ExcludeLabels:  filter.ExcludeLabels,
-		LabelPattern:   filter.LabelPattern,
-		LabelRegex:     filter.LabelRegex,
-		ParentID:       filter.ParentID,
-		MolType:        filter.MolType,
-		WispType:       filter.WispType,
-		ExcludeTypes:   filter.ExcludeTypes,
-		MetadataFields: filter.MetadataFields,
-		HasMetadataKey: filter.HasMetadataKey,
-		MaxRows:        filter.MaxRows,
-		MaxRowsSource:  filter.MaxRowsSource,
-		// Carried, where SkipLabels and SkipCounts are dropped: those two hide
-		// a number the ready renderings print, and this bounds a body no
-		// listing prints. Dropping it here would answer `bd list --ready
-		// --brief` with full rows and nothing to say why.
-		Lite: filter.Lite,
+		WorkFilterCore: types.WorkFilterCore{
+			Status:        types.StatusOpen,
+			Limit:         filter.Limit,
+			Labels:        filter.Labels,
+			LabelsAny:     filter.LabelsAny,
+			ExcludeLabels: filter.ExcludeLabels,
+			LabelPattern:  filter.LabelPattern,
+			LabelRegex:    filter.LabelRegex,
+			ParentID:      filter.ParentID,
+		},
+		WorkFilterExtra: types.WorkFilterExtra{
+			Offset:         filter.Offset,
+			MolType:        filter.MolType,
+			WispType:       filter.WispType,
+			ExcludeTypes:   filter.ExcludeTypes,
+			MetadataFields: filter.MetadataFields,
+			HasMetadataKey: filter.HasMetadataKey,
+			MaxRows:        filter.MaxRows,
+			MaxRowsSource:  filter.MaxRowsSource,
+			// Carried, where SkipLabels and SkipCounts are dropped: those two hide
+			// a number the ready renderings print, and this bounds a body no
+			// listing prints. Dropping it here would answer `bd list --ready
+			// --brief` with full rows and nothing to say why.
+			Lite: filter.Lite,
+		},
 	}
 	if filter.IssueType != nil {
 		wf.Type = string(*filter.IssueType)

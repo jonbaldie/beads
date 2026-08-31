@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -397,5 +398,85 @@ func TestRunFailsLoudlyWithoutCLIReferenceGroup(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "CLI Reference") {
 		t.Errorf("error should name the missing group: %v", err)
+	}
+}
+
+func TestMarkdownPageNamesFiltersAndSorts(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "z.md"), "z")
+	writeFile(t, filepath.Join(root, "a.md"), "a")
+	writeFile(t, filepath.Join(root, "notes.txt"), "notes")
+	if err := os.Mkdir(filepath.Join(root, "nested.md"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := markdownPageNames(entries)
+	want := []string{"a.md", "z.md"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("markdownPageNames() = %v, want %v", got, want)
+	}
+}
+
+func TestNeutralizeESMLine(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want string
+	}{
+		{"ordinary prose", "  explain export behavior", "  explain export behavior"},
+		{"export", "  export VALUE=1", "  `export VALUE=1`"},
+		{"import", "\timport package", "\t`import package`"},
+		{"embedded backtick", "  export VALUE=`date`", "  ``export VALUE=`date```"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := neutralizeESMLine(test.line); got != test.want {
+				t.Fatalf("neutralizeESMLine(%q) = %q, want %q", test.line, got, test.want)
+			}
+		})
+	}
+}
+
+func TestLocateCLINavArrayRejectsMalformedNavigation(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{"missing group", `{"group":"Other","pages":[]}`, "no \"CLI Reference\""},
+		{"missing pages", `{"group": "CLI Reference"}`, "has no \"pages\" key"},
+		{"pages is not array", `{"group": "CLI Reference", "pages": null}`, "has no array"},
+		{"unbalanced array", `{"group": "CLI Reference", "pages": [`, "unbalanced"},
+		{"crossed object", `{"group": "CLI Reference"}, {"pages": []}`, "cannot safely locate"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, _, _, err := locateCLINavArray(test.content, "docs.json")
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("locateCLINavArray() error = %v, want fragment %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestLocateAndRenderCLINavArray(t *testing.T) {
+	content := "{\n  \"group\": \"CLI Reference\",\n  \"pages\": [\"old\"]\n}"
+	open, close, indent, err := locateCLINavArray(content, "docs.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := content[open : close+1]; got != `["old"]` {
+		t.Fatalf("located array = %q", got)
+	}
+	if indent != "  " {
+		t.Fatalf("indent = %q, want two spaces", indent)
+	}
+	want := "[\n    \"cli-reference/index\",\n    \"cli-reference/show\"\n  ]"
+	if got := renderCLINavPages([]string{"cli-reference/index", "cli-reference/show"}, indent); got != want {
+		t.Fatalf("renderCLINavPages() = %q, want %q", got, want)
 	}
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -105,6 +106,275 @@ func TestParseFlagsPreservesExplicitExistingWorkspaceSeedMode(t *testing.T) {
 	}
 	if cfg.SeedMode != "full" {
 		t.Fatalf("SeedMode = %q, want full", cfg.SeedMode)
+	}
+}
+
+func TestParseFlagsReturnsEveryDefaultAndOverride(t *testing.T) {
+	defaults, err := parseFlags(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDefaults := config{
+		BDPath:      "bd",
+		SeedMode:    "full",
+		Scenario:    "all",
+		IssueCount:  100000,
+		DepCount:    85000,
+		Concurrency: 20,
+		Ops:         80,
+		Timeout:     30 * time.Second,
+	}
+	if !reflect.DeepEqual(defaults, wantDefaults) {
+		t.Fatalf("parseFlags(nil) = %#v, want %#v", defaults, wantDefaults)
+	}
+
+	got, err := parseFlags([]string{
+		"--bd", "custom-bd", "--workspace", "/workspace", "--seed-mode", "dep-only",
+		"--scenario", "dep", "--issues", "7", "--deps", "8", "--concurrency", "9",
+		"--ops", "10", "--timeout", "11s", "--chain-depth", "12", "--keep-workdir",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := config{
+		BDPath:      "custom-bd",
+		Workspace:   "/workspace",
+		SeedMode:    "dep-only",
+		Scenario:    "dep",
+		IssueCount:  7,
+		DepCount:    8,
+		Concurrency: 9,
+		Ops:         10,
+		Timeout:     11 * time.Second,
+		ChainDepth:  12,
+		KeepWorkdir: true,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseFlags(overrides) = %#v, want %#v", got, want)
+	}
+	if _, err := parseFlags([]string{"--issues", "not-a-number"}); err == nil {
+		t.Fatal("parseFlags accepted malformed integer")
+	}
+}
+
+func TestSeedPureHelpersExact(t *testing.T) {
+	for _, tc := range []struct {
+		start, batch, total, want int
+	}{
+		{0, 500, 1200, 500},
+		{1000, 500, 1200, 1200},
+		{1200, 500, 1200, 1200},
+	} {
+		if got := minSeedEnd(tc.start, tc.batch, tc.total); got != tc.want {
+			t.Fatalf("minSeedEnd(%d, %d, %d) = %d, want %d", tc.start, tc.batch, tc.total, got, tc.want)
+		}
+	}
+
+	rows := []struct {
+		i, count int
+		want     issueSeedRowValues
+	}{
+		{0, 100, issueSeedRowValues{"perf-000000", "open", "example-org--control-dispatcher", "{}", 1}},
+		{39, 100, issueSeedRowValues{"perf-000039", "open", "example-org--control-dispatcher", "{}", 4}},
+		{40, 100, issueSeedRowValues{"perf-000040", "open", "", `{"route.routed_to":"example-org/control-dispatcher"}`, 1}},
+		{79, 100, issueSeedRowValues{"perf-000079", "open", "", `{"route.routed_to":"example-org/control-dispatcher"}`, 4}},
+		{80, 100, issueSeedRowValues{"perf-000080", "open", "", "{}", 1}},
+		{350, 400, issueSeedRowValues{"perf-000350", "closed", "", "{}", 3}},
+		{100, 100, issueSeedRowValues{"perf-dep-000000", "open", "", "{}", 1}},
+	}
+	for _, tc := range rows {
+		if got := issueSeedRow(tc.i, tc.count); got != tc.want {
+			t.Fatalf("issueSeedRow(%d, %d) = %#v, want %#v", tc.i, tc.count, got, tc.want)
+		}
+	}
+
+	for _, tc := range []struct {
+		ops, depth, want int
+	}{{10, -1, 20}, {10, 0, 20}, {10, 1, 43}, {10, 100, 1132}} {
+		if got := depFixtureIssueCount(tc.ops, tc.depth); got != tc.want {
+			t.Fatalf("depFixtureIssueCount(%d, %d) = %d, want %d", tc.ops, tc.depth, got, tc.want)
+		}
+	}
+
+	for _, tc := range []struct {
+		i, count                        int
+		wantIssue, wantTarget, wantType string
+	}{
+		{0, 100, "perf-000000", "perf-000002", "blocks"},
+		{19, 100, "perf-000019", "perf-000021", "blocks"},
+		{20, 100, "perf-000020", "perf-000023", "blocks"},
+		{40, 100, "perf-000040", "perf-000042", "blocks"},
+		{59, 100, "perf-000059", "perf-000061", "blocks"},
+		{60, 100, "perf-000060", "perf-000063", "blocks"},
+		{4999, 100, "perf-000099", "perf-000051", "blocks"},
+		{5000, 100, "perf-000000", "perf-000053", "parent-child"},
+	} {
+		issue, target, typ := dependencySeedRow(tc.i, tc.count)
+		if issue != tc.wantIssue || target != tc.wantTarget || typ != tc.wantType {
+			t.Fatalf("dependencySeedRow(%d, %d) = (%q, %q, %q), want (%q, %q, %q)", tc.i, tc.count, issue, target, typ, tc.wantIssue, tc.wantTarget, tc.wantType)
+		}
+	}
+
+	for _, tc := range []struct {
+		count, want int
+		wantErr     bool
+	}{{-1, 0, true}, {0, 0, true}, {1, 1, false}, {2, 2, false}, {5, 20, false}} {
+		got, err := maxDependencyPairs(tc.count)
+		if got != tc.want || (err != nil) != tc.wantErr {
+			t.Fatalf("maxDependencyPairs(%d) = (%d, %v), want (%d, error=%v)", tc.count, got, err, tc.want, tc.wantErr)
+		}
+	}
+
+	for _, tc := range []struct {
+		i, count, sourceOffset, targetOffset int
+		wantSource, wantTarget               string
+	}{
+		{0, 1, 1000, 300, "perf-000000", "perf-000000"},
+		{0, 5, 0, 200, "perf-000000", "perf-000004"},
+		{4, 5, 0, 200, "perf-000004", "perf-000003"},
+		{5, 5, 0, 200, "perf-000000", "perf-000001"},
+		{7, 5, 1000, 300, "perf-000002", "perf-000003"},
+	} {
+		source, target := dependencyEndpoints(tc.i, tc.count, tc.sourceOffset, tc.targetOffset)
+		if source != tc.wantSource || target != tc.wantTarget {
+			t.Fatalf("dependencyEndpoints(%d, %d, %d, %d) = (%q, %q), want (%q, %q)", tc.i, tc.count, tc.sourceOffset, tc.targetOffset, source, target, tc.wantSource, tc.wantTarget)
+		}
+	}
+}
+
+func TestBuildIssueInsertBatchExact(t *testing.T) {
+	query, args := buildIssueInsertBatch(0, 2, 1)
+	wantQuery := `INSERT INTO issues
+		(id, title, description, design, acceptance_criteria, notes,
+		 status, priority, issue_type, assignee, metadata)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?),(?,?,?,?,?,?,?,?,?,?,?)`
+	if query.String() != wantQuery {
+		t.Fatalf("query = %q, want %q", query.String(), wantQuery)
+	}
+	wantArgs := []any{
+		"perf-000000", "prod timeout issue 0", "fixture", "", "", "", "open", 1, "task", "example-org--control-dispatcher", "{}",
+		"perf-dep-000000", "prod timeout issue 1", "fixture", "", "", "", "open", 2, "task", "example-org--control-dispatcher", "{}",
+	}
+	if !reflect.DeepEqual(args, wantArgs) {
+		t.Fatalf("args = %#v, want %#v", args, wantArgs)
+	}
+
+	emptyQuery, emptyArgs := buildIssueInsertBatch(4, 4, 10)
+	if strings.Contains(emptyQuery.String(), "(?)") || len(emptyArgs) != 0 {
+		t.Fatalf("empty batch = (%q, %#v)", emptyQuery.String(), emptyArgs)
+	}
+}
+
+func TestSeedInsertErrorsRetainBatchAndCause(t *testing.T) {
+	wantErr := errors.New("database unavailable")
+	tests := []struct {
+		name string
+		run  func(context.Context, *sql.DB) error
+		want string
+	}{
+		{"issues", func(ctx context.Context, db *sql.DB) error { return insertIssues(ctx, db, 1, 0, 0) }, "insert issues 0-1"},
+		{"dep issues", func(ctx context.Context, db *sql.DB) error { return insertDepIssues(ctx, db, 1, 1) }, "insert dep issues 0-7"},
+		{"dependencies", func(ctx context.Context, db *sql.DB) error { return insertDependencies(ctx, db, 1, 2) }, "insert dependencies 0-1"},
+		{"chains", func(ctx context.Context, db *sql.DB) error { return insertDepAddChains(ctx, db, 1, 1) }, "insert dep-add chains 0-1"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			mock.ExpectExec("INSERT INTO").WillReturnError(wantErr)
+			err = tc.run(context.Background(), db)
+			if !errors.Is(err, wantErr) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q wrapping cause", err, tc.want)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestScenarioJobBuildersExact(t *testing.T) {
+	wantMixed := []job{
+		{Kind: "session-ready", Argv: []string{"ready", "--include-ephemeral", "--assignee=mc-0000000", "--json", "--limit=1"}},
+		{Kind: "control-ready", Argv: []string{"--readonly", "--sandbox", "ready", "--include-ephemeral", "--assignee=example-org--control-dispatcher", "--json", "--limit=20"}},
+		{Kind: "route-ready", Argv: []string{"--readonly", "--sandbox", "ready", "--include-ephemeral", "--metadata-field", "route.routed_to=example-org/control-dispatcher", "--unassigned", "--json", "--limit=20"}},
+		{Kind: "show", Argv: []string{"show", "perf-000003", "--json"}},
+		{Kind: "list", Argv: []string{"list", "--json", "--status", "in_progress", "--assignee=mc-0000004", "--limit=1"}},
+		{Kind: "claim", Argv: []string{"update", "perf-000005", "--claim", "--json"}},
+	}
+	if got := mixedBackgroundJobs(6); !reflect.DeepEqual(got, wantMixed) {
+		t.Fatalf("mixedBackgroundJobs(6) = %#v, want %#v", got, wantMixed)
+	}
+	if got := mixedBackgroundJobs(0); len(got) != 0 {
+		t.Fatalf("mixedBackgroundJobs(0) = %#v, want empty", got)
+	}
+	if got := sessionAssignee(64); got != "mc-0000000" {
+		t.Fatalf("sessionAssignee(64) = %q", got)
+	}
+
+	for _, tc := range []struct{ i, depth, want int }{{3, -1, 6}, {3, 0, 6}, {3, 1, 12}, {3, 5, 24}} {
+		if got := depBase(tc.i, tc.depth); got != tc.want {
+			t.Fatalf("depBase(%d, %d) = %d, want %d", tc.i, tc.depth, got, tc.want)
+		}
+	}
+	wantDep := job{Kind: "dep", Argv: []string{"dep", "add", "perf-dep-000008", "perf-dep-000009", "--type", "blocks", "--json"}}
+	if got := depAddJob(2, 1); !reflect.DeepEqual(got, wantDep) {
+		t.Fatalf("depAddJob(2, 1) = %#v, want %#v", got, wantDep)
+	}
+
+	control := controlQueryJobs(5)
+	if len(control) != 5 {
+		t.Fatalf("controlQueryJobs(5) length = %d", len(control))
+	}
+	wantEnvs := [][]string{
+		{"BD_EXPORT_AUTO=false", "GC_CONTROL_TARGET=control-dispatcher", "GC_CONTROL_SESSION_NAME=control-dispatcher", "GC_CONTROL_LEGACY_TARGET=workflow-control", "GC_SESSION_NAME=control-dispatcher", "GC_ALIAS=control-dispatcher", "GC_SESSION_ID=control-dispatcher"},
+		{"BD_EXPORT_AUTO=false", "GC_CONTROL_TARGET=example-org/control-dispatcher", "GC_CONTROL_SESSION_NAME=example-org--control-dispatcher", "GC_CONTROL_LEGACY_TARGET=example-org/workflow-control", "GC_SESSION_NAME=example-org--control-dispatcher", "GC_ALIAS=example-org/control-dispatcher", "GC_SESSION_ID=example-org--control-dispatcher"},
+		{"BD_EXPORT_AUTO=false", "GC_CONTROL_TARGET=example-gui/control-dispatcher", "GC_CONTROL_SESSION_NAME=example-gui--control-dispatcher", "GC_CONTROL_LEGACY_TARGET=example-gui/workflow-control", "GC_SESSION_NAME=example-gui--control-dispatcher", "GC_ALIAS=example-gui/control-dispatcher", "GC_SESSION_ID=example-gui--control-dispatcher"},
+		{"BD_EXPORT_AUTO=false", "GC_CONTROL_TARGET=gtest-rig/control-dispatcher", "GC_CONTROL_SESSION_NAME=gtest-rig--control-dispatcher", "GC_CONTROL_LEGACY_TARGET=gtest-rig/workflow-control", "GC_SESSION_NAME=gtest-rig--control-dispatcher", "GC_ALIAS=gtest-rig/control-dispatcher", "GC_SESSION_ID=gtest-rig--control-dispatcher"},
+	}
+	for i, item := range control {
+		if item.Kind != "control" || item.Sh != controlQueryScript() || !reflect.DeepEqual(item.Env, wantEnvs[i%4]) {
+			t.Fatalf("controlQueryJobs(5)[%d] = %#v", i, item)
+		}
+	}
+}
+
+func TestResultHelpersExact(t *testing.T) {
+	results := []opResult{{Latency: time.Millisecond}, {Latency: 2 * time.Millisecond}, {Latency: 10 * time.Millisecond}, {Latency: 20 * time.Millisecond}}
+	for _, tc := range []struct {
+		p    int
+		want time.Duration
+	}{{0, time.Millisecond}, {1, time.Millisecond}, {25, time.Millisecond}, {50, 2 * time.Millisecond}, {95, 20 * time.Millisecond}, {100, 20 * time.Millisecond}, {101, 20 * time.Millisecond}} {
+		if got := percentile(results, tc.p); got != tc.want {
+			t.Fatalf("percentile(results, %d) = %s, want %s", tc.p, got, tc.want)
+		}
+	}
+	if got := percentile(nil, 50); got != 0 {
+		t.Fatalf("percentile(nil, 50) = %s", got)
+	}
+	if got := tail("  abcdef  ", 4); got != "cdef" {
+		t.Fatalf("tail = %q, want cdef", got)
+	}
+	if got := tail("  abc  ", 4); got != "abc" {
+		t.Fatalf("tail short = %q, want abc", got)
+	}
+	if got := compactShell("  one\n  two\tthree "); got != "one two three" {
+		t.Fatalf("compactShell = %q", got)
+	}
+	for _, tc := range []struct {
+		stderr string
+		want   bool
+	}{
+		{"packets.go:58 read tcp x: i/o timeout", true},
+		{"packets.go:59 read tcp x: i/o timeout", false},
+		{"packets.go:58 read tcp x: reset", false},
+	} {
+		if got := isDriverReadTimeout(opResult{StderrTail: tc.stderr}); got != tc.want {
+			t.Fatalf("isDriverReadTimeout(%q) = %v, want %v", tc.stderr, got, tc.want)
+		}
 	}
 }
 

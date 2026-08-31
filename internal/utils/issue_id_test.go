@@ -13,13 +13,30 @@ func TestNaturalCompareIDs(t *testing.T) {
 		{"bd-E.10", "bd-E.4", 1},
 		{"bd-E.4", "bd-E.4", 0},
 		{"bd-A.1", "bd-B.1", -1}, // alpha prefix
+		{"bd-B.1", "bd-A.1", 1},
 		{"bd-1.1", "bd-1.2", -1},
 		{"bd-1.9", "bd-1.10", -1}, // 9 < 10
+		{"bd-1", "bd-1.1", -1},
+		{"bd-1.1", "bd-1", 1},
+		{"bd-1", "bd-A", -1},
 	}
 	for _, tt := range tests {
 		got := NaturalCompareIDs(tt.a, tt.b)
 		if (tt.want < 0 && got >= 0) || (tt.want > 0 && got <= 0) || (tt.want == 0 && got != 0) {
 			t.Errorf("NaturalCompareIDs(%q, %q) = %d, want sign %d", tt.a, tt.b, got, tt.want)
+		}
+	}
+}
+
+func TestBase36CharacterBoundaries(t *testing.T) {
+	for _, r := range []rune{'0', '9', 'a', 'z', 'A', 'Z'} {
+		if !isBase36(string(r)) {
+			t.Errorf("isBase36(%q) = false, want true", r)
+		}
+	}
+	for _, r := range []rune{'/', ':', '@', '[', '`', '{'} {
+		if isBase36(string(r)) {
+			t.Errorf("isBase36(%q) = true, want false", r)
 		}
 	}
 }

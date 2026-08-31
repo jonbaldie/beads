@@ -20,7 +20,7 @@ func TestExists(t *testing.T) {
 		},
 		{
 			name:    "non-nil issue passes",
-			issue:   &types.Issue{ID: "bd-test"},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}},
 			wantErr: false,
 		},
 	}
@@ -48,12 +48,12 @@ func TestNotTemplate(t *testing.T) {
 		},
 		{
 			name:    "non-template passes",
-			issue:   &types.Issue{ID: "bd-test", IsTemplate: false},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWisp: types.IssueWisp{IsTemplate: false}},
 			wantErr: false,
 		},
 		{
 			name:    "template returns error",
-			issue:   &types.Issue{ID: "bd-test", IsTemplate: true},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWisp: types.IssueWisp{IsTemplate: true}},
 			wantErr: true,
 		},
 	}
@@ -83,19 +83,19 @@ func TestNotPinned(t *testing.T) {
 		},
 		{
 			name:    "open issue passes",
-			issue:   &types.Issue{ID: "bd-test", Status: types.StatusOpen},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			force:   false,
 			wantErr: false,
 		},
 		{
 			name:    "pinned issue without force fails",
-			issue:   &types.Issue{ID: "bd-test", Status: types.StatusPinned},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusPinned}},
 			force:   false,
 			wantErr: true,
 		},
 		{
 			name:    "pinned issue with force passes",
-			issue:   &types.Issue{ID: "bd-test", Status: types.StatusPinned},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusPinned}},
 			force:   true,
 			wantErr: false,
 		},
@@ -103,13 +103,13 @@ func TestNotPinned(t *testing.T) {
 		// issue carrying pinned=true is protected whatever its status.
 		{
 			name:    "boolean-pinned issue without force fails",
-			issue:   &types.Issue{ID: "bd-test", Status: types.StatusOpen, Pinned: true},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueWisp: types.IssueWisp{Pinned: true}},
 			force:   false,
 			wantErr: true,
 		},
 		{
 			name:    "boolean-pinned issue with force passes",
-			issue:   &types.Issue{ID: "bd-test", Status: types.StatusOpen, Pinned: true},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueWisp: types.IssueWisp{Pinned: true}},
 			force:   true,
 			wantErr: false,
 		},
@@ -122,13 +122,13 @@ func TestNotPinned(t *testing.T) {
 		// and must change these two cases deliberately rather than silently.
 		{
 			name:    "boolean-pinned closed issue without force fails",
-			issue:   &types.Issue{ID: "bd-test", Status: types.StatusClosed, Pinned: true},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}, IssueWisp: types.IssueWisp{Pinned: true}},
 			force:   false,
 			wantErr: true,
 		},
 		{
 			name:    "boolean-pinned closed issue with force passes",
-			issue:   &types.Issue{ID: "bd-test", Status: types.StatusClosed, Pinned: true},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}, IssueWisp: types.IssueWisp{Pinned: true}},
 			force:   true,
 			wantErr: false,
 		},
@@ -210,19 +210,19 @@ func TestAssigneeMatches(t *testing.T) {
 		},
 		{
 			name:    "unassigned issue passes for any actor",
-			issue:   &types.Issue{ID: "bd-test", Assignee: ""},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Assignee: ""}},
 			actor:   "alice",
 			wantErr: false,
 		},
 		{
 			name:    "matching assignee passes",
-			issue:   &types.Issue{ID: "bd-test", Assignee: "alice"},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Assignee: "alice"}},
 			actor:   "alice",
 			wantErr: false,
 		},
 		{
 			name:        "mismatched assignee without force fails",
-			issue:       &types.Issue{ID: "bd-test", Assignee: "bob"},
+			issue:       &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Assignee: "bob"}},
 			actor:       "alice",
 			force:       false,
 			wantErr:     true,
@@ -230,14 +230,14 @@ func TestAssigneeMatches(t *testing.T) {
 		},
 		{
 			name:    "mismatched assignee with force passes",
-			issue:   &types.Issue{ID: "bd-test", Assignee: "bob"},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Assignee: "bob"}},
 			actor:   "alice",
 			force:   true,
 			wantErr: false,
 		},
 		{
 			name:        "empty actor with assigned bead fails",
-			issue:       &types.Issue{ID: "bd-test", Assignee: "bob"},
+			issue:       &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Assignee: "bob"}},
 			actor:       "",
 			wantErr:     true,
 			wantErrFrag: "assignee is",
@@ -250,19 +250,19 @@ func TestAssigneeMatches(t *testing.T) {
 		// spelled its name differently.
 		{
 			name:    "same identity under session-name spelling passes (ga-wzl83)",
-			issue:   &types.Issue{ID: "bd-test", Assignee: "gastown.mayor"},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Assignee: "gastown.mayor"}},
 			actor:   "gastown__mayor",
 			wantErr: false,
 		},
 		{
 			name:    "same identity under hyphen spelling passes",
-			issue:   &types.Issue{ID: "bd-test", Assignee: "gastown.mayor"},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Assignee: "gastown.mayor"}},
 			actor:   "gastown-mayor",
 			wantErr: false,
 		},
 		{
 			name:    "same identity under single-underscore spelling passes",
-			issue:   &types.Issue{ID: "bd-test", Assignee: "gastown.mayor"},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Assignee: "gastown.mayor"}},
 			actor:   "gastown_mayor",
 			wantErr: false,
 		},
@@ -271,7 +271,7 @@ func TestAssigneeMatches(t *testing.T) {
 		// contains separator characters that canonicalize.
 		{
 			name:        "genuinely different identity stays rejected despite shared separators",
-			issue:       &types.Issue{ID: "bd-test", Assignee: "gastown.mayor"},
+			issue:       &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Assignee: "gastown.mayor"}},
 			actor:       "gastown.dog-3",
 			force:       false,
 			wantErr:     true,
@@ -296,7 +296,7 @@ func TestAssigneeMatches(t *testing.T) {
 
 func TestAssigneeNotStolen(t *testing.T) {
 	inProgress := func(assignee string) *types.Issue {
-		return &types.Issue{ID: "bd-test", Assignee: assignee, Status: types.StatusInProgress}
+		return &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Assignee: assignee, Status: types.StatusInProgress}}
 	}
 	poolsCalled := false
 	pools := func() []string {
@@ -342,7 +342,7 @@ func TestAssigneeNotStolen(t *testing.T) {
 		},
 		{
 			name:        "reassigning an OPEN assigned bead stays frictionless",
-			issue:       &types.Issue{ID: "bd-test", Assignee: "bob", Status: types.StatusOpen},
+			issue:       &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Assignee: "bob", Status: types.StatusOpen}},
 			actor:       "alice",
 			newAssignee: "carol",
 			wantErr:     false,
@@ -436,7 +436,7 @@ func TestAssigneeNotStolen(t *testing.T) {
 	// call sites hand it a live config read, and routine dispatch (open-bead
 	// reassigns, self-edits) must not pay that round trip.
 	poolsCalled = false
-	if err := AssigneeNotStolen("alice", "bob", pools, false)("bd-test", &types.Issue{ID: "bd-test", Assignee: "bob", Status: types.StatusOpen}); err != nil {
+	if err := AssigneeNotStolen("alice", "bob", pools, false)("bd-test", &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Assignee: "bob", Status: types.StatusOpen}}); err != nil {
 		t.Errorf("open-bead reassign should pass, got %v", err)
 	}
 	if poolsCalled {
@@ -457,12 +457,12 @@ func TestNotClosed(t *testing.T) {
 		},
 		{
 			name:    "open issue passes",
-			issue:   &types.Issue{ID: "bd-test", Status: types.StatusOpen},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			wantErr: false,
 		},
 		{
 			name:    "closed issue fails",
-			issue:   &types.Issue{ID: "bd-test", Status: types.StatusClosed},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}},
 			wantErr: true,
 		},
 	}
@@ -486,13 +486,13 @@ func TestChain(t *testing.T) {
 	}{
 		{
 			name:       "empty chain passes",
-			issue:      &types.Issue{ID: "bd-test"},
+			issue:      &types.Issue{IssueID: types.IssueID{ID: "bd-test"}},
 			validators: []IssueValidator{},
 			wantErr:    false,
 		},
 		{
 			name:  "all validators pass",
-			issue: &types.Issue{ID: "bd-test", Status: types.StatusOpen},
+			issue: &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			validators: []IssueValidator{
 				Exists(),
 				NotTemplate(),
@@ -511,7 +511,7 @@ func TestChain(t *testing.T) {
 		},
 		{
 			name:  "middle validator fails",
-			issue: &types.Issue{ID: "bd-test", IsTemplate: true},
+			issue: &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWisp: types.IssueWisp{IsTemplate: true}},
 			validators: []IssueValidator{
 				Exists(),
 				NotTemplate(),
@@ -547,19 +547,19 @@ func TestHasStatus(t *testing.T) {
 		},
 		{
 			name:    "matching status passes",
-			issue:   &types.Issue{ID: "bd-test", Status: types.StatusOpen},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			allowed: []types.Status{types.StatusOpen},
 			wantErr: false,
 		},
 		{
 			name:    "one of multiple allowed passes",
-			issue:   &types.Issue{ID: "bd-test", Status: types.StatusClosed},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}},
 			allowed: []types.Status{types.StatusOpen, types.StatusClosed},
 			wantErr: false,
 		},
 		{
 			name:    "non-matching status fails",
-			issue:   &types.Issue{ID: "bd-test", Status: types.StatusPinned},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusPinned}},
 			allowed: []types.Status{types.StatusOpen, types.StatusClosed},
 			wantErr: true,
 		},
@@ -590,19 +590,19 @@ func TestHasType(t *testing.T) {
 		},
 		{
 			name:    "matching type passes",
-			issue:   &types.Issue{ID: "bd-test", IssueType: types.TypeTask},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask}},
 			allowed: []types.IssueType{types.TypeTask},
 			wantErr: false,
 		},
 		{
 			name:    "one of multiple allowed passes",
-			issue:   &types.Issue{ID: "bd-test", IssueType: types.TypeBug},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeBug}},
 			allowed: []types.IssueType{types.TypeTask, types.TypeBug},
 			wantErr: false,
 		},
 		{
 			name:    "non-matching type fails",
-			issue:   &types.Issue{ID: "bd-test", IssueType: types.TypeEpic},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeEpic}},
 			allowed: []types.IssueType{types.TypeTask, types.TypeBug},
 			wantErr: true,
 		},
@@ -635,28 +635,28 @@ func TestEpicHasOpenChildren(t *testing.T) {
 		},
 		{
 			name:           "non-epic passes regardless of children",
-			issue:          &types.Issue{ID: "bd-test", IssueType: types.TypeTask},
+			issue:          &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask}},
 			force:          false,
 			openChildCount: 10,
 			wantErr:        false,
 		},
 		{
 			name:           "epic with no open children passes",
-			issue:          &types.Issue{ID: "bd-test", IssueType: types.TypeEpic},
+			issue:          &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeEpic}},
 			force:          false,
 			openChildCount: 0,
 			wantErr:        false,
 		},
 		{
 			name:           "epic with open children fails",
-			issue:          &types.Issue{ID: "bd-test", IssueType: types.TypeEpic},
+			issue:          &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeEpic}},
 			force:          false,
 			openChildCount: 3,
 			wantErr:        true,
 		},
 		{
 			name:           "epic with open children passes with force",
-			issue:          &types.Issue{ID: "bd-test", IssueType: types.TypeEpic},
+			issue:          &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeEpic}},
 			force:          true,
 			openChildCount: 3,
 			wantErr:        false,
@@ -686,12 +686,12 @@ func TestForUpdate(t *testing.T) {
 		},
 		{
 			name:    "template fails",
-			issue:   &types.Issue{ID: "bd-test", IsTemplate: true},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWisp: types.IssueWisp{IsTemplate: true}},
 			wantErr: true,
 		},
 		{
 			name:    "regular issue passes",
-			issue:   &types.Issue{ID: "bd-test", IsTemplate: false},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWisp: types.IssueWisp{IsTemplate: false}},
 			wantErr: false,
 		},
 	}
@@ -721,19 +721,19 @@ func TestForClose(t *testing.T) {
 		},
 		{
 			name:    "template fails",
-			issue:   &types.Issue{ID: "bd-test", IsTemplate: true},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWisp: types.IssueWisp{IsTemplate: true}},
 			force:   false,
 			wantErr: true,
 		},
 		{
 			name:    "pinned without force fails",
-			issue:   &types.Issue{ID: "bd-test", Status: types.StatusPinned},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusPinned}},
 			force:   false,
 			wantErr: true,
 		},
 		{
 			name:    "pinned with force passes",
-			issue:   &types.Issue{ID: "bd-test", Status: types.StatusPinned},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusPinned}},
 			force:   true,
 			wantErr: false,
 		},
@@ -741,13 +741,13 @@ func TestForClose(t *testing.T) {
 		// issue is refused even though its status is open.
 		{
 			name:    "boolean-pinned without force fails",
-			issue:   &types.Issue{ID: "bd-test", Status: types.StatusOpen, Pinned: true},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueWisp: types.IssueWisp{Pinned: true}},
 			force:   false,
 			wantErr: true,
 		},
 		{
 			name:    "regular open issue passes",
-			issue:   &types.Issue{ID: "bd-test", Status: types.StatusOpen},
+			issue:   &types.Issue{IssueID: types.IssueID{ID: "bd-test"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			force:   false,
 			wantErr: false,
 		},

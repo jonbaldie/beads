@@ -96,14 +96,65 @@ func TestConvertLegacyIndexProducesGenericForm(t *testing.T) {
 }
 
 func TestConvertLegacyPageFailsOnUnexpectedShape(t *testing.T) {
-	for name, content := range map[string]string{
-		"no frontmatter":  "## bd show\n",
-		"no marker":       "---\nid: x\n---\n\nGenerated from `bd help --doc x`\n\n## bd x\n",
-		"no command head": "---\nid: x\n---\n\n<!-- AUTO-GENERATED: do not edit manually -->\nGenerated from `bd help --doc x`\n\nprose\n",
+	for name, test := range map[string]struct {
+		content string
+		want    string
+	}{
+		"no frontmatter": {
+			content: "## bd show\n",
+			want:    "missing frontmatter",
+		},
+		"no marker": {
+			content: "---\nid: x\n---\n\nGenerated from `bd help --doc x`\n\n## bd x\n",
+			want:    `missing "<!-- AUTO-GENERATED: do not edit manually -->" marker`,
+		},
+		"no generated line": {
+			content: "---\nid: x\n---\n\n<!-- AUTO-GENERATED: do not edit manually -->\n",
+			want:    "missing Generated-from line",
+		},
+		"no command head": {
+			content: "---\nid: x\n---\n\n<!-- AUTO-GENERATED: do not edit manually -->\nGenerated from `bd help --doc x`\n\nprose\n",
+			want:    "expected '## bd <command>' heading",
+		},
 	} {
-		if _, err := convertLegacyPage(content); err == nil {
-			t.Errorf("%s: expected error, got none", name)
+		if _, err := convertLegacyPage(test.content); err == nil || err.Error() != test.want {
+			t.Errorf("%s: error = %v, want %q", name, err, test.want)
 		}
+	}
+}
+
+func TestLegacyPageShort(t *testing.T) {
+	for name, test := range map[string]struct {
+		lines []string
+		want  string
+	}{
+		"empty":         {nil, ""},
+		"blank":         {[]string{"   "}, ""},
+		"heading":       {[]string{"## Usage"}, ""},
+		"fence":         {[]string{"```console"}, ""},
+		"trimmed prose": {[]string{"  Show one issue  "}, "Show one issue"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := legacyPageShort(test.lines); got != test.want {
+				t.Fatalf("legacyPageShort(%q) = %q, want %q", test.lines, got, test.want)
+			}
+		})
+	}
+}
+
+func TestStripFrontmatterFailures(t *testing.T) {
+	for name, test := range map[string]struct {
+		content string
+		want    string
+	}{
+		"missing":      {"title: x\n", "missing frontmatter"},
+		"unterminated": {"---\ntitle: x\n", "unterminated frontmatter"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := stripFrontmatter(test.content); err == nil || err.Error() != test.want {
+				t.Fatalf("stripFrontmatter() error = %v, want %q", err, test.want)
+			}
+		})
 	}
 }
 

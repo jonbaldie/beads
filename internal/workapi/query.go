@@ -59,32 +59,13 @@ func (p QueryPlan) RequiresPredicate() bool { return p.Predicate != nil }
 // It reads no configuration and touches no store, so both implementations share
 // it without supplying a config source.
 func BuildQueryPlan(in issueops.QueryRequest) (QueryPlan, error) {
-	expression := strings.TrimSpace(in.Expression)
-	if expression == "" {
-		return QueryPlan{}, invalidQueryExpression("an expression is required")
-	}
-	limit := LimitOr(in.Limit, DefaultQueryLimit)
-	if limit < 0 {
-		return QueryPlan{}, fmt.Errorf("invalid limit %d: a query limit must be zero or greater; 0 means unlimited%.0w",
-			limit, issueops.ErrValidation)
-	}
-	if in.Offset < 0 {
-		return QueryPlan{}, fmt.Errorf("invalid offset %d: a query offset must be zero or greater%.0w",
-			in.Offset, issueops.ErrValidation)
-	}
-	if in.Offset > 0 && in.SortBy != "" {
-		return QueryPlan{}, fmt.Errorf(
-			"invalid offset: an offset cannot be combined with a display order, because the order is applied to the rows the query bounded and each page would be sorted for itself%.0w",
-			issueops.ErrValidation)
-	}
-
-	node, err := query.Parse(expression)
+	expression, limit, err := validateQueryRequest(in)
 	if err != nil {
-		return QueryPlan{}, invalidQueryExpression(err.Error())
+		return QueryPlan{}, err
 	}
-	result, err := query.NewEvaluator(time.Now()).Evaluate(node)
+	node, result, err := evaluateQueryExpression(expression)
 	if err != nil {
-		return QueryPlan{}, invalidQueryExpression(err.Error())
+		return QueryPlan{}, err
 	}
 
 	plan := QueryPlan{
@@ -111,17 +92,53 @@ func BuildQueryPlan(in issueops.QueryRequest) (QueryPlan, error) {
 		// Pushed down, the bound and the order are one decision the engine
 		// makes: the page is the first N in the requested order on every
 		// backend, and the probe row is genuinely last.
-		plan.Filter.Limit = limit
-		plan.Filter.SortBy = in.SortBy
-		plan.Filter.SortDesc = in.Reverse
+		applyQueryPushdown(&plan, limit, in.SortBy, in.Reverse)
 	}
 
-	// The default closed exclusion, applied only to an expression that has no
-	// opinion of its own about status (issueops/querier.go:29-41).
-	if !in.IncludeClosed && plan.Filter.Status == nil && !mentionsStatus(node) {
+	applyDefaultClosedExclusion(&plan, in.IncludeClosed, node)
+	return plan, nil
+}
+
+func validateQueryRequest(in issueops.QueryRequest) (string, int, error) {
+	expression := strings.TrimSpace(in.Expression)
+	if expression == "" {
+		return "", 0, invalidQueryExpression("an expression is required")
+	}
+	limit := LimitOr(in.Limit, DefaultQueryLimit)
+	if limit < 0 {
+		return "", 0, fmt.Errorf("invalid limit %d: a query limit must be zero or greater; 0 means unlimited%.0w", limit, issueops.ErrValidation)
+	}
+	if in.Offset < 0 {
+		return "", 0, fmt.Errorf("invalid offset %d: a query offset must be zero or greater%.0w", in.Offset, issueops.ErrValidation)
+	}
+	if in.Offset > 0 && in.SortBy != "" {
+		return "", 0, fmt.Errorf("invalid offset: an offset cannot be combined with a display order, because the order is applied to the rows the query bounded and each page would be sorted for itself%.0w", issueops.ErrValidation)
+	}
+	return expression, limit, nil
+}
+
+func evaluateQueryExpression(expression string) (query.Node, *query.QueryResult, error) {
+	node, err := query.Parse(expression)
+	if err != nil {
+		return nil, nil, invalidQueryExpression(err.Error())
+	}
+	result, err := query.NewEvaluator(time.Now()).Evaluate(node)
+	if err != nil {
+		return nil, nil, invalidQueryExpression(err.Error())
+	}
+	return node, result, nil
+}
+
+func applyQueryPushdown(plan *QueryPlan, limit int, sortBy string, reverse bool) {
+	plan.Filter.Limit = limit
+	plan.Filter.SortBy = sortBy
+	plan.Filter.SortDesc = reverse
+}
+
+func applyDefaultClosedExclusion(plan *QueryPlan, includeClosed bool, node query.Node) {
+	if !includeClosed && plan.Filter.Status == nil && !mentionsStatus(node) {
 		plan.Filter.ExcludeStatus = append(plan.Filter.ExcludeStatus, types.StatusClosed)
 	}
-	return plan, nil
 }
 
 // invalidQueryExpression is the one refusal shape a bad expression takes. The

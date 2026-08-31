@@ -97,12 +97,13 @@ func LintIssue(issue *types.Issue) error {
 		text = text + "\n" + issue.AcceptanceCriteria
 	}
 	err := ValidateTemplate(issue.IssueType, text)
-	if err == nil || issue.AcceptanceCriteria == "" {
+	return applyAcceptanceCriteria(err, issue.AcceptanceCriteria)
+}
+
+func applyAcceptanceCriteria(err error, acceptance string) error {
+	if acceptance == "" {
 		return err
 	}
-
-	// A non-empty AcceptanceCriteria field satisfies "Acceptance Criteria"
-	// or "Success Criteria" requirements even without the heading text.
 	templateErr, ok := err.(*TemplateError)
 	if !ok {
 		return err
@@ -111,7 +112,7 @@ func LintIssue(issue *types.Issue) error {
 	for _, m := range templateErr.Missing {
 		heading := strings.ToLower(strings.TrimPrefix(m.Heading, "## "))
 		if heading == "acceptance criteria" || heading == "success criteria" {
-			continue // satisfied by the dedicated field
+			continue
 		}
 		remaining = append(remaining, m)
 	}

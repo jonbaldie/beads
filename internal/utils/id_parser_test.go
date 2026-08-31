@@ -24,10 +24,15 @@ func newTestStore(t *testing.T) *dolt.DoltStore {
 	ctx := context.Background()
 	dbName := uniqueTestDBName(t)
 	store, err := dolt.New(ctx, &dolt.Config{
-		Path:            t.TempDir(),
-		Database:        dbName,
-		ServerPort:      utils.DoltTestServerPort,
-		CreateIfMissing: true, // test creates fresh database
+		Path:     t.TempDir(),
+		Database: dbName,
+		ServerOptions: dolt.ServerOptions{
+			ServerPort: utils.DoltTestServerPort,
+		},
+		RemoteOptions: dolt.RemoteOptions{
+			CreateIfMissing: true,
+		},
+		// test creates fresh database,
 	})
 	if err != nil {
 		t.Fatalf("Failed to create dolt store: %v", err)
@@ -56,58 +61,100 @@ func TestResolvePartialID(t *testing.T) {
 	// Create test issues with sequential IDs (current implementation)
 	// When hash IDs (bd-165) are implemented, these can be hash-based
 	issue1 := &types.Issue{
-		ID:        "bd-1",
-		Title:     "Test Issue 1",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "bd-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Test Issue 1",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	issue2 := &types.Issue{
-		ID:        "bd-2",
-		Title:     "Test Issue 2",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "bd-2",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Test Issue 2",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	issue3 := &types.Issue{
-		ID:        "bd-10",
-		Title:     "Test Issue 3",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "bd-10",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Test Issue 3",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	// Test hierarchical IDs - parent and child
 	parentIssue := &types.Issue{
-		ID:        "offlinebrew-3d0",
-		Title:     "Parent Epic",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeEpic,
+		IssueID: types.IssueID{
+			ID: "offlinebrew-3d0",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Parent Epic",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeEpic,
+		},
 	}
 	childIssue := &types.Issue{
-		ID:        "offlinebrew-3d0.1",
-		Title:     "Child Task",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "offlinebrew-3d0.1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Child Task",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	// Test substring matching rejection (GH#4234)
 	// This issue's hash "j0kt8" contains "kt8" as substring
 	substringIssue := &types.Issue{
-		ID:        "hq-wisp-j0kt8",
-		Title:     "Inspect resource conditions",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "hq-wisp-j0kt8",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Inspect resource conditions",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	// Test leading-prefix abbreviation still resolves (documented UX, e.g.
 	// "a3f8" -> "a3f8e9..."), not just exact hash matches.
 	prefixIssue := &types.Issue{
-		ID:        "bd-a3f8e9",
-		Title:     "Prefix resolution target",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "bd-a3f8e9",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Prefix resolution target",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	if err := store.CreateIssue(ctx, issue1, "test"); err != nil {
@@ -248,18 +295,30 @@ func TestResolvePartialIDs(t *testing.T) {
 
 	// Create test issues
 	issue1 := &types.Issue{
-		ID:        "bd-1",
-		Title:     "Test Issue 1",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "bd-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Test Issue 1",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	issue2 := &types.Issue{
-		ID:        "bd-2",
-		Title:     "Test Issue 2",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "bd-2",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Test Issue 2",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	if err := store.CreateIssue(ctx, issue1, "test"); err != nil {
@@ -332,11 +391,17 @@ func TestResolvePartialID_NoConfig(t *testing.T) {
 
 	// Create test issue without setting config (test default prefix)
 	issue1 := &types.Issue{
-		ID:        "bd-1",
-		Title:     "Test Issue",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "bd-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Test Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	if err := store.CreateIssue(ctx, issue1, "test"); err != nil {
@@ -675,25 +740,43 @@ func TestResolvePartialID_CrossPrefix(t *testing.T) {
 
 	// Create issues with different prefixes (simulating multi-repo hydration)
 	hqIssue := &types.Issue{
-		ID:        "hq-abc12",
-		Title:     "HQ Issue",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "hq-abc12",
+		},
+		IssueContent: types.IssueContent{
+			Title: "HQ Issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	aapIssue := &types.Issue{
-		ID:        "aap-4ar",
-		Title:     "AAP Issue from different rig",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "aap-4ar",
+		},
+		IssueContent: types.IssueContent{
+			Title: "AAP Issue from different rig",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	crIssue := &types.Issue{
-		ID:        "cr-xyz99",
-		Title:     "CR Issue from another rig",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "cr-xyz99",
+		},
+		IssueContent: types.IssueContent{
+			Title: "CR Issue from another rig",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	if err := store.CreateIssue(ctx, hqIssue, "test"); err != nil {
@@ -774,25 +857,43 @@ func TestResolvePartialID_AllowedPrefixes(t *testing.T) {
 
 	// Create issues with multi-hyphen prefixes
 	hackerNews := &types.Issue{
-		ID:        "hacker-news-ko4",
-		Title:     "Hacker News item",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "hacker-news-ko4",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Hacker News item",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	pyToolkit := &types.Issue{
-		ID:        "me-py-toolkit-a1b",
-		Title:     "Python toolkit issue",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "me-py-toolkit-a1b",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Python toolkit issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	hqCvIssue := &types.Issue{
-		ID:        "hq-cv-7x2",
-		Title:     "HQ CV issue",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "hq-cv-7x2",
+		},
+		IssueContent: types.IssueContent{
+			Title: "HQ CV issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	if err := store.CreateIssue(ctx, hackerNews, "test"); err != nil {
@@ -871,12 +972,20 @@ func TestResolvePartialID_Wisp(t *testing.T) {
 
 	// Create a wisp (ephemeral issue) with a wisp-prefixed ID
 	wisp := &types.Issue{
-		ID:        "bd-wisp-t3st",
-		Title:     "Test wisp",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: "bd-wisp-t3st",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Test wisp",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, wisp, "test"); err != nil {
 		t.Fatal(err)
@@ -935,19 +1044,31 @@ func TestResolvePartialID_TitleFalsePositive(t *testing.T) {
 
 	// Issue whose title contains "abc12" but ID does NOT
 	decoy := &types.Issue{
-		ID:        "bd-xyz99",
-		Title:     "See abc12 for reference",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "bd-xyz99",
+		},
+		IssueContent: types.IssueContent{
+			Title: "See abc12 for reference",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 	// Issue whose ID actually contains "abc12"
 	target := &types.Issue{
-		ID:        "bd-abc12",
-		Title:     "Real issue",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "bd-abc12",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Real issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
 	}
 
 	if err := store.CreateIssue(ctx, decoy, "test"); err != nil {

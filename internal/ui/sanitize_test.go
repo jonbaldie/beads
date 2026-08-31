@@ -93,6 +93,56 @@ func TestSanitizeForTerminal(t *testing.T) {
 			input: "\x1b[31m\x1b[0m",
 			want:  "",
 		},
+		{
+			name:  "strips trailing escape",
+			input: "safe\x1b",
+			want:  "safe",
+		},
+		{
+			name:  "strips non-CSI escape pair",
+			input: "a\x1bXb",
+			want:  "ab",
+		},
+		{
+			name:  "accepts CSI parameter and final byte lower bounds",
+			input: "\x1b[ @visible",
+			want:  "visible",
+		},
+		{
+			name:  "accepts CSI parameter and final byte upper bounds",
+			input: "\x1b[?~visible",
+			want:  "visible",
+		},
+		{
+			name:  "strips unterminated OSC payload",
+			input: "visible\x1b]hidden",
+			want:  "visible",
+		},
+		{
+			name:  "does not mistake embedded escape for OSC terminator",
+			input: "visible\x1b]hidden\x1bXstill hidden",
+			want:  "visible",
+		},
+		{
+			name:  "strips encoded C1 boundary controls",
+			input: "a\u0080b\u009fc",
+			want:  "abc",
+		},
+		{
+			name:  "preserves first rune above C1 range",
+			input: "a\u00a0b",
+			want:  "a\u00a0b",
+		},
+		{
+			name:  "preserves valid replacement rune",
+			input: "a\ufffdb",
+			want:  "a\ufffdb",
+		},
+		{
+			name:  "strips invalid UTF-8 bytes",
+			input: string([]byte{'a', 0xff, 'b'}),
+			want:  "ab",
+		},
 	}
 
 	for _, tt := range tests {

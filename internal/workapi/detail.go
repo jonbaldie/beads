@@ -116,62 +116,72 @@ func BuildIssueDetails(ctx context.Context, src DetailSource, issue *types.Issue
 	id := issue.ID
 	details := types.NewIssueDetails(*issue)
 
+	loadIssueDetailsBasics(ctx, src, details, id, isWisp)
+	if err := loadIssueDetailsRows(ctx, src, details, id, isWisp, opts); err != nil {
+		return nil, err
+	}
+	applyIssueDetailsOptions(details, opts)
+	return details, nil
+}
+
+func loadIssueDetailsBasics(ctx context.Context, src DetailSource, details *types.IssueDetails, id string, isWisp bool) {
 	details.Labels, _ = src.Labels(ctx, id, isWisp)
 	details.Dependencies, _ = src.Dependencies(ctx, id, isWisp)
-
-	// Aggregate counts - O(1) queries, no row materialization.
 	dependentCount, _ := src.CountDependents(ctx, id, isWisp)
 	details.DependentCount = &dependentCount
 	dependencyCount, _ := src.CountDependencies(ctx, id, isWisp)
 	details.DependencyCount = &dependencyCount
 	commentCount, _ := src.CountComments(ctx, id, isWisp)
 	details.CommentCount = &commentCount
+}
 
+func loadIssueDetailsRows(ctx context.Context, src DetailSource, details *types.IssueDetails, id string, isWisp bool, opts DetailOptions) error {
 	if opts.IncludeDependents {
 		dependents, err := collectDependents(ctx, src, id, isWisp)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		details.Dependents = dependents
 		applyEpicProgress(details, dependents)
 	}
+	if !opts.IncludeComments {
+		return nil
+	}
+	comments, err := collectComments(ctx, src, id, isWisp)
+	if err != nil {
+		return err
+	}
+	details.Comments = comments
+	return nil
+}
 
-	if opts.IncludeComments {
-		comments, err := collectComments(ctx, src, id, isWisp)
-		if err != nil {
-			return nil, err
-		}
-		details.Comments = comments
-	} else if commentCount > 0 {
-		// ga-clgh: comment_count alone announces content exists without
-		// saying the representation is partial. Flag it explicitly so a
-		// caller reading only `.comments` doesn't read absence as "none".
+func applyIssueDetailsOptions(details *types.IssueDetails, opts DetailOptions) {
+	if !opts.IncludeComments && details.CommentCount != nil && *details.CommentCount > 0 {
 		omitted := true
 		details.CommentsOmitted = &omitted
 	}
-
 	for _, dep := range details.Dependencies {
-		if dep.DependencyType == types.DepParentChild {
+		if dep != nil && dep.DependencyType == types.DepParentChild {
 			parentID := dep.ID
 			details.Parent = &parentID
 			break
 		}
 	}
-
-	// After the Parent scan, which reads DependencyType and ID off the full rows.
-	// Builds a new slice: the source owns the one it returned and may cache it.
 	if opts.BriefDeps && details.Dependencies != nil {
-		brief := make([]*types.IssueWithDependencyMetadata, 0, len(details.Dependencies))
-		for _, dep := range details.Dependencies {
-			if dep == nil {
-				brief = append(brief, nil)
-				continue
-			}
-			brief = append(brief, shallowDep(dep))
-		}
-		details.Dependencies = brief
+		details.Dependencies = briefDependencies(details.Dependencies)
 	}
-	return details, nil
+}
+
+func briefDependencies(dependencies []*types.IssueWithDependencyMetadata) []*types.IssueWithDependencyMetadata {
+	brief := make([]*types.IssueWithDependencyMetadata, 0, len(dependencies))
+	for _, dep := range dependencies {
+		if dep == nil {
+			brief = append(brief, nil)
+			continue
+		}
+		brief = append(brief, shallowDep(dep))
+	}
+	return brief
 }
 
 // shallowDep keeps the identity-and-shape fields callers consume and drops the
@@ -179,11 +189,17 @@ func BuildIssueDetails(ctx context.Context, src DetailSource, issue *types.Issue
 func shallowDep(item *types.IssueWithDependencyMetadata) *types.IssueWithDependencyMetadata {
 	return &types.IssueWithDependencyMetadata{
 		Issue: types.Issue{
-			ID:        item.Issue.ID,
-			Status:    item.Issue.Status,
-			IssueType: item.Issue.IssueType,
-			Priority:  item.Issue.Priority,
-			Title:     item.Issue.Title,
+			IssueID: types.IssueID{
+				ID: item.Issue.ID,
+			},
+			IssueContent: types.IssueContent{
+				Title: item.Issue.Title,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    item.Issue.Status,
+				IssueType: item.Issue.IssueType,
+				Priority:  item.Issue.Priority,
+			},
 		},
 		DependencyType: item.DependencyType,
 	}
@@ -375,65 +391,4 @@ func NewUOWDetailSource(uw UnitOfWork) DetailSource {
 
 func newUseCaseDetailSource(issues detailIssueReader, labels detailLabelReader, deps detailDepReader, comments detailCommentReader) DetailSource {
 	return useCaseDetailSource{issues: issues, labels: labels, deps: deps, comments: comments}
-}
-
-func (u useCaseDetailSource) GetIssue(ctx context.Context, id string) (*types.Issue, error) {
-	return u.issues.GetIssue(ctx, id)
-}
-
-func (u useCaseDetailSource) GetWisp(ctx context.Context, id string) (*types.Issue, error) {
-	return u.issues.GetWisp(ctx, id)
-}
-
-func (u useCaseDetailSource) Labels(ctx context.Context, id string, isWisp bool) ([]string, error) {
-	if isWisp {
-		return u.labels.GetWispLabels(ctx, id)
-	}
-	return u.labels.GetLabels(ctx, id)
-}
-
-func (u useCaseDetailSource) Dependencies(ctx context.Context, id string, isWisp bool) ([]*types.IssueWithDependencyMetadata, error) {
-	filter := domain.DepListFilter{Direction: domain.DepDirectionOut}
-	if isWisp {
-		return u.deps.ListWispWithIssueMetadata(ctx, id, filter)
-	}
-	return u.deps.ListWithIssueMetadata(ctx, id, filter)
-}
-
-func (u useCaseDetailSource) CountDependencies(ctx context.Context, id string, isWisp bool) (int64, error) {
-	return u.countDeps(ctx, id, isWisp, domain.DepDirectionOut)
-}
-
-func (u useCaseDetailSource) CountDependents(ctx context.Context, id string, isWisp bool) (int64, error) {
-	return u.countDeps(ctx, id, isWisp, domain.DepDirectionIn)
-}
-
-func (u useCaseDetailSource) countDeps(ctx context.Context, id string, isWisp bool, dir domain.DepDirection) (int64, error) {
-	filter := domain.DepListFilter{Direction: dir}
-	if isWisp {
-		return u.deps.CountByWispID(ctx, id, filter)
-	}
-	return u.deps.CountByIssueID(ctx, id, filter)
-}
-
-func (u useCaseDetailSource) CountComments(ctx context.Context, id string, isWisp bool) (int64, error) {
-	if isWisp {
-		return u.comments.CountCommentsForWisp(ctx, id)
-	}
-	return u.comments.CountCommentsForIssue(ctx, id)
-}
-
-func (u useCaseDetailSource) IterDependents(ctx context.Context, id string, isWisp bool) (storage.Iter[types.IssueWithDependencyMetadata], error) {
-	filter := domain.DepListFilter{Direction: domain.DepDirectionIn}
-	if isWisp {
-		return u.deps.IterWispWithIssueMetadata(ctx, id, filter)
-	}
-	return u.deps.IterWithIssueMetadata(ctx, id, filter)
-}
-
-func (u useCaseDetailSource) IterComments(ctx context.Context, id string, isWisp bool) (storage.Iter[types.Comment], error) {
-	if isWisp {
-		return u.comments.IterCommentsForWisp(ctx, id)
-	}
-	return u.comments.IterCommentsForIssue(ctx, id)
 }

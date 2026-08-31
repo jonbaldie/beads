@@ -16,16 +16,21 @@ import (
 )
 
 func main() {
+	runMain(os.Args, os.Exit)
+}
+
+func runMain(args []string, exit func(int)) {
 	root := "."
-	if len(os.Args) > 1 {
-		root = os.Args[1]
+	if len(args) > 1 {
+		root = args[1]
 	}
-	if len(os.Args) > 2 {
+	if len(args) > 2 {
 		fmt.Fprintln(os.Stderr, "usage: docsmint [repo-root]")
-		os.Exit(2)
+		exit(2)
+		return
 	}
 	if err := run(root); err != nil {
 		fmt.Fprintln(os.Stderr, "docsmint:", err)
-		os.Exit(1)
+		exit(1)
 	}
 }

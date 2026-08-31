@@ -114,11 +114,11 @@ func TestFilterSweepCandidatesRechecksClosedAtCutoff(t *testing.T) {
 	recentClosedAt := cutoff.Add(time.Second)
 
 	candidates := []*types.Issue{
-		{ID: "old-closed", Status: types.StatusClosed, ClosedAt: &oldClosedAt},
-		{ID: "recent-closed", Status: types.StatusClosed, ClosedAt: &recentClosedAt},
-		{ID: "missing-closed-at", Status: types.StatusClosed},
-		{ID: "open-with-old-closed-at", Status: types.StatusOpen, ClosedAt: &oldClosedAt},
-		{ID: "pinned-old", Status: types.StatusClosed, ClosedAt: &oldClosedAt, Pinned: true},
+		{IssueID: types.IssueID{ID: "old-closed"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}, IssueTimes: types.IssueTimes{ClosedAt: &oldClosedAt}},
+		{IssueID: types.IssueID{ID: "recent-closed"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}, IssueTimes: types.IssueTimes{ClosedAt: &recentClosedAt}},
+		{IssueID: types.IssueID{ID: "missing-closed-at"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}},
+		{IssueID: types.IssueID{ID: "open-with-old-closed-at"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}, IssueTimes: types.IssueTimes{ClosedAt: &oldClosedAt}},
+		{IssueID: types.IssueID{ID: "pinned-old"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}, IssueTimes: types.IssueTimes{ClosedAt: &oldClosedAt}, IssueWisp: types.IssueWisp{Pinned: true}},
 		nil,
 	}
 
@@ -146,8 +146,8 @@ func TestFilterSweepCandidatesRechecksClosedAtCutoff(t *testing.T) {
 func TestFilterSweepCandidatesWithoutCutoffStillRequiresClosedAt(t *testing.T) {
 	closedAt := time.Date(2026, 4, 26, 18, 30, 18, 0, time.UTC)
 	candidates := []*types.Issue{
-		{ID: "closed", Status: types.StatusClosed, ClosedAt: &closedAt},
-		{ID: "closed-missing-time", Status: types.StatusClosed},
+		{IssueID: types.IssueID{ID: "closed"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}, IssueTimes: types.IssueTimes{ClosedAt: &closedAt}},
+		{IssueID: types.IssueID{ID: "closed-missing-time"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}},
 	}
 
 	filtered, skips := FilterSweepCandidates(candidates, "", nil)
@@ -169,9 +169,9 @@ func TestFilterSweepCandidatesWithoutCutoffStillRequiresClosedAt(t *testing.T) {
 func TestFilterSweepCandidatesNarrowsByPatternBeforeProtecting(t *testing.T) {
 	closedAt := time.Date(2026, 4, 26, 18, 30, 18, 0, time.UTC)
 	candidates := []*types.Issue{
-		{ID: "keep-1", Status: types.StatusClosed, ClosedAt: &closedAt},
-		{ID: "keep-pinned", Status: types.StatusClosed, ClosedAt: &closedAt, Pinned: true},
-		{ID: "other-pinned", Status: types.StatusClosed, ClosedAt: &closedAt, Pinned: true},
+		{IssueID: types.IssueID{ID: "keep-1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}, IssueTimes: types.IssueTimes{ClosedAt: &closedAt}},
+		{IssueID: types.IssueID{ID: "keep-pinned"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}, IssueTimes: types.IssueTimes{ClosedAt: &closedAt}, IssueWisp: types.IssueWisp{Pinned: true}},
+		{IssueID: types.IssueID{ID: "other-pinned"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}, IssueTimes: types.IssueTimes{ClosedAt: &closedAt}, IssueWisp: types.IssueWisp{Pinned: true}},
 	}
 
 	filtered, skips := FilterSweepCandidates(candidates, "keep-*", nil)
@@ -248,10 +248,10 @@ func TestPartitionSweepReferencedBoundsTheSample(t *testing.T) {
 	referenced := make(map[string]bool, protected)
 	for i := 0; i < protected; i++ {
 		id := fmt.Sprintf("be-ref-%03d", i)
-		candidates = append(candidates, &types.Issue{ID: id})
+		candidates = append(candidates, &types.Issue{IssueID: types.IssueID{ID: id}})
 		referenced[id] = true
 	}
-	candidates = append(candidates, &types.Issue{ID: "be-free"})
+	candidates = append(candidates, &types.Issue{IssueID: types.IssueID{ID: "be-free"}})
 
 	kept, count, sample := PartitionSweepReferenced(candidates, referenced)
 

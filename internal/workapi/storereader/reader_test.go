@@ -59,7 +59,7 @@ func (s *fakeReaderStore) GetInfraTypes(context.Context) map[string]bool    { re
 func readerFixture(n int) []*types.IssueWithCounts {
 	out := make([]*types.IssueWithCounts, 0, n)
 	for i := 1; i <= n; i++ {
-		out = append(out, &types.IssueWithCounts{Issue: &types.Issue{ID: "bd-" + string(rune('0'+i))}})
+		out = append(out, &types.IssueWithCounts{Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-" + string(rune('0'+i))}}})
 	}
 	return out
 }
@@ -180,7 +180,7 @@ func TestStoreReaderListOverFetchesForAPushdownSort(t *testing.T) {
 	} {
 		t.Run(tc.sortBy, func(t *testing.T) {
 			rd, store := storeReaderFor(t, readerFixture(5))
-			page, err := rd.List(context.Background(), issueops.ListRequest{SortBy: tc.sortBy, Limit: &limit})
+			page, err := rd.List(context.Background(), issueops.ListRequest{ListPageOptions: issueops.ListPageOptions{SortBy: tc.sortBy, Limit: &limit}})
 			if err != nil {
 				t.Fatalf("List: %v", err)
 			}
@@ -216,7 +216,7 @@ func TestStoreReaderReachesPastTheOffset(t *testing.T) {
 			return rd.Ready(context.Background(), issueops.ReadyRequest{Sort: "priority", Limit: &limit, Offset: 1})
 		}, func(s *fakeReaderStore) (int, int) { return s.readyFilters[0].Limit, s.readyFilters[0].Offset }},
 		{"List", func(rd issueops.Reader) (issueops.IssuePage, error) {
-			return rd.List(context.Background(), issueops.ListRequest{SortBy: "created", Limit: &limit, Offset: 1})
+			return rd.List(context.Background(), issueops.ListRequest{ListPageOptions: issueops.ListPageOptions{SortBy: "created", Limit: &limit, Offset: 1}})
 		}, func(s *fakeReaderStore) (int, int) { return s.searchFilters[0].Limit, s.searchFilters[0].Offset }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -247,7 +247,7 @@ func TestStoreReaderReachesPastTheOffset(t *testing.T) {
 func TestStoreReaderOffsetPastTheEndIsAnEmptyPage(t *testing.T) {
 	rd, _ := storeReaderFor(t, readerFixture(2))
 
-	page, err := rd.List(context.Background(), issueops.ListRequest{SortBy: "created", Offset: 5})
+	page, err := rd.List(context.Background(), issueops.ListRequest{ListPageOptions: issueops.ListPageOptions{SortBy: "created", Offset: 5}})
 	if err != nil {
 		t.Fatalf("List at Offset 5 over two rows: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestStoreReaderServesOffsetZero(t *testing.T) {
 	if _, err := rd.Ready(context.Background(), issueops.ReadyRequest{Sort: "priority", Limit: &limit, Offset: 0}); err != nil {
 		t.Fatalf("Ready at Offset 0: %v", err)
 	}
-	if _, err := rd.List(context.Background(), issueops.ListRequest{SortBy: "created", Limit: &limit, Offset: 0}); err != nil {
+	if _, err := rd.List(context.Background(), issueops.ListRequest{ListPageOptions: issueops.ListPageOptions{SortBy: "created", Limit: &limit, Offset: 0}}); err != nil {
 		t.Fatalf("List at Offset 0: %v", err)
 	}
 	if len(store.readyFilters) != 1 || len(store.searchFilters) != 1 {

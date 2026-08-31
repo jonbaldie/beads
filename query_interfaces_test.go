@@ -8,6 +8,7 @@ import (
 	"github.com/jonbaldie/beads"
 	"github.com/jonbaldie/beads/internal/storage"
 	"github.com/jonbaldie/beads/internal/storage/dolt"
+	"github.com/jonbaldie/beads/internal/types"
 )
 
 // Compile-time proof that the concrete Dolt store satisfies each narrow public
@@ -38,7 +39,7 @@ func TestQueryInterfacesAgainstRealDolt(t *testing.T) {
 	}
 
 	mk := func(id string) {
-		iss := &beads.Issue{ID: id, Title: id, Status: beads.StatusOpen, Priority: 2, IssueType: beads.TypeTask}
+		iss := &beads.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{Status: beads.StatusOpen, Priority: 2, IssueType: beads.TypeTask}}
 		if err := store.CreateIssue(ctx, iss, "tester"); err != nil {
 			t.Fatalf("CreateIssue %s: %v", id, err)
 		}

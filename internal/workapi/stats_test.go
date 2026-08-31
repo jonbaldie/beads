@@ -77,11 +77,11 @@ func TestFoldStatsAssigneeSummary(t *testing.T) {
 		{
 			name: "counts every status and ready work",
 			issues: []*types.Issue{
-				{Status: types.StatusOpen},
-				{Status: types.StatusInProgress},
-				{Status: types.StatusBlocked},
-				{Status: types.StatusDeferred},
-				{Status: types.StatusClosed},
+				{IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
+				{IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress}},
+				{IssueWorkflow: types.IssueWorkflow{Status: types.StatusBlocked}},
+				{IssueWorkflow: types.IssueWorkflow{Status: types.StatusDeferred}},
+				{IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}},
 			},
 			ready: 2, total: 5, open: 1, inProgress: 1, blocked: 1, deferred: 1, closed: 1,
 		},
@@ -93,12 +93,12 @@ func TestFoldStatsAssigneeSummary(t *testing.T) {
 			// A status outside the five the fold knows lands in the total and
 			// in no bucket, exactly as the workspace-wide answer's tallies do.
 			name:   "an unknown status is counted once and bucketed nowhere",
-			issues: []*types.Issue{{Status: types.Status("triage")}, {Status: types.StatusOpen}},
+			issues: []*types.Issue{{IssueWorkflow: types.IssueWorkflow{Status: types.Status("triage")}}, {IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}},
 			ready:  1, total: 2, open: 1,
 		},
 		{
 			name:   "a nil row is counted nowhere at all",
-			issues: []*types.Issue{nil, {Status: types.StatusOpen}},
+			issues: []*types.Issue{nil, {IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}},
 			ready:  0, total: 1, open: 1,
 		},
 	}

@@ -41,28 +41,32 @@ func LimitOr(limit *int, fallback int) int {
 // own to shape, and running it through here would change it.
 func BuildReadyFilter(in issueops.ReadyRequest) (types.WorkFilter, error) {
 	filter := types.WorkFilter{
-		// Open only, not in_progress - the same set `bd list --ready` shows.
-		Status: types.StatusOpen,
-		Type:   utils.NormalizeIssueType(in.IssueType),
-		Limit:  LimitOr(in.Limit, DefaultReadyLimit),
-		// Carried for the callers that consume this filter as a VALUE and run
-		// their own query (cmd/bd's proxied `bd ready`), where the seam beneath
-		// them renders it. Both implementations of issueops.Reader take it back
-		// off and skip in the shared page epilogue; see BuildListFilter and
-		// FinishPageAt.
-		Offset:           in.Offset,
-		Unassigned:       in.Unassigned,
-		SortPolicy:       types.SortPolicy(in.Sort),
-		Labels:           utils.NormalizeLabels(in.Labels),
-		LabelsAny:        utils.NormalizeLabels(in.LabelsAny),
-		ExcludeLabels:    utils.NormalizeLabels(in.ExcludeLabels),
-		LabelPattern:     in.LabelPattern,
-		LabelRegex:       in.LabelRegex,
-		IncludeDeferred:  in.IncludeDeferred,
-		IncludeEphemeral: in.IncludeEphemeral,
-		ExcludeTypes:     normalizeExcludeTypes(in.ExcludeTypes),
-		HasMetadataKey:   in.HasMetadataKey,
-		Lite:             in.Brief,
+		WorkFilterCore: types.WorkFilterCore{
+			// Open only, not in_progress - the same set `bd list --ready` shows.
+			Status:        types.StatusOpen,
+			Type:          utils.NormalizeIssueType(in.IssueType),
+			Limit:         LimitOr(in.Limit, DefaultReadyLimit),
+			Unassigned:    in.Unassigned,
+			SortPolicy:    types.SortPolicy(in.Sort),
+			Labels:        utils.NormalizeLabels(in.Labels),
+			LabelsAny:     utils.NormalizeLabels(in.LabelsAny),
+			ExcludeLabels: utils.NormalizeLabels(in.ExcludeLabels),
+			LabelPattern:  in.LabelPattern,
+			LabelRegex:    in.LabelRegex,
+		},
+		WorkFilterExtra: types.WorkFilterExtra{
+			// Carried for the callers that consume this filter as a VALUE and run
+			// their own query (cmd/bd's proxied `bd ready`), where the seam beneath
+			// them renders it. Both implementations of issueops.Reader take it back
+			// off and skip in the shared page epilogue; see BuildListFilter and
+			// FinishPageAt.
+			Offset:           in.Offset,
+			IncludeDeferred:  in.IncludeDeferred,
+			IncludeEphemeral: in.IncludeEphemeral,
+			ExcludeTypes:     normalizeExcludeTypes(in.ExcludeTypes),
+			HasMetadataKey:   in.HasMetadataKey,
+			Lite:             in.Brief,
+		},
 	}
 
 	if in.Priority != nil {

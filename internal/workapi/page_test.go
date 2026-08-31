@@ -11,9 +11,15 @@ func pageRows(ids ...string) []*types.IssueWithCounts {
 	out := make([]*types.IssueWithCounts, 0, len(ids))
 	for i, id := range ids {
 		out = append(out, &types.IssueWithCounts{Issue: &types.Issue{
-			ID:        id,
-			Priority:  i,
-			CreatedAt: time.Unix(int64(1000-i), 0),
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority: i,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: time.Unix(int64(1000-i), 0),
+			},
 		}})
 	}
 	return out
@@ -127,7 +133,7 @@ func TestFinishPageSortsBothRowShapes(t *testing.T) {
 	counted := pageRows("b", "a", "c")
 	gotCounted, _ := FinishPage(counted, "id", false, 0, false)
 
-	bare := []*types.Issue{{ID: "b"}, {ID: "a"}, {ID: "c"}}
+	bare := []*types.Issue{{IssueID: types.IssueID{ID: "b"}}, {IssueID: types.IssueID{ID: "a"}}, {IssueID: types.IssueID{ID: "c"}}}
 	gotBare, _ := FinishPage(bare, "id", false, 0, false)
 
 	if !equalStrings(pageIDs(gotCounted), pageIDs(gotBare)) {
@@ -139,7 +145,7 @@ func TestFinishPageSortsBothRowShapes(t *testing.T) {
 // TestFinishPageToleratesAHollowRow guards the one nil shape storage can hand
 // back: a counted row whose issue never loaded. Ordering must not panic on it.
 func TestFinishPageToleratesAHollowRow(t *testing.T) {
-	rows := []*types.IssueWithCounts{{Issue: &types.Issue{ID: "b"}}, {}, nil}
+	rows := []*types.IssueWithCounts{{Issue: &types.Issue{IssueID: types.IssueID{ID: "b"}}}, {}, nil}
 	got, _ := FinishPage(rows, "id", false, 0, false)
 	if len(got) != 3 {
 		t.Fatalf("len = %d, want 3", len(got))

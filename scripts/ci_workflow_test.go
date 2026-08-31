@@ -85,8 +85,8 @@ func TestPRCIGateRequiresMessgoAndMutago(t *testing.T) {
 	if messgoStep.Run != "./scripts/ci/messgo.sh" {
 		t.Errorf("messgo command = %q", messgoStep.Run)
 	}
-	if messgoStep.Env["MESSGO_DIFF_BASE"] != "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}" {
-		t.Errorf("messgo base env = %q", messgoStep.Env["MESSGO_DIFF_BASE"])
+	if _, narrowed := messgoStep.Env["MESSGO_DIFF_BASE"]; narrowed {
+		t.Errorf("messgo must scan all production Go, env = %v", messgoStep.Env)
 	}
 
 	mutago := workflow.job(t, "mutago")

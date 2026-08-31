@@ -19,22 +19,32 @@ func TestIssueValidation(t *testing.T) {
 		{
 			name: "valid issue",
 			issue: Issue{
-				ID:          "test-1",
-				Title:       "Valid issue",
-				Description: "Description",
-				Status:      StatusOpen,
-				Priority:    2,
-				IssueType:   TypeFeature,
+				IssueID: IssueID{
+					ID: "test-1",
+				},
+				IssueContent: IssueContent{
+					Title:       "Valid issue",
+					Description: "Description",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:    StatusOpen,
+					Priority:  2,
+					IssueType: TypeFeature,
+				},
 			},
 			wantErr: false,
 		},
 		{
 			name: "missing title",
 			issue: Issue{
-				ID:        "test-1",
-				Status:    StatusOpen,
-				Priority:  2,
-				IssueType: TypeFeature,
+				IssueID: IssueID{
+					ID: "test-1",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:    StatusOpen,
+					Priority:  2,
+					IssueType: TypeFeature,
+				},
 			},
 			wantErr: true,
 			errMsg:  "title is required",
@@ -42,11 +52,18 @@ func TestIssueValidation(t *testing.T) {
 		{
 			name: "title too long",
 			issue: Issue{
-				ID:        "test-1",
-				Title:     string(make([]byte, 501)), // 501 bytes of NUL
-				Status:    StatusOpen,
-				Priority:  2,
-				IssueType: TypeFeature,
+				IssueID: IssueID{
+					ID: "test-1",
+				},
+				IssueContent: IssueContent{
+					Title: string(make([]byte, 501)),
+				},
+				IssueWorkflow: IssueWorkflow{
+					// 501 bytes of NUL
+					Status:    StatusOpen,
+					Priority:  2,
+					IssueType: TypeFeature,
+				},
 			},
 			wantErr: true,
 			errMsg:  "title must be 500 bytes or less",
@@ -54,11 +71,17 @@ func TestIssueValidation(t *testing.T) {
 		{
 			name: "invalid priority too low",
 			issue: Issue{
-				ID:        "test-1",
-				Title:     "Test",
-				Status:    StatusOpen,
-				Priority:  -1,
-				IssueType: TypeFeature,
+				IssueID: IssueID{
+					ID: "test-1",
+				},
+				IssueContent: IssueContent{
+					Title: "Test",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:    StatusOpen,
+					Priority:  -1,
+					IssueType: TypeFeature,
+				},
 			},
 			wantErr: true,
 			errMsg:  "priority must be between 0 and 4",
@@ -66,11 +89,17 @@ func TestIssueValidation(t *testing.T) {
 		{
 			name: "invalid priority too high",
 			issue: Issue{
-				ID:        "test-1",
-				Title:     "Test",
-				Status:    StatusOpen,
-				Priority:  5,
-				IssueType: TypeFeature,
+				IssueID: IssueID{
+					ID: "test-1",
+				},
+				IssueContent: IssueContent{
+					Title: "Test",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:    StatusOpen,
+					Priority:  5,
+					IssueType: TypeFeature,
+				},
 			},
 			wantErr: true,
 			errMsg:  "priority must be between 0 and 4",
@@ -78,11 +107,17 @@ func TestIssueValidation(t *testing.T) {
 		{
 			name: "invalid status",
 			issue: Issue{
-				ID:        "test-1",
-				Title:     "Test",
-				Status:    Status("invalid"),
-				Priority:  2,
-				IssueType: TypeFeature,
+				IssueID: IssueID{
+					ID: "test-1",
+				},
+				IssueContent: IssueContent{
+					Title: "Test",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:    Status("invalid"),
+					Priority:  2,
+					IssueType: TypeFeature,
+				},
 			},
 			wantErr: true,
 			errMsg:  "invalid status",
@@ -90,11 +125,17 @@ func TestIssueValidation(t *testing.T) {
 		{
 			name: "invalid issue type",
 			issue: Issue{
-				ID:        "test-1",
-				Title:     "Test",
-				Status:    StatusOpen,
-				Priority:  2,
-				IssueType: IssueType("invalid"),
+				IssueID: IssueID{
+					ID: "test-1",
+				},
+				IssueContent: IssueContent{
+					Title: "Test",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:    StatusOpen,
+					Priority:  2,
+					IssueType: IssueType("invalid"),
+				},
 			},
 			wantErr: true,
 			errMsg:  "invalid issue type",
@@ -102,12 +143,18 @@ func TestIssueValidation(t *testing.T) {
 		{
 			name: "negative estimated minutes",
 			issue: Issue{
-				ID:               "test-1",
-				Title:            "Test",
-				Status:           StatusOpen,
-				Priority:         2,
-				IssueType:        TypeFeature,
-				EstimatedMinutes: intPtr(-10),
+				IssueID: IssueID{
+					ID: "test-1",
+				},
+				IssueContent: IssueContent{
+					Title: "Test",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:           StatusOpen,
+					Priority:         2,
+					IssueType:        TypeFeature,
+					EstimatedMinutes: intPtr(-10),
+				},
 			},
 			wantErr: true,
 			errMsg:  "estimated_minutes cannot be negative",
@@ -115,24 +162,38 @@ func TestIssueValidation(t *testing.T) {
 		{
 			name: "valid estimated minutes",
 			issue: Issue{
-				ID:               "test-1",
-				Title:            "Test",
-				Status:           StatusOpen,
-				Priority:         2,
-				IssueType:        TypeFeature,
-				EstimatedMinutes: intPtr(60),
+				IssueID: IssueID{
+					ID: "test-1",
+				},
+				IssueContent: IssueContent{
+					Title: "Test",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:           StatusOpen,
+					Priority:         2,
+					IssueType:        TypeFeature,
+					EstimatedMinutes: intPtr(60),
+				},
 			},
 			wantErr: false,
 		},
 		{
 			name: "closed issue without closed_at",
 			issue: Issue{
-				ID:        "test-1",
-				Title:     "Test",
-				Status:    StatusClosed,
-				Priority:  2,
-				IssueType: TypeFeature,
-				ClosedAt:  nil,
+				IssueID: IssueID{
+					ID: "test-1",
+				},
+				IssueContent: IssueContent{
+					Title: "Test",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:    StatusClosed,
+					Priority:  2,
+					IssueType: TypeFeature,
+				},
+				IssueTimes: IssueTimes{
+					ClosedAt: nil,
+				},
 			},
 			wantErr: true,
 			errMsg:  "closed issues must have closed_at timestamp",
@@ -140,12 +201,20 @@ func TestIssueValidation(t *testing.T) {
 		{
 			name: "open issue with closed_at",
 			issue: Issue{
-				ID:        "test-1",
-				Title:     "Test",
-				Status:    StatusOpen,
-				Priority:  2,
-				IssueType: TypeFeature,
-				ClosedAt:  timePtr(time.Now()),
+				IssueID: IssueID{
+					ID: "test-1",
+				},
+				IssueContent: IssueContent{
+					Title: "Test",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:    StatusOpen,
+					Priority:  2,
+					IssueType: TypeFeature,
+				},
+				IssueTimes: IssueTimes{
+					ClosedAt: timePtr(time.Now()),
+				},
 			},
 			wantErr: true,
 			errMsg:  "non-closed issues cannot have closed_at timestamp",
@@ -153,12 +222,20 @@ func TestIssueValidation(t *testing.T) {
 		{
 			name: "in_progress issue with closed_at",
 			issue: Issue{
-				ID:        "test-1",
-				Title:     "Test",
-				Status:    StatusInProgress,
-				Priority:  2,
-				IssueType: TypeFeature,
-				ClosedAt:  timePtr(time.Now()),
+				IssueID: IssueID{
+					ID: "test-1",
+				},
+				IssueContent: IssueContent{
+					Title: "Test",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:    StatusInProgress,
+					Priority:  2,
+					IssueType: TypeFeature,
+				},
+				IssueTimes: IssueTimes{
+					ClosedAt: timePtr(time.Now()),
+				},
 			},
 			wantErr: true,
 			errMsg:  "non-closed issues cannot have closed_at timestamp",
@@ -166,25 +243,41 @@ func TestIssueValidation(t *testing.T) {
 		{
 			name: "closed issue with closed_at",
 			issue: Issue{
-				ID:        "test-1",
-				Title:     "Test",
-				Status:    StatusClosed,
-				Priority:  2,
-				IssueType: TypeFeature,
-				ClosedAt:  timePtr(time.Now()),
+				IssueID: IssueID{
+					ID: "test-1",
+				},
+				IssueContent: IssueContent{
+					Title: "Test",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:    StatusClosed,
+					Priority:  2,
+					IssueType: TypeFeature,
+				},
+				IssueTimes: IssueTimes{
+					ClosedAt: timePtr(time.Now()),
+				},
 			},
 			wantErr: false,
 		},
 		{
 			name: "ephemeral and no_history both set",
 			issue: Issue{
-				ID:        "test-1",
-				Title:     "Test",
-				Status:    StatusOpen,
-				Priority:  2,
-				IssueType: TypeFeature,
-				Ephemeral: true,
-				NoHistory: true,
+				IssueID: IssueID{
+					ID: "test-1",
+				},
+				IssueContent: IssueContent{
+					Title: "Test",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:    StatusOpen,
+					Priority:  2,
+					IssueType: TypeFeature,
+				},
+				IssueWisp: IssueWisp{
+					Ephemeral: true,
+					NoHistory: true,
+				},
 			},
 			wantErr: true,
 			errMsg:  "ephemeral and no_history are mutually exclusive",
@@ -192,24 +285,40 @@ func TestIssueValidation(t *testing.T) {
 		{
 			name: "ephemeral without no_history",
 			issue: Issue{
-				ID:        "test-1",
-				Title:     "Test",
-				Status:    StatusOpen,
-				Priority:  2,
-				IssueType: TypeFeature,
-				Ephemeral: true,
+				IssueID: IssueID{
+					ID: "test-1",
+				},
+				IssueContent: IssueContent{
+					Title: "Test",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:    StatusOpen,
+					Priority:  2,
+					IssueType: TypeFeature,
+				},
+				IssueWisp: IssueWisp{
+					Ephemeral: true,
+				},
 			},
 			wantErr: false,
 		},
 		{
 			name: "no_history without ephemeral",
 			issue: Issue{
-				ID:        "test-1",
-				Title:     "Test",
-				Status:    StatusOpen,
-				Priority:  2,
-				IssueType: TypeFeature,
-				NoHistory: true,
+				IssueID: IssueID{
+					ID: "test-1",
+				},
+				IssueContent: IssueContent{
+					Title: "Test",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:    StatusOpen,
+					Priority:  2,
+					IssueType: TypeFeature,
+				},
+				IssueWisp: IssueWisp{
+					NoHistory: true,
+				},
 			},
 			wantErr: false,
 		},
@@ -264,10 +373,14 @@ func TestValidateIssueTitleRejectsInvalidUTF8(t *testing.T) {
 		t.Fatalf("ValidateIssueTitle() error = %v, want %q", err, want)
 	}
 	err = (&Issue{
-		Title:     "ok\xff",
-		Status:    StatusOpen,
-		Priority:  2,
-		IssueType: TypeTask,
+		IssueContent: IssueContent{
+			Title: "ok\xff",
+		},
+		IssueWorkflow: IssueWorkflow{
+			Status:    StatusOpen,
+			Priority:  2,
+			IssueType: TypeTask,
+		},
 	}).Validate()
 	if err == nil {
 		t.Fatal("Issue.Validate() accepted an invalid UTF-8 title")
@@ -348,10 +461,14 @@ func TestValidateWithCustomStatuses(t *testing.T) {
 		{
 			name: "valid issue with built-in status",
 			issue: Issue{
-				Title:     "Test Issue",
-				Status:    StatusOpen,
-				Priority:  1,
-				IssueType: TypeTask,
+				IssueContent: IssueContent{
+					Title: "Test Issue",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:    StatusOpen,
+					Priority:  1,
+					IssueType: TypeTask,
+				},
 			},
 			customStatuses: nil,
 			wantErr:        false,
@@ -359,10 +476,14 @@ func TestValidateWithCustomStatuses(t *testing.T) {
 		{
 			name: "valid issue with custom status",
 			issue: Issue{
-				Title:     "Test Issue",
-				Status:    Status("awaiting_review"),
-				Priority:  1,
-				IssueType: TypeTask,
+				IssueContent: IssueContent{
+					Title: "Test Issue",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:    Status("awaiting_review"),
+					Priority:  1,
+					IssueType: TypeTask,
+				},
 			},
 			customStatuses: customStatuses,
 			wantErr:        false,
@@ -370,10 +491,14 @@ func TestValidateWithCustomStatuses(t *testing.T) {
 		{
 			name: "invalid custom status without config",
 			issue: Issue{
-				Title:     "Test Issue",
-				Status:    Status("awaiting_review"),
-				Priority:  1,
-				IssueType: TypeTask,
+				IssueContent: IssueContent{
+					Title: "Test Issue",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:    Status("awaiting_review"),
+					Priority:  1,
+					IssueType: TypeTask,
+				},
 			},
 			customStatuses: nil,
 			wantErr:        true,
@@ -381,10 +506,14 @@ func TestValidateWithCustomStatuses(t *testing.T) {
 		{
 			name: "invalid custom status not in config",
 			issue: Issue{
-				Title:     "Test Issue",
-				Status:    Status("unknown_status"),
-				Priority:  1,
-				IssueType: TypeTask,
+				IssueContent: IssueContent{
+					Title: "Test Issue",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:    Status("unknown_status"),
+					Priority:  1,
+					IssueType: TypeTask,
+				},
 			},
 			customStatuses: customStatuses,
 			wantErr:        true,
@@ -414,70 +543,103 @@ func TestValidateForImport(t *testing.T) {
 		{
 			name: "built-in type task passes",
 			issue: Issue{
-				Title:     "Test Issue",
-				Status:    StatusOpen,
-				Priority:  1,
-				IssueType: TypeTask,
+				IssueContent: IssueContent{
+					Title: "Test Issue",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:    StatusOpen,
+					Priority:  1,
+					IssueType: TypeTask,
+				},
 			},
 			wantErr: false,
 		},
 		{
 			name: "built-in type bug passes",
 			issue: Issue{
-				Title:     "Test Issue",
-				Status:    StatusOpen,
-				Priority:  1,
-				IssueType: TypeBug,
+				IssueContent: IssueContent{
+					Title: "Test Issue",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:    StatusOpen,
+					Priority:  1,
+					IssueType: TypeBug,
+				},
 			},
 			wantErr: false,
 		},
 		{
 			name: "custom type pm is trusted (not in parent config)",
 			issue: Issue{
-				Title:     "Test Issue",
-				Status:    StatusOpen,
-				Priority:  1,
-				IssueType: IssueType("pm"), // Custom type from child repo
+				IssueContent: IssueContent{
+					Title: "Test Issue",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:    StatusOpen,
+					Priority:  1,
+					IssueType: IssueType("pm"),
+				},
+				// Custom type from child repo,
 			},
 			wantErr: false, // Should pass - federation trust model
 		},
 		{
 			name: "custom type llm is trusted",
 			issue: Issue{
-				Title:     "Test Issue",
-				Status:    StatusOpen,
-				Priority:  1,
-				IssueType: IssueType("llm"), // Custom type from child repo
+				IssueContent: IssueContent{
+					Title: "Test Issue",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:    StatusOpen,
+					Priority:  1,
+					IssueType: IssueType("llm"),
+				},
+				// Custom type from child repo,
 			},
 			wantErr: false, // Should pass - federation trust model
 		},
 		{
 			name: "custom type passes (federation trust)",
 			issue: Issue{
-				Title:     "Test Issue",
-				Status:    StatusOpen,
-				Priority:  1,
-				IssueType: IssueType("agent"), // Custom type (no longer built-in)
+				IssueContent: IssueContent{
+					Title: "Test Issue",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:    StatusOpen,
+					Priority:  1,
+					IssueType: IssueType("agent"),
+				},
+				// Custom type (no longer built-in),
 			},
 			wantErr: false,
 		},
 		{
 			name: "empty type defaults to task (handled by SetDefaults)",
 			issue: Issue{
-				Title:     "Test Issue",
-				Status:    StatusOpen,
-				Priority:  1,
-				IssueType: IssueType(""), // Empty is allowed
+				IssueContent: IssueContent{
+					Title: "Test Issue",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:    StatusOpen,
+					Priority:  1,
+					IssueType: IssueType(""),
+				},
+				// Empty is allowed,
 			},
 			wantErr: false,
 		},
 		{
 			name: "other validations still run - missing title",
 			issue: Issue{
-				Title:     "", // Missing required field
-				Status:    StatusOpen,
-				Priority:  1,
-				IssueType: IssueType("pm"),
+				IssueContent: IssueContent{
+					Title: "",
+				},
+				IssueWorkflow: IssueWorkflow{
+					// Missing required field
+					Status:    StatusOpen,
+					Priority:  1,
+					IssueType: IssueType("pm"),
+				},
 			},
 			wantErr: true,
 			errMsg:  "title is required",
@@ -485,10 +647,15 @@ func TestValidateForImport(t *testing.T) {
 		{
 			name: "other validations still run - invalid priority",
 			issue: Issue{
-				Title:     "Test Issue",
-				Status:    StatusOpen,
-				Priority:  10, // Invalid
-				IssueType: IssueType("pm"),
+				IssueContent: IssueContent{
+					Title: "Test Issue",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:   StatusOpen,
+					Priority: 10,
+					// Invalid
+					IssueType: IssueType("pm"),
+				},
 			},
 			wantErr: true,
 			errMsg:  "priority must be between 0 and 4",
@@ -519,10 +686,15 @@ func TestValidateForImport(t *testing.T) {
 func TestValidateForImportVsValidateWithCustom(t *testing.T) {
 	// Issue with custom type that's NOT in customTypes list
 	issue := Issue{
-		Title:     "Test Issue",
-		Status:    StatusOpen,
-		Priority:  1,
-		IssueType: IssueType("pm"), // Custom type not configured in parent
+		IssueContent: IssueContent{
+			Title: "Test Issue",
+		},
+		IssueWorkflow: IssueWorkflow{
+			Status:    StatusOpen,
+			Priority:  1,
+			IssueType: IssueType("pm"),
+		},
+		// Custom type not configured in parent,
 	}
 
 	// ValidateWithCustom (normal mode): should fail without pm in customTypes
@@ -589,12 +761,18 @@ func TestIssueTypeIsValid(t *testing.T) {
 func TestEventTypeValidation(t *testing.T) {
 	now := time.Now()
 	event := Issue{
-		Title:     "state change event",
-		Status:    StatusOpen,
-		Priority:  4,
-		IssueType: TypeEvent,
-		CreatedAt: now,
-		UpdatedAt: now,
+		IssueContent: IssueContent{
+			Title: "state change event",
+		},
+		IssueWorkflow: IssueWorkflow{
+			Status:    StatusOpen,
+			Priority:  4,
+			IssueType: TypeEvent,
+		},
+		IssueTimes: IssueTimes{
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
 	}
 
 	// event is not a core work type
@@ -710,7 +888,7 @@ func TestIssueCompoundHelpers(t *testing.T) {
 		t.Fatalf("expected nil constituents for non-compound issue")
 	}
 
-	bonded := &Issue{BondedFrom: []BondRef{{SourceID: "proto-1", BondType: BondTypeSequential}}}
+	bonded := &Issue{IssueCoord: IssueCoord{BondedFrom: []BondRef{{SourceID: "proto-1", BondType: BondTypeSequential}}}}
 	if !bonded.IsCompound() {
 		t.Fatalf("issue with bonded refs should be compound")
 	}
@@ -921,15 +1099,23 @@ func TestIssueStructFields(t *testing.T) {
 	closedAt := now.Add(time.Hour)
 
 	issue := Issue{
-		ID:          "test-1",
-		Title:       "Test Issue",
-		Description: "Test description",
-		Status:      StatusClosed,
-		Priority:    1,
-		IssueType:   TypeBug,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-		ClosedAt:    &closedAt,
+		IssueID: IssueID{
+			ID: "test-1",
+		},
+		IssueContent: IssueContent{
+			Title:       "Test Issue",
+			Description: "Test description",
+		},
+		IssueWorkflow: IssueWorkflow{
+			Status:    StatusClosed,
+			Priority:  1,
+			IssueType: TypeBug,
+		},
+		IssueTimes: IssueTimes{
+			CreatedAt: now,
+			UpdatedAt: now,
+			ClosedAt:  &closedAt,
+		},
 	}
 
 	if issue.CreatedAt != now {
@@ -949,11 +1135,19 @@ func TestIssueLeaseJSONSerialization(t *testing.T) {
 
 	// With an active lease: both keys appear, row_lock never does.
 	leased := IssueDetails{Issue: Issue{
-		ID:             "test-1",
-		Title:          "Leased",
-		Status:         StatusInProgress,
-		LeaseExpiresAt: &expires,
-		HeartbeatAt:    &now,
+		IssueID: IssueID{
+			ID: "test-1",
+		},
+		IssueContent: IssueContent{
+			Title: "Leased",
+		},
+		IssueWorkflow: IssueWorkflow{
+			Status: StatusInProgress,
+		},
+		IssueLease: IssueLease{
+			LeaseExpiresAt: &expires,
+			HeartbeatAt:    &now,
+		},
 	}}
 	b, err := json.Marshal(leased)
 	if err != nil {
@@ -974,7 +1168,7 @@ func TestIssueLeaseJSONSerialization(t *testing.T) {
 	}
 
 	// Without a lease (the common case): keys are omitted, not null.
-	unleased := IssueDetails{Issue: Issue{ID: "test-2", Title: "Open", Status: StatusOpen}}
+	unleased := IssueDetails{Issue: Issue{IssueID: IssueID{ID: "test-2"}, IssueContent: IssueContent{Title: "Open"}, IssueWorkflow: IssueWorkflow{Status: StatusOpen}}}
 	b2, err := json.Marshal(unleased)
 	if err != nil {
 		t.Fatalf("marshal unleased issue: %v", err)
@@ -995,7 +1189,7 @@ func TestIssueLeaseJSONSerialization(t *testing.T) {
 // interchanges, which is why it is the one shape allowed to project the token
 // (see TestNewIssueDetailsProjectsTheRevisionToken).
 func TestRowVersionNeverSerialized(t *testing.T) {
-	iss := Issue{ID: "test-1", Title: "Versioned", Status: StatusOpen, RowVersion: 123456789}
+	iss := Issue{IssueID: IssueID{ID: "test-1"}, IssueContent: IssueContent{Title: "Versioned"}, IssueWorkflow: IssueWorkflow{Status: StatusOpen}, IssueLease: IssueLease{RowVersion: 123456789}}
 
 	// The Go field stays populated — this is what library call sites read.
 	if iss.RowVersion != 123456789 {
@@ -1041,7 +1235,7 @@ func TestNewIssueDetailsProjectsTheRevisionToken(t *testing.T) {
 		{"a legacy un-mutated row", 0, `"revision":0`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			details := NewIssueDetails(Issue{ID: "test-1", Title: "Versioned", RowVersion: tc.token})
+			details := NewIssueDetails(Issue{IssueID: IssueID{ID: "test-1"}, IssueContent: IssueContent{Title: "Versioned"}, IssueLease: IssueLease{RowVersion: tc.token}})
 			if details.Revision != tc.token {
 				t.Errorf("Revision = %d, want %d", details.Revision, tc.token)
 			}
@@ -1086,11 +1280,17 @@ func TestReclaimedLeaseJSONSerialization(t *testing.T) {
 func TestBlockedIssueEmbedding(t *testing.T) {
 	blocked := BlockedIssue{
 		Issue: Issue{
-			ID:        "test-1",
-			Title:     "Blocked issue",
-			Status:    StatusBlocked,
-			Priority:  2,
-			IssueType: TypeFeature,
+			IssueID: IssueID{
+				ID: "test-1",
+			},
+			IssueContent: IssueContent{
+				Title: "Blocked issue",
+			},
+			IssueWorkflow: IssueWorkflow{
+				Status:    StatusBlocked,
+				Priority:  2,
+				IssueType: TypeFeature,
+			},
 		},
 		BlockedByCount: 2,
 		BlockedBy:      []string{"test-2", "test-3"},
@@ -1111,11 +1311,17 @@ func TestBlockedIssueEmbedding(t *testing.T) {
 func TestTreeNodeEmbedding(t *testing.T) {
 	node := TreeNode{
 		Issue: Issue{
-			ID:        "test-1",
-			Title:     "Root node",
-			Status:    StatusOpen,
-			Priority:  1,
-			IssueType: TypeEpic,
+			IssueID: IssueID{
+				ID: "test-1",
+			},
+			IssueContent: IssueContent{
+				Title: "Root node",
+			},
+			IssueWorkflow: IssueWorkflow{
+				Status:    StatusOpen,
+				Priority:  1,
+				IssueType: TypeEpic,
+			},
 		},
 		Depth:     0,
 		Truncated: false,
@@ -1132,25 +1338,41 @@ func TestTreeNodeEmbedding(t *testing.T) {
 
 func TestComputeContentHash(t *testing.T) {
 	issue1 := Issue{
-		ID:               "test-1",
-		Title:            "Test Issue",
-		Description:      "Description",
-		Status:           StatusOpen,
-		Priority:         2,
-		IssueType:        TypeFeature,
-		EstimatedMinutes: intPtr(60),
+		IssueID: IssueID{
+			ID: "test-1",
+		},
+		IssueContent: IssueContent{
+			Title:       "Test Issue",
+			Description: "Description",
+		},
+		IssueWorkflow: IssueWorkflow{
+			Status:           StatusOpen,
+			Priority:         2,
+			IssueType:        TypeFeature,
+			EstimatedMinutes: intPtr(60),
+		},
 	}
 
 	// Same content should produce same hash
 	issue2 := Issue{
-		ID:               "test-2", // Different ID
-		Title:            "Test Issue",
-		Description:      "Description",
-		Status:           StatusOpen,
-		Priority:         2,
-		IssueType:        TypeFeature,
-		EstimatedMinutes: intPtr(60),
-		CreatedAt:        time.Now(), // Different timestamp
+		IssueID: IssueID{
+			ID: "test-2",
+		},
+		IssueContent: IssueContent{
+			// Different ID
+			Title:       "Test Issue",
+			Description: "Description",
+		},
+		IssueWorkflow: IssueWorkflow{
+			Status:           StatusOpen,
+			Priority:         2,
+			IssueType:        TypeFeature,
+			EstimatedMinutes: intPtr(60),
+		},
+		IssueTimes: IssueTimes{
+			CreatedAt: time.Now(),
+		},
+		// Different timestamp,
 	}
 
 	hash1 := issue1.ComputeContentHash()
@@ -1233,15 +1455,19 @@ func TestSetDefaults(t *testing.T) {
 	}{
 		{
 			name:           "empty fields get defaults",
-			issue:          Issue{Title: "Test"},
+			issue:          Issue{IssueContent: IssueContent{Title: "Test"}},
 			expectedStatus: StatusOpen,
 			expectedType:   TypeTask,
 		},
 		{
 			name: "existing status preserved",
 			issue: Issue{
-				Title:  "Test",
-				Status: StatusInProgress,
+				IssueContent: IssueContent{
+					Title: "Test",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status: StatusInProgress,
+				},
 			},
 			expectedStatus: StatusInProgress,
 			expectedType:   TypeTask,
@@ -1249,8 +1475,12 @@ func TestSetDefaults(t *testing.T) {
 		{
 			name: "existing type preserved",
 			issue: Issue{
-				Title:     "Test",
-				IssueType: TypeBug,
+				IssueContent: IssueContent{
+					Title: "Test",
+				},
+				IssueWorkflow: IssueWorkflow{
+					IssueType: TypeBug,
+				},
 			},
 			expectedStatus: StatusOpen,
 			expectedType:   TypeBug,
@@ -1258,10 +1488,16 @@ func TestSetDefaults(t *testing.T) {
 		{
 			name: "all fields set - no changes",
 			issue: Issue{
-				Title:     "Test",
-				Status:    StatusClosed,
-				IssueType: TypeFeature,
-				ClosedAt:  timePtr(time.Now()),
+				IssueContent: IssueContent{
+					Title: "Test",
+				},
+				IssueWorkflow: IssueWorkflow{
+					Status:    StatusClosed,
+					IssueType: TypeFeature,
+				},
+				IssueTimes: IssueTimes{
+					ClosedAt: timePtr(time.Now()),
+				},
 			},
 			expectedStatus: StatusClosed,
 			expectedType:   TypeFeature,
@@ -1809,10 +2045,14 @@ func TestBondRefUnmarshalJSON(t *testing.T) {
 // field-length tests below isolate the assignee/owner bound.
 func validIssue() Issue {
 	return Issue{
-		Title:     "Test Issue",
-		Status:    StatusOpen,
-		Priority:  1,
-		IssueType: TypeTask,
+		IssueContent: IssueContent{
+			Title: "Test Issue",
+		},
+		IssueWorkflow: IssueWorkflow{
+			Status:    StatusOpen,
+			Priority:  1,
+			IssueType: TypeTask,
+		},
 	}
 }
 

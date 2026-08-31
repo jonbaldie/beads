@@ -65,33 +65,61 @@ type runStats struct {
 }
 
 func main() {
-	workers := defaultWorkers
-	opsPerWorker := defaultOpsPerWorker
-	mode := "both"
-	if len(os.Args) > 1 {
-		if n, err := strconv.Atoi(os.Args[1]); err == nil {
-			workers = n
-		}
-	}
-	if len(os.Args) > 2 {
-		if n, err := strconv.Atoi(os.Args[2]); err == nil {
-			opsPerWorker = n
-		}
-	}
-	if len(os.Args) > 3 {
-		mode = os.Args[3]
-	}
+	config := parseReproConfig(os.Args[1:])
+	printReproHeader(config)
+	ctx, cancel := reproContext()
+	defer cancel()
+	watchForInterrupt(cancel)
 
+	var allStats []runStats
+	for _, mode := range reproModes(config.mode) {
+		stats := runMode(ctx, mode, config.workers, config.opsPerWorker)
+		allStats = append(allStats, stats)
+	}
+	printReproSummary(allStats)
+	if hasHang(allStats) {
+		log.Fatal("*** SERVER HANG DETECTED ***")
+	}
+}
+
+type reproConfig struct {
+	workers      int
+	opsPerWorker int
+	mode         string
+}
+
+func parseReproConfig(args []string) reproConfig {
+	config := reproConfig{workers: defaultWorkers, opsPerWorker: defaultOpsPerWorker, mode: "both"}
+	if len(args) > 0 {
+		if n, err := strconv.Atoi(args[0]); err == nil {
+			config.workers = n
+		}
+	}
+	if len(args) > 1 {
+		if n, err := strconv.Atoi(args[1]); err == nil {
+			config.opsPerWorker = n
+		}
+	}
+	if len(args) > 2 {
+		config.mode = args[2]
+	}
+	return config
+}
+
+func printReproHeader(config reproConfig) {
 	fmt.Println("=== Dolt Transaction Pattern Comparison ===")
 	out, _ := exec.Command("dolt", "version").Output()
 	fmt.Printf("Dolt: %s", out)
-	fmt.Printf("Workers: %d, Ops/worker: %d, Total: %d\n", workers, opsPerWorker, workers*opsPerWorker)
-	fmt.Printf("Mode: %s\n", mode)
+	fmt.Printf("Workers: %d, Ops/worker: %d, Total: %d\n", config.workers, config.opsPerWorker, config.workers*config.opsPerWorker)
+	fmt.Printf("Mode: %s\n", config.mode)
 	fmt.Println()
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), overallTimeout)
-	defer cancel()
+func reproContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), overallTimeout)
+}
 
+func watchForInterrupt(cancel context.CancelFunc) {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
@@ -99,18 +127,16 @@ func main() {
 		fmt.Println("\nInterrupted, cleaning up...")
 		cancel()
 	}()
+}
 
-	var allStats []runStats
-
-	modes := []string{mode}
+func reproModes(mode string) []string {
 	if mode == "both" {
-		modes = []string{"old", "new"}
+		return []string{"old", "new"}
 	}
+	return []string{mode}
+}
 
-	for _, m := range modes {
-		stats := runMode(ctx, m, workers, opsPerWorker)
-		allStats = append(allStats, stats)
-	}
+func printReproSummary(allStats []runStats) {
 
 	// Summary
 	fmt.Println()
@@ -137,16 +163,15 @@ func main() {
 	}
 
 	fmt.Println()
-	anyHang := false
-	for _, s := range allStats {
-		if s.unresponsive > 0 {
-			anyHang = true
+}
+
+func hasHang(allStats []runStats) bool {
+	for _, stats := range allStats {
+		if stats.unresponsive > 0 {
+			return true
 		}
 	}
-	if anyHang {
-		fmt.Println("*** SERVER HANG DETECTED ***")
-		os.Exit(1)
-	}
+	return false
 }
 
 func runMode(ctx context.Context, mode string, workers, opsPerWorker int) runStats {

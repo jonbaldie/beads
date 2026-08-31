@@ -173,10 +173,10 @@ func TestAQueryExpressionRefusalNamesItselfForTheWire(t *testing.T) {
 // rather than handed to a function that reads issue fields.
 func TestApplyQueryPredicateDropsRowsWithNoIssue(t *testing.T) {
 	rows := []*types.IssueWithCounts{
-		{Issue: &types.Issue{ID: "bd-1"}},
+		{Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-1"}}},
 		nil,
 		{},
-		{Issue: &types.Issue{ID: "bd-2"}},
+		{Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-2"}}},
 	}
 	got := ApplyQueryPredicate(rows, func(i *types.Issue) bool { return i.ID != "bd-1" })
 	if len(got) != 1 || got[0].Issue.ID != "bd-2" {
@@ -191,9 +191,9 @@ func TestApplyQueryPredicateDropsRowsWithNoIssue(t *testing.T) {
 // skipping past the end is an empty page rather than a nil one.
 func TestSkipRows(t *testing.T) {
 	rows := []*types.IssueWithCounts{
-		{Issue: &types.Issue{ID: "bd-1"}},
-		{Issue: &types.Issue{ID: "bd-2"}},
-		{Issue: &types.Issue{ID: "bd-3"}},
+		{Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-1"}}},
+		{Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-2"}}},
+		{Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-3"}}},
 	}
 	if got := SkipRows(rows, 0); len(got) != 3 {
 		t.Errorf("SkipRows(0) returned %d rows, want all three", len(got))

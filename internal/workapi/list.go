@@ -48,32 +48,6 @@ type ListConfig struct {
 	InfraSet       map[string]bool
 }
 
-func (c ListConfig) CustomStatusNames() []string {
-	out := make([]string, len(c.CustomStatuses))
-	for i, s := range c.CustomStatuses {
-		out[i] = s.Name
-	}
-	return out
-}
-
-func (c ListConfig) InfraTypes() []string {
-	if len(c.InfraSet) == 0 {
-		return domain.DefaultInfraTypes()
-	}
-	out := make([]string, 0, len(c.InfraSet))
-	for t := range c.InfraSet {
-		out = append(out, t)
-	}
-	return out
-}
-
-func (c ListConfig) IsInfra(t string) bool {
-	if len(c.InfraSet) == 0 {
-		return domain.IsInfraType(types.IssueType(t))
-	}
-	return c.InfraSet[t]
-}
-
 // ConfigSource reads the workspace configuration BuildListFilter depends on.
 // It is the seam between the filter logic and however a given frontend reaches
 // storage (a direct store handle, a unit of work, ...).
@@ -184,43 +158,65 @@ func LoadUOWListConfig(ctx context.Context, uw UnitOfWork) (ListConfig, error) {
 // exclusions, the pinned and template defaults, and the gate, infra-type, and
 // wisp suppression that make the default listing show durable work only.
 func BuildListFilter(in issueops.ListRequest, cfg ListConfig) (types.IssueFilter, error) {
-	// The --ready arm reaches its query through ReadyFilterFromIssueFilter,
-	// which carries only part of what this filter can express. A request that
-	// asks --ready to honor something the projection drops is refused here,
-	// at the one point every frontend and every implementation of
-	// issueops.Reader passes through, rather than answered with the wider set.
-	// The drop set and the refusal text live beside the promise they enforce,
-	// in issueops.
 	if err := issueops.ValidateReadyFlagScope(in); err != nil {
 		return types.IssueFilter{}, err
 	}
 
-	filter := types.IssueFilter{
-		Limit: SQLLimit(in),
-		// The offset is carried for the callers that consume this filter as a
-		// VALUE and run their own query — `bd list --watch` and the proxied
-		// hierarchical --parent walk — where the seam beneath them renders it.
-		// Both implementations of issueops.Reader take it back off
-		// (WithRowsBeforeThePage) and skip in the shared page epilogue instead;
-		// FinishPageAt says why the role cannot leave it here.
-		Offset:         in.Offset,
-		SortBy:         in.SortBy,
-		SortDesc:       in.Reverse,
-		AfterCreatedAt: in.AfterCreatedAt,
-		AfterID:        in.AfterID,
-		// The defensive cap travels ON the request, so this builder is the
-		// only writer of the filter's two cap fields. `bd list` used to stamp
-		// them onto the filter after the builder returned, which is the
-		// "build it, then reach in and change it" half-step the role exists to
-		// make unreachable — and it left the cap invisible to every
-		// implementation of Reader.List.
-		MaxRows:       in.MaxRows,
-		MaxRowsSource: in.MaxRowsSource,
-	}
+	filter := newListFilter(in)
+	err := runListFilterStages(
+		func() error { return applyListStatusFilter(&filter, in, cfg) },
+		func() error { return applyListCoreFilters(&filter, in, cfg) },
+		func() error { return applyListLabelsAndIDs(&filter, in) },
+		func() error { return applyListTextContainsFilters(&filter, in) },
+		func() error { return applyListDateFilters(&filter, in) },
+		func() error { return applyListOutputFilters(&filter, in) },
+		func() error { return applyListPriorityRange(&filter, in) },
+		func() error { return applyListPinnedFilter(&filter, in) },
+		func() error {
+			applyTypeSuppressions(in, cfg, &filter)
+			return nil
+		},
+		func() error { return applyListExcludedTypes(&filter, in) },
+		func() error { return applyListInfraFilter(&filter, in, cfg) },
+		func() error { return applyListParentFilter(&filter, in) },
+		func() error { return applyListMoleculeFilters(&filter, in) },
+		func() error { return applyListSchedulingFilters(&filter, in) },
+		func() error { return applyListMetadataFilters(&filter, in) },
+	)
+	return filter, err
+}
 
-	// The status selector is parsed once here; every consumer below — the
-	// "all" short-circuit, the default exclusions, the pinned default —
-	// works from the same parts so their readings cannot drift.
+func runListFilterStages(stages ...func() error) error {
+	for _, stage := range stages {
+		if err := stage(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func newListFilter(in issueops.ListRequest) types.IssueFilter {
+	return types.IssueFilter{
+		IssueFilterCore: types.IssueFilterCore{
+			Limit: SQLLimit(in),
+		},
+		IssueFilterMatch: types.IssueFilterMatch{
+			AfterCreatedAt: in.AfterCreatedAt,
+			AfterID:        in.AfterID,
+		},
+		IssueFilterHydrate: types.IssueFilterHydrate{
+			Offset: in.Offset,
+		},
+		IssueFilterPage: types.IssueFilterPage{
+			SortBy:        in.SortBy,
+			SortDesc:      in.Reverse,
+			MaxRows:       in.MaxRows,
+			MaxRowsSource: in.MaxRowsSource,
+		},
+	}
+}
+
+func applyListStatusFilter(filter *types.IssueFilter, in issueops.ListRequest, cfg ListConfig) error {
 	statusParts := splitStatusSelector(in.Status)
 	statusAll := len(statusParts) == 1 && statusParts[0] == "all"
 
@@ -228,21 +224,32 @@ func BuildListFilter(in issueops.ListRequest, cfg ListConfig) (types.IssueFilter
 		s := types.StatusOpen
 		filter.Status = &s
 	} else if len(statusParts) > 0 && !statusAll {
-		if err := applyStatusParts(&filter, statusParts, cfg.CustomStatusNames()); err != nil {
-			return filter, err
+		if err := applyStatusParts(filter, statusParts, cfg.CustomStatusNames()); err != nil {
+			return err
 		}
 	}
 
-	if len(statusParts) == 0 && !in.AllFlag && !in.ReadyFlag && !in.PinnedFlag {
-		excludeStatuses := []types.Status{types.StatusClosed, types.StatusPinned}
-		for _, cs := range cfg.CustomStatuses {
-			if cs.Category == types.CategoryDone || cs.Category == types.CategoryFrozen {
-				excludeStatuses = append(excludeStatuses, types.Status(cs.Name))
-			}
-		}
-		filter.ExcludeStatus = excludeStatuses
+	if shouldUseDefaultListStatuses(statusParts, in) {
+		filter.ExcludeStatus = defaultListExcludedStatuses(cfg)
 	}
+	return nil
+}
 
+func shouldUseDefaultListStatuses(parts []string, in issueops.ListRequest) bool {
+	return len(parts) == 0 && !in.AllFlag && !in.ReadyFlag && !in.PinnedFlag
+}
+
+func defaultListExcludedStatuses(cfg ListConfig) []types.Status {
+	excludeStatuses := []types.Status{types.StatusClosed, types.StatusPinned}
+	for _, cs := range cfg.CustomStatuses {
+		if cs.Category == types.CategoryDone || cs.Category == types.CategoryFrozen {
+			excludeStatuses = append(excludeStatuses, types.Status(cs.Name))
+		}
+	}
+	return excludeStatuses
+}
+
+func applyListCoreFilters(filter *types.IssueFilter, in issueops.ListRequest, cfg ListConfig) error {
 	if in.Priority != nil {
 		p := *in.Priority
 		filter.Priority = &p
@@ -251,18 +258,32 @@ func BuildListFilter(in issueops.ListRequest, cfg ListConfig) (types.IssueFilter
 		a := in.Assignee
 		filter.Assignee = &a
 	}
-	if in.IssueType != "" {
-		t := types.IssueType(in.IssueType)
-		if !t.IsValidWithCustom(cfg.CustomTypes) {
-			validTypes := "bug, feature, task, epic, chore, decision"
-			if len(cfg.CustomTypes) > 0 {
-				validTypes += ", " + strings.Join(cfg.CustomTypes, ", ")
-			}
-			return filter, fmt.Errorf("invalid issue type %q (valid: %s)", in.IssueType, validTypes)
-		}
-		filter.IssueType = &t
+	if in.IssueType == "" {
+		return nil
 	}
+	return applyListIssueTypeFilter(filter, in.IssueType, cfg)
+}
 
+func applyListIssueTypeFilter(filter *types.IssueFilter, issueType string, cfg ListConfig) error {
+	t := types.IssueType(issueType)
+	if !t.IsValidWithCustom(cfg.CustomTypes) {
+		validTypes := "bug, feature, task, epic, chore, decision"
+		if len(cfg.CustomTypes) > 0 {
+			validTypes += ", " + strings.Join(cfg.CustomTypes, ", ")
+		}
+		return fmt.Errorf("invalid issue type %q (valid: %s)", issueType, validTypes)
+	}
+	filter.IssueType = &t
+	return nil
+}
+
+func applyListLabelsAndIDs(filter *types.IssueFilter, in issueops.ListRequest) error {
+	applyListLabels(filter, in)
+	applyListIDs(filter, in)
+	return nil
+}
+
+func applyListLabels(filter *types.IssueFilter, in issueops.ListRequest) {
 	if len(in.Labels) > 0 {
 		filter.Labels = in.Labels
 	}
@@ -278,6 +299,9 @@ func BuildListFilter(in issueops.ListRequest, cfg ListConfig) (types.IssueFilter
 	if in.LabelRegex != "" {
 		filter.LabelRegex = in.LabelRegex
 	}
+}
+
+func applyListIDs(filter *types.IssueFilter, in issueops.ListRequest) {
 	if in.TitleSearch != "" {
 		filter.TitleSearch = in.TitleSearch
 	}
@@ -290,7 +314,9 @@ func BuildListFilter(in issueops.ListRequest, cfg ListConfig) (types.IssueFilter
 	if in.SpecPrefix != "" {
 		filter.SpecIDPrefix = in.SpecPrefix
 	}
+}
 
+func applyListTextContainsFilters(filter *types.IssueFilter, in issueops.ListRequest) error {
 	if in.TitleContains != "" {
 		filter.TitleContains = in.TitleContains
 	}
@@ -306,14 +332,20 @@ func BuildListFilter(in issueops.ListRequest, cfg ListConfig) (types.IssueFilter
 	if in.ExternalRef != "" {
 		filter.ExternalRef = &in.ExternalRef
 	}
+	return nil
+}
 
+func applyListDateFilters(filter *types.IssueFilter, in issueops.ListRequest) error {
 	filter.CreatedAfter = in.CreatedAfter
 	filter.CreatedBefore = in.CreatedBefore
 	filter.UpdatedAfter = in.UpdatedAfter
 	filter.UpdatedBefore = in.UpdatedBefore
 	filter.ClosedAfter = in.ClosedAfter
 	filter.ClosedBefore = in.ClosedBefore
+	return nil
+}
 
+func applyListOutputFilters(filter *types.IssueFilter, in issueops.ListRequest) error {
 	if in.EmptyDesc {
 		filter.EmptyDescription = true
 	}
@@ -332,7 +364,10 @@ func BuildListFilter(in issueops.ListRequest, cfg ListConfig) (types.IssueFilter
 	if in.Brief {
 		filter.Lite = true
 	}
+	return nil
+}
 
+func applyListPriorityRange(filter *types.IssueFilter, in issueops.ListRequest) error {
 	if in.PriorityMin != nil {
 		p := *in.PriorityMin
 		filter.PriorityMin = &p
@@ -341,17 +376,21 @@ func BuildListFilter(in issueops.ListRequest, cfg ListConfig) (types.IssueFilter
 		p := *in.PriorityMax
 		filter.PriorityMax = &p
 	}
+	return nil
+}
 
+func applyListPinnedFilter(filter *types.IssueFilter, in issueops.ListRequest) error {
 	if in.PinnedFlag {
 		pinned := true
 		filter.Pinned = &pinned
-	} else if in.NoPinnedFlag || (!statusSelectsPinned(statusParts, !in.ReadyFlag) && !in.AllFlag) {
+	} else if in.NoPinnedFlag || (!statusSelectsPinned(splitStatusSelector(in.Status), !in.ReadyFlag) && !in.AllFlag) {
 		pinned := false
 		filter.Pinned = &pinned
 	}
+	return nil
+}
 
-	applyTypeSuppressions(in, cfg, &filter)
-
+func applyListExcludedTypes(filter *types.IssueFilter, in issueops.ListRequest) error {
 	for _, raw := range in.ExcludeTypes {
 		for _, t := range strings.Split(raw, ",") {
 			t = strings.TrimSpace(t)
@@ -360,12 +399,18 @@ func BuildListFilter(in issueops.ListRequest, cfg ListConfig) (types.IssueFilter
 			}
 		}
 	}
+	return nil
+}
 
+func applyListInfraFilter(filter *types.IssueFilter, in issueops.ListRequest, cfg ListConfig) error {
 	if cfg.IsInfra(in.IssueType) {
 		ephemeral := true
 		filter.Ephemeral = &ephemeral
 	}
+	return nil
+}
 
+func applyListParentFilter(filter *types.IssueFilter, in issueops.ListRequest) error {
 	if in.ParentID != "" {
 		pid := in.ParentID
 		filter.ParentID = &pid
@@ -373,14 +418,20 @@ func BuildListFilter(in issueops.ListRequest, cfg ListConfig) (types.IssueFilter
 	if in.NoParent {
 		filter.NoParent = true
 	}
+	return nil
+}
 
+func applyListMoleculeFilters(filter *types.IssueFilter, in issueops.ListRequest) error {
 	if in.MolType != nil {
 		filter.MolType = in.MolType
 	}
 	if in.WispType != nil {
 		filter.WispType = in.WispType
 	}
+	return nil
+}
 
+func applyListSchedulingFilters(filter *types.IssueFilter, in issueops.ListRequest) error {
 	if in.DeferredFlag {
 		filter.Deferred = true
 	}
@@ -391,56 +442,54 @@ func BuildListFilter(in issueops.ListRequest, cfg ListConfig) (types.IssueFilter
 	if in.OverdueFlag {
 		filter.Overdue = true
 	}
+	return nil
+}
 
+func applyListMetadataFilters(filter *types.IssueFilter, in issueops.ListRequest) error {
 	if len(in.MetadataFields) > 0 {
 		filter.MetadataFields = in.MetadataFields
 	}
 	if in.HasMetadataKey != "" {
 		filter.HasMetadataKey = in.HasMetadataKey
 	}
-	if err := ValidateMetadataFilters(in.MetadataFields, in.HasMetadataKey); err != nil {
-		return filter, err
-	}
-
-	return filter, nil
+	return ValidateMetadataFilters(in.MetadataFields, in.HasMetadataKey)
 }
 
 // applyTypeSuppressions applies every default suppression that hides a bead on
-// account of WHAT IT IS, so that a "show everything" frontend has exactly one
-// thing to skip. Two kinds live here: the type-level exclusions that make the
-// default listing show durable work only (templates, gates, infra types), and
-// the plane decision — whether the wisps TABLE is read at all.
-//
-// IncludeAllTypes lifts them ALL by skipping this function entirely, which is
-// what makes it future-proof: a suppression added here is automatically lifted
-// for frontends like `bd human list` without touching them.
+// account of what it is, so that every list-shaped frontend shares the same
+// durable-work default.
 func applyTypeSuppressions(in issueops.ListRequest, cfg ListConfig, filter *types.IssueFilter) {
 	if in.IncludeAllTypes {
 		return
 	}
+	applyTemplateSuppression(in, filter)
+	applyGateSuppression(in, filter)
+	applyInfraSuppression(in, cfg, filter)
+	applyWispSuppression(in, cfg, filter)
+}
 
+func applyTemplateSuppression(in issueops.ListRequest, filter *types.IssueFilter) {
 	if !in.IncludeTemplates {
 		isTemplate := false
 		filter.IsTemplate = &isTemplate
 	}
+}
 
+func applyGateSuppression(in issueops.ListRequest, filter *types.IssueFilter) {
 	if !in.IncludeGates && in.IssueType != "gate" {
 		filter.ExcludeTypes = append(filter.ExcludeTypes, "gate")
 	}
+}
 
+func applyInfraSuppression(in issueops.ListRequest, cfg ListConfig, filter *types.IssueFilter) {
 	if !in.IncludeInfra && !cfg.IsInfra(in.IssueType) {
 		for _, t := range cfg.InfraTypes() {
 			filter.ExcludeTypes = append(filter.ExcludeTypes, types.IssueType(t))
 		}
 	}
+}
 
-	// The plane bit. Three requests admit the wisp table: an explicit
-	// IncludeEphemeral, IncludeInfra (which admits the plane AND drops the
-	// infra-type exclusions above), and naming an infra type (which routed to
-	// the plane alone in BuildListFilter). Everything else is the durable
-	// listing. IncludeAllTypes is a fourth, via the early return above — it is
-	// the union of these flags, so it must decide the plane too, not only the
-	// type exclusions.
+func applyWispSuppression(in issueops.ListRequest, cfg ListConfig, filter *types.IssueFilter) {
 	if !in.IncludeEphemeral && !in.IncludeInfra && (in.IssueType == "" || !cfg.IsInfra(in.IssueType)) {
 		filter.SkipWisps = true
 	}

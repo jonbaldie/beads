@@ -47,22 +47,28 @@ func ValidateCountGroup(group issueops.CountGroup) (string, error) {
 // IncludeInfra; a zero ListConfig falls back to the default infra set.
 func BuildCountFilter(in issueops.CountRequest, cfg ListConfig) (types.IssueFilter, error) {
 	filter := types.IssueFilter{
-		TitleSearch:         in.TitleSearch,
-		TitleContains:       in.TitleContains,
-		DescriptionContains: in.DescContains,
-		NotesContains:       in.NotesContains,
-		CreatedAfter:        in.CreatedAfter,
-		CreatedBefore:       in.CreatedBefore,
-		UpdatedAfter:        in.UpdatedAfter,
-		UpdatedBefore:       in.UpdatedBefore,
-		ClosedAfter:         in.ClosedAfter,
-		ClosedBefore:        in.ClosedBefore,
-		EmptyDescription:    in.EmptyDesc,
-		NoAssignee:          in.NoAssignee,
-		NoLabels:            in.NoLabels,
-		Priority:            in.Priority,
-		PriorityMin:         in.PriorityMin,
-		PriorityMax:         in.PriorityMax,
+		IssueFilterCore: types.IssueFilterCore{
+			TitleSearch: in.TitleSearch,
+			Priority:    in.Priority,
+		},
+		IssueFilterMatch: types.IssueFilterMatch{
+			TitleContains:       in.TitleContains,
+			DescriptionContains: in.DescContains,
+			NotesContains:       in.NotesContains,
+			CreatedAfter:        in.CreatedAfter,
+			CreatedBefore:       in.CreatedBefore,
+			UpdatedAfter:        in.UpdatedAfter,
+			UpdatedBefore:       in.UpdatedBefore,
+			ClosedAfter:         in.ClosedAfter,
+			ClosedBefore:        in.ClosedBefore,
+		},
+		IssueFilterFlags: types.IssueFilterFlags{
+			EmptyDescription: in.EmptyDesc,
+			NoAssignee:       in.NoAssignee,
+			NoLabels:         in.NoLabels,
+			PriorityMin:      in.PriorityMin,
+			PriorityMax:      in.PriorityMax,
+		},
 	}
 
 	// Status and IssueType are taken as written. Neither is validated against

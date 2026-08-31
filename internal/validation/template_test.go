@@ -1,6 +1,7 @@
 package validation
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -243,78 +244,114 @@ func TestLintIssue(t *testing.T) {
 		{
 			name: "valid bug",
 			issue: &types.Issue{
-				IssueType:   types.TypeBug,
-				Description: "## Steps to Reproduce\nClick\n\n## Acceptance Criteria\nFixed",
+				IssueContent: types.IssueContent{
+					Description: "## Steps to Reproduce\nClick\n\n## Acceptance Criteria\nFixed",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: types.TypeBug,
+				},
 			},
 			wantErr: false,
 		},
 		{
 			name: "invalid bug",
 			issue: &types.Issue{
-				IssueType:   types.TypeBug,
-				Description: "It's broken",
+				IssueContent: types.IssueContent{
+					Description: "It's broken",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: types.TypeBug,
+				},
 			},
 			wantErr: true,
 		},
 		{
 			name: "bug with acceptance in dedicated field",
 			issue: &types.Issue{
-				IssueType:          types.TypeBug,
-				Description:        "## Steps to Reproduce\nClick button",
-				AcceptanceCriteria: "## Acceptance Criteria\nButton works",
+				IssueContent: types.IssueContent{
+					Description:        "## Steps to Reproduce\nClick button",
+					AcceptanceCriteria: "## Acceptance Criteria\nButton works",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: types.TypeBug,
+				},
 			},
 			wantErr: false,
 		},
 		{
 			name: "task with acceptance in dedicated field",
 			issue: &types.Issue{
-				IssueType:          types.TypeTask,
-				Description:        "Do the thing",
-				AcceptanceCriteria: "Acceptance Criteria: thing is done",
+				IssueContent: types.IssueContent{
+					Description:        "Do the thing",
+					AcceptanceCriteria: "Acceptance Criteria: thing is done",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: types.TypeTask,
+				},
 			},
 			wantErr: false,
 		},
 		{
 			name: "task with plain-text acceptance field (no heading) GH#2468",
 			issue: &types.Issue{
-				IssueType:          types.TypeTask,
-				Description:        "Do the thing",
-				AcceptanceCriteria: "- Criterion one\n- Criterion two",
+				IssueContent: types.IssueContent{
+					Description:        "Do the thing",
+					AcceptanceCriteria: "- Criterion one\n- Criterion two",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: types.TypeTask,
+				},
 			},
 			wantErr: false,
 		},
 		{
 			name: "feature with plain-text acceptance field (no heading) GH#2468",
 			issue: &types.Issue{
-				IssueType:          types.TypeFeature,
-				Description:        "Add new widget",
-				AcceptanceCriteria: "Widget displays correctly",
+				IssueContent: types.IssueContent{
+					Description:        "Add new widget",
+					AcceptanceCriteria: "Widget displays correctly",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: types.TypeFeature,
+				},
 			},
 			wantErr: false,
 		},
 		{
 			name: "epic with plain-text acceptance field satisfies success criteria GH#2468",
 			issue: &types.Issue{
-				IssueType:          types.TypeEpic,
-				Description:        "Big project",
-				AcceptanceCriteria: "Project ships and users happy",
+				IssueContent: types.IssueContent{
+					Description:        "Big project",
+					AcceptanceCriteria: "Project ships and users happy",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: types.TypeEpic,
+				},
 			},
 			wantErr: false,
 		},
 		{
 			name: "bug with plain-text acceptance field still needs steps GH#2468",
 			issue: &types.Issue{
-				IssueType:          types.TypeBug,
-				Description:        "Something is broken",
-				AcceptanceCriteria: "It should work",
+				IssueContent: types.IssueContent{
+					Description:        "Something is broken",
+					AcceptanceCriteria: "It should work",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: types.TypeBug,
+				},
 			},
 			wantErr: true,
 		},
 		{
 			name: "chore always valid",
 			issue: &types.Issue{
-				IssueType:   types.TypeChore,
-				Description: "",
+				IssueContent: types.IssueContent{
+					Description: "",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					IssueType: types.TypeChore,
+				},
 			},
 			wantErr: false,
 		},
@@ -327,6 +364,20 @@ func TestLintIssue(t *testing.T) {
 				t.Errorf("LintIssue() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestApplyAcceptanceCriteriaPreservesUnrelatedErrors(t *testing.T) {
+	sentinel := errors.New("sentinel")
+
+	if got := applyAcceptanceCriteria(nil, "provided"); got != nil {
+		t.Fatalf("applyAcceptanceCriteria(nil, provided) = %v, want nil", got)
+	}
+	if got := applyAcceptanceCriteria(sentinel, ""); !errors.Is(got, sentinel) {
+		t.Fatalf("applyAcceptanceCriteria(sentinel, empty) = %v, want sentinel", got)
+	}
+	if got := applyAcceptanceCriteria(sentinel, "provided"); !errors.Is(got, sentinel) {
+		t.Fatalf("applyAcceptanceCriteria(sentinel, provided) = %v, want sentinel", got)
 	}
 }
 

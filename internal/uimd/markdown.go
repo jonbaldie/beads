@@ -126,7 +126,8 @@ func stripOSC8Hyperlinks(s string) string {
 
 	var out strings.Builder
 	out.Grow(len(s))
-	for i := 0; i < len(s); {
+	n := len(s)
+	for i := 0; i < n; {
 		if strings.HasPrefix(s[i:], osc8) {
 			if end := oscSequenceEnd(s, i+len(osc8)); end > i {
 				i = end
@@ -144,7 +145,8 @@ func stripOSC8Hyperlinks(s string) string {
 // logic local to OSC 8 handling instead of using a broad ANSI stripper that would
 // also remove color/style escapes we may still want to preserve.
 func oscSequenceEnd(s string, start int) int {
-	for i := start; i < len(s); i++ {
+	n := len(s)
+	for i := start; i < n; i++ {
 		switch s[i] {
 		case '\a':
 			return i + 1

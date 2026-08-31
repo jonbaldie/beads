@@ -70,8 +70,12 @@ func BuildSweepCandidateFilter(in issueops.SweepRequest) types.IssueFilter {
 	closed := types.StatusClosed
 	ephemeral := in.Tier == issueops.SweepEphemeral
 	filter := types.IssueFilter{
-		Status:    &closed,
-		Ephemeral: &ephemeral,
+		IssueFilterCore: types.IssueFilterCore{
+			Status: &closed,
+		},
+		IssueFilterFlags: types.IssueFilterFlags{
+			Ephemeral: &ephemeral,
+		},
 	}
 	if in.ClosedBefore != nil {
 		cutoff := *in.ClosedBefore
@@ -171,7 +175,7 @@ func NotDoneStatusesForSweep(custom []types.CustomStatus) []types.Status {
 // BuildSweepReferenceScanFilter selects the rows a reference scan reads: the
 // not-done set, and nothing else about them.
 func BuildSweepReferenceScanFilter(custom []types.CustomStatus) types.IssueFilter {
-	return types.IssueFilter{Statuses: NotDoneStatusesForSweep(custom)}
+	return types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Statuses: NotDoneStatusesForSweep(custom)}}
 }
 
 // CandidateIDMatcher finds literal, word-bounded occurrences of a candidate id
@@ -213,7 +217,8 @@ func NewCandidateIDMatcher(candidateIDs map[string]bool) CandidateIDMatcher {
 // FindAll adds every candidate id occurring in text at ASCII word boundaries
 // to found.
 func (m CandidateIDMatcher) FindAll(text string, found map[string]bool) {
-	for i := 0; i < len(text); i++ {
+	n := len(text)
+	for i := 0; i < n; i++ {
 		ids := m.byFirstByte[text[i]]
 		if len(ids) == 0 || !isWordBoundaryAt(text, i) {
 			continue

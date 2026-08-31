@@ -39,7 +39,7 @@ func ValidateStatsAssignee(assignee string) (string, error) {
 // total), and no wisp suppression — the search seam merges the ephemeral tier
 // unless told not to.
 func BuildStatsAssigneeIssueFilter(assignee string) types.IssueFilter {
-	return types.IssueFilter{Assignee: &assignee}
+	return types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Assignee: &assignee}}
 }
 
 // BuildStatsAssigneeWorkFilter is the ready-work predicate for the same actor.
@@ -47,7 +47,7 @@ func BuildStatsAssigneeIssueFilter(assignee string) types.IssueFilter {
 // its own exclusions — which is why AssigneeStats can report a ready count the
 // workspace-wide answer's subtraction would not produce.
 func BuildStatsAssigneeWorkFilter(assignee string) types.WorkFilter {
-	return types.WorkFilter{Assignee: &assignee}
+	return types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Assignee: &assignee}}
 }
 
 // FoldStatsAssigneeSummary turns one actor's rows and their ready-work count

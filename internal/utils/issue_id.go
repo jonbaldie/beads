@@ -84,19 +84,39 @@ func isLikelyHash(s string) bool {
 	if len(s) < 3 || len(s) > 8 {
 		return false
 	}
-	// 3-char suffixes get a free pass (word collision acceptable)
-	// 4+ char suffixes require at least one digit
-	hasDigit := len(s) == 3
-	// Check if all characters are base36 (0-9, a-z)
+	if !isBase36(s) {
+		return false
+	}
+	// 3-char suffixes get a free pass (word collision acceptable); longer
+	// suffixes require a digit to distinguish them from English words.
+	return len(s) == 3 || hasDigit(s)
+}
+
+func isBase36(s string) bool {
 	for _, c := range s {
-		if c >= '0' && c <= '9' {
-			hasDigit = true
+		if isBase36Digit(c) || isBase36Letter(c) {
+			continue
 		}
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
-			return false
+		return false
+	}
+	return true
+}
+
+func isBase36Digit(c rune) bool {
+	return c >= '0' && c <= '9'
+}
+
+func isBase36Letter(c rune) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+func hasDigit(s string) bool {
+	for _, c := range s {
+		if isBase36Digit(c) {
+			return true
 		}
 	}
-	return hasDigit
+	return false
 }
 
 // ExtractIssuePrefixKnown extracts the prefix from an issue ID using a list of
@@ -141,7 +161,8 @@ func ExtractIssuePrefixKnown(issueID string, knownPrefixes []string) string {
 func NaturalCompareIDs(a, b string) int {
 	sa := splitIDSegments(a)
 	sb := splitIDSegments(b)
-	for i := 0; i < len(sa) && i < len(sb); i++ {
+	na, nb := len(sa), len(sb)
+	for i := 0; i < na && i < nb; i++ {
 		if sa[i] == sb[i] {
 			continue
 		}

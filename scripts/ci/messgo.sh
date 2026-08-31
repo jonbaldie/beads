@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# messgo is intentionally scoped to production Go in the change.  The
-# repository's baseline contains legacy findings, so a whole-tree required
-# check would make unrelated changes impossible to merge.  A file touched by
-# this change is scanned in full; tests are excluded by design.
+# messgo scans the complete production Go tree. Tests are excluded by design,
+# but no PR diff base narrows the source set: a clean required check means the
+# repository as checked out satisfies the rulesets, not only the latest patch.
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/../.." && pwd)"
@@ -14,16 +13,10 @@ cd "$repo_root"
 # shellcheck disable=SC1091
 source ./.buildflags
 
-diff_base="${MESSGO_DIFF_BASE:-}"
-if [[ -n "$diff_base" ]]; then
-  if ! git rev-parse --verify --quiet "$diff_base^{commit}" >/dev/null; then
-    printf 'messgo: merge-base %q is not available locally\n' "$diff_base" >&2
-    exit 1
-  fi
-  changed_files="$(git diff --name-only "$diff_base"...HEAD -- '*.go')"
-else
-  changed_files="$(git ls-files -- '*.go')"
-fi
+production_files="$({
+  git ls-files -- '*.go'
+  git ls-files --others --exclude-standard -- '*.go'
+} | sort -u)"
 
 paths=()
 while IFS= read -r path; do
@@ -31,7 +24,7 @@ while IFS= read -r path; do
   [[ "$path" != *_test.go ]] || continue
   [[ -f "$path" ]] || continue
   paths+=("$path")
-done <<<"$changed_files"
+done <<<"$production_files"
 
 if ((${#paths[@]} == 0)); then
   echo 'messgo: no production Go files in scope; skipping'

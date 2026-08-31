@@ -70,7 +70,7 @@ func TestHookDecoratedIssueOperationsCreateFiresReverseDependencyUpdate(t *testi
 	if err := store.SetConfig(ctx, "issue_prefix", "test"); err != nil {
 		t.Fatal(err)
 	}
-	source := &types.Issue{ID: "test-hook-source", Title: "source", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+	source := &types.Issue{IssueID: types.IssueID{ID: "test-hook-source"}, IssueContent: types.IssueContent{Title: "source"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 	if err := store.CreateIssue(ctx, source, "seed"); err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestHookDecoratedIssueOperationsCreateFiresReverseDependencyUpdate(t *testi
 	result, err := operations.Create(ctx, issueops.CreateRequest{
 		Actor:         "writer",
 		ForceIDPrefix: true,
-		Issue:         &types.Issue{Title: "created", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+		Issue:         &types.Issue{IssueContent: types.IssueContent{Title: "created"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
 		Dependencies:  []issueops.CreateDependency{{TargetID: source.ID, Type: types.DepRelatesTo, Reverse: true, Metadata: `{"key":"value"}`, ThreadID: "thread"}},
 	})
 	if err != nil {

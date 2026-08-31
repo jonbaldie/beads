@@ -43,6 +43,15 @@ const (
 // checks, so it is left off rather than published untested; TitleSearch and
 // the three *Contains fields are the substring matches that ARE reachable.
 type CountRequest struct {
+	CountIdentityFilters
+	CountPriorityFilters
+	CountTextFilters
+	CountTimeFilters
+	CountPresenceFilters
+}
+
+// CountIdentityFilters selects stored issue identity and ownership values.
+type CountIdentityFilters struct {
 	// Status restricts to one stored status. Empty and the literal "all" both
 	// mean every status, which is what makes a bare count answer for closed
 	// rows as well as open ones.
@@ -65,14 +74,20 @@ type CountRequest struct {
 	// none. Setting both is not refused — they are handed to the filter as
 	// written and answer with the empty intersection.
 	Assignee string
+}
 
+// CountPriorityFilters selects exact or bounded priorities.
+type CountPriorityFilters struct {
 	// Priority is an exact priority; PriorityMin and PriorityMax bound a range
 	// inclusively. All three are pointers because 0 is a real priority, for the
 	// reason ReadyRequest.Priority gives.
 	Priority    *int
 	PriorityMin *int
 	PriorityMax *int
+}
 
+// CountTextFilters selects labels and textual issue fields.
+type CountTextFilters struct {
 	// Labels must ALL be present; LabelsAny requires at least one. Both are
 	// raw: entries are trimmed and de-duplicated INSIDE, and a slice whose
 	// entries are all blank is the same as an unset one.
@@ -92,14 +107,20 @@ type CountRequest struct {
 	TitleContains string
 	DescContains  string
 	NotesContains string
+}
 
+// CountTimeFilters selects timestamp ranges.
+type CountTimeFilters struct {
 	CreatedAfter  *time.Time
 	CreatedBefore *time.Time
 	UpdatedAfter  *time.Time
 	UpdatedBefore *time.Time
 	ClosedAfter   *time.Time
 	ClosedBefore  *time.Time
+}
 
+// CountPresenceFilters selects missing values and the storage plane.
+type CountPresenceFilters struct {
 	// EmptyDesc, NoAssignee and NoLabels restrict to rows missing each of those.
 	EmptyDesc  bool
 	NoAssignee bool

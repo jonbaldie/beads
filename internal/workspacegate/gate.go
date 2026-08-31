@@ -257,10 +257,7 @@ func (g Gate) readInfo() *Info {
 func (g Gate) busyDetail(mode Mode) string {
 	info := g.readInfo()
 	if info == nil {
-		if mode == Exclusive {
-			return "other bd processes (shared holders record no info)"
-		}
-		return "another bd process (no holder info recorded)"
+		return busyDetailWithoutInfo(mode)
 	}
 	desc := fmt.Sprintf("pid %d", info.PID)
 	if info.Hostname != "" {
@@ -272,6 +269,17 @@ func (g Gate) busyDetail(mode Mode) string {
 	if !info.StartedAt.IsZero() {
 		desc += " since " + info.StartedAt.UTC().Format(time.RFC3339)
 	}
+	return busyDetailWithInfo(mode, info, desc)
+}
+
+func busyDetailWithoutInfo(mode Mode) string {
+	if mode == Exclusive {
+		return "other bd processes (shared holders record no info)"
+	}
+	return "another bd process (no holder info recorded)"
+}
+
+func busyDetailWithInfo(mode Mode, info *Info, desc string) string {
 	stale := func() bool {
 		host, _ := os.Hostname()
 		return host == info.Hostname && !pidAlive(info.PID)
@@ -397,6 +405,10 @@ func (g Gate) Acquire(ctx context.Context, mode Mode, opts Options) (*Handle, er
 		try = lockfile.FlockExclusiveNonBlock
 	}
 
+	return acquireLoop(ctx, g, mode, opts, poll, deadline, f, try)
+}
+
+func acquireLoop(ctx context.Context, g Gate, mode Mode, opts Options, poll time.Duration, deadline time.Time, f *os.File, try func(*os.File) error) (*Handle, error) {
 	notified := false
 	for {
 		err := try(f)
@@ -407,35 +419,65 @@ func (g Gate) Acquire(ctx context.Context, mode Mode, opts Options) (*Handle, er
 			}
 			return h, nil
 		}
-		if !errors.Is(err, lockfile.ErrLockBusy) && !lockfile.IsLocked(err) {
-			_ = f.Close()
-			return nil, fmt.Errorf("workspacegate: lock %s: %w", g.path, err)
+		if retry, retryErr := retryGateLock(ctx, g, mode, opts, poll, deadline, f, err, &notified); !retry {
+			return nil, retryErr
 		}
-		if !notified {
-			notified = true
-			if opts.OnWait != nil {
-				opts.OnWait(g.busyDetail(mode))
-			}
-		}
-		remaining := time.Until(deadline)
-		if opts.Wait <= 0 || remaining <= 0 {
-			_ = f.Close()
-			return nil, fmt.Errorf("workspacegate: %s (%s mode) held by %s: %w",
-				g.path, mode, g.busyDetail(mode), ErrBusy)
-		}
-		// Never sleep past the wait budget: a Wait shorter than the poll
-		// interval must still come back within (about) Wait, and the
-		// deadline is re-checked above before any further attempt.
-		sleep := poll
-		if remaining < sleep {
-			sleep = remaining
-		}
-		select {
-		case <-ctx.Done():
-			_ = f.Close()
-			return nil, fmt.Errorf("workspacegate: waiting for %s: %w", g.path, ctx.Err())
-		case <-time.After(sleep):
-		}
+	}
+}
+
+func retryGateLock(ctx context.Context, g Gate, mode Mode, opts Options, poll time.Duration, deadline time.Time, f *os.File, err error, notified *bool) (bool, error) {
+	if !isGateLockBusy(err) {
+		_ = f.Close()
+		return false, fmt.Errorf("workspacegate: lock %s: %w", g.path, err)
+	}
+	notifyGateWait(g, mode, opts, notified)
+	remaining := time.Until(deadline)
+	if gateWaitExpired(opts, remaining) {
+		_ = f.Close()
+		return false, fmt.Errorf("workspacegate: %s (%s mode) held by %s: %w",
+			g.path, mode, g.busyDetail(mode), ErrBusy)
+	}
+	if err := waitForGateRetry(ctx, gateRetrySleep(poll, remaining)); err != nil {
+		_ = f.Close()
+		return false, fmt.Errorf("workspacegate: waiting for %s: %w", g.path, err)
+	}
+	return true, nil
+}
+
+func isGateLockBusy(err error) bool {
+	return errors.Is(err, lockfile.ErrLockBusy) || lockfile.IsLocked(err)
+}
+
+func notifyGateWait(g Gate, mode Mode, opts Options, notified *bool) {
+	if *notified {
+		return
+	}
+	*notified = true
+	if opts.OnWait != nil {
+		opts.OnWait(g.busyDetail(mode))
+	}
+}
+
+func gateWaitExpired(opts Options, remaining time.Duration) bool {
+	return opts.Wait <= 0 || remaining <= 0
+}
+
+func gateRetrySleep(poll, remaining time.Duration) time.Duration {
+	// Never sleep past the wait budget: a Wait shorter than the poll
+	// interval must still come back within (about) Wait, and the
+	// deadline is re-checked above before any further attempt.
+	if remaining < poll {
+		return remaining
+	}
+	return poll
+}
+
+func waitForGateRetry(ctx context.Context, sleep time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(sleep):
+		return nil
 	}
 }
 
@@ -516,6 +558,14 @@ func AcquireAll(ctx context.Context, mode Mode, opts Options, gates ...Gate) (*M
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	ordered, err := orderedUniqueGates(gates)
+	if err != nil {
+		return nil, err
+	}
+	return acquireOrderedGates(ctx, mode, opts, ordered)
+}
+
+func orderedUniqueGates(gates []Gate) ([]Gate, error) {
 	uniq := make(map[string]Gate, len(gates))
 	for _, g := range gates {
 		if g.path == "" {
@@ -528,7 +578,10 @@ func AcquireAll(ctx context.Context, mode Mode, opts Options, gates ...Gate) (*M
 		ordered = append(ordered, g)
 	}
 	sort.Slice(ordered, func(i, j int) bool { return gateKey(ordered[i].path) < gateKey(ordered[j].path) })
+	return ordered, nil
+}
 
+func acquireOrderedGates(ctx context.Context, mode Mode, opts Options, ordered []Gate) (*MultiHandle, error) {
 	perGate := opts
 	if opts.OnWait != nil {
 		var once sync.Once
@@ -536,7 +589,6 @@ func AcquireAll(ctx context.Context, mode Mode, opts Options, gates ...Gate) (*M
 		perGate.OnWait = func(holder string) { once.Do(func() { cb(holder) }) }
 	}
 	deadline := time.Now().Add(opts.Wait)
-
 	m := &MultiHandle{handles: make([]*Handle, 0, len(ordered))}
 	for _, g := range ordered {
 		if opts.Wait > 0 {
@@ -547,8 +599,7 @@ func AcquireAll(ctx context.Context, mode Mode, opts Options, gates ...Gate) (*M
 		}
 		h, err := g.Acquire(ctx, mode, perGate)
 		if err != nil {
-			rerr := m.Release()
-			return nil, errors.Join(err, rerr)
+			return nil, errors.Join(err, m.Release())
 		}
 		m.handles = append(m.handles, h)
 	}

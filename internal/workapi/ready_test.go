@@ -12,9 +12,8 @@ import (
 // ready_input_test.go with the builder it covers (bd-ehi).
 func TestBuildReadyFilterPropagatesLabelPatternAndRegex(t *testing.T) {
 	filter, err := BuildReadyFilter(issueops.ReadyRequest{
-		LabelPattern: "tech-*",
-		LabelRegex:   "^tech-(debt|legacy)$",
-		Sort:         "priority",
+		ReadyRequestFilters: issueops.ReadyRequestFilters{LabelPattern: "tech-*", LabelRegex: "^tech-(debt|legacy)$"},
+		Sort:                "priority",
 	})
 	if err != nil {
 		t.Fatalf("BuildReadyFilter() error = %v", err)
@@ -32,12 +31,11 @@ func TestBuildReadyFilterPropagatesLabelPatternAndRegex(t *testing.T) {
 // only a non-CLI caller hits.
 func TestBuildReadyFilterNormalizes(t *testing.T) {
 	filter, err := BuildReadyFilter(issueops.ReadyRequest{
-		IssueType:     "mr",
-		Labels:        []string{" alpha ", "alpha", "  ", "beta"},
-		LabelsAny:     []string{"gamma", "gamma"},
-		ExcludeLabels: []string{" delta "},
-		ExcludeTypes:  []string{"epic, mol", "", "  "},
-		Sort:          "priority",
+		IssueType:           "mr",
+		Labels:              []string{" alpha ", "alpha", "  ", "beta"},
+		LabelsAny:           []string{"gamma", "gamma"},
+		ReadyRequestFilters: issueops.ReadyRequestFilters{ExcludeLabels: []string{" delta "}, ExcludeTypes: []string{"epic, mol", "", "  "}},
+		Sort:                "priority",
 	})
 	if err != nil {
 		t.Fatalf("BuildReadyFilter() error = %v", err)

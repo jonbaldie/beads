@@ -35,7 +35,7 @@ func TestPinnedDefaultBySelector(t *testing.T) {
 
 	t.Run("selectors that ask for pinned beads lift the default", func(t *testing.T) {
 		for _, status := range []string{"pinned", "hooked", "all", "pinned,closed", "closed,hooked", " all "} {
-			if got := pinnedDefault(t, issueops.ListRequest{Status: status}); got != nil {
+			if got := pinnedDefault(t, issueops.ListRequest{ListIdentityFilters: issueops.ListIdentityFilters{Status: status}}); got != nil {
 				t.Errorf("--status=%q: Pinned = %v, want nil (no pinned exclusion)", status, *got)
 			}
 		}
@@ -43,7 +43,7 @@ func TestPinnedDefaultBySelector(t *testing.T) {
 
 	t.Run("every other selector keeps the exclusion", func(t *testing.T) {
 		for _, status := range []string{"", "open", "closed", "open,closed", "in_progress"} {
-			got := pinnedDefault(t, issueops.ListRequest{Status: status})
+			got := pinnedDefault(t, issueops.ListRequest{ListIdentityFilters: issueops.ListIdentityFilters{Status: status}})
 			if got == nil || *got {
 				t.Errorf("--status=%q: Pinned = %v, want false", status, got)
 			}
@@ -52,7 +52,7 @@ func TestPinnedDefaultBySelector(t *testing.T) {
 
 	t.Run("--no-pinned wins over the selector", func(t *testing.T) {
 		for _, status := range []string{"pinned", "all", "pinned,closed"} {
-			got := pinnedDefault(t, issueops.ListRequest{Status: status, NoPinnedFlag: true})
+			got := pinnedDefault(t, issueops.ListRequest{ListIdentityFilters: issueops.ListIdentityFilters{Status: status}, ListVisibilityOptions: issueops.ListVisibilityOptions{NoPinnedFlag: true}})
 			if got == nil || *got {
 				t.Errorf("--status=%q --no-pinned: Pinned = %v, want false", status, got)
 			}
@@ -60,7 +60,7 @@ func TestPinnedDefaultBySelector(t *testing.T) {
 	})
 
 	t.Run("--pinned forces pinned-only regardless of selector", func(t *testing.T) {
-		got := pinnedDefault(t, issueops.ListRequest{Status: "all", PinnedFlag: true})
+		got := pinnedDefault(t, issueops.ListRequest{ListIdentityFilters: issueops.ListIdentityFilters{Status: "all"}, ListVisibilityOptions: issueops.ListVisibilityOptions{PinnedFlag: true}})
 		if got == nil || !*got {
 			t.Errorf("--status=all --pinned: Pinned = %v, want true", got)
 		}
@@ -71,7 +71,7 @@ func TestPinnedDefaultBySelector(t *testing.T) {
 	// either. Without this, `bd list --ready --status=all` would admit pinned
 	// beads into a ready listing that is filtered to open.
 	t.Run("--ready ignores the selector, including for pinned", func(t *testing.T) {
-		got := pinnedDefault(t, issueops.ListRequest{Status: "all", ReadyFlag: true})
+		got := pinnedDefault(t, issueops.ListRequest{ListIdentityFilters: issueops.ListIdentityFilters{Status: "all"}, ListModeOptions: issueops.ListModeOptions{ReadyFlag: true}})
 		if got == nil || *got {
 			t.Errorf("--ready --status=all: Pinned = %v, want false", got)
 		}
@@ -85,7 +85,7 @@ func TestIncludeAllTypesLiftsEverySuppression(t *testing.T) {
 	cfg := ListConfig{}
 
 	t.Run("lifts type exclusions and admits the ephemeral plane", func(t *testing.T) {
-		filter, err := BuildListFilter(issueops.ListRequest{IncludeAllTypes: true}, cfg)
+		filter, err := BuildListFilter(issueops.ListRequest{ListVisibilityOptions: issueops.ListVisibilityOptions{IncludeAllTypes: true}}, cfg)
 		if err != nil {
 			t.Fatalf("BuildListFilter: %v", err)
 		}
@@ -119,7 +119,7 @@ func TestIncludeAllTypesLiftsEverySuppression(t *testing.T) {
 	// It is a TYPE/plane knob only: the status axis is untouched, so the
 	// done/frozen exclusions and the pinned default still apply.
 	t.Run("says nothing about status", func(t *testing.T) {
-		filter, err := BuildListFilter(issueops.ListRequest{IncludeAllTypes: true}, cfg)
+		filter, err := BuildListFilter(issueops.ListRequest{ListVisibilityOptions: issueops.ListVisibilityOptions{IncludeAllTypes: true}}, cfg)
 		if err != nil {
 			t.Fatalf("BuildListFilter: %v", err)
 		}
@@ -134,9 +134,8 @@ func TestIncludeAllTypesLiftsEverySuppression(t *testing.T) {
 	// ExcludeTypes is the caller's own explicit exclusion, not a default
 	// suppression, so IncludeAllTypes must leave it alone.
 	t.Run("explicit ExcludeTypes still applies", func(t *testing.T) {
-		filter, err := BuildListFilter(issueops.ListRequest{
-			IncludeAllTypes: true,
-			ExcludeTypes:    []string{"gate"},
+		filter, err := BuildListFilter(issueops.ListRequest{ListVisibilityOptions: issueops.ListVisibilityOptions{IncludeAllTypes: true,
+			ExcludeTypes: []string{"gate"}},
 		}, cfg)
 		if err != nil {
 			t.Fatalf("BuildListFilter: %v", err)

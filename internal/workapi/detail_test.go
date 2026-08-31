@@ -32,12 +32,12 @@ func newDetailFixture() *detailFixture {
 
 	return &detailFixture{
 		issues: map[string]*types.Issue{
-			"bd-1":    {ID: "bd-1", Title: "Durable issue", IssueType: types.TypeTask, Status: types.StatusOpen, Priority: 1},
-			"bd-epic": {ID: "bd-epic", Title: "Epic", IssueType: types.TypeEpic, Status: types.StatusOpen, Priority: 1},
-			"bd-chat": {ID: "bd-chat", Title: "Has comments", IssueType: types.TypeTask, Status: types.StatusOpen},
+			"bd-1":    {IssueID: types.IssueID{ID: "bd-1"}, IssueContent: types.IssueContent{Title: "Durable issue"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen, Priority: 1}},
+			"bd-epic": {IssueID: types.IssueID{ID: "bd-epic"}, IssueContent: types.IssueContent{Title: "Epic"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeEpic, Status: types.StatusOpen, Priority: 1}},
+			"bd-chat": {IssueID: types.IssueID{ID: "bd-chat"}, IssueContent: types.IssueContent{Title: "Has comments"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}},
 		},
 		wisps: map[string]*types.Issue{
-			"bd-w1": {ID: "bd-w1", Title: "Ephemeral wisp", IssueType: types.TypeTask, Status: types.StatusOpen},
+			"bd-w1": {IssueID: types.IssueID{ID: "bd-w1"}, IssueContent: types.IssueContent{Title: "Ephemeral wisp"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}},
 		},
 		labels: map[string][]string{
 			"bd-1":  {"alpha", "beta"},
@@ -45,30 +45,43 @@ func newDetailFixture() *detailFixture {
 		},
 		deps: map[string][]*types.IssueWithDependencyMetadata{
 			"bd-1": {
-				{Issue: types.Issue{ID: "bd-parent", Title: "Parent"}, DependencyType: types.DepParentChild},
-				{Issue: types.Issue{ID: "bd-blocker", Title: "Blocker"}, DependencyType: types.DepBlocks},
+				{Issue: types.Issue{IssueID: types.IssueID{ID: "bd-parent"}, IssueContent: types.IssueContent{Title: "Parent"}}, DependencyType: types.DepParentChild},
+				{Issue: types.Issue{IssueID: types.IssueID{ID: "bd-blocker"}, IssueContent: types.IssueContent{Title: "Blocker"}}, DependencyType: types.DepBlocks},
 			},
 			"bd-w1": {
-				{Issue: types.Issue{ID: "bd-1", Title: "Durable issue"}, DependencyType: types.DepBlocks},
+				{Issue: types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueContent: types.IssueContent{Title: "Durable issue"}}, DependencyType: types.DepBlocks},
 			},
 		},
 		dependents: map[string][]*types.IssueWithDependencyMetadata{
 			"bd-1": {
 				{
 					Issue: types.Issue{
-						ID: "bd-spoke", Title: "Spoke", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2,
-						Description: heavy, Design: heavy, Notes: heavy, AcceptanceCriteria: heavy,
+						IssueID: types.IssueID{
+							ID: "bd-spoke",
+						},
+						IssueContent: types.IssueContent{
+							Title:              "Spoke",
+							Description:        heavy,
+							Design:             heavy,
+							Notes:              heavy,
+							AcceptanceCriteria: heavy,
+						},
+						IssueWorkflow: types.IssueWorkflow{
+							Status:    types.StatusOpen,
+							IssueType: types.TypeTask,
+							Priority:  2,
+						},
 					},
 					DependencyType: types.DepBlocks,
 				},
 			},
 			"bd-epic": {
-				{Issue: types.Issue{ID: "bd-kid1", Title: "Kid 1", Status: types.StatusClosed}, DependencyType: types.DepParentChild},
-				{Issue: types.Issue{ID: "bd-kid2", Title: "Kid 2", Status: types.StatusOpen}, DependencyType: types.DepParentChild},
-				{Issue: types.Issue{ID: "bd-other", Title: "Not a child", Status: types.StatusOpen}, DependencyType: types.DepBlocks},
+				{Issue: types.Issue{IssueID: types.IssueID{ID: "bd-kid1"}, IssueContent: types.IssueContent{Title: "Kid 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}}, DependencyType: types.DepParentChild},
+				{Issue: types.Issue{IssueID: types.IssueID{ID: "bd-kid2"}, IssueContent: types.IssueContent{Title: "Kid 2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}, DependencyType: types.DepParentChild},
+				{Issue: types.Issue{IssueID: types.IssueID{ID: "bd-other"}, IssueContent: types.IssueContent{Title: "Not a child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}, DependencyType: types.DepBlocks},
 			},
 			"bd-w1": {
-				{Issue: types.Issue{ID: "bd-wkid", Title: "Wisp kid", Status: types.StatusOpen}, DependencyType: types.DepParentChild},
+				{Issue: types.Issue{IssueID: types.IssueID{ID: "bd-wkid"}, IssueContent: types.IssueContent{Title: "Wisp kid"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}, DependencyType: types.DepParentChild},
 			},
 		},
 		comments: map[string][]*types.Comment{
@@ -576,9 +589,21 @@ func TestBuildIssueDetailsBriefDeps(t *testing.T) {
 		fx := newDetailFixture()
 		fx.deps["bd-1"] = []*types.IssueWithDependencyMetadata{{
 			Issue: types.Issue{
-				ID: "bd-blocker", Title: "Blocker", Status: types.StatusOpen,
-				IssueType: types.TypeTask, Priority: 2,
-				Description: heavy, Design: heavy, Notes: heavy, AcceptanceCriteria: heavy,
+				IssueID: types.IssueID{
+					ID: "bd-blocker",
+				},
+				IssueContent: types.IssueContent{
+					Title:              "Blocker",
+					Description:        heavy,
+					Design:             heavy,
+					Notes:              heavy,
+					AcceptanceCriteria: heavy,
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					IssueType: types.TypeTask,
+					Priority:  2,
+				},
 			},
 			DependencyType: types.DepBlocks,
 		}}
@@ -641,7 +666,7 @@ func TestBuildIssueDetailsBriefDeps(t *testing.T) {
 	t.Run("BriefDeps still resolves Parent", func(t *testing.T) {
 		fx := newFixture()
 		fx.deps["bd-1"] = append(fx.deps["bd-1"], &types.IssueWithDependencyMetadata{
-			Issue:          types.Issue{ID: "bd-parent", Title: "Parent", Notes: heavy},
+			Issue:          types.Issue{IssueID: types.IssueID{ID: "bd-parent"}, IssueContent: types.IssueContent{Title: "Parent", Notes: heavy}},
 			DependencyType: types.DepParentChild,
 		})
 		store, _ := fixtureSources(fx)

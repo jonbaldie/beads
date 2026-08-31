@@ -2,12 +2,106 @@ package ui
 
 import (
 	"fmt"
+	"image/color"
+	"os"
 	"strings"
 	"testing"
 
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/jonbaldie/beads/internal/types"
 )
+
+func TestSemanticPaletteAndStyles(t *testing.T) {
+	t.Setenv("BD_GIT_HOOK", "")
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("CLICOLOR", "")
+	t.Setenv("CLICOLOR_FORCE", "1")
+
+	colored := []struct {
+		name        string
+		color       func() color.Color
+		style       func() lipgloss.Style
+		light, dark string
+	}{
+		{"pass", ColorPass, PassStyle, "#86b300", "#c2d94c"},
+		{"warn", ColorWarn, WarnStyle, "#f2ae49", "#ffb454"},
+		{"fail", ColorFail, FailStyle, "#f07171", "#f07178"},
+		{"muted", ColorMuted, MutedStyle, "#828c99", "#6c7680"},
+		{"accent", ColorAccent, AccentStyle, "#399ee6", "#59c2ff"},
+		{"status in progress", ColorStatusInProgress, StatusInProgressStyle, "#f2ae49", "#ffb454"},
+		{"status closed", ColorStatusClosed, StatusClosedStyle, "#9099a1", "#8090a0"},
+		{"status blocked", ColorStatusBlocked, StatusBlockedStyle, "#f07171", "#f26d78"},
+		{"status pinned", ColorStatusPinned, StatusPinnedStyle, "#d2a6ff", "#d2a6ff"},
+		{"status hooked", ColorStatusHooked, StatusHookedStyle, "#59c2ff", "#59c2ff"},
+		{"priority P0", ColorPriorityP0, PriorityP0Style, "#f07171", "#f07178"},
+		{"priority P1", ColorPriorityP1, PriorityP1Style, "#ff8f40", "#ff8f40"},
+		{"priority P2", ColorPriorityP2, PriorityP2Style, "#e6b450", "#e6b450"},
+		{"type bug", ColorTypeBug, TypeBugStyle, "#f07171", "#f26d78"},
+		{"type epic", ColorTypeEpic, TypeEpicStyle, "#d2a6ff", "#d2a6ff"},
+	}
+
+	for _, dark := range []bool{false, true} {
+		setDarkBackground(dark)
+		wantEnv := "0"
+		if dark {
+			wantEnv = "1"
+		}
+		if got := os.Getenv(darkBackgroundEnv); got != wantEnv {
+			t.Fatalf("dark background env = %q, want %q", got, wantEnv)
+		}
+		for _, tc := range colored {
+			want := tc.light
+			if dark {
+				want = tc.dark
+			}
+			assertSameColor(t, tc.name, tc.color(), lipgloss.Color(want))
+			assertSameColor(t, tc.name+" style", tc.style().GetForeground(), lipgloss.Color(want))
+		}
+	}
+
+	plain := []struct {
+		name  string
+		color func() color.Color
+		style func() lipgloss.Style
+	}{
+		{"status open", ColorStatusOpen, StatusOpenStyle},
+		{"priority P3", ColorPriorityP3, PriorityP3Style},
+		{"priority P4", ColorPriorityP4, PriorityP4Style},
+		{"type feature", ColorTypeFeature, TypeFeatureStyle},
+		{"type task", ColorTypeTask, TypeTaskStyle},
+		{"type chore", ColorTypeChore, TypeChoreStyle},
+		{"ID", ColorID, IDStyle},
+	}
+	for _, tc := range plain {
+		if _, ok := tc.color().(lipgloss.NoColor); !ok {
+			t.Errorf("%s color = %T, want NoColor", tc.name, tc.color())
+		}
+		if _, ok := tc.style().GetForeground().(lipgloss.NoColor); !ok {
+			t.Errorf("%s style foreground = %T, want NoColor", tc.name, tc.style().GetForeground())
+		}
+	}
+
+	if !PriorityP0Style().GetBold() {
+		t.Error("P0 priority style must be bold when color is enabled")
+	}
+	for name, style := range map[string]lipgloss.Style{
+		"P1": PriorityP1Style(), "P2": PriorityP2Style(),
+		"P3": PriorityP3Style(), "P4": PriorityP4Style(),
+	} {
+		if style.GetBold() {
+			t.Errorf("%s priority style unexpectedly bold", name)
+		}
+	}
+}
+
+func assertSameColor(t *testing.T, name string, got, want color.Color) {
+	t.Helper()
+	gr, gg, gb, ga := got.RGBA()
+	wr, wg, wb, wa := want.RGBA()
+	if gr != wr || gg != wg || gb != wb || ga != wa {
+		t.Errorf("%s RGBA = (%d,%d,%d,%d), want (%d,%d,%d,%d)", name, gr, gg, gb, ga, wr, wg, wb, wa)
+	}
+}
 
 func TestRenderBasicStyles(t *testing.T) {
 	t.Run("semantic wrappers", func(t *testing.T) {
@@ -16,20 +110,20 @@ func TestRenderBasicStyles(t *testing.T) {
 			got  string
 			want string
 		}{
-			{"pass", RenderPass("ok"), PassStyle.Render("ok")},
-			{"warn", RenderWarn("careful"), WarnStyle.Render("careful")},
-			{"fail", RenderFail("boom"), FailStyle.Render("boom")},
-			{"muted", RenderMuted("note"), MutedStyle.Render("note")},
-			{"accent", RenderAccent("info"), AccentStyle.Render("info")},
-			{"category", RenderCategory("mixed Case"), CategoryStyle.Render("MIXED CASE")},
-			{"separator", RenderSeparator(), MutedStyle.Render(SeparatorLight)},
-			{"pass icon", RenderPassIcon(), PassStyle.Render(IconPass)},
-			{"warn icon", RenderWarnIcon(), WarnStyle.Render(IconWarn)},
-			{"fail icon", RenderFailIcon(), FailStyle.Render(IconFail)},
-			{"skip icon", RenderSkipIcon(), MutedStyle.Render(IconSkip)},
-			{"info icon", RenderInfoIcon(), AccentStyle.Render(IconInfo)},
-			{"bold", RenderBold("bold"), BoldStyle.Render("bold")},
-			{"command", RenderCommand("bd prime"), CommandStyle.Render("bd prime")},
+			{"pass", RenderPass("ok"), PassStyle().Render("ok")},
+			{"warn", RenderWarn("careful"), WarnStyle().Render("careful")},
+			{"fail", RenderFail("boom"), FailStyle().Render("boom")},
+			{"muted", RenderMuted("note"), MutedStyle().Render("note")},
+			{"accent", RenderAccent("info"), AccentStyle().Render("info")},
+			{"category", RenderCategory("mixed Case"), CategoryStyle().Render("MIXED CASE")},
+			{"separator", RenderSeparator(), MutedStyle().Render(SeparatorLight)},
+			{"pass icon", RenderPassIcon(), PassStyle().Render(IconPass)},
+			{"warn icon", RenderWarnIcon(), WarnStyle().Render(IconWarn)},
+			{"fail icon", RenderFailIcon(), FailStyle().Render(IconFail)},
+			{"skip icon", RenderSkipIcon(), MutedStyle().Render(IconSkip)},
+			{"info icon", RenderInfoIcon(), AccentStyle().Render(IconInfo)},
+			{"bold", RenderBold("bold"), BoldStyle().Render("bold")},
+			{"command", RenderCommand("bd prime"), CommandStyle().Render("bd prime")},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -46,13 +140,13 @@ func TestRenderStatusAndPriority(t *testing.T) {
 		status string
 		want   string
 	}{
-		{"open", StatusOpenStyle.Render("open")},
-		{"in_progress", StatusInProgressStyle.Render("in_progress")},
-		{"blocked", StatusBlockedStyle.Render("blocked")},
-		{"pinned", StatusPinnedStyle.Render("pinned")},
-		{"hooked", StatusHookedStyle.Render("hooked")},
-		{"closed", StatusClosedStyle.Render("closed")},
-		{"custom", StatusOpenStyle.Render("custom")},
+		{"open", StatusOpenStyle().Render("open")},
+		{"in_progress", StatusInProgressStyle().Render("in_progress")},
+		{"blocked", StatusBlockedStyle().Render("blocked")},
+		{"pinned", StatusPinnedStyle().Render("pinned")},
+		{"hooked", StatusHookedStyle().Render("hooked")},
+		{"closed", StatusClosedStyle().Render("closed")},
+		{"custom", StatusOpenStyle().Render("custom")},
 	}
 	for _, tc := range statusCases {
 		if got := RenderStatus(tc.status); got != tc.want {
@@ -65,11 +159,11 @@ func TestRenderStatusAndPriority(t *testing.T) {
 		priority int
 		want     string
 	}{
-		{0, PriorityP0Style.Render("P0")},
-		{1, PriorityP1Style.Render("P1")},
-		{2, PriorityP2Style.Render("P2")},
-		{3, PriorityP3Style.Render("P3")},
-		{4, PriorityP4Style.Render("P4")},
+		{0, PriorityP0Style().Render("P0")},
+		{1, PriorityP1Style().Render("P1")},
+		{2, PriorityP2Style().Render("P2")},
+		{3, PriorityP3Style().Render("P3")},
+		{4, PriorityP4Style().Render("P4")},
 		{5, "P5"},
 	}
 	for _, tc := range priorityCases {
@@ -96,11 +190,11 @@ func TestRenderTypeVariants(t *testing.T) {
 		issueType string
 		want      string
 	}{
-		{"bug", TypeBugStyle.Render("bug")},
-		{"feature", TypeFeatureStyle.Render("feature")},
-		{"task", TypeTaskStyle.Render("task")},
-		{"epic", TypeEpicStyle.Render("epic")},
-		{"chore", TypeChoreStyle.Render("chore")},
+		{"bug", TypeBugStyle().Render("bug")},
+		{"feature", TypeFeatureStyle().Render("feature")},
+		{"task", TypeTaskStyle().Render("task")},
+		{"epic", TypeEpicStyle().Render("epic")},
+		{"chore", TypeChoreStyle().Render("chore")},
 		// Orchestrator types (agent, role, rig) have been removed - they now fall through to default
 		{"agent", "agent"}, // Falls through to default (no styling)
 		{"role", "role"},   // Falls through to default (no styling)
@@ -136,41 +230,37 @@ func TestRenderIssueCompact(t *testing.T) {
 
 	closed := RenderIssueCompact("bd-2", 2, "task", "closed", "done")
 	raw := fmt.Sprintf("%s [P%d] [%s] %s - %s", "bd-2", 2, "task", "closed", "done")
-	if closed != StatusClosedStyle.Render(raw) {
+	if closed != StatusClosedStyle().Render(raw) {
 		t.Fatalf("closed issue line should be dimmed: got %q", closed)
 	}
 }
 
 func TestRenderClosedUtilities(t *testing.T) {
 	line := "bd-42 closed"
-	if got := RenderClosedLine(line); got != StatusClosedStyle.Render(line) {
+	if got := RenderClosedLine(line); got != StatusClosedStyle().Render(line) {
 		t.Fatalf("closed line mismatch: got %q", got)
 	}
 
-	if got := RenderID("bd-5"); got != IDStyle.Render("bd-5") {
+	if got := RenderID("bd-5"); got != IDStyle().Render("bd-5") {
 		t.Fatalf("RenderID mismatch")
 	}
 }
 
 func TestDisableColors(t *testing.T) {
-	// Save and restore mutated globals so other tests are unaffected.
-	savedStyle := AccentStyle
-	savedColor := ColorAccent
-	t.Cleanup(func() {
-		AccentStyle = savedStyle
-		ColorAccent = savedColor
-	})
-
-	// Simulate a color-enabled init: a style carrying an explicit foreground.
-	ColorAccent = lipgloss.Color("#ff0000")
-	AccentStyle = lipgloss.NewStyle().Foreground(ColorAccent)
+	t.Setenv("BD_GIT_HOOK", "")
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("CLICOLOR", "")
+	t.Setenv("CLICOLOR_FORCE", "1")
+	if _, ok := ColorAccent().(lipgloss.NoColor); ok {
+		t.Fatal("colors not enabled before DisableColors")
+	}
 
 	DisableColors()
 
-	if _, ok := ColorAccent.(lipgloss.NoColor); !ok {
-		t.Errorf("ColorAccent not reset to NoColor, got %T", ColorAccent)
+	if _, ok := ColorAccent().(lipgloss.NoColor); !ok {
+		t.Errorf("ColorAccent not reset to NoColor, got %T", ColorAccent())
 	}
-	if out := AccentStyle.Render("hello"); strings.ContainsRune(out, '\x1b') {
+	if out := AccentStyle().Render("hello"); strings.ContainsRune(out, '\x1b') {
 		t.Errorf("AccentStyle still emits ANSI escape after DisableColors: %q", out)
 	}
 }

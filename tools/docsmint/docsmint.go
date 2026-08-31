@@ -27,23 +27,60 @@ var (
 // <root>/website/docs/cli-reference (Docusaurus form, bd <= v1.1.0), those
 // pages are converted to the generic form first (see legacy.go).
 func run(root string) error {
-	staging := filepath.Join(root, "build", "cli-docs")
-	legacyStaging := filepath.Join(root, "website", "docs", "cli-reference")
+	source, err := loadStagingSource(root)
+	if err != nil {
+		return err
+	}
 	target := filepath.Join(root, "docs", "cli-reference")
 	docsJSON := filepath.Join(root, "docs", "docs.json")
 
-	stagingDir := staging
-	legacy := false
-	entries, err := os.ReadDir(staging)
-	if err != nil {
-		entries, err = os.ReadDir(legacyStaging)
-		if err != nil {
-			return fmt.Errorf("no staging tree at %s or %s (run `bd help --docs-root` first)", staging, legacyStaging)
-		}
-		stagingDir = legacyStaging
-		legacy = true
+	if err := neutralizeSingleFileReference(filepath.Join(root, "docs", "CLI_REFERENCE.md")); err != nil {
+		return err
+	}
+	if err := prepareDocsmintTarget(target); err != nil {
+		return err
 	}
 
+	navPages, err := writeStagingPages(source, target)
+	if err != nil {
+		return err
+	}
+	return spliceCLINav(docsJSON, append([]string{"cli-reference/index"}, navPages...))
+}
+
+type stagingSource struct {
+	dir    string
+	legacy bool
+	pages  []string
+}
+
+func loadStagingSource(root string) (stagingSource, error) {
+	staging := filepath.Join(root, "build", "cli-docs")
+	legacyStaging := filepath.Join(root, "website", "docs", "cli-reference")
+	stagingDir, legacy, entries, err := readStagingEntries(staging, legacyStaging)
+	if err != nil {
+		return stagingSource{}, err
+	}
+	pages := markdownPageNames(entries)
+	if len(pages) == 0 {
+		return stagingSource{}, fmt.Errorf("staging tree %s contains no markdown pages (run `bd help --docs-root` first)", stagingDir)
+	}
+	return stagingSource{dir: stagingDir, legacy: legacy, pages: pages}, nil
+}
+
+func readStagingEntries(staging, legacyStaging string) (string, bool, []os.DirEntry, error) {
+	entries, err := os.ReadDir(staging)
+	if err == nil {
+		return staging, false, entries, nil
+	}
+	entries, err = os.ReadDir(legacyStaging)
+	if err != nil {
+		return "", false, nil, fmt.Errorf("no staging tree at %s or %s (run `bd help --docs-root` first)", staging, legacyStaging)
+	}
+	return legacyStaging, true, entries, nil
+}
+
+func markdownPageNames(entries []os.DirEntry) []string {
 	var pages []string
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".md" {
@@ -51,52 +88,58 @@ func run(root string) error {
 		}
 		pages = append(pages, entry.Name())
 	}
-	if len(pages) == 0 {
-		return fmt.Errorf("staging tree %s contains no markdown pages (run `bd help --docs-root` first)", stagingDir)
-	}
 	sort.Strings(pages)
+	return pages
+}
 
-	if err := neutralizeSingleFileReference(filepath.Join(root, "docs", "CLI_REFERENCE.md")); err != nil {
-		return err
-	}
-
+func prepareDocsmintTarget(target string) error {
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		return err
 	}
-	if err := removeMarkdownFiles(target); err != nil {
-		return err
-	}
+	return removeMarkdownFiles(target)
+}
 
+func writeStagingPages(source stagingSource, target string) ([]string, error) {
 	var navPages []string
-	for _, name := range pages {
-		// #nosec G304: name comes from os.ReadDir over the repo's own staging
-		// tree (filtered to *.md above), not from external input.
-		data, err := os.ReadFile(filepath.Join(stagingDir, name))
+	for _, name := range source.pages {
+		generic, err := readStagingPage(source, name)
 		if err != nil {
-			return err
-		}
-		generic := string(data)
-		if legacy {
-			if name == "index.md" {
-				generic, err = convertLegacyIndex(generic)
-			} else {
-				generic, err = convertLegacyPage(generic)
-			}
-			if err != nil {
-				return fmt.Errorf("converting legacy page %s: %w", name, err)
-			}
+			return nil, err
 		}
 		out := transformPage(generic)
 		// #nosec G306: generated repository Markdown should be readable like source files.
 		if err := os.WriteFile(filepath.Join(target, name), []byte(out), 0o644); err != nil {
-			return err
+			return nil, err
 		}
 		if name != "index.md" {
 			navPages = append(navPages, "cli-reference/"+strings.TrimSuffix(name, ".md"))
 		}
 	}
+	return navPages, nil
+}
 
-	return spliceCLINav(docsJSON, append([]string{"cli-reference/index"}, navPages...))
+func readStagingPage(source stagingSource, name string) (string, error) {
+	// #nosec G304: name comes from os.ReadDir over the repo's own staging
+	// tree (filtered to *.md above), not from external input.
+	data, err := os.ReadFile(filepath.Join(source.dir, name))
+	if err != nil {
+		return "", err
+	}
+	if !source.legacy {
+		return string(data), nil
+	}
+	converted, err := convertLegacyDocument(name, string(data))
+	if err != nil {
+		return "", fmt.Errorf("converting legacy page %s: %w", name, err)
+	}
+	return converted, nil
+}
+
+func convertLegacyDocument(name, content string) (string, error) {
+	if name == "index.md" {
+		return convertLegacyIndex(content)
+	}
+	return convertLegacyPage(content)
 }
 
 // transformPage converts one generic page to Mintlify form. Every rewrite
@@ -206,50 +249,67 @@ func spliceCLINav(docsJSONPath string, pages []string) error {
 		return err
 	}
 	s := string(data)
+	openIdx, closeIdx, indent, err := locateCLINavArray(s, docsJSONPath)
+	if err != nil {
+		return err
+	}
+	b := renderCLINavPages(pages, indent)
 
+	out := s[:openIdx] + b + s[closeIdx+1:]
+	var check any
+	if err := json.Unmarshal([]byte(out), &check); err != nil {
+		return fmt.Errorf("%s: splice produced invalid JSON, refusing to write: %w", docsJSONPath, err)
+	}
+	// #nosec G306: docs.json is repository source, readable like other source files.
+	return os.WriteFile(docsJSONPath, []byte(out), 0o644)
+}
+
+func locateCLINavArray(s, docsJSONPath string) (int, int, string, error) {
 	groupIdx := strings.Index(s, `"group": "CLI Reference"`)
 	if groupIdx < 0 {
-		return fmt.Errorf("%s: no \"CLI Reference\" navigation group found", docsJSONPath)
+		return 0, 0, "", fmt.Errorf("%s: no \"CLI Reference\" navigation group found", docsJSONPath)
 	}
 	pagesIdx := strings.Index(s[groupIdx:], `"pages"`)
 	if pagesIdx < 0 {
-		return fmt.Errorf("%s: \"CLI Reference\" group has no \"pages\" key", docsJSONPath)
+		return 0, 0, "", fmt.Errorf("%s: \"CLI Reference\" group has no \"pages\" key", docsJSONPath)
 	}
 	pagesIdx += groupIdx
 	groupEnd := groupIdx + len(`"group": "CLI Reference"`)
 	if err := verifySiblingGap(s[groupEnd:pagesIdx]); err != nil {
-		return fmt.Errorf("%s: cannot safely locate the CLI Reference \"pages\" array: %w", docsJSONPath, err)
+		return 0, 0, "", fmt.Errorf("%s: cannot safely locate the CLI Reference \"pages\" array: %w", docsJSONPath, err)
 	}
 	openIdx := strings.Index(s[pagesIdx:], "[")
 	if openIdx < 0 {
-		return fmt.Errorf("%s: \"CLI Reference\" pages key has no array", docsJSONPath)
+		return 0, 0, "", fmt.Errorf("%s: \"CLI Reference\" pages key has no array", docsJSONPath)
 	}
 	openIdx += pagesIdx
+	closeIdx := matchingArrayEnd(s, openIdx)
+	if closeIdx < 0 {
+		return 0, 0, "", fmt.Errorf("%s: unbalanced \"pages\" array in \"CLI Reference\" group", docsJSONPath)
+	}
+	lineStart := strings.LastIndex(s[:pagesIdx], "\n") + 1
+	return openIdx, closeIdx, s[lineStart:pagesIdx], nil
+}
 
+func matchingArrayEnd(s string, openIdx int) int {
 	depth := 0
-	closeIdx := -1
-	for i := openIdx; i < len(s); i++ {
+	contentLength := len(s)
+	for i := openIdx; i < contentLength; i++ {
 		switch s[i] {
 		case '[':
 			depth++
 		case ']':
 			depth--
 			if depth == 0 {
-				closeIdx = i
+				return i
 			}
 		}
-		if closeIdx >= 0 {
-			break
-		}
 	}
-	if closeIdx < 0 {
-		return fmt.Errorf("%s: unbalanced \"pages\" array in \"CLI Reference\" group", docsJSONPath)
-	}
+	return -1
+}
 
-	lineStart := strings.LastIndex(s[:pagesIdx], "\n") + 1
-	indent := s[lineStart:pagesIdx]
+func renderCLINavPages(pages []string, indent string) string {
 	entryIndent := indent + "  "
-
 	var b strings.Builder
 	b.WriteString("[\n")
 	for i, p := range pages {
@@ -263,14 +323,7 @@ func spliceCLINav(docsJSONPath string, pages []string) error {
 		b.WriteString("\n")
 	}
 	b.WriteString(indent + "]")
-
-	out := s[:openIdx] + b.String() + s[closeIdx+1:]
-	var check any
-	if err := json.Unmarshal([]byte(out), &check); err != nil {
-		return fmt.Errorf("%s: splice produced invalid JSON, refusing to write: %w", docsJSONPath, err)
-	}
-	// #nosec G306: docs.json is repository source, readable like other source files.
-	return os.WriteFile(docsJSONPath, []byte(out), 0o644)
+	return b.String()
 }
 
 // verifySiblingGap ensures the "pages" key found after "group": "CLI

@@ -19,7 +19,7 @@ import (
 func TestIncludeEphemeralIsThePlaneBitAndNothingElse(t *testing.T) {
 	cfg := ListConfig{}
 
-	plane, err := BuildListFilter(issueops.ListRequest{IncludeEphemeral: true}, cfg)
+	plane, err := BuildListFilter(issueops.ListRequest{ListVisibilityOptions: issueops.ListVisibilityOptions{IncludeEphemeral: true}}, cfg)
 	if err != nil {
 		t.Fatalf("BuildListFilter(IncludeEphemeral): %v", err)
 	}
@@ -48,7 +48,7 @@ func TestIncludeEphemeralIsThePlaneBitAndNothingElse(t *testing.T) {
 
 	// And the two knobs compose rather than fight: IncludeInfra still drops the
 	// infra exclusions with the flag also set.
-	both, err := BuildListFilter(issueops.ListRequest{IncludeEphemeral: true, IncludeInfra: true}, cfg)
+	both, err := BuildListFilter(issueops.ListRequest{ListVisibilityOptions: issueops.ListVisibilityOptions{IncludeEphemeral: true, IncludeInfra: true}}, cfg)
 	if err != nil {
 		t.Fatalf("BuildListFilter(IncludeEphemeral+IncludeInfra): %v", err)
 	}
@@ -71,9 +71,9 @@ func TestReadyProjectionCarriesTheEphemeralPlane(t *testing.T) {
 		req  issueops.ListRequest
 		want bool
 	}{
-		{"a plain ready listing keeps the durable set", issueops.ListRequest{ReadyFlag: true}, false},
-		{"IncludeEphemeral crosses", issueops.ListRequest{ReadyFlag: true, IncludeEphemeral: true}, true},
-		{"IncludeInfra's plane half crosses with it", issueops.ListRequest{ReadyFlag: true, IncludeInfra: true}, true},
+		{"a plain ready listing keeps the durable set", issueops.ListRequest{ListModeOptions: issueops.ListModeOptions{ReadyFlag: true}}, false},
+		{"IncludeEphemeral crosses", issueops.ListRequest{ListVisibilityOptions: issueops.ListVisibilityOptions{IncludeEphemeral: true}, ListModeOptions: issueops.ListModeOptions{ReadyFlag: true}}, true},
+		{"IncludeInfra's plane half crosses with it", issueops.ListRequest{ListVisibilityOptions: issueops.ListVisibilityOptions{IncludeInfra: true}, ListModeOptions: issueops.ListModeOptions{ReadyFlag: true}}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			filter, err := BuildListFilter(tc.req, ListConfig{})

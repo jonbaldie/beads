@@ -111,16 +111,11 @@ type MetadataPatch struct {
 
 // IssuePatch describes fields that can change on an issue.
 type IssuePatch struct {
-	Title              Field[string]
-	Description        Field[string]
-	Design             Field[string]
-	AcceptanceCriteria Field[string]
+	IssuePatchDetails
+	Title       Field[string]
+	Description Field[string]
 	// Notes replaces the notes and is mutually exclusive with AppendNotes.
 	Notes Field[string]
-	// AppendNotes appends to the notes and is mutually exclusive with Notes.
-	AppendNotes Field[string]
-	SpecID      Field[string]
-	AwaitID     Field[string]
 	// Status sets the issue's status. A status that crosses from outside the
 	// configured done category into it answers to close policy: the update
 	// refuses with CloseOpenChildrenError or ErrCloseBlocked unless
@@ -128,16 +123,13 @@ type IssuePatch struct {
 	// out of the done category are unaffected. Close and Reopen remain the
 	// operations that carry the full lifecycle policy — a crossing update
 	// applies the close policy, not the close semantics.
-	Status           Field[Status]
-	Priority         Field[int]
-	IssueType        Field[IssueType]
-	Assignee         Field[string]
-	Owner            Field[string]
-	ClosedBySession  Field[string]
-	EstimatedMinutes Field[*int]
-	ExternalRef      Field[*string]
-	DueAt            Field[*time.Time]
-	DeferUntil       Field[*time.Time]
+	Status      Field[Status]
+	Priority    Field[int]
+	IssueType   Field[IssueType]
+	Assignee    Field[string]
+	ExternalRef Field[*string]
+	DueAt       Field[*time.Time]
+	DeferUntil  Field[*time.Time]
 	// Persistence selects the complete persistence state. It is unchanged when
 	// unset; a set value must be a known PersistenceMode. A same current mode is
 	// a representation-preserving no-op. Every aggregate move is atomic.
@@ -146,13 +138,28 @@ type IssuePatch struct {
 	// select wisp retention modes, never durable unversioned storage. Command
 	// adapters translate their own flag spelling before constructing this
 	// request.
-	Persistence Field[PersistenceMode]
 	// ParentID is unchanged when unset. A set empty value removes all outgoing
 	// parent-child edges. A set nonempty value atomically replaces all parents
 	// with exactly that target and does not inherit labels.
 	ParentID Field[string]
 	Labels   LabelPatch
 	Metadata MetadataPatch
+}
+
+// IssuePatchDetails contains less frequently changed issue attributes. It is
+// embedded in IssuePatch so ordinary field access remains direct while the
+// main mutation request presents a compact interface.
+type IssuePatchDetails struct {
+	Design             Field[string]
+	AcceptanceCriteria Field[string]
+	// AppendNotes appends to the notes and is mutually exclusive with Notes.
+	AppendNotes      Field[string]
+	SpecID           Field[string]
+	AwaitID          Field[string]
+	Owner            Field[string]
+	ClosedBySession  Field[string]
+	EstimatedMinutes Field[*int]
+	Persistence      Field[PersistenceMode]
 }
 
 // CreateDependency describes a dependency created with an issue.

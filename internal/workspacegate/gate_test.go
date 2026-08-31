@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jonbaldie/beads/internal/lockfile"
 )
 
 // TestMain doubles as the cross-process helper: when WORKSPACEGATE_HELPER
@@ -439,6 +441,61 @@ func TestWaitBudgetCapsPolling(t *testing.T) {
 	}
 	if elapsed > 2*time.Second {
 		t.Fatalf("acquisition with 20ms budget took %v (slept a full poll interval?)", elapsed)
+	}
+}
+
+func TestGateRetryDecisions(t *testing.T) {
+	if got := busyDetailWithoutInfo(Shared); got != "another bd process (no holder info recorded)" {
+		t.Fatalf("shared detail = %q", got)
+	}
+	if got := busyDetailWithoutInfo(Exclusive); got != "other bd processes (shared holders record no info)" {
+		t.Fatalf("exclusive detail = %q", got)
+	}
+
+	if !isGateLockBusy(lockfile.ErrLockBusy) {
+		t.Fatal("ErrLockBusy must be retryable")
+	}
+	if isGateLockBusy(errors.New("not busy")) {
+		t.Fatal("arbitrary errors must not be retryable")
+	}
+
+	g, _ := testGate(t)
+	notified := false
+	calls := 0
+	notifyGateWait(g, Shared, Options{OnWait: func(detail string) {
+		calls++
+		if detail != "another bd process (no holder info recorded)" {
+			t.Errorf("wait detail = %q", detail)
+		}
+	}}, &notified)
+	notifyGateWait(g, Shared, Options{OnWait: func(string) { calls++ }}, &notified)
+	if !notified || calls != 1 {
+		t.Fatalf("notified = %v, callback calls = %d; want true, 1", notified, calls)
+	}
+
+	if !gateWaitExpired(Options{}, time.Second) {
+		t.Fatal("zero wait must expire immediately")
+	}
+	if !gateWaitExpired(Options{Wait: time.Second}, 0) {
+		t.Fatal("exhausted remaining duration must expire")
+	}
+	if gateWaitExpired(Options{Wait: time.Second}, time.Millisecond) {
+		t.Fatal("positive wait and remaining duration must permit retry")
+	}
+	if got := gateRetrySleep(time.Second, time.Millisecond); got != time.Millisecond {
+		t.Fatalf("capped retry sleep = %v, want 1ms", got)
+	}
+	if got := gateRetrySleep(time.Millisecond, time.Second); got != time.Millisecond {
+		t.Fatalf("uncapped retry sleep = %v, want 1ms", got)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := waitForGateRetry(ctx, time.Hour); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled retry = %v, want context.Canceled", err)
+	}
+	if err := waitForGateRetry(context.Background(), 0); err != nil {
+		t.Fatalf("elapsed retry = %v, want nil", err)
 	}
 }
 

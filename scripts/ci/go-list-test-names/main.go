@@ -24,21 +24,28 @@ type listedPackage struct {
 var topLevelTestName = regexp.MustCompile(`^Test[A-Za-z0-9_]*$`)
 
 func main() {
-	if len(os.Args) != 2 {
-		fmt.Fprintf(os.Stderr, "usage: %s <go package>\n", os.Args[0])
-		os.Exit(2)
+	runMain(os.Args, os.Exit)
+}
+
+func runMain(args []string, exit func(int)) {
+	if len(args) != 2 {
+		fmt.Fprintf(os.Stderr, "usage: %s <go package>\n", args[0])
+		exit(2)
+		return
 	}
 
-	pkg, err := listPackage(os.Args[1])
+	pkg, err := listPackage(args[1])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "go list: %v\n", err)
-		os.Exit(1)
+		exit(1)
+		return
 	}
 
 	names, err := testNames(pkg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "list tests: %v\n", err)
-		os.Exit(1)
+		exit(1)
+		return
 	}
 
 	for _, name := range names {

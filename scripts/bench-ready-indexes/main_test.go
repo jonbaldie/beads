@@ -46,6 +46,104 @@ func TestCleanupCandidateIndexesHonorsKeepIndexes(t *testing.T) {
 	}
 }
 
+func TestParseBenchConfigDefaultsAndOverrides(t *testing.T) {
+	defaults, err := parseBenchConfig(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaults.concurrency != 64 || defaults.iterations != 2 || defaults.keepIndexes {
+		t.Fatalf("defaults = %#v", defaults)
+	}
+	if defaults.dsn == "" {
+		t.Fatal("default DSN is empty")
+	}
+
+	overrides, err := parseBenchConfig([]string{"--dsn", "custom", "--concurrency", "3", "--iterations", "4", "--keep-indexes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if overrides != (benchConfig{dsn: "custom", concurrency: 3, iterations: 4, keepIndexes: true}) {
+		t.Fatalf("overrides = %#v", overrides)
+	}
+	if _, err := parseBenchConfig([]string{"--concurrency", "not-a-number"}); err == nil {
+		t.Fatal("malformed concurrency returned nil error")
+	}
+}
+
+func TestOpenBenchDBReportsOpenAndPingFailures(t *testing.T) {
+	original := sqlOpen
+	t.Cleanup(func() { sqlOpen = original })
+	openCause := errors.New("open failed")
+	sqlOpen = func(string, string) (*sql.DB, error) { return nil, openCause }
+	if _, err := openBenchDB(context.Background(), benchConfig{}); !errors.Is(err, openCause) {
+		t.Fatalf("open error = %v, want %v", err, openCause)
+	}
+
+	db, mock, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pingCause := errors.New("ping failed")
+	mock.ExpectPing().WillReturnError(pingCause)
+	mock.ExpectClose()
+	sqlOpen = func(string, string) (*sql.DB, error) { return db, nil }
+	if _, err := openBenchDB(context.Background(), benchConfig{concurrency: 3}); !errors.Is(err, pingCause) {
+		t.Fatalf("ping error = %v, want %v", err, pingCause)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInstallIndexStateNamesEveryInstalledIndexAndWrapsFailure(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if name, err := installIndexState(context.Background(), db, nil); err != nil || name != "baseline" {
+		t.Fatalf("baseline = %q, %v", name, err)
+	}
+	state := indexes[:2]
+	for _, idx := range state {
+		mock.ExpectExec(regexp.QuoteMeta(idx.SQL)).WillReturnResult(sqlmock.NewResult(0, 0))
+	}
+	name, err := installIndexState(context.Background(), db, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := state[0].Name + "+" + state[1].Name; name != want {
+		t.Fatalf("state name = %q, want %q", name, want)
+	}
+
+	cause := errors.New("create failed")
+	mock.ExpectExec(regexp.QuoteMeta(state[0].SQL)).WillReturnError(cause)
+	if _, err := installIndexState(context.Background(), db, state[:1]); !errors.Is(err, cause) {
+		t.Fatalf("install error = %v, want wrapped %v", err, cause)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBenchmarkStatesIncludeBaselineSinglesAndAll(t *testing.T) {
+	states := benchmarkStates()
+	if len(states) != len(indexes)+2 {
+		t.Fatalf("states = %d, want %d", len(states), len(indexes)+2)
+	}
+	if states[0] != nil {
+		t.Fatalf("first state = %#v, want baseline", states[0])
+	}
+	for i, idx := range indexes {
+		if len(states[i+1]) != 1 || states[i+1][0] != idx {
+			t.Fatalf("state %d = %#v, want %#v", i+1, states[i+1], idx)
+		}
+	}
+	if len(states[len(states)-1]) != len(indexes) {
+		t.Fatalf("all-index state length = %d, want %d", len(states[len(states)-1]), len(indexes))
+	}
+}
+
 func TestRunCleansUpCandidateIndexesAfterCreateFailure(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.MonitorPingsOption(true))
 	if err != nil {

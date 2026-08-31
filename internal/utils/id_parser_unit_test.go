@@ -36,3 +36,16 @@ func TestPartialIDSearchPartRejectsInvalidSearchText(t *testing.T) {
 		}
 	}
 }
+
+func TestASCIIAlphaNumericBoundaries(t *testing.T) {
+	for _, r := range []rune{'0', '9', 'a', 'z', 'A', 'Z'} {
+		if !isASCIIAlphaNumeric(r) {
+			t.Errorf("isASCIIAlphaNumeric(%q) = false, want true", r)
+		}
+	}
+	for _, r := range []rune{'/', ':', '@', '[', '`', '{'} {
+		if isASCIIAlphaNumeric(r) {
+			t.Errorf("isASCIIAlphaNumeric(%q) = true, want false", r)
+		}
+	}
+}

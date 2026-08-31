@@ -109,7 +109,11 @@ if [[ -z "${BEADS_TEST_BD_BINARY:-}" ]]; then
             mkdir -p "$PREBUILT_BD_DIR"
             echo "Prebuilding bd for subprocess tests..." >&2
             PREBUILT_BD_BIN="$PREBUILT_BD_DIR/bd$(go env GOEXE)"
-            if go build -o "$PREBUILT_BD_BIN" "$REPO_ROOT/cmd/bd"; then
+            # The test package stays on the normal CGO-off path, but its CLI
+            # subprocess scenarios initialize embedded Dolt. Give those
+            # scenarios the same CGO-capable binary they built for themselves
+            # before this shared prebuild optimization was introduced.
+            if CGO_ENABLED=1 go build -o "$PREBUILT_BD_BIN" "$REPO_ROOT/cmd/bd"; then
                 export BEADS_TEST_BD_BINARY="$PREBUILT_BD_BIN"
                 echo "Prebuilt bd: $BEADS_TEST_BD_BINARY" >&2
             else

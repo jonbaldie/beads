@@ -9,7 +9,10 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
 
 printf 'Checking Go formatting...\n'
-if UNFORMATTED="$(gofmt -l .)"; then
+mapfile -d '' GO_FILES < <(git ls-files -z --cached --others --exclude-standard -- '*.go')
+if ((${#GO_FILES[@]} == 0)); then
+    UNFORMATTED=""
+elif UNFORMATTED="$(gofmt -l "${GO_FILES[@]}")"; then
     :
 else
     status=$?

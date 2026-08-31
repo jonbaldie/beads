@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# mutago measures only changed production lines.  This keeps the required
-# covered-MSI gate focused on the code a change actually owns while retaining
-# full test coverage and per-test mutation attribution for those lines.
+# mutago measures only changed production lines. This keeps the required
+# covered-MSI gate focused on the code a change actually owns while still
+# running the package's full test suite for those lines.
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/../.." && pwd)"
@@ -28,11 +28,19 @@ if [[ -z "$diff_base" ]] || ! git rev-parse --verify --quiet "$diff_base^{commit
 fi
 
 changed_files="$(git diff --name-only "$diff_base"...HEAD -- '*.go')"
+active_files="$(go list -f '{{range .GoFiles}}{{printf "%s/%s\n" $.Dir .}}{{end}}{{range .CgoFiles}}{{printf "%s/%s\n" $.Dir .}}{{end}}' ./...)"
+declare -A active_paths=()
+while IFS= read -r path; do
+  [[ "$path" == "$repo_root/"* ]] || continue
+  active_paths["${path#"$repo_root/"}"]=1
+done <<<"$active_files"
+
 paths=()
 while IFS= read -r path; do
   [[ -n "$path" ]] || continue
   [[ "$path" != *_test.go ]] || continue
   [[ -f "$path" ]] || continue
+  [[ -n "${active_paths[$path]+present}" ]] || continue
   paths+=("$path")
 done <<<"$changed_files"
 
@@ -52,7 +60,6 @@ fi
 printf 'mutago: scanning %d changed production Go file(s) against %s\n' "${#paths[@]}" "$diff_base"
 "${mutago[@]}" \
   --coverage \
-  --per-test \
   --git-diff-lines \
   --git-diff-base="$diff_base" \
   --min-covered-msi=80 \

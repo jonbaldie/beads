@@ -72,8 +72,7 @@ const dependencyTargetExpr = "COALESCE(depends_on_issue_id, depends_on_wisp_id, 
 
 func main() {
 	if err := run(context.Background()); err != nil {
-		log.Print(err)
-		os.Exit(1)
+		log.Fatal(err)
 	}
 }
 
@@ -82,31 +81,17 @@ func run(ctx context.Context) error {
 }
 
 func runWithArgs(ctx context.Context, args []string) error {
-	var dsn string
-	var concurrency int
-	var iterations int
-	var keepIndexes bool
-	fs := flag.NewFlagSet("bench-ready-indexes", flag.ContinueOnError)
-	fs.StringVar(&dsn, "dsn", "root@tcp(127.0.0.1:33307)/mc?timeout=30s&readTimeout=30s&writeTimeout=30s", "MySQL DSN")
-	fs.IntVar(&concurrency, "concurrency", 64, "concurrent query workers")
-	fs.IntVar(&iterations, "iterations", 2, "query executions per worker per case")
-	fs.BoolVar(&keepIndexes, "keep-indexes", false, "leave candidate indexes installed after the final benchmark state")
-	if err := fs.Parse(args); err != nil {
+	config, err := parseBenchConfig(args)
+	if err != nil {
 		return err
 	}
-
-	db, err := sqlOpen("mysql", dsn)
+	db, err := openBenchDB(ctx, config)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
-	db.SetMaxOpenConns(concurrency + 8)
-	db.SetMaxIdleConns(concurrency + 8)
-	if err := db.PingContext(ctx); err != nil {
-		return err
-	}
 	defer func() {
-		if err := cleanupCandidateIndexes(context.Background(), db, keepIndexes); err != nil {
+		if err := cleanupCandidateIndexes(context.Background(), db, config.keepIndexes); err != nil {
 			log.Printf("cleanup candidate indexes: %v", err)
 		}
 	}()
@@ -115,40 +100,91 @@ func runWithArgs(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	return benchmarkIndexStates(ctx, db, queries, config)
+}
 
-	states := [][]candidateIndex{nil}
-	for _, idx := range indexes {
-		states = append(states, []candidateIndex{idx})
+type benchConfig struct {
+	dsn         string
+	concurrency int
+	iterations  int
+	keepIndexes bool
+}
+
+func parseBenchConfig(args []string) (benchConfig, error) {
+	config := benchConfig{}
+	fs := flag.NewFlagSet("bench-ready-indexes", flag.ContinueOnError)
+	fs.StringVar(&config.dsn, "dsn", "root@tcp(127.0.0.1:33307)/mc?timeout=30s&readTimeout=30s&writeTimeout=30s", "MySQL DSN")
+	fs.IntVar(&config.concurrency, "concurrency", 64, "concurrent query workers")
+	fs.IntVar(&config.iterations, "iterations", 2, "query executions per worker per case")
+	fs.BoolVar(&config.keepIndexes, "keep-indexes", false, "leave candidate indexes installed after the final benchmark state")
+	if err := fs.Parse(args); err != nil {
+		return benchConfig{}, err
 	}
-	states = append(states, indexes)
+	return config, nil
+}
 
-	for _, state := range states {
+func openBenchDB(ctx context.Context, config benchConfig) (*sql.DB, error) {
+	db, err := sqlOpen("mysql", config.dsn)
+	if err != nil {
+		return nil, err
+	}
+	maxConnections := config.concurrency + 8
+	db.SetMaxOpenConns(maxConnections)
+	db.SetMaxIdleConns(maxConnections)
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return db, nil
+}
+
+func benchmarkIndexStates(ctx context.Context, db *sql.DB, queries []queryCase, config benchConfig) error {
+	for _, state := range benchmarkStates() {
 		if err := dropAll(ctx, db); err != nil {
 			return err
 		}
-		stateName := "baseline"
-		if len(state) > 0 {
-			names := make([]string, 0, len(state))
-			for _, idx := range state {
-				start := time.Now()
-				if _, err := db.ExecContext(ctx, idx.SQL); err != nil {
-					return fmt.Errorf("create %s: %w", idx.Name, err)
-				}
-				fmt.Printf("created %s in %s\n", idx.Name, time.Since(start).Round(time.Millisecond))
-				names = append(names, idx.Name)
-			}
-			stateName = strings.Join(names, "+")
+		stateName, err := installIndexState(ctx, db, state)
+		if err != nil {
+			return err
 		}
 
 		fmt.Printf("\n## %s\n", stateName)
 		for _, qc := range queries {
-			r := benchQuery(ctx, db, qc, concurrency, iterations)
-			fmt.Printf("%-32s count=%4d errors=%2d min=%7s p50=%7s p95=%7s max=%7s wall=%7s\n",
-				r.Name, r.Count, r.Errors, r.Min.Round(time.Millisecond), r.P50.Round(time.Millisecond),
-				r.P95.Round(time.Millisecond), r.Max.Round(time.Millisecond), r.Elapsed.Round(time.Millisecond))
+			r := benchQuery(ctx, db, qc, config.concurrency, config.iterations)
+			printQueryResult(r)
 		}
 	}
 	return nil
+}
+
+func benchmarkStates() [][]candidateIndex {
+	states := [][]candidateIndex{nil}
+	for _, idx := range indexes {
+		states = append(states, []candidateIndex{idx})
+	}
+	return append(states, indexes)
+}
+
+func installIndexState(ctx context.Context, db *sql.DB, state []candidateIndex) (string, error) {
+	if len(state) == 0 {
+		return "baseline", nil
+	}
+	names := make([]string, 0, len(state))
+	for _, idx := range state {
+		start := time.Now()
+		if _, err := db.ExecContext(ctx, idx.SQL); err != nil {
+			return "", fmt.Errorf("create %s: %w", idx.Name, err)
+		}
+		fmt.Printf("created %s in %s\n", idx.Name, time.Since(start).Round(time.Millisecond))
+		names = append(names, idx.Name)
+	}
+	return strings.Join(names, "+"), nil
+}
+
+func printQueryResult(r result) {
+	fmt.Printf("%-32s count=%4d errors=%2d min=%7s p50=%7s p95=%7s max=%7s wall=%7s\n",
+		r.Name, r.Count, r.Errors, r.Min.Round(time.Millisecond), r.P50.Round(time.Millisecond),
+		r.P95.Round(time.Millisecond), r.Max.Round(time.Millisecond), r.Elapsed.Round(time.Millisecond))
 }
 
 func cleanupCandidateIndexes(ctx context.Context, db *sql.DB, keepIndexes bool) error {

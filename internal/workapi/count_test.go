@@ -24,14 +24,13 @@ func TestBuildCountFilterIncludeInfraMirrorsListFilter(t *testing.T) {
 			name = "none"
 		}
 		t.Run("type_"+name, func(t *testing.T) {
-			want, err := BuildListFilter(issueops.ListRequest{
-				AllFlag: true, IncludeInfra: true, IssueType: issueType,
-			}, cfg)
+			want, err := BuildListFilter(issueops.ListRequest{ListIdentityFilters: issueops.ListIdentityFilters{IssueType: issueType}, ListVisibilityOptions: issueops.ListVisibilityOptions{IncludeInfra: true}, ListModeOptions: issueops.ListModeOptions{AllFlag: true}}, cfg)
 			if err != nil {
 				t.Fatalf("BuildListFilter(%q): %v", issueType, err)
 			}
 			got, err := BuildCountFilter(issueops.CountRequest{
-				IncludeInfra: true, IssueType: issueType,
+				CountIdentityFilters: issueops.CountIdentityFilters{IssueType: issueType},
+				CountPresenceFilters: issueops.CountPresenceFilters{IncludeInfra: true},
 			}, cfg)
 			if err != nil {
 				t.Fatalf("BuildCountFilter(%q): %v", issueType, err)
@@ -75,7 +74,10 @@ func TestBuildCountFilterIncludeInfraMirrorsListFilter(t *testing.T) {
 func TestBuildCountFilterHonorsTheWorkspaceInfraSet(t *testing.T) {
 	cfg := ListConfig{InfraSet: map[string]bool{"robot": true}}
 
-	robot, err := BuildCountFilter(issueops.CountRequest{IncludeInfra: true, IssueType: "robot"}, cfg)
+	robot, err := BuildCountFilter(issueops.CountRequest{
+		CountIdentityFilters: issueops.CountIdentityFilters{IssueType: "robot"},
+		CountPresenceFilters: issueops.CountPresenceFilters{IncludeInfra: true},
+	}, cfg)
 	if err != nil {
 		t.Fatalf("BuildCountFilter(robot): %v", err)
 	}
@@ -85,7 +87,10 @@ func TestBuildCountFilterHonorsTheWorkspaceInfraSet(t *testing.T) {
 
 	// "message" is a default infra type but NOT part of the custom set, so it
 	// must not route to the ephemeral tier (mirrors ListConfig.IsInfra).
-	msg, err := BuildCountFilter(issueops.CountRequest{IncludeInfra: true, IssueType: "message"}, cfg)
+	msg, err := BuildCountFilter(issueops.CountRequest{
+		CountIdentityFilters: issueops.CountIdentityFilters{IssueType: "message"},
+		CountPresenceFilters: issueops.CountPresenceFilters{IncludeInfra: true},
+	}, cfg)
 	if err != nil {
 		t.Fatalf("BuildCountFilter(message): %v", err)
 	}
@@ -137,9 +142,9 @@ func TestBuildCountFilterNormalizesLabelsAndIDs(t *testing.T) {
 	snapshot := append([]string(nil), labels...)
 
 	got, err := BuildCountFilter(issueops.CountRequest{
-		Labels:    labels,
-		LabelsAny: labelsAny,
-		IDFilter:  " bd-1 , bd-2 ,, bd-1 ",
+		CountTextFilters: issueops.CountTextFilters{
+			Labels: labels, LabelsAny: labelsAny, IDFilter: " bd-1 , bd-2 ,, bd-1 ",
+		},
 	}, ListConfig{})
 	if err != nil {
 		t.Fatalf("BuildCountFilter: %v", err)
@@ -163,7 +168,9 @@ func TestBuildCountFilterNormalizesLabelsAndIDs(t *testing.T) {
 // and matches nothing, rather than failing. A scripted caller counting a
 // retired status reads 0.
 func TestBuildCountFilterTakesStatusAndTypeAsWritten(t *testing.T) {
-	got, err := BuildCountFilter(issueops.CountRequest{Status: "no-such-status", IssueType: "no-such-type"}, ListConfig{})
+	got, err := BuildCountFilter(issueops.CountRequest{CountIdentityFilters: issueops.CountIdentityFilters{
+		Status: "no-such-status", IssueType: "no-such-type",
+	}}, ListConfig{})
 	if err != nil {
 		t.Fatalf("BuildCountFilter with unknown vocabulary: %v, want the filter as written", err)
 	}
@@ -176,7 +183,7 @@ func TestBuildCountFilterTakesStatusAndTypeAsWritten(t *testing.T) {
 
 	// "all" and the empty string are the two spellings of "every status".
 	for _, status := range []string{"", "all"} {
-		filter, err := BuildCountFilter(issueops.CountRequest{Status: status}, ListConfig{})
+		filter, err := BuildCountFilter(issueops.CountRequest{CountIdentityFilters: issueops.CountIdentityFilters{Status: status}}, ListConfig{})
 		if err != nil {
 			t.Fatalf("BuildCountFilter(status=%q): %v", status, err)
 		}

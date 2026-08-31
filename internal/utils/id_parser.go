@@ -53,177 +53,150 @@ func ResolvePartialID(ctx context.Context, store PartialIDResolverStore, input s
 	if store == nil {
 		return "", fmt.Errorf("cannot resolve issue ID %q: storage is nil", input)
 	}
-
-	// Fast path: Use SearchIssues with exact ID filter (GH#942).
-	// This uses the same query path as "bd list --id", ensuring consistency.
-	// Previously we used GetIssue which could fail in cases where SearchIssues
-	// with filter.IDs succeeded, likely due to subtle query differences.
-	exactFilter := types.IssueFilter{IDs: []string{input}}
-	if issues, err := store.SearchIssues(ctx, "", exactFilter); err == nil && len(issues) > 0 {
-		return issues[0].ID, nil
+	if exact := searchExactIssueID(ctx, store, input); exact != "" {
+		return exact, nil
 	}
+	resolver := newPartialIDResolver(ctx, store, input)
+	if exact := searchExactIssueID(ctx, store, resolver.normalizedID); exact != "" {
+		return exact, nil
+	}
+	searchPart, ok := partialIDSearchPart(resolver.hashPart)
+	if !ok {
+		return "", fmt.Errorf("no issue found matching %q", input)
+	}
+	ids, err := store.SearchIssueIDs(ctx, searchPart, types.IssueFilter{})
+	if err != nil {
+		return "", fmt.Errorf("failed to search issues: %w", err)
+	}
+	exactMatch, matches := resolver.matchDurableIDs(ids)
+	if exactMatch != "" {
+		return exactMatch, nil
+	}
+	if len(matches) == 0 {
+		exactMatch, matches = resolver.matchWisps(searchPart)
+		if exactMatch != "" {
+			return exactMatch, nil
+		}
+	}
+	return finishPartialIDResolution(input, matches)
+}
 
-	// Get the configured prefix
+type partialIDResolver struct {
+	ctx              context.Context
+	store            PartialIDResolverStore
+	input            string
+	prefixWithHyphen string
+	knownPrefixes    []string
+	normalizedID     string
+	hashPart         string
+}
+
+func searchExactIssueID(ctx context.Context, store PartialIDResolverStore, id string) string {
+	filter := types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IDs: []string{id}}}
+	issues, err := store.SearchIssues(ctx, "", filter)
+	if err != nil || len(issues) == 0 {
+		return ""
+	}
+	return issues[0].ID
+}
+
+func newPartialIDResolver(ctx context.Context, store PartialIDResolverStore, input string) partialIDResolver {
 	prefix, err := store.GetConfig(ctx, "issue_prefix")
 	if err != nil || prefix == "" {
 		prefix = "bd"
 	}
-
-	// Ensure prefix has hyphen for ID format
 	prefixWithHyphen := prefix
 	if !strings.HasSuffix(prefix, "-") {
-		prefixWithHyphen = prefix + "-"
+		prefixWithHyphen += "-"
 	}
+	knownPrefixes := configuredIssuePrefixes(ctx, store, prefix)
+	normalizedID := normalizePartialID(input, prefixWithHyphen, knownPrefixes)
+	return partialIDResolver{
+		ctx: ctx, store: store, input: input, prefixWithHyphen: prefixWithHyphen,
+		knownPrefixes: knownPrefixes, normalizedID: normalizedID,
+		hashPart: strings.TrimPrefix(normalizedID, prefixWithHyphen),
+	}
+}
 
-	// Build known prefixes from config for deterministic multi-hyphen prefix handling.
-	// This avoids relying solely on looksLikePrefixedID heuristics when the repo
-	// explicitly declares which prefixes are valid.
-	knownPrefixes := []string{strings.TrimSuffix(prefix, "-")}
-	if allowed, aErr := store.GetConfig(ctx, "allowed_prefixes"); aErr == nil && allowed != "" {
-		for _, p := range strings.Split(allowed, ",") {
-			p = strings.TrimSpace(p)
-			p = strings.TrimSuffix(p, "-")
-			if p != "" {
-				knownPrefixes = append(knownPrefixes, p)
-			}
+func configuredIssuePrefixes(ctx context.Context, store PartialIDResolverStore, prefix string) []string {
+	prefixes := []string{strings.TrimSuffix(prefix, "-")}
+	allowed, err := store.GetConfig(ctx, "allowed_prefixes")
+	if err != nil || allowed == "" {
+		return prefixes
+	}
+	for _, candidate := range strings.Split(allowed, ",") {
+		candidate = strings.TrimSuffix(strings.TrimSpace(candidate), "-")
+		if candidate != "" {
+			prefixes = append(prefixes, candidate)
 		}
 	}
+	return prefixes
+}
 
-	// Normalize input:
-	// 1. If it has the full prefix with hyphen (bd-a3f8e9), use as-is
-	// 2. If it starts with any known/allowed prefix, use as-is (config-aware cross-prefix)
-	// 3. If it has ANY prefix (heuristic fallback), use as-is for cross-prefix lookup
-	// 4. Otherwise, add prefix with hyphen (handles both bare hashes and prefix-without-hyphen cases)
-
-	var normalizedID string
-
-	if strings.HasPrefix(input, prefixWithHyphen) {
-		// Already has configured prefix with hyphen: "bd-a3f8e9"
-		normalizedID = input
-	} else if hasKnownPrefix(input, knownPrefixes) {
-		// Starts with a known/allowed prefix (e.g., "hacker-news-ko4" when allowed_prefixes includes "hacker-news")
-		normalizedID = input
-	} else if looksLikePrefixedID(input) {
-		// Has a different prefix (e.g., "aap-4ar" when configured prefix is "hq-")
-		// Don't prepend configured prefix - use as-is for cross-prefix lookup (GH#1513)
-		normalizedID = input
-	} else {
-		// Bare hash or prefix without hyphen: "a3f8e9", "07b8c8", "bda3f8e9" → all get prefix with hyphen added
-		normalizedID = prefixWithHyphen + input
+func normalizePartialID(input, prefix string, knownPrefixes []string) string {
+	if strings.HasPrefix(input, prefix) || hasKnownPrefix(input, knownPrefixes) || looksLikePrefixedID(input) {
+		return input
 	}
+	return prefix + input
+}
 
-	// Try exact match on normalized ID using SearchIssues (GH#942)
-	normalizedFilter := types.IssueFilter{IDs: []string{normalizedID}}
-	if issues, err := store.SearchIssues(ctx, "", normalizedFilter); err == nil && len(issues) > 0 {
-		return issues[0].ID, nil
+func (r partialIDResolver) issueHash(id string) string {
+	prefix := ExtractIssuePrefixKnown(id, r.knownPrefixes)
+	if prefix != "" && strings.HasPrefix(id, prefix+"-") {
+		return id[len(prefix)+1:]
 	}
+	return id
+}
 
-	// If exact match failed, try substring search.
-	// Use the hash part as a search query to leverage SQL-level filtering
-	// (id LIKE %hash%) instead of loading ALL issues into memory.
-	// On large databases (23k+ issues over MySQL wire protocol), loading all
-	// issues took 60+ seconds; with SQL filtering it's near-instant.
-	hashPart := strings.TrimPrefix(normalizedID, prefixWithHyphen)
-	searchPart, ok := partialIDSearchPart(hashPart)
-	if !ok {
-		return "", fmt.Errorf("no issue found matching %q", input)
-	}
-
-	// Narrow projection: this loop only reads the .ID field, so use the
-	// SearchIssueIDs path instead of SearchIssues. Avoids hydrating all
-	// 45+ issue columns (including big TEXT fields like description, design,
-	// notes, metadata, payload) only to discard them.
-	filter := types.IssueFilter{}
-	ids, err := store.SearchIssueIDs(ctx, searchPart, filter)
-	if err != nil {
-		return "", fmt.Errorf("failed to search issues: %w", err)
-	}
-
+func (r partialIDResolver) matchDurableIDs(ids []string) (string, []string) {
+	var exact string
 	var matches []string
-	var exactMatch string
-
 	for _, id := range ids {
-		// Check for exact full ID match first (case: user typed full ID with different prefix)
-		if id == input {
-			exactMatch = id
-			break
+		if id == r.input {
+			return id, matches
 		}
-
-		// Extract hash from each issue using config-aware prefix extraction.
-		// This correctly handles multi-hyphen prefixes (e.g., "hacker-news-ko4"
-		// yields hash "ko4", not "news-ko4" from naive first-hyphen split).
-		var issueHash string
-		if p := ExtractIssuePrefixKnown(id, knownPrefixes); p != "" && strings.HasPrefix(id, p+"-") {
-			issueHash = id[len(p)+1:]
-		} else {
-			issueHash = id
-		}
-
-		// Check for exact hash match (excluding hierarchical children)
-		if issueHash == hashPart {
-			exactMatch = id
-			// Don't break - keep searching in case there's a full ID match
-		} else if strings.HasPrefix(issueHash, hashPart) {
-			// Leading-prefix abbreviation (documented UX, e.g. "a3f8" -> "a3f8e9...").
-			// HasPrefix rather than Contains: reject interior-substring matches
-			// like "kt8" inside "j0kt8" (GH#4234).
+		hash := r.issueHash(id)
+		if hash == r.hashPart {
+			exact = id
+		} else if strings.HasPrefix(hash, r.hashPart) {
 			matches = append(matches, id)
 		}
 	}
+	return exact, matches
+}
 
-	// Prefer exact match over substring matches
-	if exactMatch != "" {
-		return exactMatch, nil
+func (r partialIDResolver) matchWisps(searchPart string) (string, []string) {
+	ephemeral := true
+	filter := types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{Ephemeral: &ephemeral}}
+	ids, err := r.store.SearchIssueIDs(r.ctx, searchPart, filter)
+	if err != nil {
+		return "", nil
 	}
-
-	// Fallback: explicitly search wisps table for partial ID resolution.
-	// DoltStore.SearchIssues merges wisps when Ephemeral is nil, but
-	// transaction-level SearchIssues does not. This ensures wisps are
-	// always resolvable by partial ID.
-	if len(matches) == 0 {
-		ephTrue := true
-		wispFilter := types.IssueFilter{Ephemeral: &ephTrue}
-		if wispIDs, wispErr := store.SearchIssueIDs(ctx, searchPart, wispFilter); wispErr == nil {
-			for _, wID := range wispIDs {
-				if wID == input {
-					return wID, nil
-				}
-				var wHash string
-				if p := ExtractIssuePrefixKnown(wID, knownPrefixes); p != "" && strings.HasPrefix(wID, p+"-") {
-					wHash = wID[len(p)+1:]
-				} else {
-					wHash = wID
-				}
-				// Wisp IDs are shaped "<prefix>-wisp-<hash>", so wHash here is
-				// the composite "wisp-<hash>". Strip the literal "wisp-" infix
-				// before comparing so bare-hash lookups (e.g. "t3st") resolve
-				// against the isolated hash, not the full "wisp-t3st" string.
-				wispHash := strings.TrimPrefix(wHash, "wisp-")
-				if wHash == hashPart || wispHash == hashPart {
-					exactMatch = wID
-				} else if strings.HasPrefix(wispHash, hashPart) {
-					matches = append(matches, wID)
-				}
-			}
-			if exactMatch != "" {
-				return exactMatch, nil
-			}
+	var exact string
+	var matches []string
+	for _, id := range ids {
+		if id == r.input {
+			return id, matches
+		}
+		hash := r.issueHash(id)
+		wispHash := strings.TrimPrefix(hash, "wisp-")
+		if hash == r.hashPart || wispHash == r.hashPart {
+			exact = id
+		} else if strings.HasPrefix(wispHash, r.hashPart) {
+			matches = append(matches, id)
 		}
 	}
+	return exact, matches
+}
 
+func finishPartialIDResolution(input string, matches []string) (string, error) {
 	if len(matches) == 0 {
 		return "", fmt.Errorf("no issue found matching %q", input)
 	}
-
-	// Sort so the ambiguity error lists IDs deterministically. SearchIssues return
-	// order is not a contract for ambiguous matches, so sorting by ID pins the same
-	// message for every storage implementation.
 	sort.Strings(matches)
-
 	if len(matches) > 1 {
 		return "", fmt.Errorf("%w: %q matches %d issues: %v\nUse more characters to disambiguate", ErrAmbiguousID, input, len(matches), matches)
 	}
-
 	return matches[0], nil
 }
 
@@ -246,11 +219,23 @@ func looksLikePartialIDHash(input string) bool {
 		return false
 	}
 	for _, c := range input {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '-' || c == '.') {
+		if !isPartialIDRune(c) {
 			return false
 		}
 	}
 	return true
+}
+
+func isPartialIDRune(r rune) bool {
+	return isASCIIAlphaNumeric(r) || r == '-' || r == '.'
+}
+
+func isASCIIAlphaNumeric(r rune) bool {
+	return r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z'
+}
+
+func isASCIILowerAlphaNumeric(r rune) bool {
+	return r >= '0' && r <= '9' || r >= 'a' && r <= 'z'
 }
 
 // ResolvePartialIDs resolves multiple potentially partial issue IDs.
@@ -283,7 +268,7 @@ func looksLikePrefixedID(input string) bool {
 
 	// Prefix must be non-empty lowercase alphanumeric
 	for _, c := range prefix {
-		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+		if !isASCIILowerAlphaNumeric(c) {
 			return false
 		}
 	}
@@ -292,8 +277,7 @@ func looksLikePrefixedID(input string) bool {
 	if len(suffix) == 0 {
 		return false
 	}
-	first := rune(suffix[0])
-	if !((first >= 'a' && first <= 'z') || (first >= '0' && first <= '9')) {
+	if !isASCIILowerAlphaNumeric(rune(suffix[0])) {
 		return false
 	}
 

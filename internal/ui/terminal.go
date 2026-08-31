@@ -75,6 +75,19 @@ func ShouldUseHyperlinks() bool {
 // capability markers (for example Windows Terminal's WT_SESSION) without needing
 // to run inside those terminals.
 func shouldUseHyperlinks(stdoutIsTerminal bool) bool {
+	if !hyperlinkEnvironmentAllowed() {
+		return false
+	}
+	if forceHyperlinksEnabled() {
+		return true
+	}
+	if !stdoutIsTerminal {
+		return false
+	}
+	return terminalAdvertisesHyperlinks()
+}
+
+func hyperlinkEnvironmentAllowed() bool {
 	if os.Getenv("BD_GIT_HOOK") == "1" {
 		return false
 	}
@@ -90,41 +103,49 @@ func shouldUseHyperlinks(stdoutIsTerminal bool) bool {
 	if strings.EqualFold(os.Getenv("TERM"), "dumb") {
 		return false
 	}
-	if force := os.Getenv("FORCE_HYPERLINK"); force != "" && force != "0" {
-		return true
-	}
-	if !stdoutIsTerminal {
-		return false
-	}
+	return true
+}
 
-	if os.Getenv("WT_SESSION") != "" ||
+func forceHyperlinksEnabled() bool {
+	force := os.Getenv("FORCE_HYPERLINK")
+	return force != "" && force != "0"
+}
+
+func terminalAdvertisesHyperlinks() bool {
+	return hyperlinkMarkerPresent() || supportedTermProgram() || supportedTermName() || supportedVTE()
+}
+
+func hyperlinkMarkerPresent() bool {
+	return os.Getenv("WT_SESSION") != "" ||
 		os.Getenv("KITTY_WINDOW_ID") != "" ||
 		os.Getenv("WEZTERM_EXECUTABLE") != "" ||
 		os.Getenv("KONSOLE_VERSION") != "" ||
 		os.Getenv("DOMTERM") != "" ||
-		os.Getenv("GHOSTTY_RESOURCES_DIR") != "" {
-		return true
-	}
+		os.Getenv("GHOSTTY_RESOURCES_DIR") != ""
+}
 
+func supportedTermProgram() bool {
 	switch strings.ToLower(os.Getenv("TERM_PROGRAM")) {
 	case "iterm.app", "wezterm", "vscode", "apple_terminal", "tabby", "hyper", "ghostty":
 		return true
 	}
+	return false
+}
 
+func supportedTermName() bool {
 	termName := strings.ToLower(os.Getenv("TERM"))
-	if strings.Contains(termName, "xterm-kitty") ||
+	return strings.Contains(termName, "xterm-kitty") ||
 		strings.Contains(termName, "wezterm") ||
 		strings.Contains(termName, "foot") ||
 		strings.Contains(termName, "contour") ||
-		strings.Contains(termName, "ghostty") {
-		return true
-	}
+		strings.Contains(termName, "ghostty")
+}
 
+func supportedVTE() bool {
 	if vte := os.Getenv("VTE_VERSION"); vte != "" {
 		version, err := strconv.Atoi(vte)
 		return err == nil && version >= 5000
 	}
-
 	return false
 }
 

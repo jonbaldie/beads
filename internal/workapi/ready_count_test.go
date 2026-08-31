@@ -24,20 +24,22 @@ func TestBuildReadyCountFilterIsTheUnboundedReadyFilter(t *testing.T) {
 	request := issueops.ReadyRequest{
 		Brief:            true,
 		IssueType:        "mr",
-		Assignee:         "alice",
 		Labels:           []string{" alpha ", "alpha"},
 		LabelsAny:        []string{"gamma"},
-		ExcludeLabels:    []string{" delta "},
-		LabelPattern:     "tech-*",
-		LabelRegex:       "^tech-",
 		Priority:         &priority,
 		ParentID:         "bd-parent",
 		IncludeDeferred:  true,
 		IncludeEphemeral: true,
-		ExcludeTypes:     []string{"epic, mol"},
-		MetadataFields:   map[string]string{"team": "core"},
-		HasMetadataKey:   "team",
 		Sort:             "priority",
+		ReadyRequestFilters: issueops.ReadyRequestFilters{
+			Assignee:       "alice",
+			ExcludeLabels:  []string{" delta "},
+			LabelPattern:   "tech-*",
+			LabelRegex:     "^tech-",
+			ExcludeTypes:   []string{"epic, mol"},
+			MetadataFields: map[string]string{"team": "core"},
+			HasMetadataKey: "team",
+		},
 	}
 
 	counted, err := BuildReadyCountFilter(request)
