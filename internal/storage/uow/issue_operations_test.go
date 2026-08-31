@@ -36,21 +36,21 @@ func TestIssueOperationsRejectsInvalidRequestsBeforeOpeningUOW(t *testing.T) {
 			return err
 		}},
 		{"create embedded relations", func() error {
-			_, err := operations.Create(context.Background(), issueops.CreateRequest{Actor: "a", Issue: &issueops.Issue{Comments: []*types.Comment{{Text: "no"}}}})
+			_, err := operations.Create(context.Background(), issueops.CreateRequest{Actor: "a", Issue: &issueops.Issue{IssueGraph: types.IssueGraph{Comments: []*types.Comment{{Text: "no"}}}}})
 			return err
 		}},
 		{"create duplicate dependency", func() error {
-			_, err := operations.Create(context.Background(), issueops.CreateRequest{Actor: "a", Issue: &issueops.Issue{Title: "x"}, ParentID: "bd-parent", Dependencies: []issueops.CreateDependency{{TargetID: "bd-parent", Type: types.DepParentChild}}})
+			_, err := operations.Create(context.Background(), issueops.CreateRequest{Actor: "a", Issue: &issueops.Issue{IssueContent: types.IssueContent{Title: "x"}}, ParentID: "bd-parent", Dependencies: []issueops.CreateDependency{{TargetID: "bd-parent", Type: types.DepParentChild}}})
 			return err
 		}},
 		{"create overlong label", func() error {
-			_, err := operations.Create(context.Background(), issueops.CreateRequest{Actor: "a", Issue: &issueops.Issue{Title: "x", Labels: []string{strings.Repeat("x", types.MaxFieldLen+1)}}})
+			_, err := operations.Create(context.Background(), issueops.CreateRequest{Actor: "a", Issue: &issueops.Issue{IssueContent: types.IssueContent{Title: "x"}, IssueGraph: types.IssueGraph{Labels: []string{strings.Repeat("x", types.MaxFieldLen+1)}}}})
 			return err
 		}},
 		{"create malformed dependency metadata", func() error {
 			_, err := operations.Create(context.Background(), issueops.CreateRequest{
 				Actor:        "a",
-				Issue:        &issueops.Issue{Title: "x"},
+				Issue:        &issueops.Issue{IssueContent: types.IssueContent{Title: "x"}},
 				Dependencies: []issueops.CreateDependency{{TargetID: "bd-target", Type: types.DepRelated, Metadata: "{"}},
 			})
 			return err
@@ -58,7 +58,7 @@ func TestIssueOperationsRejectsInvalidRequestsBeforeOpeningUOW(t *testing.T) {
 		{"create overlong dependency thread", func() error {
 			_, err := operations.Create(context.Background(), issueops.CreateRequest{
 				Actor:        "a",
-				Issue:        &issueops.Issue{Title: "x"},
+				Issue:        &issueops.Issue{IssueContent: types.IssueContent{Title: "x"}},
 				Dependencies: []issueops.CreateDependency{{TargetID: "bd-target", Type: types.DepRelated, ThreadID: strings.Repeat("t", types.MaxFieldLen+1)}},
 			})
 			return err
@@ -66,7 +66,7 @@ func TestIssueOperationsRejectsInvalidRequestsBeforeOpeningUOW(t *testing.T) {
 		{"create overlong parent ID", func() error {
 			_, err := operations.Create(context.Background(), issueops.CreateRequest{
 				Actor:    "a",
-				Issue:    &issueops.Issue{Title: "x"},
+				Issue:    &issueops.Issue{IssueContent: types.IssueContent{Title: "x"}},
 				ParentID: strings.Repeat("p", types.MaxFieldLen+1),
 			})
 			return err
@@ -74,7 +74,7 @@ func TestIssueOperationsRejectsInvalidRequestsBeforeOpeningUOW(t *testing.T) {
 		{"create overlong dependency target ID", func() error {
 			_, err := operations.Create(context.Background(), issueops.CreateRequest{
 				Actor:        "a",
-				Issue:        &issueops.Issue{Title: "x"},
+				Issue:        &issueops.Issue{IssueContent: types.IssueContent{Title: "x"}},
 				Dependencies: []issueops.CreateDependency{{TargetID: strings.Repeat("d", types.MaxFieldLen+1), Type: types.DepRelated}},
 			})
 			return err
@@ -82,7 +82,7 @@ func TestIssueOperationsRejectsInvalidRequestsBeforeOpeningUOW(t *testing.T) {
 		{"create overlong waits-for spawner ID", func() error {
 			_, err := operations.Create(context.Background(), issueops.CreateRequest{
 				Actor:    "a",
-				Issue:    &issueops.Issue{Title: "x"},
+				Issue:    &issueops.Issue{IssueContent: types.IssueContent{Title: "x"}},
 				WaitsFor: &issueops.WaitsFor{SpawnerID: strings.Repeat("w", types.MaxFieldLen+1)},
 			})
 			return err
@@ -122,7 +122,7 @@ func TestIssueOperationsRejectsInvalidRequestsBeforeOpeningUOW(t *testing.T) {
 		{"update negative estimated minutes", func() error {
 			_, err := operations.Update(context.Background(), issueops.UpdateRequest{
 				Actor: "a", IssueID: "bd-1",
-				Patch: issueops.IssuePatch{EstimatedMinutes: issueops.Field[*int]{Set: true, Value: &negativeEstimate}},
+				Patch: issueops.IssuePatch{IssuePatchDetails: issueops.IssuePatchDetails{EstimatedMinutes: issueops.Field[*int]{Set: true, Value: &negativeEstimate}}},
 			})
 			return err
 		}},
@@ -144,7 +144,7 @@ func TestIssueOperationsRejectsInvalidRequestsBeforeOpeningUOW(t *testing.T) {
 			return err
 		}},
 		{"invalid persistence", func() error {
-			_, err := operations.Update(context.Background(), issueops.UpdateRequest{Actor: "a", IssueID: "bd-1", Patch: issueops.IssuePatch{Persistence: issueops.Field[issueops.PersistenceMode]{Set: true, Value: "bad"}}})
+			_, err := operations.Update(context.Background(), issueops.UpdateRequest{Actor: "a", IssueID: "bd-1", Patch: issueops.IssuePatch{IssuePatchDetails: issueops.IssuePatchDetails{Persistence: issueops.Field[issueops.PersistenceMode]{Set: true, Value: "bad"}}}})
 			return err
 		}},
 		{"metadata replacement combined", func() error {
@@ -214,19 +214,15 @@ func TestIssueOperationsLifecycleWithRealUnitOfWork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewIssueOperations() error = %v", err)
 	}
-	target, err := operations.Create(ctx, issueops.CreateRequest{Actor: "tester", Issue: &issueops.Issue{ID: "bd-life-target", Title: "target", IssueType: types.TypeTask, Priority: 2}})
+	target, err := operations.Create(ctx, issueops.CreateRequest{Actor: "tester", Issue: &issueops.Issue{IssueID: types.IssueID{ID: "bd-life-target"}, IssueContent: types.IssueContent{Title: "target"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}}})
 	if err != nil {
 		t.Fatalf("Create(target) error = %v", err)
 	}
 	if target.Issue == nil {
 		t.Fatal("Create(target) returned nil issue")
 	}
-	importedIssue := &issueops.Issue{
-		ID:        "bd-life-main",
-		Title:     "main",
-		IssueType: types.TypeTask,
-		Priority:  2,
-		Labels:    []string{"imported-label"},
+	importedIssue := &issueops.Issue{IssueID: types.IssueID{ID: "bd-life-main"}, IssueContent: types.IssueContent{Title: "main"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask,
+		Priority: 2}, IssueGraph: types.IssueGraph{Labels: []string{"imported-label"}},
 	}
 	importedDependency := issueops.CreateDependency{
 		TargetID: target.Issue.ID,
@@ -270,8 +266,7 @@ func TestIssueOperationsLifecycleWithRealUnitOfWork(t *testing.T) {
 		Claim:           true,
 		ExpectedVersion: &created.Issue.RowVersion,
 		Patch: issueops.IssuePatch{
-			Title:       issueops.Field[string]{Set: true, Value: "claimed and moved"},
-			Persistence: issueops.Field[issueops.PersistenceMode]{Set: true, Value: issueops.PersistenceModeEphemeral},
+			Title: issueops.Field[string]{Set: true, Value: "claimed and moved"}, IssuePatchDetails: issueops.IssuePatchDetails{Persistence: issueops.Field[issueops.PersistenceMode]{Set: true, Value: issueops.PersistenceModeEphemeral}},
 		},
 	})
 	if err != nil {
@@ -295,9 +290,7 @@ func TestIssueOperationsLifecycleWithRealUnitOfWork(t *testing.T) {
 	samePersistence, err := operations.Update(ctx, issueops.UpdateRequest{
 		Actor:   "tester",
 		IssueID: updated.Issue.ID,
-		Patch: issueops.IssuePatch{
-			Persistence: issueops.Field[issueops.PersistenceMode]{Set: true, Value: issueops.PersistenceModeEphemeral},
-		},
+		Patch:   issueops.IssuePatch{IssuePatchDetails: issueops.IssuePatchDetails{Persistence: issueops.Field[issueops.PersistenceMode]{Set: true, Value: issueops.PersistenceModeEphemeral}}},
 	})
 	if err != nil || samePersistence.Changed {
 		t.Fatalf("Update(same persistence) = %#v, %v; want unchanged", samePersistence, err)
@@ -305,9 +298,7 @@ func TestIssueOperationsLifecycleWithRealUnitOfWork(t *testing.T) {
 	promoted, err := operations.Update(ctx, issueops.UpdateRequest{
 		Actor:   "tester",
 		IssueID: updated.Issue.ID,
-		Patch: issueops.IssuePatch{
-			Persistence: issueops.Field[issueops.PersistenceMode]{Set: true, Value: issueops.PersistenceModePersistent},
-		},
+		Patch:   issueops.IssuePatch{IssuePatchDetails: issueops.IssuePatchDetails{Persistence: issueops.Field[issueops.PersistenceMode]{Set: true, Value: issueops.PersistenceModePersistent}}},
 	})
 	if err != nil || !promoted.Changed || promoted.Issue.Ephemeral || promoted.Issue.NoHistory {
 		t.Fatalf("Update(promote persistence) = %#v, %v", promoted, err)
@@ -315,11 +306,11 @@ func TestIssueOperationsLifecycleWithRealUnitOfWork(t *testing.T) {
 	if stored := readStoredIssue(t, ctx, provider, promoted.Issue.ID); stored.ID != promoted.Issue.ID {
 		t.Fatalf("promoted durable issue = %#v", stored)
 	}
-	parent, err := operations.Create(ctx, issueops.CreateRequest{Actor: "tester", Issue: &issueops.Issue{ID: "bd-life-parent", Title: "parent", IssueType: types.TypeEpic, Priority: 2}})
+	parent, err := operations.Create(ctx, issueops.CreateRequest{Actor: "tester", Issue: &issueops.Issue{IssueID: types.IssueID{ID: "bd-life-parent"}, IssueContent: types.IssueContent{Title: "parent"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeEpic, Priority: 2}}})
 	if err != nil {
 		t.Fatalf("Create(parent) error = %v", err)
 	}
-	child, err := operations.Create(ctx, issueops.CreateRequest{Actor: "tester", Issue: &issueops.Issue{ID: "bd-life-parent.1", Title: "child", IssueType: types.TypeTask, Priority: 2}, ParentID: parent.Issue.ID})
+	child, err := operations.Create(ctx, issueops.CreateRequest{Actor: "tester", Issue: &issueops.Issue{IssueID: types.IssueID{ID: "bd-life-parent.1"}, IssueContent: types.IssueContent{Title: "child"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}}, ParentID: parent.Issue.ID})
 	if err != nil {
 		t.Fatalf("Create(child) error = %v", err)
 	}
@@ -334,7 +325,7 @@ func TestIssueOperationsLifecycleWithRealUnitOfWork(t *testing.T) {
 	if closedChild.Issue.ClosedBySession != "session-life-child" {
 		t.Fatalf("Close(child) ClosedBySession = %q, want session-life-child", closedChild.Issue.ClosedBySession)
 	}
-	movedClosedChild, err := operations.Update(ctx, issueops.UpdateRequest{Actor: "tester", IssueID: closedChild.Issue.ID, Patch: issueops.IssuePatch{Persistence: issueops.Field[issueops.PersistenceMode]{Set: true, Value: issueops.PersistenceModeEphemeral}}})
+	movedClosedChild, err := operations.Update(ctx, issueops.UpdateRequest{Actor: "tester", IssueID: closedChild.Issue.ID, Patch: issueops.IssuePatch{IssuePatchDetails: issueops.IssuePatchDetails{Persistence: issueops.Field[issueops.PersistenceMode]{Set: true, Value: issueops.PersistenceModeEphemeral}}}})
 	if err != nil {
 		t.Fatalf("Update(closed child persistence) error = %v", err)
 	}
@@ -358,12 +349,8 @@ func TestIssueOperationsLifecycleWithRealUnitOfWork(t *testing.T) {
 	if err != nil || noOp.Changed {
 		t.Fatalf("Reopen(no-op) = %#v, %v", noOp, err)
 	}
-	rollbackIssue := &issueops.Issue{
-		ID:        "bd-life-rollback",
-		Title:     "rollback",
-		IssueType: types.TypeTask,
-		Priority:  2,
-		Labels:    []string{"rollback-label"},
+	rollbackIssue := &issueops.Issue{IssueID: types.IssueID{ID: "bd-life-rollback"}, IssueContent: types.IssueContent{Title: "rollback"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask,
+		Priority: 2}, IssueGraph: types.IssueGraph{Labels: []string{"rollback-label"}},
 	}
 	rollbackDependency := issueops.CreateDependency{
 		TargetID: "bd-life-missing",
@@ -440,7 +427,7 @@ func TestOperationIssueFallsBackOnlyAfterNotFoundWispRead(t *testing.T) {
 		},
 		getIssue: func(context.Context, string) (*types.Issue, error) {
 			durableCalls++
-			return &types.Issue{ID: "bd-durable"}, nil
+			return &types.Issue{IssueID: types.IssueID{ID: "bd-durable"}}, nil
 		},
 	}}
 
@@ -461,7 +448,7 @@ func TestOperationIssueFallsBackToDurableAfterNoRowsWispRead(t *testing.T) {
 		},
 		getIssue: func(context.Context, string) (*types.Issue, error) {
 			durableCalls++
-			return &types.Issue{ID: "bd-durable"}, nil
+			return &types.Issue{IssueID: types.IssueID{ID: "bd-durable"}}, nil
 		},
 	}}
 
@@ -495,7 +482,7 @@ func TestOperationIssuePropagatesWispReadFailure(t *testing.T) {
 		},
 		getIssue: func(context.Context, string) (*types.Issue, error) {
 			durableCalls++
-			return &types.Issue{ID: "bd-durable"}, nil
+			return &types.Issue{IssueID: types.IssueID{ID: "bd-durable"}}, nil
 		},
 	}}
 
@@ -528,9 +515,7 @@ func TestUpdateSpecClassifiesMetadataValidationAndClearsReplacement(t *testing.T
 }
 
 func TestUpdateSpecLowersPersistenceMode(t *testing.T) {
-	spec, err := updateSpec(issueops.UpdateRequest{Patch: issueops.IssuePatch{
-		Persistence: issueops.Field[issueops.PersistenceMode]{Set: true, Value: issueops.PersistenceModeEphemeral},
-	}})
+	spec, err := updateSpec(issueops.UpdateRequest{Patch: issueops.IssuePatch{IssuePatchDetails: issueops.IssuePatchDetails{Persistence: issueops.Field[issueops.PersistenceMode]{Set: true, Value: issueops.PersistenceModeEphemeral}}}})
 	if err != nil {
 		t.Fatalf("updateSpec() error = %v", err)
 	}

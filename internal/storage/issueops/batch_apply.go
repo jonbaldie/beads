@@ -322,21 +322,46 @@ func (r *applyBatchRun) applyClose(ctx context.Context, tx DBTX, index int, item
 // nothing — the rule RemoveDependencyResult.Removed states for the mirror
 // operation.
 func (r *applyBatchRun) applyDepAdd(ctx context.Context, tx DBTX, index int, item *publicops.DepAddItem) error {
-	source, err := r.resolve(item.Source, index, "source")
+	prepared, err := prepareBatchDependency(ctx, tx, index, item, r)
 	if err != nil {
 		return err
 	}
-	target, err := r.resolve(item.Target, index, "target")
+	eventWritten, err := AddDependencyInTx(ctx, tx, prepared.dependency, r.plan.Actor, AddDependencyOpts{
+		SourceTable:    prepared.sourceTable,
+		WriteTable:     prepared.depTable,
+		IsCrossPrefix:  types.ExtractPrefix(prepared.source) != types.ExtractPrefix(prepared.target),
+		SkipCycleCheck: r.plan.SkipPerEdgeCycleCheck,
+		EmitEvent:      true,
+	})
 	if err != nil {
-		return err
+		return batchDependencyItemError(index, item, prepared.source, err)
 	}
-	itemErr := func(err error) error {
-		return &publicops.ItemError{Index: index, Kind: publicops.ItemDepAdd, Key: item.Source.Key, IssueID: source, Err: err}
+	recordBatchDependencyWrite(r, index, prepared, eventWritten)
+	return nil
+}
+
+type preparedBatchDependency struct {
+	source      string
+	target      string
+	dependency  *types.Dependency
+	sourceTable string
+	eventTable  string
+	depTable    string
+}
+
+func prepareBatchDependency(ctx context.Context, tx DBTX, index int, item *publicops.DepAddItem, run *applyBatchRun) (preparedBatchDependency, error) {
+	source, err := run.resolve(item.Source, index, "source")
+	if err != nil {
+		return preparedBatchDependency{}, err
+	}
+	target, err := run.resolve(item.Target, index, "target")
+	if err != nil {
+		return preparedBatchDependency{}, err
 	}
 	if source == target {
 		// Two different refs can still name one row — a key and the id it was
 		// bound to. The planner catches only the syntactically identical pair.
-		return itemErr(fmt.Errorf("%w: %s", publicops.ErrSelfDependency, source))
+		return preparedBatchDependency{}, batchDependencyItemError(index, item, source, fmt.Errorf("%w: %s", publicops.ErrSelfDependency, source))
 	}
 	// THE CROSS-PLANE REFUSAL IS ABOUT ROWS THIS REQUEST CREATED, and only
 	// those. The two planes hold their edges in different tables, so an edge
@@ -346,55 +371,52 @@ func (r *applyBatchRun) applyDepAdd(ctx context.Context, tx DBTX, index int, ite
 	// here, because these creates ran one at a time. An edge between rows that
 	// already existed is untouched by this: either class may depend on the
 	// other (DependencyEditor).
-	sourceWisp, sourceMine := r.planes[source]
-	targetWisp, targetMine := r.planes[target]
+	sourceWisp, sourceMine := run.planes[source]
+	targetWisp, targetMine := run.planes[target]
 	if sourceMine && targetMine && sourceWisp != targetWisp {
-		return itemErr(CrossPlaneBatchEdgeError(source, target))
+		return preparedBatchDependency{}, batchDependencyItemError(index, item, source, CrossPlaneBatchEdgeError(source, target))
 	}
 	if !sourceMine {
 		sourceWisp = IsActiveWispInTx(ctx, tx, source)
 	}
 	sourceTable, _, eventTable, depTable := WispTableRouting(sourceWisp)
+	return preparedBatchDependency{
+		source:      source,
+		target:      target,
+		dependency:  &types.Dependency{IssueID: source, DependsOnID: target, Type: item.Type, Metadata: item.Metadata},
+		sourceTable: sourceTable,
+		eventTable:  eventTable,
+		depTable:    depTable,
+	}, nil
+}
 
-	dep := &types.Dependency{
-		IssueID:     source,
-		DependsOnID: target,
-		Type:        item.Type,
-		Metadata:    item.Metadata,
-	}
-	eventWritten, err := AddDependencyInTx(ctx, tx, dep, r.plan.Actor, AddDependencyOpts{
-		SourceTable:    sourceTable,
-		WriteTable:     depTable,
-		IsCrossPrefix:  types.ExtractPrefix(source) != types.ExtractPrefix(target),
-		SkipCycleCheck: r.plan.SkipPerEdgeCycleCheck,
-		EmitEvent:      true,
-	})
-	if err != nil {
-		return itemErr(err)
-	}
+func batchDependencyItemError(index int, item *publicops.DepAddItem, source string, err error) error {
+	return &publicops.ItemError{Index: index, Kind: publicops.ItemDepAdd, Key: item.Source.Key, IssueID: source, Err: err}
+}
+
+func recordBatchDependencyWrite(run *applyBatchRun, index int, prepared preparedBatchDependency, eventWritten bool) {
 	// Stage the source's dependency table always and its events table only when
 	// a row was recorded — the selective staging addDependencyEdgeInTx
 	// documents, so an idempotent re-add cannot sweep unrelated pending event
 	// rows into this commit (GH#2455).
-	r.write.Tables.Add(depTable)
+	run.write.Tables.Add(prepared.depTable)
 	// The edge row was written EITHER WAY: a new edge is an insert, and a
 	// same-type re-add rewrites that row's metadata. So the transaction has
 	// something to commit even when the caller sees no change.
-	r.write.Changed = true
+	run.write.Changed = true
 	if eventWritten {
-		r.write.Tables.Add(eventTable)
+		run.write.Tables.Add(prepared.eventTable)
 	}
-	r.edges = append(r.edges, appliedEdge{
+	run.edges = append(run.edges, appliedEdge{
 		index: index,
-		edge:  publicops.DependencyEdge{IssueID: source, DependsOnID: target, Type: item.Type},
+		edge:  publicops.DependencyEdge{IssueID: prepared.source, DependsOnID: prepared.target, Type: prepared.dependency.Type},
 	})
-	r.result.Items[index] = publicops.ItemResult{
+	run.result.Items[index] = publicops.ItemResult{
 		Kind:        publicops.ItemDepAdd,
-		IssueID:     source,
-		DependsOnID: target,
+		IssueID:     prepared.source,
+		DependsOnID: prepared.target,
 		Changed:     eventWritten,
 	}
-	return nil
 }
 
 // spliceMetadataRefs writes the resolved ids into the metadata of the create
@@ -416,7 +438,7 @@ func (r *applyBatchRun) spliceMetadataRefs(ctx context.Context, tx DBTX) error {
 		if item.Kind != publicops.ItemCreate || len(item.Create.MetadataRefs) == 0 {
 			continue
 		}
-		set, err := r.resolveMetadataRefs(index, item.Create.MetadataRefs)
+		set, err := resolveBatchMetadataRefs(r, index, item.Create.MetadataRefs)
 		if err != nil {
 			return err
 		}
@@ -447,7 +469,7 @@ func (r *applyBatchRun) spliceMetadataRefs(ctx context.Context, tx DBTX) error {
 // value of that key, one level deep. Nothing merges into a nested object,
 // because the metadata object's nesting is value structure and this splice
 // replaces values.
-func (r *applyBatchRun) resolveMetadataRefs(index int, refs map[string]publicops.Ref) (map[string]json.RawMessage, error) {
+func resolveBatchMetadataRefs(r *applyBatchRun, index int, refs map[string]publicops.Ref) (map[string]json.RawMessage, error) {
 	set := make(map[string]json.RawMessage, len(refs))
 	// Sorted so the update this composes is byte-identical run to run, which is
 	// what keeps the metadata write's own deterministic key order deterministic

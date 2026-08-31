@@ -15,52 +15,49 @@ func SearchIssuesWithCountsInTx(ctx context.Context, tx *sql.Tx, query string, f
 	if err != nil {
 		return nil, fmt.Errorf("search issues with counts: wisp dependency probe: %w", err)
 	}
-
 	if filter.Ephemeral != nil && *filter.Ephemeral {
-		empty, probeErr := wispsTableEmptyOrMissingInTx(ctx, tx)
-		if probeErr != nil {
-			return nil, fmt.Errorf("search issues with counts: ephemeral wisp probe: %w", probeErr)
-		}
-		if !empty && wispDepsExist {
-			wisps, err := runFilterSearchQueryInTx(ctx, tx, query, filter, WispsFilterTables, true)
-			if err != nil && !isTableNotExistError(err) {
-				return nil, err
-			}
-			if len(wisps) > 0 {
-				return finishSearchIssuesWithCounts(wisps, filter)
-			}
-		}
-		// Fall through: the wisps tier is missing/empty or matched no rows.
-		// Mirror SearchIssuesInTx / CountIssuesInTx so count-projection searches
-		// also surface a durable issues-table row flagged ephemeral=1 instead of
-		// dropping it. Use the same IssuesFilterTables query the non-ephemeral
-		// path uses, keeping the GH#4387 count/list cardinality parity for
-		// searches that project counts (e.g. `bd search --counts --include-infra`).
-		out, err := runFilterSearchQueryInTx(ctx, tx, query, filter, IssuesFilterTables, wispDepsExist)
-		if err != nil {
-			return nil, err
-		}
-		return finishSearchIssuesWithCounts(out, filter)
+		return searchEphemeralIssuesWithCountsInTx(ctx, tx, query, filter, wispDepsExist)
 	}
+	return searchStandardIssuesWithCountsInTx(ctx, tx, query, filter, wispDepsExist)
+}
 
+func searchEphemeralIssuesWithCountsInTx(ctx context.Context, tx *sql.Tx, query string, filter types.IssueFilter, wispDepsExist bool) ([]*types.IssueWithCounts, error) {
+	empty, err := wispsTableEmptyOrMissingInTx(ctx, tx)
+	if err != nil {
+		return nil, fmt.Errorf("search issues with counts: ephemeral wisp probe: %w", err)
+	}
+	if !empty && wispDepsExist {
+		wisps, queryErr := runFilterSearchQueryInTx(ctx, tx, query, filter, WispsFilterTables, true)
+		if queryErr != nil && !isTableNotExistError(queryErr) {
+			return nil, queryErr
+		}
+		if len(wisps) > 0 {
+			return finishSearchIssuesWithCounts(wisps, filter)
+		}
+	}
+	// Fall through when the wisps tier is missing, empty, or matched no rows.
+	out, err := runFilterSearchQueryInTx(ctx, tx, query, filter, IssuesFilterTables, wispDepsExist)
+	if err != nil {
+		return nil, err
+	}
+	return finishSearchIssuesWithCounts(out, filter)
+}
+
+func searchStandardIssuesWithCountsInTx(ctx context.Context, tx *sql.Tx, query string, filter types.IssueFilter, wispDepsExist bool) ([]*types.IssueWithCounts, error) {
 	out, err := runFilterSearchQueryInTx(ctx, tx, query, filter, IssuesFilterTables, wispDepsExist)
 	if err != nil {
 		return nil, err
 	}
 
-	// Skip wisps merge entirely when caller opts out (Q2: perf escape hatch).
 	if filter.SkipWisps {
 		return finishSearchIssuesWithCounts(out, filter)
 	}
 
-	empty, probeErr := wispsTableEmptyOrMissingInTx(ctx, tx)
-	if probeErr != nil {
-		return nil, fmt.Errorf("search issues with counts: wisp probe: %w", probeErr)
+	empty, err := wispsTableEmptyOrMissingInTx(ctx, tx)
+	if err != nil {
+		return nil, fmt.Errorf("search issues with counts: wisp probe: %w", err)
 	}
-	if empty {
-		return finishSearchIssuesWithCounts(out, filter)
-	}
-	if !wispDepsExist {
+	if empty || !wispDepsExist {
 		return finishSearchIssuesWithCounts(out, filter)
 	}
 
@@ -74,8 +71,10 @@ func SearchIssuesWithCountsInTx(ctx context.Context, tx *sql.Tx, query string, f
 	if len(wisps) == 0 {
 		return finishSearchIssuesWithCounts(out, filter)
 	}
+	return finishSearchIssuesWithCounts(mergeSearchCountsResults(out, wisps), filter)
+}
 
-	// Prefer the canonical wisp record when an ID exists in both tables (be-iabdi).
+func mergeSearchCountsResults(out, wisps []*types.IssueWithCounts) []*types.IssueWithCounts {
 	wispByID := make(map[string]struct{}, len(wisps))
 	for _, w := range wisps {
 		if w != nil && w.Issue != nil {
@@ -93,7 +92,7 @@ func SearchIssuesWithCountsInTx(ctx context.Context, tx *sql.Tx, query string, f
 		}
 	}
 	kept = append(kept, wisps...)
-	return finishSearchIssuesWithCounts(kept, filter)
+	return kept
 }
 
 // hydrationFor reads the two hydration opt-outs off a search filter. It is one

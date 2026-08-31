@@ -26,7 +26,7 @@ import (
 // - 10,000 issues: ~94.9% chance (most extend to 7-8 chars)
 //
 // Progressive strategy optimizes for common case: 97% stay at 6 chars.
-func GenerateHashID(prefix, title, description string, created time.Time, workspaceID string) string {
+func GenerateHashID(_, title, description string, created time.Time, workspaceID string) string {
 	h := sha256.New()
 
 	// Write all components to hash

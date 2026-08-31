@@ -152,49 +152,67 @@ func buildConflictRow(table string, cols []string, vals []any) storage.ConflictR
 	row := storage.ConflictRow{Table: table}
 	index := make(map[string]int, len(cols))
 	for i, col := range cols {
-		side, field, ok := splitConflictColumn(col)
-		if !ok {
-			continue
-		}
-		v := formatConflictValue(vals[i])
-		if conflictMetaSuffixes[field] {
-			if field == "diff_type" && v != nil {
-				switch side {
-				case "our":
-					row.OurDiffType = *v
-				case "their":
-					row.TheirDiffType = *v
-				}
-			}
-			continue
-		}
-		pos, seen := index[field]
-		if !seen {
-			pos = len(row.Fields)
-			index[field] = pos
-			row.Fields = append(row.Fields, storage.ConflictFieldValue{Name: field})
-		}
-		switch side {
-		case "base":
-			row.Fields[pos].Base = v
-		case "our":
-			row.Fields[pos].Ours = v
-		case "their":
-			row.Fields[pos].Theirs = v
-		}
-		if v != nil {
-			switch side {
-			case "base":
-				row.BaseExists = true
-			case "our":
-				row.OurExists = true
-			case "their":
-				row.TheirExists = true
-			}
-		}
+		applyConflictColumn(&row, index, col, vals[i])
 	}
 	row.Key = conflictRowKey(table, row.Fields)
 	return row
+}
+
+func applyConflictColumn(row *storage.ConflictRow, index map[string]int, col string, raw any) {
+	side, field, ok := splitConflictColumn(col)
+	if !ok {
+		return
+	}
+	v := formatConflictValue(raw)
+	if conflictMetaSuffixes[field] {
+		setConflictDiffType(row, side, field, v)
+		return
+	}
+	pos, seen := index[field]
+	if !seen {
+		pos = len(row.Fields)
+		index[field] = pos
+		row.Fields = append(row.Fields, storage.ConflictFieldValue{Name: field})
+	}
+	setConflictFieldSide(&row.Fields[pos], side, v)
+	setConflictSidePresent(row, side, v)
+}
+
+func setConflictDiffType(row *storage.ConflictRow, side, field string, value *string) {
+	if field != "diff_type" || value == nil {
+		return
+	}
+	switch side {
+	case "our":
+		row.OurDiffType = *value
+	case "their":
+		row.TheirDiffType = *value
+	}
+}
+
+func setConflictFieldSide(field *storage.ConflictFieldValue, side string, value *string) {
+	switch side {
+	case "base":
+		field.Base = value
+	case "our":
+		field.Ours = value
+	case "their":
+		field.Theirs = value
+	}
+}
+
+func setConflictSidePresent(row *storage.ConflictRow, side string, value *string) {
+	if value == nil {
+		return
+	}
+	switch side {
+	case "base":
+		row.BaseExists = true
+	case "our":
+		row.OurExists = true
+	case "their":
+		row.TheirExists = true
+	}
 }
 
 // conflictRowKey picks the value that identifies a conflicted row: the table's
@@ -236,23 +254,41 @@ func ResolveConflictRows(ctx context.Context, db DBConn, table string, keys []st
 	if err := ValidateConflictStrategy(strategy); err != nil {
 		return 0, err
 	}
-	keyCol, ok := conflictRowKeyColumn[table]
-	if !ok {
-		return 0, fmt.Errorf("per-row conflict resolution is not supported for table %s; resolve the whole table instead", table)
+	keyCol, err := conflictKeyColumn(table)
+	if err != nil {
+		return 0, err
 	}
 	if len(keys) == 0 {
 		return 0, nil
 	}
+	if err := enableConflictResolution(ctx, db); err != nil {
+		return 0, err
+	}
+	return resolveConflictKeys(ctx, db, table, keyCol, keys, strategy)
+}
+
+func conflictKeyColumn(table string) (string, error) {
+	keyCol, ok := conflictRowKeyColumn[table]
+	if !ok {
+		return "", fmt.Errorf("per-row conflict resolution is not supported for table %s; resolve the whole table instead", table)
+	}
+	return keyCol, nil
+}
+
+func enableConflictResolution(ctx context.Context, db DBConn) error {
 	// A conflicted table cannot be written — nor the session committed —
 	// without dolt's conflict-tolerance flags (the same pair MergeAndSettle
 	// sets). They are session state, which is why db must be one session.
 	if _, err := db.ExecContext(ctx, "SET @@dolt_allow_commit_conflicts = 1"); err != nil {
-		return 0, fmt.Errorf("set dolt_allow_commit_conflicts: %w", err)
+		return fmt.Errorf("set dolt_allow_commit_conflicts: %w", err)
 	}
 	if _, err := db.ExecContext(ctx, "SET @@dolt_force_transaction_commit = 1"); err != nil {
-		return 0, fmt.Errorf("set dolt_force_transaction_commit: %w", err)
+		return fmt.Errorf("set dolt_force_transaction_commit: %w", err)
 	}
+	return nil
+}
 
+func resolveConflictKeys(ctx context.Context, db DBConn, table, keyCol string, keys []string, strategy string) (int, error) {
 	resolved := 0
 	for _, key := range keys {
 		row, err := loadConflictRow(ctx, db, table, keyCol, key)
@@ -373,6 +409,20 @@ func conflictTargetStillPresent(ctx context.Context, db DBConn, table, keyCol st
 func resolveOneConflictRow(ctx context.Context, db DBConn, table, keyCol, key, strategy string, row rawConflictRow) error {
 	ourKey, ourOK := row.value("our", keyCol)
 	theirKey, theirOK := row.value("their", keyCol)
+	if err := validateConflictRowSides(table, keyCol, key, ourKey, theirKey, ourOK, theirOK); err != nil {
+		return err
+	}
+
+	if strategy == ConflictStrategyTheirs {
+		if err := applyTheirConflictValues(ctx, db, table, keyCol, key, ourKey, row); err != nil {
+			return err
+		}
+	}
+
+	return clearConflictRow(ctx, db, table, keyCol, key, ourKey)
+}
+
+func validateConflictRowSides(table, keyCol, key string, ourKey, theirKey any, ourOK, theirOK bool) error {
 	if !ourOK || !theirOK {
 		return fmt.Errorf("conflict table dolt_conflicts_%s has no our_%s/their_%s column", table, keyCol, keyCol)
 	}
@@ -383,49 +433,64 @@ func resolveOneConflictRow(ctx context.Context, db DBConn, table, keyCol, key, s
 		return fmt.Errorf("conflict for %s %s is not a modify/modify conflict (one side has no row); "+
 			"resolve it with a whole-table strategy or edit the row directly", table, key)
 	}
+	return nil
+}
 
-	if strategy == ConflictStrategyTheirs {
-		names, vals := row.theirFields(keyCol)
-		if len(names) == 0 {
-			return fmt.Errorf("conflict for %s %s carries no their_* data columns", table, key)
-		}
-		sets := make([]string, len(names))
-		args := make([]any, 0, len(names)+1)
-		for i, n := range names {
-			// Column names are interpolated (MySQL cannot bind an
-			// identifier) and come from the conflict table's own schema,
-			// which a peer's schema merge can extend — gate them exactly
-			// like the table name rather than trusting the source.
-			if err := ValidateConflictTable(n); err != nil {
-				return fmt.Errorf("refusing to write unexpected column %q of %s: %w", n, table, err)
-			}
-			sets[i] = fmt.Sprintf("`%s` = ?", n)
-			args = append(args, vals[i])
-		}
-		args = append(args, ourKey)
-		stmt := fmt.Sprintf("UPDATE `%s` SET %s WHERE `%s` = ?", table, strings.Join(sets, ", "), keyCol) //nolint:gosec // identifiers validated above
-		res, err := db.ExecContext(ctx, stmt, args...)
-		if err != nil {
-			return fmt.Errorf("apply their values for %s %s: %w", table, key, err)
-		}
-		// Zero rows would mean the row we read the conflict for is no longer
-		// there — another session on the same branch deleted it between the
-		// read and the write. Clearing the conflict now would discard their
-		// side under a --theirs invocation, undetectably. But zero is not
-		// proof of that on its own (see conflictTargetStillPresent), so ask
-		// before refusing: an operator who named this row deserves the abort
-		// only when the row really is gone.
-		if n, err := res.RowsAffected(); err != nil || n == 0 {
-			present, err := conflictTargetStillPresent(ctx, db, table, keyCol, ourKey)
-			if err != nil {
-				return fmt.Errorf("confirm %s %s still exists after writing their values: %w", table, key, err)
-			}
-			if !present {
-				return fmt.Errorf("their values for %s %s matched no row (was it deleted concurrently?); conflict left unresolved", table, key)
-			}
-		}
+func applyTheirConflictValues(ctx context.Context, db DBConn, table, keyCol, key string, ourKey any, row rawConflictRow) error {
+	names, vals := row.theirFields(keyCol)
+	if len(names) == 0 {
+		return fmt.Errorf("conflict for %s %s carries no their_* data columns", table, key)
 	}
+	stmt, args, err := theirConflictUpdate(table, keyCol, names, vals, ourKey)
+	if err != nil {
+		return err
+	}
+	res, err := db.ExecContext(ctx, stmt, args...)
+	if err != nil {
+		return fmt.Errorf("apply their values for %s %s: %w", table, key, err)
+	}
+	return ensureTheirConflictUpdateMatched(ctx, db, table, keyCol, key, ourKey, res)
+}
 
+func theirConflictUpdate(table, keyCol string, names []string, vals []any, ourKey any) (string, []any, error) {
+	sets := make([]string, len(names))
+	args := make([]any, 0, len(names)+1)
+	for i, n := range names {
+		// Column names are interpolated (MySQL cannot bind an identifier) and
+		// come from the conflict table's own schema, which a peer's schema
+		// merge can extend — gate them exactly like the table name.
+		if err := ValidateConflictTable(n); err != nil {
+			return "", nil, fmt.Errorf("refusing to write unexpected column %q of %s: %w", n, table, err)
+		}
+		sets[i] = fmt.Sprintf("`%s` = ?", n)
+		args = append(args, vals[i])
+	}
+	args = append(args, ourKey)
+	stmt := fmt.Sprintf("UPDATE `%s` SET %s WHERE `%s` = ?", table, strings.Join(sets, ", "), keyCol) //nolint:gosec // identifiers validated above
+	return stmt, args, nil
+}
+
+func ensureTheirConflictUpdateMatched(ctx context.Context, db DBConn, table, keyCol, key string, ourKey any, res sql.Result) error {
+	// Zero rows would mean the row we read the conflict for is no longer
+	// there — another session on the same branch deleted it between the read
+	// and the write. Clearing the conflict now would discard their side under
+	// a --theirs invocation, undetectably. But zero is not proof of that on its
+	// own (see conflictTargetStillPresent), so ask before refusing.
+	n, err := res.RowsAffected()
+	if err == nil && n != 0 {
+		return nil
+	}
+	present, err := conflictTargetStillPresent(ctx, db, table, keyCol, ourKey)
+	if err != nil {
+		return fmt.Errorf("confirm %s %s still exists after writing their values: %w", table, key, err)
+	}
+	if !present {
+		return fmt.Errorf("their values for %s %s matched no row (was it deleted concurrently?); conflict left unresolved", table, key)
+	}
+	return nil
+}
+
+func clearConflictRow(ctx context.Context, db DBConn, table, keyCol, key string, ourKey any) error {
 	del := fmt.Sprintf("DELETE FROM `dolt_conflicts_%s` WHERE `our_%s` = ?", table, keyCol) //nolint:gosec // identifiers validated
 	res, err := db.ExecContext(ctx, del, ourKey)
 	if err != nil {

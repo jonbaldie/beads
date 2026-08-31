@@ -30,69 +30,88 @@ const (
 // OpenSQL opens an embedded Dolt database at dir. The returned cleanup
 // function closes both the *sql.DB and the underlying connector.
 func OpenSQL(ctx context.Context, dir, database, branch string) (*sql.DB, func() error, error) {
-	dsn := buildDSN(dir, database)
-
-	cfg, err := doltembed.ParseDSN(dsn)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	bo := backoff.NewExponentialBackOff()
-	bo.MaxElapsedTime = 0 // wait until ctx cancellation
-	bo.MaxInterval = 5 * time.Second
-	cfg.BackOff = bo
-
-	connector, err := doltembed.NewConnector(cfg)
+	connector, err := openConnector(buildDSN(dir, database))
 	if err != nil {
 		return nil, nil, err
 	}
 
 	db := sql.OpenDB(connector)
-	db.SetMaxOpenConns(2)
-	db.SetMaxIdleConns(2)
-	db.SetConnMaxIdleTime(0)
-	db.SetConnMaxLifetime(0)
+	configureConnectionPool(db)
 
-	cleanup := func() error {
-		dbErr := db.Close()
-		connErr := connector.Close()
-		// connector.Close → engine.Close → BackgroundThreads.Shutdown
-		// always returns context.Canceled because Shutdown cancels its
-		// own parent context then returns parentCtx.Err().  This is
-		// a spurious error from a clean shutdown; filter it from each
-		// result individually so real close errors are still surfaced.
-		if errors.Is(dbErr, context.Canceled) {
-			dbErr = nil
-		}
-		if errors.Is(connErr, context.Canceled) {
-			connErr = nil
-		}
-		return errors.Join(dbErr, connErr)
-	}
+	cleanup := func() error { return closeEmbeddedDatabase(db, connector) }
 
 	if err := db.PingContext(ctx); err != nil {
 		return nil, nil, errors.Join(err, cleanup())
 	}
-
-	if strings.TrimSpace(database) != "" {
-		if !validIdentifier.MatchString(database) {
-			msg := fmt.Sprintf("invalid database name: %q", database)
-			if strings.ContainsRune(database, '-') {
-				msg += "; hyphens are not allowed in embedded mode — replace with underscores in .beads/metadata.json dolt_database field, or run 'bd doctor'"
-			}
-			return nil, nil, errors.Join(errors.New(msg), cleanup())
-		}
-		if _, err := db.ExecContext(ctx, "USE `"+database+"`"); err != nil {
-			return nil, nil, errors.Join(err, cleanup())
-		}
-		if strings.TrimSpace(branch) != "" {
-			if _, err := db.ExecContext(ctx, fmt.Sprintf("SET @@%s_head_ref = %s", database, sqlStringLiteral(branch))); err != nil {
-				return nil, nil, errors.Join(err, cleanup())
-			}
-		}
+	if err := configureDatabase(ctx, db, database, branch); err != nil {
+		return nil, nil, errors.Join(err, cleanup())
 	}
 
 	return db, cleanup, nil
+}
+
+func openConnector(dsn string) (*doltembed.Connector, error) {
+	cfg, err := doltembed.ParseDSN(dsn)
+	if err != nil {
+		return nil, err
+	}
+	bo := backoff.NewExponentialBackOff()
+	bo.MaxElapsedTime = 0 // wait until ctx cancellation
+	bo.MaxInterval = 5 * time.Second
+	cfg.BackOff = bo
+	return doltembed.NewConnector(cfg)
+}
+
+func configureConnectionPool(db *sql.DB) {
+	db.SetMaxOpenConns(2)
+	db.SetMaxIdleConns(2)
+	db.SetConnMaxIdleTime(0)
+	db.SetConnMaxLifetime(0)
+}
+
+func closeEmbeddedDatabase(db *sql.DB, connector *doltembed.Connector) error {
+	dbErr := db.Close()
+	connErr := connector.Close()
+	// connector.Close → engine.Close → BackgroundThreads.Shutdown
+	// always returns context.Canceled because Shutdown cancels its
+	// own parent context then returns parentCtx.Err().  This is
+	// a spurious error from a clean shutdown; filter it from each
+	// result individually so real close errors are still surfaced.
+	if errors.Is(dbErr, context.Canceled) {
+		dbErr = nil
+	}
+	if errors.Is(connErr, context.Canceled) {
+		connErr = nil
+	}
+	return errors.Join(dbErr, connErr)
+}
+
+func configureDatabase(ctx context.Context, db *sql.DB, database, branch string) error {
+	if strings.TrimSpace(database) == "" {
+		return nil
+	}
+	if err := validateDatabaseName(database); err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, "USE `"+database+"`"); err != nil {
+		return err
+	}
+	if strings.TrimSpace(branch) == "" {
+		return nil
+	}
+	_, err := db.ExecContext(ctx, fmt.Sprintf("SET @@%s_head_ref = %s", database, sqlStringLiteral(branch)))
+	return err
+}
+
+func validateDatabaseName(database string) error {
+	if validIdentifier.MatchString(database) {
+		return nil
+	}
+	msg := fmt.Sprintf("invalid database name: %q", database)
+	if strings.ContainsRune(database, '-') {
+		msg += "; hyphens are not allowed in embedded mode — replace with underscores in .beads/metadata.json dolt_database field, or run 'bd doctor'"
+	}
+	return errors.New(msg)
 }
 
 func buildDSN(dir, database string) string {

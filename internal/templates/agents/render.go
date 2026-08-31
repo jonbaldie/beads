@@ -100,38 +100,48 @@ func ReplaceSection(content string, profile Profile) (string, bool, error) {
 // ReplaceSectionWithOpts replaces an existing beads integration section in content with a
 // freshly rendered section for the given profile and opts.
 func ReplaceSectionWithOpts(content string, profile Profile, opts RenderOpts) (string, bool, error) {
-	beginIdx := strings.Index(content, "<!-- BEGIN BEADS INTEGRATION")
-	if beginIdx == -1 {
-		return content, false, ErrNoSection
+	beginIdx, endIdx, err := sectionBounds(content)
+	if err != nil {
+		return content, false, err
 	}
+	if sectionIsCurrent(content, beginIdx, profile, opts) {
+		return content, false, nil
+	}
+	return replaceSectionAt(content, beginIdx, endIdx, profile, opts), true, nil
+}
 
-	endMarker := "<!-- END BEADS INTEGRATION -->"
-	endIdx := strings.Index(content, endMarker)
+func sectionBounds(content string) (beginIdx, endIdx int, err error) {
+	beginIdx = strings.Index(content, "<!-- BEGIN BEADS INTEGRATION")
+	if beginIdx == -1 {
+		return -1, -1, ErrNoSection
+	}
+	const endMarker = "<!-- END BEADS INTEGRATION -->"
+	endIdx = strings.Index(content, endMarker)
 	if endIdx == -1 {
-		return "", false, fmt.Errorf("%w: BEGIN marker at offset %d but no END marker", ErrMalformedMarkers, beginIdx)
+		return 0, 0, fmt.Errorf("%w: BEGIN marker at offset %d but no END marker", ErrMalformedMarkers, beginIdx)
 	}
 	if endIdx < beginIdx {
-		return "", false, fmt.Errorf("%w: END marker at offset %d before BEGIN at %d", ErrMalformedMarkers, endIdx, beginIdx)
+		return 0, 0, fmt.Errorf("%w: END marker at offset %d before BEGIN at %d", ErrMalformedMarkers, endIdx, beginIdx)
 	}
+	return beginIdx, endIdx, nil
+}
 
-	// Check if already current (hash freshness)
+func sectionIsCurrent(content string, beginIdx int, profile Profile, opts RenderOpts) bool {
 	firstLine := content[beginIdx:]
 	if nl := strings.Index(firstLine, "\n"); nl != -1 {
 		firstLine = firstLine[:nl]
 	}
 	meta := ParseMarker(firstLine)
-	if meta != nil && meta.Hash == CurrentHashWithOpts(profile, opts) && meta.Profile == profile {
-		return content, false, nil // already up to date
-	}
+	return meta != nil && meta.Hash == CurrentHashWithOpts(profile, opts) && meta.Profile == profile
+}
 
-	// Replace section: consume exactly one trailing newline after END marker
+func replaceSectionAt(content string, beginIdx, endIdx int, profile Profile, opts RenderOpts) string {
+	const endMarker = "<!-- END BEADS INTEGRATION -->"
 	endOfEndMarker := endIdx + len(endMarker)
 	if endOfEndMarker < len(content) && content[endOfEndMarker] == '\n' {
 		endOfEndMarker++
 	}
-
-	replaced := content[:beginIdx] + RenderSectionWithOpts(profile, opts) + content[endOfEndMarker:]
-	return replaced, true, nil
+	return content[:beginIdx] + RenderSectionWithOpts(profile, opts) + content[endOfEndMarker:]
 }
 
 // CurrentHash returns the hash of the current template body for a profile.

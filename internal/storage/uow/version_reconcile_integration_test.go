@@ -41,18 +41,15 @@ func newTestUOWProvider(t *testing.T) UnitOfWorkProvider {
 
 	provider, err := NewDoltServerUOWProvider(
 		context.Background(),
-		storeRootDir,
-		"beads",
-		logPath,
-		cfgPath,
-		proxy.BackendLocalServer,
-		"root",
-		"",
-		bin,
-		0,
-		0,
-		false,
-		"",
+		DoltServerUOWOptions{
+			ServerRootDir:        storeRootDir,
+			Database:             "beads",
+			ServerLogFilePath:    logPath,
+			ServerConfigFilePath: cfgPath,
+			Backend:              proxy.BackendLocalServer,
+			RootUser:             "root",
+			DoltBinExec:          bin,
+		},
 	)
 	require.NoError(t, err)
 	require.NotNil(t, provider)

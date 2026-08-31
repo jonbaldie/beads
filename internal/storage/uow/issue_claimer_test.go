@@ -74,7 +74,7 @@ func newClaimer(t *testing.T, issues *claimerIssues) (publicops.Claimer, *mockUn
 // with no prior relationship to the issue — a guest — wins the CAS like any
 // other. The actor is caller-asserted provenance, not authenticated identity.
 func TestClaimerCommitsAWonCASForAnyActor(t *testing.T) {
-	issues := &claimerIssues{issue: &types.Issue{ID: "bd-1", Assignee: "guest-42", Status: types.StatusInProgress}}
+	issues := &claimerIssues{issue: &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueWorkflow: types.IssueWorkflow{Assignee: "guest-42", Status: types.StatusInProgress}}}
 	claimer, uw, provider := newClaimer(t, issues)
 
 	result, err := claimer.Claim(context.Background(), publicops.ClaimRequest{Actor: "guest-42", IssueID: "bd-1"})
@@ -104,7 +104,7 @@ func TestClaimerCommitsAWonCASForAnyActor(t *testing.T) {
 func TestClaimerIdempotentReclaimCommitsNothing(t *testing.T) {
 	issues := &claimerIssues{
 		result: domain.ClaimResult{AlreadyClaimed: true, PriorAssignee: "alice"},
-		issue:  &types.Issue{ID: "bd-1", Assignee: "alice", Status: types.StatusInProgress},
+		issue:  &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueWorkflow: types.IssueWorkflow{Assignee: "alice", Status: types.StatusInProgress}},
 	}
 	claimer, uw, _ := newClaimer(t, issues)
 
@@ -131,11 +131,11 @@ func TestClaimerReportsTheStateThatLostTheCAS(t *testing.T) {
 	}{
 		{
 			name: "held by another actor", sentinel: storage.ErrAlreadyClaimed,
-			issue: &types.Issue{ID: "bd-1", Assignee: "bob", Status: types.StatusInProgress},
+			issue: &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueWorkflow: types.IssueWorkflow{Assignee: "bob", Status: types.StatusInProgress}},
 		},
 		{
 			name: "not in a claimable state", sentinel: storage.ErrNotClaimable,
-			issue: &types.Issue{ID: "bd-1", Assignee: "bob", Status: types.StatusClosed},
+			issue: &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueWorkflow: types.IssueWorkflow{Assignee: "bob", Status: types.StatusClosed}},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -175,7 +175,7 @@ func TestClaimerRefusalSurvivesAnUnreadableRow(t *testing.T) {
 	refusal := fmt.Errorf("claim bd-1: %w", storage.ErrAlreadyClaimed)
 	issues := &claimerIssues{
 		err:    refusal,
-		issue:  &types.Issue{ID: "bd-1", Assignee: "bob", Status: types.StatusInProgress},
+		issue:  &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueWorkflow: types.IssueWorkflow{Assignee: "bob", Status: types.StatusInProgress}},
 		getErr: errors.New("read failed"),
 	}
 	claimer, _, _ := newClaimer(t, issues)

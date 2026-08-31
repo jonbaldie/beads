@@ -277,34 +277,44 @@ func attemptFastForward(ctx context.Context, db DBConn, ref string, adopt *FastF
 // directive stays reachable and accurate even when atLatest is false — only
 // the AUTOMATIC fast-forward is conditioned on it (checkRemoteMigrateGate).
 func routeSmartGate(ctx context.Context, db DBConn, current, latest int, remoteName string, adopt *FastForwardAdopter) (decision smartGateDecision, skewVersions []int, ref string, atLatest bool) {
-	local, err := ReadMigrationContentHashes(ctx, db, "")
-	if err != nil || len(local) == 0 {
+	local, ok := readSmartGateHashes(ctx, db, "")
+	if !ok {
 		// No local hashes to compare (old database) — cannot assess safely.
 		return smartUndetermined, nil, "", false
 	}
 
-	if remoteName == "" {
-		remoteName = smartGateDefaultRemote
-	}
-	branch := smartGateActiveBranch(ctx, db)
-	ref = "remotes/" + remoteName + "/" + branch
-	remote, err := ReadMigrationContentHashes(ctx, db, ref)
-	if err != nil {
+	ref = smartGateRemoteRef(ctx, db, remoteName)
+	remote, ok := readSmartGateHashes(ctx, db, ref)
+	if !ok {
 		// Cached ref absent/stale (never pushed/pulled) or pre-content_hash:
 		// nothing to compare — fall back to the blunt block.
 		return smartUndetermined, nil, "", false
 	}
-	if len(remote) == 0 {
-		return smartUndetermined, nil, "", false
-	}
-
 	if skew := ContentHashSkew(local, remote); len(skew) > 0 {
 		return smartForkSkew, skew, ref, false
 	}
 
-	remoteMax := maxVersion(remote)
+	return routeSmartGateVersion(current, latest, maxVersion(remote), ref, adopt, ctx, db)
+}
+
+func readSmartGateHashes(ctx context.Context, db DBConn, ref string) (map[int]string, bool) {
+	hashes, err := ReadMigrationContentHashes(ctx, db, ref)
+	if err != nil || len(hashes) == 0 {
+		return nil, false
+	}
+	return hashes, true
+}
+
+func smartGateRemoteRef(ctx context.Context, db DBConn, remoteName string) string {
+	if remoteName == "" {
+		remoteName = smartGateDefaultRemote
+	}
+	return "remotes/" + remoteName + "/" + smartGateActiveBranch(ctx, db)
+}
+
+func routeSmartGateVersion(current, latest, remoteMax int, ref string, adopt *FastForwardAdopter, ctx context.Context, db DBConn) (smartGateDecision, []int, string, bool) {
 	if remoteMax > current {
-		atLatest = remoteMax == latest
+		atLatest := remoteMax == latest
 		if routeAdoptFastForward(ctx, db, ref, adopt) {
 			return smartAdoptFastForward, nil, ref, atLatest
 		}

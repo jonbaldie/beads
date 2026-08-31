@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/jonbaldie/beads/internal/types"
 	"github.com/jonbaldie/beads/issueops"
 )
 
@@ -73,7 +74,7 @@ func TestHookReleaserFiresOnlyForAReleaseThatWrote(t *testing.T) {
 // the role reported: a hook layer that rewrote a snapshot would be a hook layer
 // deciding what a caller sees the release produced.
 func TestHookReleaserPassesTheResultThrough(t *testing.T) {
-	issue := &issueops.Issue{ID: "bd-1", RowVersion: 42}
+	issue := &issueops.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueLease: types.IssueLease{RowVersion: 42}}
 	inner := &fakeReleaser{result: issueops.ReleaseResult{Issue: issue, Changed: true}}
 	releaser := &hookReleaser{inner: inner, hooks: &recordingIssueOperationHooks{}}
 

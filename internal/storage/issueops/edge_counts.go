@@ -136,33 +136,46 @@ func ExecuteEdgeCount(ctx context.Context, tx DBTX, request publicops.EdgeCountR
 func tallyEdgesInTx(ctx context.Context, tx DBTX, anchors []string, request publicops.EdgeCountRequest) (map[string]int64, error) {
 	tallies := make(map[string]int64, len(anchors))
 	for _, plane := range edgeCountPlanes {
-		for start := 0; start < len(anchors); start += queryBatchSize {
-			end := start + queryBatchSize
-			if end > len(anchors) {
-				end = len(anchors)
+		planeTallies, err := tallyEdgesForPlane(ctx, tx, anchors, request, plane.dependencies, plane.sources)
+		if err != nil {
+			return nil, err
+		}
+		for id, n := range planeTallies {
+			tallies[id] += n
+		}
+	}
+	return tallies, nil
+}
+
+func tallyEdgesForPlane(ctx context.Context, tx DBTX, anchors []string, request publicops.EdgeCountRequest, depTable, sourceTable string) (map[string]int64, error) {
+	tallies := make(map[string]int64, len(anchors))
+	totalAnchors := len(anchors)
+	for start := 0; start < totalAnchors; start += queryBatchSize {
+		end := start + queryBatchSize
+		if end > totalAnchors {
+			end = totalAnchors
+		}
+		batch := anchors[start:end]
+		query := buildEdgeCountQuery(depTable, sourceTable, len(batch), request)
+		rows, err := tx.QueryContext(ctx, query, edgeCountArgs(batch, request)...)
+		if err != nil {
+			if optionalBlockedTable(depTable) && isTableNotExistError(err) {
+				return tallies, nil
 			}
-			batch := anchors[start:end]
-			query := buildEdgeCountQuery(plane.dependencies, plane.sources, len(batch), request)
-			rows, err := tx.QueryContext(ctx, query, edgeCountArgs(batch, request)...)
-			if err != nil {
-				if optionalBlockedTable(plane.dependencies) && isTableNotExistError(err) {
-					break
-				}
-				return nil, fmt.Errorf("count edges in %s: %w", plane.dependencies, err)
+			return nil, fmt.Errorf("count edges in %s: %w", depTable, err)
+		}
+		for rows.Next() {
+			var id string
+			var n int64
+			if scanErr := rows.Scan(&id, &n); scanErr != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("count edges in %s: scan: %w", depTable, scanErr)
 			}
-			for rows.Next() {
-				var id string
-				var n int64
-				if scanErr := rows.Scan(&id, &n); scanErr != nil {
-					_ = rows.Close()
-					return nil, fmt.Errorf("count edges in %s: scan: %w", plane.dependencies, scanErr)
-				}
-				tallies[id] += n
-			}
-			_ = rows.Close()
-			if err := rows.Err(); err != nil {
-				return nil, fmt.Errorf("count edges in %s: rows: %w", plane.dependencies, err)
-			}
+			tallies[id] += n
+		}
+		_ = rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("count edges in %s: rows: %w", depTable, err)
 		}
 	}
 	return tallies, nil

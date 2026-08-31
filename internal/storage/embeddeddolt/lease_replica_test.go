@@ -26,11 +26,17 @@ func TestReclaimRefusesForeignReplicaLease(t *testing.T) {
 	ctx := t.Context()
 
 	issue := &types.Issue{
-		ID:        "leasereplica-1",
-		Title:     "claimed on the other machine",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "leasereplica-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "claimed on the other machine",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := te.store.CreateIssue(ctx, issue, "seeder"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -102,11 +108,17 @@ func TestReclaimAnyReplicaOverride(t *testing.T) {
 	ctx := t.Context()
 
 	issue := &types.Issue{
-		ID:        "leaseoverride-1",
-		Title:     "stranded by a departed replica",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "leaseoverride-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "stranded by a departed replica",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := te.store.CreateIssue(ctx, issue, "seeder"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -147,11 +159,17 @@ func TestUnknownProvenanceLeaseStaysReclaimable(t *testing.T) {
 
 	for _, id := range []string{"leaselegacy-1", "leaselegacy-2"} {
 		issue := &types.Issue{
-			ID:        id,
-			Title:     "legacy lease row",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: "legacy lease row",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := te.store.CreateIssue(ctx, issue, "seeder"); err != nil {
 			t.Fatalf("CreateIssue(%s): %v", id, err)

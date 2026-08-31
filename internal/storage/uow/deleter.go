@@ -83,20 +83,35 @@ func (d *deleter) Delete(ctx context.Context, req publicops.DeleteRequest) (publ
 func deleteInUOW(ctx context.Context, uw UnitOfWork, req publicops.DeleteRequest) (publicops.DeleteResult, error) {
 	issueUC := uw.IssueUseCase()
 	result := publicops.DeleteResult{DryRun: req.DryRun}
+	present, err := resolveDeleteRows(ctx, issueUC, req.IDs)
+	if err != nil {
+		return publicops.DeleteResult{}, err
+	}
+	if err := requireDeleteRowsPresent(req.IDs, present); err != nil {
+		return publicops.DeleteResult{}, err
+	}
+	if err := checkDeleteVersion(req, present); err != nil {
+		return publicops.DeleteResult{}, err
+	}
+	if !req.Cascade {
+		orphaned, err := checkDeleteDependents(ctx, uw, req)
+		if err != nil {
+			return publicops.DeleteResult{}, err
+		}
+		result.Orphaned = orphaned
+	}
+	return executeDelete(ctx, issueUC, req, result)
+}
 
-	// The existence probe comes FIRST, so a request naming a typo reports the
-	// typo rather than whatever the graph says about the ids that resolved. It
-	// keeps the ROWS rather than a set of ids, because the version precondition
-	// below needs their RowVersion and re-reading them for it would be a second
-	// read of the same rows in the same transaction.
-	present := make(map[string]*types.Issue, len(req.IDs))
+func resolveDeleteRows(ctx context.Context, issueUC domain.IssueUseCase, ids []string) (map[string]*types.Issue, error) {
+	present := make(map[string]*types.Issue, len(ids))
 	for _, load := range []func(context.Context, []string) ([]*types.Issue, error){
 		issueUC.GetIssuesByIDs,
 		issueUC.GetWispsByIDs,
 	} {
-		rows, err := load(ctx, req.IDs)
+		rows, err := load(ctx, ids)
 		if err != nil {
-			return publicops.DeleteResult{}, fmt.Errorf("delete: resolve ids: %w", err)
+			return nil, fmt.Errorf("delete: resolve ids: %w", err)
 		}
 		for _, row := range rows {
 			if row != nil {
@@ -104,75 +119,72 @@ func deleteInUOW(ctx context.Context, uw UnitOfWork, req publicops.DeleteRequest
 			}
 		}
 	}
+	return present, nil
+}
+
+func requireDeleteRowsPresent(ids []string, present map[string]*types.Issue) error {
 	var missing []string
-	for _, id := range req.IDs {
+	for _, id := range ids {
 		if present[id] == nil {
 			missing = append(missing, id)
 		}
 	}
 	if len(missing) > 0 {
-		return publicops.DeleteResult{}, &publicops.NotFoundError{IDs: missing}
+		return &publicops.NotFoundError{IDs: missing}
 	}
+	return nil
+}
 
-	// The version precondition, between the existence probe and the dependents
-	// guard exactly as issueops.Deleter.Delete orders them.
-	//
-	// This leg compares the row the probe already loaded rather than issuing
-	// its own guard read, which is what updatePreconditionsHold does for the
-	// same token on the update path. The row was read inside this unit of work,
-	// so the comparison and the deletion still see one snapshot; the sentinel
-	// and the message are the shared ones, because a caller matching
-	// ErrVersionMismatch must not have to know which backend answered.
-	//
-	// req.IDs[0] is the only distinct id: ValidateDeleteRequest refused a
-	// multi-id request carrying a version and NormalizeDeleteIDs collapsed the
-	// duplicates before either ran.
-	if req.ExpectedVersion != nil {
-		if current := present[req.IDs[0]].RowVersion; current != *req.ExpectedVersion {
-			return publicops.DeleteResult{}, fmt.Errorf("%w: expected %d, got %d",
-				publicops.ErrVersionMismatch, *req.ExpectedVersion, current)
-		}
+func checkDeleteVersion(req publicops.DeleteRequest, present map[string]*types.Issue) error {
+	if req.ExpectedVersion == nil {
+		return nil
 	}
+	current := present[req.IDs[0]].RowVersion
+	if current == *req.ExpectedVersion {
+		return nil
+	}
+	return fmt.Errorf("%w: expected %d, got %d", publicops.ErrVersionMismatch, *req.ExpectedVersion, current)
+}
 
-	// The guard runs only when the request did not already say what to do
-	// about dependents. Under Cascade there is nothing outside the set by
-	// construction.
-	if !req.Cascade {
-		idSet := make(map[string]bool, len(req.IDs))
-		for _, id := range req.IDs {
-			idSet[id] = true
-		}
-		external, err := externalDependentsBySourceInUOW(ctx, uw, req.IDs, idSet)
-		if err != nil {
-			return publicops.DeleteResult{}, err
-		}
-		if !req.Force {
-			// Request order, so the id a caller is told about is stable
-			// across runs and across backends.
-			for _, id := range req.IDs {
-				if deps := external[id]; len(deps) > 0 {
-					return publicops.DeleteResult{}, &publicops.DependentsOutsideRequestError{
-						IssueID:    id,
-						Dependents: deps,
-					}
-				}
-			}
-		} else {
-			orphaned := make(map[string]bool)
-			for _, deps := range external {
-				for _, id := range deps {
-					orphaned[id] = true
-				}
-			}
-			result.Orphaned = workapi.SortedDeleteIDs(orphaned)
+func checkDeleteDependents(ctx context.Context, uw UnitOfWork, req publicops.DeleteRequest) ([]string, error) {
+	idSet := make(map[string]bool, len(req.IDs))
+	for _, id := range req.IDs {
+		idSet[id] = true
+	}
+	external, err := externalDependentsBySourceInUOW(ctx, uw, req.IDs, idSet)
+	if err != nil {
+		return nil, err
+	}
+	if !req.Force {
+		return refuseDeleteDependents(req.IDs, external)
+	}
+	return orphanedDeleteDependents(external), nil
+}
+
+func refuseDeleteDependents(ids []string, external map[string][]string) ([]string, error) {
+	for _, id := range ids {
+		if deps := external[id]; len(deps) > 0 {
+			return nil, &publicops.DependentsOutsideRequestError{IssueID: id, Dependents: deps}
 		}
 	}
+	return nil, nil
+}
 
+func orphanedDeleteDependents(external map[string][]string) []string {
+	orphaned := make(map[string]bool)
+	for _, deps := range external {
+		for _, id := range deps {
+			orphaned[id] = true
+		}
+	}
+	return workapi.SortedDeleteIDs(orphaned)
+}
+
+func executeDelete(ctx context.Context, issueUC domain.IssueUseCase, req publicops.DeleteRequest, result publicops.DeleteResult) (publicops.DeleteResult, error) {
 	deleted, err := issueUC.DeleteIssues(ctx, domain.DeleteIssuesParams{
-		IDs:     req.IDs,
-		Cascade: req.Cascade,
-		DryRun:  req.DryRun,
-		// A preview rewrites nothing, so it must not ask for the rewrite.
+		IDs:                  req.IDs,
+		Cascade:              req.Cascade,
+		DryRun:               req.DryRun,
 		UpdateTextReferences: !req.DryRun,
 	}, req.Actor)
 	if err != nil {
@@ -210,24 +222,11 @@ func externalDependentsBySourceInUOW(
 		// that is not a failed guard.
 		{list: depUC.ListByWispIDs, optional: true},
 	} {
-		res, err := plane.list(ctx, ids, domain.DepListFilter{Direction: domain.DepDirectionIn})
+		res, err := listExternalDependents(ctx, ids, plane.list, plane.optional)
 		if err != nil {
-			if plane.optional && dberrors.IsTableNotExist(err) {
-				continue
-			}
-			return nil, fmt.Errorf("delete: check dependents: %w", err)
+			return nil, err
 		}
-		for target, edges := range res.Incoming {
-			for _, edge := range edges {
-				if edge == nil || idSet[edge.IssueID] {
-					continue
-				}
-				if bySource[target] == nil {
-					bySource[target] = make(map[string]bool)
-				}
-				bySource[target][edge.IssueID] = true
-			}
-		}
+		mergeExternalDependents(bySource, res.Incoming, idSet)
 	}
 
 	out := make(map[string][]string, len(bySource))
@@ -235,4 +234,29 @@ func externalDependentsBySourceInUOW(
 		out[target] = workapi.SortedDeleteIDs(dependents)
 	}
 	return out, nil
+}
+
+func listExternalDependents(ctx context.Context, ids []string, list func(context.Context, []string, domain.DepListFilter) (domain.DepBulkResult, error), optional bool) (domain.DepBulkResult, error) {
+	res, err := list(ctx, ids, domain.DepListFilter{Direction: domain.DepDirectionIn})
+	if err != nil {
+		if optional && dberrors.IsTableNotExist(err) {
+			return domain.DepBulkResult{}, nil
+		}
+		return domain.DepBulkResult{}, fmt.Errorf("delete: check dependents: %w", err)
+	}
+	return res, nil
+}
+
+func mergeExternalDependents(bySource map[string]map[string]bool, incoming map[string][]*types.Dependency, idSet map[string]bool) {
+	for target, edges := range incoming {
+		for _, edge := range edges {
+			if edge == nil || idSet[edge.IssueID] {
+				continue
+			}
+			if bySource[target] == nil {
+				bySource[target] = make(map[string]bool)
+			}
+			bySource[target][edge.IssueID] = true
+		}
+	}
 }

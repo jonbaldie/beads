@@ -9,7 +9,7 @@ import (
 )
 
 func TestResolveMergeOpsTypedMetadataSetPreservesJSONValuesAndOrder(t *testing.T) {
-	resolved, err := ResolveMergeOps(&types.Issue{Metadata: json.RawMessage(`{"keep":"yes","remove":"gone","overlap":"old"}`)}, map[string]any{
+	resolved, err := ResolveMergeOps(&types.Issue{IssueMeta: types.IssueMeta{Metadata: json.RawMessage(`{"keep":"yes","remove":"gone","overlap":"old"}`)}}, map[string]any{
 		OpMergeMetadata: json.RawMessage(`{"merged":{"source":"merge"},"overlap":"merged"}`),
 		OpSetMetadata: map[string]json.RawMessage{
 			"nested":  json.RawMessage(`{"enabled":true}`),
@@ -42,7 +42,7 @@ func TestResolveMergeOpsSetMetadataKeepsCLIListForms(t *testing.T) {
 		[]string{"first=one", "second=two"},
 		[]any{"first=one", "second=two"},
 	} {
-		resolved, err := ResolveMergeOps(&types.Issue{Metadata: json.RawMessage(`{"keep":"yes"}`)}, map[string]any{OpSetMetadata: set})
+		resolved, err := ResolveMergeOps(&types.Issue{IssueMeta: types.IssueMeta{Metadata: json.RawMessage(`{"keep":"yes"}`)}}, map[string]any{OpSetMetadata: set})
 		if err != nil {
 			t.Fatalf("ResolveMergeOps(%T) error = %v", set, err)
 		}
@@ -61,7 +61,7 @@ func TestResolveMergeOpsSurfacesUntypedSetMetadataFailure(t *testing.T) {
 		[]string{"missing-separator"},
 		[]any{"missing-separator"},
 	} {
-		resolved, err := ResolveMergeOps(&types.Issue{Metadata: json.RawMessage(`{"keep":"yes"}`)}, map[string]any{OpSetMetadata: set})
+		resolved, err := ResolveMergeOps(&types.Issue{IssueMeta: types.IssueMeta{Metadata: json.RawMessage(`{"keep":"yes"}`)}}, map[string]any{OpSetMetadata: set})
 		if err == nil {
 			t.Fatalf("ResolveMergeOps(%T) error = nil, want a metadata edit failure; resolved = %#v", set, resolved)
 		}

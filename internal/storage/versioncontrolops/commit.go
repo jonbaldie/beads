@@ -70,11 +70,8 @@ func StageAndCommit(ctx context.Context, conn DBConn, dirtyTables map[string]boo
 	if !pending {
 		return nil
 	}
-
-	for table := range dirtyTables {
-		if _, err := conn.ExecContext(ctx, "CALL DOLT_ADD(?)", table); err != nil {
-			return fmt.Errorf("dolt add %s: %w", table, err)
-		}
+	if err := stageDirtyTables(ctx, conn, dirtyTables); err != nil {
+		return err
 	}
 
 	// Precise guard: HasPendingChanges above is global, but we only DOLT_ADD the
@@ -90,14 +87,29 @@ func StageAndCommit(ctx context.Context, conn DBConn, dirtyTables map[string]boo
 	if !staged {
 		return nil
 	}
-	if author == "" {
-		_, err = conn.ExecContext(ctx, "CALL DOLT_COMMIT('-m', ?)", commitMsg)
-	} else {
-		_, err = conn.ExecContext(ctx, "CALL DOLT_COMMIT('-m', ?, '--author', ?)", commitMsg, author)
-	}
-	if err != nil && !issueops.IsNothingToCommitError(err) {
-		return fmt.Errorf("dolt commit: %w", err)
-	}
+	return commitStagedChanges(ctx, conn, commitMsg, author)
+}
 
+func stageDirtyTables(ctx context.Context, conn DBConn, dirtyTables map[string]bool) error {
+	for table := range dirtyTables {
+		if _, err := conn.ExecContext(ctx, "CALL DOLT_ADD(?)", table); err != nil {
+			return fmt.Errorf("dolt add %s: %w", table, err)
+		}
+	}
+	return nil
+}
+
+func commitStagedChanges(ctx context.Context, conn DBConn, commitMsg, author string) error {
+	if author == "" {
+		_, err := conn.ExecContext(ctx, "CALL DOLT_COMMIT('-m', ?)", commitMsg)
+		if err != nil && !issueops.IsNothingToCommitError(err) {
+			return fmt.Errorf("dolt commit: %w", err)
+		}
+	} else {
+		_, err := conn.ExecContext(ctx, "CALL DOLT_COMMIT('-m', ?, '--author', ?)", commitMsg, author)
+		if err != nil && !issueops.IsNothingToCommitError(err) {
+			return fmt.Errorf("dolt commit: %w", err)
+		}
+	}
 	return nil
 }

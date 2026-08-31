@@ -64,17 +64,45 @@ func TestImporterUOW(t *testing.T) {
 			Actor: "importer-test",
 			Issues: []*types.Issue{
 				{
-					ID: "imp-one", Title: "Imported one", Status: types.StatusOpen,
-					IssueType: types.TypeTask, Priority: 2,
-					Labels:    []string{"lane:test", "imported"},
-					Comments:  []*types.Comment{{ID: "imp-one-c1", Author: "importer-test", Text: "carried comment", CreatedAt: when}},
-					CreatedAt: when, UpdatedAt: when,
+					IssueID: types.IssueID{
+						ID: "imp-one",
+					},
+					IssueContent: types.IssueContent{
+						Title: "Imported one",
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Status:    types.StatusOpen,
+						IssueType: types.TypeTask,
+						Priority:  2,
+					},
+					IssueTimes: types.IssueTimes{
+						CreatedAt: when,
+						UpdatedAt: when,
+					},
+					IssueGraph: types.IssueGraph{
+						Labels:   []string{"lane:test", "imported"},
+						Comments: []*types.Comment{{ID: "imp-one-c1", Author: "importer-test", Text: "carried comment", CreatedAt: when}},
+					},
 				},
 				{
-					ID: "imp-two", Title: "Imported two", Status: types.StatusOpen,
-					IssueType: types.TypeBug, Priority: 1,
-					Dependencies: []*types.Dependency{{IssueID: "imp-two", DependsOnID: "imp-one", Type: types.DepBlocks}},
-					CreatedAt:    when, UpdatedAt: when,
+					IssueID: types.IssueID{
+						ID: "imp-two",
+					},
+					IssueContent: types.IssueContent{
+						Title: "Imported two",
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Status:    types.StatusOpen,
+						IssueType: types.TypeBug,
+						Priority:  1,
+					},
+					IssueTimes: types.IssueTimes{
+						CreatedAt: when,
+						UpdatedAt: when,
+					},
+					IssueGraph: types.IssueGraph{
+						Dependencies: []*types.Dependency{{IssueID: "imp-two", DependsOnID: "imp-one", Type: types.DepBlocks}},
+					},
 				},
 			},
 			Memories: []publicops.ImportMemory{{Key: "kv.memory.importer-probe", Value: "remembered"}},
@@ -122,11 +150,25 @@ func TestImporterUOW(t *testing.T) {
 		when := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 		row := func() *types.Issue {
 			return &types.Issue{
-				ID: "imp-one", Title: "Imported one", Status: types.StatusOpen,
-				IssueType: types.TypeTask, Priority: 2,
-				Labels:    []string{"lane:test", "imported"},
-				Comments:  []*types.Comment{{ID: "imp-one-c1", Author: "importer-test", Text: "carried comment", CreatedAt: when}},
-				CreatedAt: when, UpdatedAt: when,
+				IssueID: types.IssueID{
+					ID: "imp-one",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Imported one",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					IssueType: types.TypeTask,
+					Priority:  2,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: when,
+					UpdatedAt: when,
+				},
+				IssueGraph: types.IssueGraph{
+					Labels:   []string{"lane:test", "imported"},
+					Comments: []*types.Comment{{ID: "imp-one-c1", Author: "importer-test", Text: "carried comment", CreatedAt: when}},
+				},
 			}
 		}
 		if _, err := imp.ImportBatch(ctx, publicops.ImportBatchRequest{
@@ -146,9 +188,21 @@ func TestImporterUOW(t *testing.T) {
 		old := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 		staleRow := func() *types.Issue {
 			return &types.Issue{
-				ID: "imp-one", Title: "Stale snapshot title", Status: types.StatusOpen,
-				IssueType: types.TypeTask, Priority: 3,
-				CreatedAt: old, UpdatedAt: old,
+				IssueID: types.IssueID{
+					ID: "imp-one",
+				},
+				IssueContent: types.IssueContent{
+					Title: "Stale snapshot title",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					IssueType: types.TypeTask,
+					Priority:  3,
+				},
+				IssueTimes: types.IssueTimes{
+					CreatedAt: old,
+					UpdatedAt: old,
+				},
 			}
 		}
 		result, err := imp.ImportBatch(ctx, publicops.ImportBatchRequest{

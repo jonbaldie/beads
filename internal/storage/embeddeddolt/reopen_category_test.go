@@ -18,7 +18,20 @@ func TestEmbeddedReopenIssueCategorySemantics(t *testing.T) {
 	create := func(id string, ephemeral bool) {
 		t.Helper()
 		if err := te.store.CreateIssue(ctx, &types.Issue{
-			ID: id, Title: id, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: ephemeral,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: ephemeral,
+			},
 		}, "tester"); err != nil {
 			t.Fatalf("CreateIssue(%s): %v", id, err)
 		}
@@ -137,7 +150,17 @@ func TestEmbeddedReopenCustomDoneFallsBackWhenNormalizedTableMissing(t *testing.
 	const id = "rcf-legacy-done"
 
 	if err := te.store.CreateIssue(ctx, &types.Issue{
-		ID: id, Title: id, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: id,
+		},
+		IssueContent: types.IssueContent{
+			Title: id,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}, "tester"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}

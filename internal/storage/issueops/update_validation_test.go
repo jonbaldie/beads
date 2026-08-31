@@ -19,8 +19,8 @@ func TestValidateUpdateRequestRejectsInvalidCanonicalFields(t *testing.T) {
 		{"priority above range", publicops.IssuePatch{Priority: publicops.Field[int]{Set: true, Value: 9}}},
 		{"empty title", publicops.IssuePatch{Title: publicops.Field[string]{Set: true}}},
 		{"title over byte limit", publicops.IssuePatch{Title: publicops.Field[string]{Set: true, Value: strings.Repeat("t", 501)}}},
-		{"negative estimate", publicops.IssuePatch{EstimatedMinutes: publicops.Field[*int]{Set: true, Value: &negative}}},
-		{"unknown persistence mode", publicops.IssuePatch{Persistence: publicops.Field[publicops.PersistenceMode]{Set: true, Value: "archived"}}},
+		{"negative estimate", publicops.IssuePatch{IssuePatchDetails: publicops.IssuePatchDetails{EstimatedMinutes: publicops.Field[*int]{Set: true, Value: &negative}}}},
+		{"unknown persistence mode", publicops.IssuePatch{IssuePatchDetails: publicops.IssuePatchDetails{Persistence: publicops.Field[publicops.PersistenceMode]{Set: true, Value: "archived"}}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := ValidateUpdateRequest(publicops.UpdateRequest{Actor: "actor", IssueID: "bd-validate", Patch: tc.patch})

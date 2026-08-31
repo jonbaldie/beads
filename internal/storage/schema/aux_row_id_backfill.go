@@ -29,6 +29,8 @@ type auxRekeyPass struct {
 	sentinelKey        string
 }
 
+type auxRekey struct{ oldID, newID string }
+
 // auxRekeyPassInitial is the original bd-6dnrw.2 backfill: converge the
 // primary keys that migration 0037 randomized per-clone.
 var auxRekeyPassInitial = auxRekeyPass{
@@ -218,14 +220,7 @@ func rekeyAuxRowIDsAllPasses(ctx context.Context, db DBConn, mainVersionBefore i
 }
 
 func rekeyAuxRowIDsPending(ctx context.Context, db DBConn, mainVersionBefore int, pass auxRekeyPass, pending []int) (bool, error) {
-	markerPending := false
-	for _, v := range pending {
-		if v == pass.markerVersion {
-			markerPending = true
-			break
-		}
-	}
-	if !markerPending {
+	if !containsVersion(pending, pass.markerVersion) {
 		return false, nil
 	}
 	resume, err := auxRekeyResumePending(ctx, db, pass.sentinelKey)
@@ -247,16 +242,33 @@ func rekeyAuxRowIDsPending(ctx context.Context, db DBConn, mainVersionBefore int
 		return false, fmt.Errorf("recording aux rekey sentinel: %w", err)
 	}
 
-	wrote := false
-	for _, t := range auxRekeyTables {
-		w, err := rekeyAuxRowTable(ctx, db, t)
-		wrote = wrote || w
-		if err != nil {
-			return wrote, fmt.Errorf("%s: %w", t.name, err)
-		}
+	wrote, err := rekeyAuxTables(ctx, db)
+	if err != nil {
+		return wrote, err
 	}
 	if err := clearAuxRekeyInProgress(ctx, db, pass.sentinelKey); err != nil {
 		return wrote, fmt.Errorf("clearing aux rekey sentinel: %w", err)
+	}
+	return wrote, nil
+}
+
+func containsVersion(versions []int, wanted int) bool {
+	for _, version := range versions {
+		if version == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func rekeyAuxTables(ctx context.Context, db DBConn) (bool, error) {
+	wrote := false
+	for _, table := range auxRekeyTables {
+		changed, err := rekeyAuxRowTable(ctx, db, table)
+		wrote = wrote || changed
+		if err != nil {
+			return wrote, fmt.Errorf("%s: %w", table.name, err)
+		}
 	}
 	return wrote, nil
 }
@@ -287,6 +299,16 @@ func rekeyAuxRowTable(ctx context.Context, db DBConn, t auxRekeyTable) (bool, er
 		return false, err
 	}
 	nFields := strings.Count(t.columns, ",") + 1
+	groups, err := scanAuxRekeyGroups(rows, nFields)
+	_ = rows.Close()
+	if err != nil {
+		return false, err
+	}
+	todo := planAuxRekeys(groups, t.name)
+	return applyAuxRekeys(ctx, db, t.name, todo)
+}
+
+func scanAuxRekeyGroups(rows *sql.Rows, nFields int) (map[string][]string, error) {
 	groups := make(map[string][]string)
 	for rows.Next() {
 		var id string
@@ -297,24 +319,21 @@ func rekeyAuxRowTable(ctx context.Context, db DBConn, t auxRekeyTable) (bool, er
 			dests = append(dests, &fields[i])
 		}
 		if err := rows.Scan(dests...); err != nil {
-			_ = rows.Close()
-			return false, err
+			return nil, err
 		}
 		digest := rowid.Digest(fields)
 		groups[digest] = append(groups[digest], id)
 	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
-		return false, err
-	}
+	return groups, rows.Err()
+}
 
-	type rekey struct{ oldID, newID string }
-	var todo []rekey
+func planAuxRekeys(groups map[string][]string, table string) []auxRekey {
+	var todo []auxRekey
 	for digest, ids := range groups {
 		targets := make([]string, len(ids))
 		targetSet := make(map[string]bool, len(ids))
 		for i := range ids {
-			targets[i] = rowid.New(t.name, i, digest)
+			targets[i] = rowid.New(table, i, digest)
 			targetSet[targets[i]] = true
 		}
 		held := make(map[string]bool, len(ids))
@@ -322,9 +341,9 @@ func rekeyAuxRowTable(ctx context.Context, db DBConn, t auxRekeyTable) (bool, er
 		for _, id := range ids {
 			if targetSet[id] {
 				held[id] = true
-			} else {
-				free = append(free, id)
+				continue
 			}
+			free = append(free, id)
 		}
 		if len(free) == 0 {
 			continue
@@ -335,18 +354,20 @@ func rekeyAuxRowTable(ctx context.Context, db DBConn, t auxRekeyTable) (bool, er
 			if held[target] {
 				continue
 			}
-			todo = append(todo, rekey{oldID: free[i], newID: target})
+			todo = append(todo, auxRekey{oldID: free[i], newID: target})
 			i++
 		}
 	}
-	// Deterministic UPDATE order (groups is a map) so runs are reproducible.
 	sort.Slice(todo, func(i, j int) bool { return todo[i].oldID < todo[j].oldID })
+	return todo
+}
 
-	for _, r := range todo {
+func applyAuxRekeys(ctx context.Context, db DBConn, table string, todo []auxRekey) (bool, error) {
+	for _, rekey := range todo {
 		//nolint:gosec // G201: table name is a hardcoded constant, never user input.
-		if _, err := db.ExecContext(ctx, fmt.Sprintf(`UPDATE %s SET id = ? WHERE id = ?`, t.name),
-			r.newID, r.oldID); err != nil {
-			return true, fmt.Errorf("re-key id %s -> %s: %w", r.oldID, r.newID, err)
+		if _, err := db.ExecContext(ctx, fmt.Sprintf(`UPDATE %s SET id = ? WHERE id = ?`, table),
+			rekey.newID, rekey.oldID); err != nil {
+			return true, fmt.Errorf("re-key id %s -> %s: %w", rekey.oldID, rekey.newID, err)
 		}
 	}
 	return len(todo) > 0, nil

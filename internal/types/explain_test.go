@@ -26,8 +26,8 @@ func TestBuildReadyExplanation_NoIssues(t *testing.T) {
 
 func TestBuildReadyExplanation_ReadyWithNoDeps(t *testing.T) {
 	issues := []*Issue{
-		{ID: "bd-1", Title: "First", Priority: 1, Status: StatusOpen},
-		{ID: "bd-2", Title: "Second", Priority: 2, Status: StatusOpen},
+		{IssueID: IssueID{ID: "bd-1"}, IssueContent: IssueContent{Title: "First"}, IssueWorkflow: IssueWorkflow{Priority: 1, Status: StatusOpen}},
+		{IssueID: IssueID{ID: "bd-2"}, IssueContent: IssueContent{Title: "Second"}, IssueWorkflow: IssueWorkflow{Priority: 2, Status: StatusOpen}},
 	}
 
 	result := BuildReadyExplanation(issues, nil, nil, nil, nil, nil)
@@ -48,7 +48,7 @@ func TestBuildReadyExplanation_ReadyWithNoDeps(t *testing.T) {
 
 func TestBuildReadyExplanation_ReadyWithResolvedBlockers(t *testing.T) {
 	issues := []*Issue{
-		{ID: "bd-1", Title: "Unblocked", Priority: 1, Status: StatusOpen},
+		{IssueID: IssueID{ID: "bd-1"}, IssueContent: IssueContent{Title: "Unblocked"}, IssueWorkflow: IssueWorkflow{Priority: 1, Status: StatusOpen}},
 	}
 
 	depCounts := map[string]*DependencyCounts{
@@ -85,7 +85,7 @@ func TestBuildReadyExplanation_ReadyWithResolvedBlockers(t *testing.T) {
 
 func TestBuildReadyExplanation_ReadyWithParent(t *testing.T) {
 	issues := []*Issue{
-		{ID: "bd-child", Title: "Child task", Priority: 2, Status: StatusOpen},
+		{IssueID: IssueID{ID: "bd-child"}, IssueContent: IssueContent{Title: "Child task"}, IssueWorkflow: IssueWorkflow{Priority: 2, Status: StatusOpen}},
 	}
 
 	allDeps := map[string][]*Dependency{
@@ -110,15 +110,15 @@ func TestBuildReadyExplanation_ReadyWithParent(t *testing.T) {
 func TestBuildReadyExplanation_BlockedIssues(t *testing.T) {
 	blockedIssues := []*BlockedIssue{
 		{
-			Issue:          Issue{ID: "bd-blocked", Title: "Stuck", Priority: 2, Status: StatusOpen},
+			Issue:          Issue{IssueID: IssueID{ID: "bd-blocked"}, IssueContent: IssueContent{Title: "Stuck"}, IssueWorkflow: IssueWorkflow{Priority: 2, Status: StatusOpen}},
 			BlockedByCount: 2,
 			BlockedBy:      []string{"bd-blocker-1", "bd-blocker-2"},
 		},
 	}
 
 	blockerMap := map[string]*Issue{
-		"bd-blocker-1": {ID: "bd-blocker-1", Title: "Critical bug", Status: StatusOpen, Priority: 0},
-		"bd-blocker-2": {ID: "bd-blocker-2", Title: "Design review", Status: StatusInProgress, Priority: 1},
+		"bd-blocker-1": {IssueID: IssueID{ID: "bd-blocker-1"}, IssueContent: IssueContent{Title: "Critical bug"}, IssueWorkflow: IssueWorkflow{Status: StatusOpen, Priority: 0}},
+		"bd-blocker-2": {IssueID: IssueID{ID: "bd-blocker-2"}, IssueContent: IssueContent{Title: "Design review"}, IssueWorkflow: IssueWorkflow{Status: StatusInProgress, Priority: 1}},
 	}
 
 	result := BuildReadyExplanation(nil, blockedIssues, nil, nil, blockerMap, nil)
@@ -154,7 +154,7 @@ func TestBuildReadyExplanation_BlockedIssues(t *testing.T) {
 func TestBuildReadyExplanation_BlockedWithMissingBlocker(t *testing.T) {
 	blockedIssues := []*BlockedIssue{
 		{
-			Issue:          Issue{ID: "bd-blocked", Title: "Stuck", Priority: 2, Status: StatusOpen},
+			Issue:          Issue{IssueID: IssueID{ID: "bd-blocked"}, IssueContent: IssueContent{Title: "Stuck"}, IssueWorkflow: IssueWorkflow{Priority: 2, Status: StatusOpen}},
 			BlockedByCount: 1,
 			BlockedBy:      []string{"bd-unknown"},
 		},
@@ -178,9 +178,9 @@ func TestBuildReadyExplanation_BlockedWithMissingBlocker(t *testing.T) {
 func TestBuildReadyExplanation_Cycles(t *testing.T) {
 	cycles := [][]*Issue{
 		{
-			{ID: "bd-a", Title: "A"},
-			{ID: "bd-b", Title: "B"},
-			{ID: "bd-c", Title: "C"},
+			{IssueID: IssueID{ID: "bd-a"}, IssueContent: IssueContent{Title: "A"}},
+			{IssueID: IssueID{ID: "bd-b"}, IssueContent: IssueContent{Title: "B"}},
+			{IssueID: IssueID{ID: "bd-c"}, IssueContent: IssueContent{Title: "C"}},
 		},
 	}
 
@@ -202,11 +202,11 @@ func TestBuildReadyExplanation_Cycles(t *testing.T) {
 
 func TestBuildReadyExplanation_FullScenario(t *testing.T) {
 	readyIssues := []*Issue{
-		{ID: "bd-ready1", Title: "Ready task", Priority: 1, Status: StatusOpen},
+		{IssueID: IssueID{ID: "bd-ready1"}, IssueContent: IssueContent{Title: "Ready task"}, IssueWorkflow: IssueWorkflow{Priority: 1, Status: StatusOpen}},
 	}
 	blockedIssues := []*BlockedIssue{
 		{
-			Issue:          Issue{ID: "bd-stuck", Title: "Blocked task", Priority: 2, Status: StatusOpen},
+			Issue:          Issue{IssueID: IssueID{ID: "bd-stuck"}, IssueContent: IssueContent{Title: "Blocked task"}, IssueWorkflow: IssueWorkflow{Priority: 2, Status: StatusOpen}},
 			BlockedByCount: 1,
 			BlockedBy:      []string{"bd-ready1"},
 		},
@@ -218,7 +218,7 @@ func TestBuildReadyExplanation_FullScenario(t *testing.T) {
 		"bd-ready1": readyIssues[0],
 	}
 	cycles := [][]*Issue{
-		{{ID: "bd-x"}, {ID: "bd-y"}},
+		{{IssueID: IssueID{ID: "bd-x"}}, {IssueID: IssueID{ID: "bd-y"}}},
 	}
 
 	result := BuildReadyExplanation(readyIssues, blockedIssues, depCounts, nil, blockerMap, cycles)

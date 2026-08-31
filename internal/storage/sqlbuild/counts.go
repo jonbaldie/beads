@@ -130,52 +130,76 @@ func (h CountsHydration) IssueColumns() string {
 //
 // hyd selects which aggregates are computed at all; see CountsHydration.
 func SearchCountsSQL(tables FilterTables, ids []string, whereSQL, orderBySQL, limitSQL string, includeWispReverseDeps bool, hyd CountsHydration) (string, []any) {
-	byIDs := len(ids) > 0
-	inSQL, idArgs := InPlaceholders(ids)
+	p := newSearchCountsParts(ids)
+	sqlText := p.render(tables, whereSQL, orderBySQL, limitSQL, includeWispReverseDeps, hyd)
+	return sqlText, p.args(includeWispReverseDeps, hyd)
+}
 
+type searchCountsParts struct {
+	byIDs                                   bool
+	inSQL                                   string
+	idArgs                                  []any
+	labelWhere, depBlocksExtra, rcDepExtra  string
+	rcWispExtra, ccWhere, pcExtra, depWhere string
+}
+
+func newSearchCountsParts(ids []string) *searchCountsParts {
+	p := &searchCountsParts{byIDs: len(ids) > 0}
+	p.inSQL, p.idArgs = InPlaceholders(ids)
 	// Per-subquery id constraints. Empty strings in the predicate form leave the
 	// projection unchanged; in the by-IDs form they push the page down so no
 	// subquery aggregates more than the page's worth of rows.
-	var labelWhere, depBlocksExtra, rcDepExtra, rcWispExtra, ccWhere, pcExtra, depWhere string
-	if byIDs {
-		labelWhere = fmt.Sprintf("WHERE issue_id IN (%s)", inSQL)
-		depBlocksExtra = fmt.Sprintf(" AND issue_id IN (%s)", inSQL)
-		rcDepExtra = fmt.Sprintf(" AND %s IN (%s)", DepTargetExpr, inSQL)
-		rcWispExtra = fmt.Sprintf(" AND %s IN (%s)", DepTargetExpr, inSQL)
-		ccWhere = fmt.Sprintf("WHERE issue_id IN (%s)", inSQL)
-		pcExtra = fmt.Sprintf(" AND issue_id IN (%s)", inSQL)
-		depWhere = fmt.Sprintf("WHERE issue_id IN (%s)", inSQL)
+	if p.byIDs {
+		p.labelWhere = fmt.Sprintf("WHERE issue_id IN (%s)", p.inSQL)
+		p.depBlocksExtra = fmt.Sprintf(" AND issue_id IN (%s)", p.inSQL)
+		p.rcDepExtra = fmt.Sprintf(" AND %s IN (%s)", DepTargetExpr, p.inSQL)
+		p.rcWispExtra = fmt.Sprintf(" AND %s IN (%s)", DepTargetExpr, p.inSQL)
+		p.ccWhere = fmt.Sprintf("WHERE issue_id IN (%s)", p.inSQL)
+		p.pcExtra = fmt.Sprintf(" AND issue_id IN (%s)", p.inSQL)
+		p.depWhere = fmt.Sprintf("WHERE issue_id IN (%s)", p.inSQL)
 	}
+	return p
+}
 
-	reverseBlockerSelect := fmt.Sprintf(`
+func (p *searchCountsParts) reverseBlockerSelect(includeWispReverseDeps bool) string {
+	sel := fmt.Sprintf(`
 				SELECT %s AS dep_id
 				FROM dependencies WHERE type = 'blocks'%s
-	`, DepTargetExpr, rcDepExtra)
+	`, DepTargetExpr, p.rcDepExtra)
 	if includeWispReverseDeps {
-		reverseBlockerSelect += fmt.Sprintf(`
+		sel += fmt.Sprintf(`
 				UNION ALL
 				SELECT %s AS dep_id
 				FROM wisp_dependencies WHERE type = 'blocks'%s
-		`, DepTargetExpr, rcWispExtra)
+		`, DepTargetExpr, p.rcWispExtra)
 	}
+	return sel
+}
 
-	labelsSelect := "l.labels_json AS labels_json"
-	labelsJoin := fmt.Sprintf(`
+func (p *searchCountsParts) labelsSQL(tables FilterTables, hyd CountsHydration) (selectSQL, joinSQL string) {
+	if hyd.SkipLabels {
+		return "NULL AS labels_json", ""
+	}
+	joinSQL = fmt.Sprintf(`
 		LEFT JOIN (
 			SELECT issue_id, JSON_ARRAYAGG(label) AS labels_json
 			FROM %s
 			%s
 			GROUP BY issue_id
-		) l ON l.issue_id = i.id`, tables.Labels, labelWhere)
-	if hyd.SkipLabels {
-		labelsSelect = "NULL AS labels_json"
-		labelsJoin = ""
-	}
+		) l ON l.issue_id = i.id`, tables.Labels, p.labelWhere)
+	return "l.labels_json AS labels_json", joinSQL
+}
 
-	countsSelect := `COALESCE(dc.cnt, 0) AS dep_count,
-			COALESCE(rc.cnt, 0) AS rdep_count,
-			COALESCE(cc.cnt, 0) AS comment_count`
-	countsJoins := fmt.Sprintf(`
+func (p *searchCountsParts) countsSQL(tables FilterTables, includeWispReverseDeps bool, hyd CountsHydration) (selectSQL, joinSQL string) {
+	if hyd.SkipCounts {
+		// Constants in the same three positions: the scan reads these columns
+		// by index, and the rc join above is the one the embedded engine
+		// cannot index (see the by-IDs rationale above).
+		return `0 AS dep_count,
+			0 AS rdep_count,
+			0 AS comment_count`, ""
+	}
+	joinSQL = fmt.Sprintf(`
 		LEFT JOIN (
 			SELECT issue_id, COUNT(*) AS cnt
 			FROM %s
@@ -193,38 +217,40 @@ func SearchCountsSQL(tables FilterTables, ids []string, whereSQL, orderBySQL, li
 			%s
 			GROUP BY issue_id
 		) cc ON cc.issue_id = i.id`,
-		tables.Dependencies, depBlocksExtra,
-		reverseBlockerSelect,
-		tables.Comments, ccWhere)
-	if hyd.SkipCounts {
-		// Constants in the same three positions: the scan reads these columns
-		// by index, and the rc join above is the one the embedded engine
-		// cannot index (see the by-IDs rationale above).
-		countsSelect = `0 AS dep_count,
-			0 AS rdep_count,
-			0 AS comment_count`
-		countsJoins = ""
-	}
+		tables.Dependencies, p.depBlocksExtra,
+		p.reverseBlockerSelect(includeWispReverseDeps),
+		tables.Comments, p.ccWhere)
+	return `COALESCE(dc.cnt, 0) AS dep_count,
+			COALESCE(rc.cnt, 0) AS rdep_count,
+			COALESCE(cc.cnt, 0) AS comment_count`, joinSQL
+}
 
+func (p *searchCountsParts) driverAndOuter(tables FilterTables, whereSQL, orderBySQL, limitSQL string) (driverSQL, outerClause string) {
 	// Predicate form with a filter: whereSQL filters the main table inside a
 	// derived table so the aggregate joins drive off the already-narrowed set;
 	// ORDER BY and LIMIT stay outer, after the joins. Everything else — empty
 	// whereSQL (nothing to push down) and the by-IDs form (subqueries already
 	// id-constrained) — keeps the plain driver.
-	driverSQL := fmt.Sprintf("%s i", tables.Main)
-	if !byIDs && whereSQL != "" {
+	driverSQL = fmt.Sprintf("%s i", tables.Main)
+	if !p.byIDs && whereSQL != "" {
 		driverSQL = fmt.Sprintf(`(
 			SELECT i.*
 			FROM %s i
 			%s
 		) i`, tables.Main, whereSQL)
 	}
-	outerClause := fmt.Sprintf("%s\n\t\t%s", orderBySQL, limitSQL)
-	if byIDs {
-		outerClause = fmt.Sprintf("WHERE i.id IN (%s)", inSQL)
+	outerClause = fmt.Sprintf("%s\n\t\t%s", orderBySQL, limitSQL)
+	if p.byIDs {
+		outerClause = fmt.Sprintf("WHERE i.id IN (%s)", p.inSQL)
 	}
+	return driverSQL, outerClause
+}
 
-	sqlText := fmt.Sprintf(`
+func (p *searchCountsParts) render(tables FilterTables, whereSQL, orderBySQL, limitSQL string, includeWispReverseDeps bool, hyd CountsHydration) string {
+	labelsSelect, labelsJoin := p.labelsSQL(tables, hyd)
+	countsSelect, countsJoins := p.countsSQL(tables, includeWispReverseDeps, hyd)
+	driverSQL, outerClause := p.driverAndOuter(tables, whereSQL, orderBySQL, limitSQL)
+	return fmt.Sprintf(`
 		SELECT %s,
 			%s,
 			%s,
@@ -256,32 +282,33 @@ func SearchCountsSQL(tables FilterTables, ids []string, whereSQL, orderBySQL, li
 		LeaseJoin("i"),
 		labelsJoin,
 		countsJoins,
-		DepTargetExpr, tables.Dependencies, pcExtra,
-		DepJSONObject, tables.Dependencies, depWhere,
+		DepTargetExpr, tables.Dependencies, p.pcExtra,
+		DepJSONObject, tables.Dependencies, p.depWhere,
 		outerClause,
 	)
+}
 
-	if !byIDs {
-		return sqlText, nil
+func (p *searchCountsParts) args(includeWispReverseDeps bool, hyd CountsHydration) []any {
+	if !p.byIDs {
+		return nil
 	}
-
 	// args follow the placeholder order in sqlText: labels join (unless
 	// skipped), dc, rc dependencies branch, rc wisp branch (if any), cc (all
 	// four unless the counts are skipped), pc, d, then the driver.
-	args := make([]any, 0, len(idArgs)*8)
+	out := make([]any, 0, len(p.idArgs)*8)
 	if !hyd.SkipLabels {
-		args = append(args, idArgs...)
+		out = append(out, p.idArgs...)
 	}
 	if !hyd.SkipCounts {
-		args = append(args, idArgs...) // dc
-		args = append(args, idArgs...) // rc dependencies
+		out = append(out, p.idArgs...) // dc
+		out = append(out, p.idArgs...) // rc dependencies
 		if includeWispReverseDeps {
-			args = append(args, idArgs...) // rc wisp_dependencies
+			out = append(out, p.idArgs...) // rc wisp_dependencies
 		}
-		args = append(args, idArgs...) // cc
+		out = append(out, p.idArgs...) // cc
 	}
-	args = append(args, idArgs...) // pc
-	args = append(args, idArgs...) // d
-	args = append(args, idArgs...) // driver
-	return sqlText, args
+	out = append(out, p.idArgs...) // pc
+	out = append(out, p.idArgs...) // d
+	out = append(out, p.idArgs...) // driver
+	return out
 }

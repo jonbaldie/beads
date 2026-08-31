@@ -143,11 +143,7 @@ func hydrateIssueOperation(ctx context.Context, uw UnitOfWork, issue *types.Issu
 	if labels == nil {
 		return nil, fmt.Errorf("hydrate issue labels: label use case is unavailable")
 	}
-	if useWisp {
-		clone.Labels, err = labels.GetWispLabels(ctx, clone.ID)
-	} else {
-		clone.Labels, err = labels.GetLabels(ctx, clone.ID)
-	}
+	clone.Labels, err = operationLabels(ctx, labels, clone.ID, useWisp)
 	if err != nil {
 		return nil, fmt.Errorf("hydrate issue labels: %w", err)
 	}
@@ -156,17 +152,26 @@ func hydrateIssueOperation(ctx context.Context, uw UnitOfWork, issue *types.Issu
 	if dependencies == nil {
 		return nil, fmt.Errorf("hydrate issue dependencies: dependency use case is unavailable")
 	}
-	var records map[string][]*types.Dependency
-	if useWisp {
-		records, err = dependencies.GetWispDependencyRecords(ctx, []string{clone.ID})
-	} else {
-		records, err = dependencies.GetIssueDependencyRecords(ctx, []string{clone.ID})
-	}
+	records, err := operationDependencies(ctx, dependencies, clone.ID, useWisp)
 	if err != nil {
 		return nil, fmt.Errorf("hydrate issue dependencies: %w", err)
 	}
 	clone.Dependencies = records[clone.ID]
 	return storageissueops.CloneCreateRequest(publicops.CreateRequest{Issue: clone}).Issue, nil
+}
+
+func operationLabels(ctx context.Context, labels domain.LabelUseCase, id string, useWisp bool) ([]string, error) {
+	if useWisp {
+		return labels.GetWispLabels(ctx, id)
+	}
+	return labels.GetLabels(ctx, id)
+}
+
+func operationDependencies(ctx context.Context, dependencies domain.DependencyUseCase, id string, useWisp bool) (map[string][]*types.Dependency, error) {
+	if useWisp {
+		return dependencies.GetWispDependencyRecords(ctx, []string{id})
+	}
+	return dependencies.GetIssueDependencyRecords(ctx, []string{id})
 }
 
 // Update updates one issue in a retried unit-of-work transaction.
@@ -232,50 +237,12 @@ func updateSpec(request publicops.UpdateRequest) (domain.UpdateSpec, error) {
 	if err := validateMetadataPatch(patch.Metadata); err != nil {
 		return domain.UpdateSpec{}, validationError(err)
 	}
-	setField(fields, "title", patch.Title)
-	setField(fields, "description", patch.Description)
-	setField(fields, "design", patch.Design)
-	setField(fields, "acceptance_criteria", patch.AcceptanceCriteria)
-	setField(fields, "spec_id", patch.SpecID)
-	setField(fields, "await_id", patch.AwaitID)
-	setField(fields, "status", patch.Status)
-	setField(fields, "priority", patch.Priority)
-	if patch.IssueType.Set {
-		fields["issue_type"] = string(patch.IssueType.Value)
+	updateSpecScalarFields(fields, patch)
+	if err := updateSpecNotes(fields, patch); err != nil {
+		return domain.UpdateSpec{}, validationError(err)
 	}
-	setField(fields, "assignee", patch.Assignee)
-	setField(fields, "owner", patch.Owner)
-	setField(fields, "closed_by_session", patch.ClosedBySession)
-	setField(fields, "estimated_minutes", patch.EstimatedMinutes)
-	setField(fields, "external_ref", patch.ExternalRef)
-	setField(fields, "due_at", patch.DueAt)
-	setField(fields, "defer_until", patch.DeferUntil)
-	if patch.Notes.Set && patch.AppendNotes.Set {
-		return domain.UpdateSpec{}, validationError(fmt.Errorf("update: notes and append notes cannot both be set"))
-	}
-	setField(fields, "notes", patch.Notes)
-	if patch.AppendNotes.Set {
-		fields[storageissueops.OpAppendNotes] = patch.AppendNotes.Value
-	}
-	if patch.Metadata.Replace.Set {
-		replacement := json.RawMessage("{}")
-		if len(patch.Metadata.Replace.Value) > 0 {
-			replacement = patch.Metadata.Replace.Value
-		}
-		if err := storageissueops.ValidateMetadataIfConfigured(replacement); err != nil {
-			return domain.UpdateSpec{}, validationError(err)
-		}
-		fields["metadata"] = replacement
-	} else {
-		if patch.Metadata.Merge.Set {
-			fields[storageissueops.OpMergeMetadata] = patch.Metadata.Merge.Value
-		}
-		if len(patch.Metadata.Set) > 0 {
-			fields[storageissueops.OpSetMetadata] = patch.Metadata.Set
-		}
-		if len(patch.Metadata.Unset) > 0 {
-			fields[storageissueops.OpUnsetMetadata] = patch.Metadata.Unset
-		}
+	if err := updateSpecMetadataFields(fields, patch.Metadata); err != nil {
+		return domain.UpdateSpec{}, validationError(err)
 	}
 	// Spelled only alongside a status change, matching the embedded backend:
 	// without one the funnel has no crossing to judge.
@@ -304,6 +271,62 @@ func updateSpec(request publicops.UpdateRequest) (domain.UpdateSpec, error) {
 		SetLabels:        setLabels,
 		Reparent:         fieldStringPointer(patch.ParentID),
 	}, nil
+}
+
+func updateSpecMetadataFields(fields map[string]any, metadata publicops.MetadataPatch) error {
+	if metadata.Replace.Set {
+		replacement := json.RawMessage("{}")
+		if len(metadata.Replace.Value) > 0 {
+			replacement = metadata.Replace.Value
+		}
+		if err := storageissueops.ValidateMetadataIfConfigured(replacement); err != nil {
+			return err
+		}
+		fields["metadata"] = replacement
+		return nil
+	}
+	if metadata.Merge.Set {
+		fields[storageissueops.OpMergeMetadata] = metadata.Merge.Value
+	}
+	if len(metadata.Set) > 0 {
+		fields[storageissueops.OpSetMetadata] = metadata.Set
+	}
+	if len(metadata.Unset) > 0 {
+		fields[storageissueops.OpUnsetMetadata] = metadata.Unset
+	}
+	return nil
+}
+
+func updateSpecScalarFields(fields map[string]any, patch publicops.IssuePatch) {
+	setField(fields, "title", patch.Title)
+	setField(fields, "description", patch.Description)
+	setField(fields, "design", patch.Design)
+	setField(fields, "acceptance_criteria", patch.AcceptanceCriteria)
+	setField(fields, "spec_id", patch.SpecID)
+	setField(fields, "await_id", patch.AwaitID)
+	setField(fields, "status", patch.Status)
+	setField(fields, "priority", patch.Priority)
+	if patch.IssueType.Set {
+		fields["issue_type"] = string(patch.IssueType.Value)
+	}
+	setField(fields, "assignee", patch.Assignee)
+	setField(fields, "owner", patch.Owner)
+	setField(fields, "closed_by_session", patch.ClosedBySession)
+	setField(fields, "estimated_minutes", patch.EstimatedMinutes)
+	setField(fields, "external_ref", patch.ExternalRef)
+	setField(fields, "due_at", patch.DueAt)
+	setField(fields, "defer_until", patch.DeferUntil)
+}
+
+func updateSpecNotes(fields map[string]any, patch publicops.IssuePatch) error {
+	if patch.Notes.Set && patch.AppendNotes.Set {
+		return fmt.Errorf("update: notes and append notes cannot both be set")
+	}
+	setField(fields, "notes", patch.Notes)
+	if patch.AppendNotes.Set {
+		fields[storageissueops.OpAppendNotes] = patch.AppendNotes.Value
+	}
+	return nil
 }
 
 func setField[T any](fields map[string]any, name string, field publicops.Field[T]) {
@@ -393,14 +416,25 @@ func updateHistoryEntry(request publicops.UpdateRequest, changed bool) string {
 // operation's own transaction.
 func operationIssue(ctx context.Context, uw UnitOfWork, id string, issuePlaneOnly bool) (*types.Issue, bool, error) {
 	if !issuePlaneOnly {
-		issue, err := uw.IssueUseCase().GetWisp(ctx, id)
-		if err == nil && issue != nil {
-			return issue, true, nil
-		}
-		if err != nil && !errors.Is(err, publicops.ErrNotFound) && !dberrors.IsNoRows(err) {
-			return nil, false, fmt.Errorf("read wisp %s: %w", id, err)
+		if issue, ok, err := operationWisp(ctx, uw, id); ok || err != nil {
+			return issue, ok, err
 		}
 	}
+	return operationDurable(ctx, uw, id)
+}
+
+func operationWisp(ctx context.Context, uw UnitOfWork, id string) (*types.Issue, bool, error) {
+	issue, err := uw.IssueUseCase().GetWisp(ctx, id)
+	if err == nil && issue != nil {
+		return issue, true, nil
+	}
+	if err != nil && !errors.Is(err, publicops.ErrNotFound) && !dberrors.IsNoRows(err) {
+		return nil, false, fmt.Errorf("read wisp %s: %w", id, err)
+	}
+	return nil, false, nil
+}
+
+func operationDurable(ctx context.Context, uw UnitOfWork, id string) (*types.Issue, bool, error) {
 	issue, err := uw.IssueUseCase().GetIssue(ctx, id)
 	if err != nil {
 		if errors.Is(err, publicops.ErrNotFound) || dberrors.IsNoRows(err) {
@@ -442,18 +476,37 @@ func validateCloseRequest(request publicops.CloseRequest) error {
 }
 
 func validateMetadataPatch(metadata publicops.MetadataPatch) error {
+	if err := validateMetadataReplacement(metadata); err != nil {
+		return err
+	}
+	if err := validateMetadataMerge(metadata); err != nil {
+		return err
+	}
+	return validateMetadataKeys(metadata)
+}
+
+func validateMetadataReplacement(metadata publicops.MetadataPatch) error {
 	if metadata.Replace.Set && (metadata.Merge.Set || len(metadata.Set) > 0 || len(metadata.Unset) > 0) {
 		return fmt.Errorf("metadata replacement cannot combine with incremental edits")
 	}
 	if metadata.Replace.Set && len(metadata.Replace.Value) > 0 && !json.Valid(metadata.Replace.Value) {
 		return fmt.Errorf("metadata replacement is not valid JSON")
 	}
-	if metadata.Merge.Set {
-		var object map[string]json.RawMessage
-		if len(metadata.Merge.Value) == 0 || json.Unmarshal(metadata.Merge.Value, &object) != nil || object == nil {
-			return fmt.Errorf("metadata merge must be a JSON object")
-		}
+	return nil
+}
+
+func validateMetadataMerge(metadata publicops.MetadataPatch) error {
+	if !metadata.Merge.Set {
+		return nil
 	}
+	var object map[string]json.RawMessage
+	if len(metadata.Merge.Value) == 0 || json.Unmarshal(metadata.Merge.Value, &object) != nil || object == nil {
+		return fmt.Errorf("metadata merge must be a JSON object")
+	}
+	return nil
+}
+
+func validateMetadataKeys(metadata publicops.MetadataPatch) error {
 	keys := make([]string, 0, len(metadata.Set))
 	for key := range metadata.Set {
 		keys = append(keys, key)

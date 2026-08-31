@@ -3,6 +3,7 @@ package issueops
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -156,30 +157,8 @@ func dirtyGraphTableSignature(ctx context.Context, tx DBTX, table string) (strin
 	if err != nil {
 		return "", err
 	}
-
-	var rowSignatures []string
-	for rows.Next() {
-		values := make([]any, len(columns))
-		dest := make([]any, len(columns))
-		for i := range values {
-			dest[i] = &values[i]
-		}
-		if err := rows.Scan(dest...); err != nil {
-			return "", err
-		}
-		var b strings.Builder
-		for i, column := range columns {
-			if isDiffCommitMetadataColumn(column) {
-				continue
-			}
-			b.WriteString(column)
-			b.WriteByte('=')
-			writeDiffSignatureValue(&b, values[i])
-			b.WriteByte(0)
-		}
-		rowSignatures = append(rowSignatures, b.String())
-	}
-	if err := rows.Err(); err != nil {
+	rowSignatures, err := diffRowSignatures(rows, columns)
+	if err != nil {
 		return "", err
 	}
 	sort.Strings(rowSignatures)
@@ -190,6 +169,43 @@ func dirtyGraphTableSignature(ctx context.Context, tx DBTX, table string) (strin
 		_, _ = h.Write([]byte{0xff})
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func diffRowSignatures(rows *sql.Rows, columns []string) ([]string, error) {
+	var rowSignatures []string
+	for rows.Next() {
+		signature, err := scanDiffRowSignature(rows, columns)
+		if err != nil {
+			return nil, err
+		}
+		rowSignatures = append(rowSignatures, signature)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return rowSignatures, nil
+}
+
+func scanDiffRowSignature(rows *sql.Rows, columns []string) (string, error) {
+	values := make([]any, len(columns))
+	dest := make([]any, len(columns))
+	for i := range values {
+		dest[i] = &values[i]
+	}
+	if err := rows.Scan(dest...); err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	for i, column := range columns {
+		if isDiffCommitMetadataColumn(column) {
+			continue
+		}
+		b.WriteString(column)
+		b.WriteByte('=')
+		writeDiffSignatureValue(&b, values[i])
+		b.WriteByte(0)
+	}
+	return b.String(), nil
 }
 
 func isBlockedRecomputeGraphTable(table string) bool {
@@ -281,20 +297,9 @@ func recomputeIsBlockedCounting(ctx context.Context, tx DBTX, issueIDs, wispIDs 
 	}
 	var total int64
 	for {
-		var changed int64
-		if len(issueIDs) > 0 {
-			n, err := recomputeAllIsBlockedPassInTx(ctx, tx, "issues", "i", "dependencies")
-			if err != nil {
-				return total, err
-			}
-			changed += n
-		}
-		if len(wispIDs) > 0 {
-			n, err := recomputeAllIsBlockedPassInTx(ctx, tx, "wisps", "w", "wisp_dependencies")
-			if err != nil {
-				return total, err
-			}
-			changed += n
+		changed, err := recomputeAllIsBlockedPasses(ctx, tx, issueIDs, wispIDs)
+		if err != nil {
+			return total, err
 		}
 		total += changed
 		if changed == 0 {
@@ -304,6 +309,25 @@ func recomputeIsBlockedCounting(ctx context.Context, tx DBTX, issueIDs, wispIDs 
 			return total, nil
 		}
 	}
+}
+
+func recomputeAllIsBlockedPasses(ctx context.Context, tx DBTX, issueIDs, wispIDs []string) (int64, error) {
+	var changed int64
+	if len(issueIDs) > 0 {
+		n, err := recomputeAllIsBlockedPassInTx(ctx, tx, "issues", "i", "dependencies")
+		if err != nil {
+			return 0, err
+		}
+		changed += n
+	}
+	if len(wispIDs) > 0 {
+		n, err := recomputeAllIsBlockedPassInTx(ctx, tx, "wisps", "w", "wisp_dependencies")
+		if err != nil {
+			return 0, err
+		}
+		changed += n
+	}
+	return changed, nil
 }
 
 // recomputeAllIsBlockedPassInTx runs one full-table mark+unmark pass for one

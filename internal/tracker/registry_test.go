@@ -6,15 +6,9 @@ import (
 
 func TestRegistry(t *testing.T) {
 	// Clean registry for test isolation
-	registryMu.Lock()
 	savedRegistry := registry
-	registry = make(map[string]TrackerFactory)
-	registryMu.Unlock()
-	defer func() {
-		registryMu.Lock()
-		registry = savedRegistry
-		registryMu.Unlock()
-	}()
+	registry = &trackerRegistry{factories: make(map[string]TrackerFactory)}
+	defer func() { registry = savedRegistry }()
 
 	t.Run("empty registry", func(t *testing.T) {
 		if got := List(); len(got) != 0 {

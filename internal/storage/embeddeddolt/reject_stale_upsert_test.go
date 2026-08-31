@@ -24,9 +24,21 @@ func TestCreateIssuesRejectStaleUpserts(t *testing.T) {
 	seed := func(t *testing.T, te *testEnv, ctx context.Context, id string) {
 		t.Helper()
 		err := te.store.CreateIssuesWithFullOptions(ctx, []*types.Issue{{
-			ID: id, Title: "local title", Status: types.StatusOpen,
-			Priority: 2, IssueType: types.TypeTask,
-			CreatedAt: base, UpdatedAt: base.Add(time.Hour),
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: "local title",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: base,
+				UpdatedAt: base.Add(time.Hour),
+			},
 		}}, "tester", storage.BatchCreateOptions{SkipPrefixValidation: true})
 		if err != nil {
 			t.Fatalf("seed issue: %v", err)
@@ -36,9 +48,21 @@ func TestCreateIssuesRejectStaleUpserts(t *testing.T) {
 	upsert := func(t *testing.T, te *testEnv, ctx context.Context, id, title string, updatedAt time.Time, rejectStale bool) {
 		t.Helper()
 		err := te.store.CreateIssuesWithFullOptions(ctx, []*types.Issue{{
-			ID: id, Title: title, Status: types.StatusOpen,
-			Priority: 2, IssueType: types.TypeTask,
-			CreatedAt: base, UpdatedAt: updatedAt,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: title,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: base,
+				UpdatedAt: updatedAt,
+			},
 		}}, "tester", storage.BatchCreateOptions{
 			SkipPrefixValidation: true,
 			RejectStaleUpserts:   rejectStale,
@@ -79,18 +103,42 @@ func TestCreateIssuesRejectStaleUpserts(t *testing.T) {
 		te := newTestEnv(t, "rsg")
 		ctx := t.Context()
 		err := te.store.CreateIssuesWithFullOptions(ctx, []*types.Issue{{
-			ID: "rsg-1", Title: "local title", Status: types.StatusClosed,
-			Priority: 2, IssueType: types.TypeTask,
-			CreatedAt: base, UpdatedAt: base.Add(time.Hour),
+			IssueID: types.IssueID{
+				ID: "rsg-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "local title",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusClosed,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: base,
+				UpdatedAt: base.Add(time.Hour),
+			},
 		}}, "tester", storage.BatchCreateOptions{SkipPrefixValidation: true})
 		if err != nil {
 			t.Fatalf("seed issue: %v", err)
 		}
 
 		err = te.store.CreateIssuesWithFullOptions(ctx, []*types.Issue{{
-			ID: "rsg-1", Title: "local title", Status: types.StatusOpen,
-			Priority: 2, IssueType: types.TypeTask,
-			CreatedAt: base, UpdatedAt: base,
+			IssueID: types.IssueID{
+				ID: "rsg-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "local title",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: base,
+				UpdatedAt: base,
+			},
 		}}, "tester", storage.BatchCreateOptions{
 			SkipPrefixValidation: true,
 			RejectStaleUpserts:   true,
@@ -131,19 +179,47 @@ func TestCreateIssuesRejectStaleUpserts(t *testing.T) {
 		te := newTestEnv(t, "rsf")
 		ctx := t.Context()
 		err := te.store.CreateIssuesWithFullOptions(ctx, []*types.Issue{{
-			ID: "rsf-1", Title: "local title", Status: types.StatusOpen,
-			Priority: 2, IssueType: types.TypeTask, Notes: "local notes",
-			CreatedAt: base, UpdatedAt: base.Add(time.Hour),
+			IssueID: types.IssueID{
+				ID: "rsf-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "local title",
+				Notes: "local notes",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: base,
+				UpdatedAt: base.Add(time.Hour),
+			},
 		}}, "tester", storage.BatchCreateOptions{SkipPrefixValidation: true})
 		if err != nil {
 			t.Fatalf("seed issue: %v", err)
 		}
 
 		err = te.store.CreateIssuesWithFullOptions(ctx, []*types.Issue{{
-			ID: "rsf-1", Title: "local title", Status: types.StatusOpen,
-			Priority: 2, IssueType: types.TypeTask, // Notes deliberately empty
-			CreatedAt: base, UpdatedAt: base.Add(time.Hour),
-			Labels: []string{"tie-label"},
+			IssueID: types.IssueID{
+				ID: "rsf-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "local title",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				// Notes deliberately empty
+				CreatedAt: base,
+				UpdatedAt: base.Add(time.Hour),
+			},
+			IssueGraph: types.IssueGraph{
+				Labels: []string{"tie-label"},
+			},
 		}}, "tester", storage.BatchCreateOptions{
 			SkipPrefixValidation: true,
 			RejectStaleUpserts:   true,
@@ -192,12 +268,26 @@ func TestCreateIssuesRejectStaleUpserts(t *testing.T) {
 
 		var rejected []string
 		err := te.store.CreateIssuesWithFullOptions(ctx, []*types.Issue{{
-			ID: "rse-1", Title: "stale snapshot title", Status: types.StatusOpen,
-			Priority: 2, IssueType: types.TypeTask,
-			CreatedAt: base, UpdatedAt: base,
-			Labels:       []string{"stale-label"},
-			Comments:     []*types.Comment{{Author: "tester", Text: "stale comment", CreatedAt: base}},
-			Dependencies: []*types.Dependency{{IssueID: "rse-1", DependsOnID: "rse-2", Type: types.DepBlocks}},
+			IssueID: types.IssueID{
+				ID: "rse-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "stale snapshot title",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueTimes: types.IssueTimes{
+				CreatedAt: base,
+				UpdatedAt: base,
+			},
+			IssueGraph: types.IssueGraph{
+				Labels:       []string{"stale-label"},
+				Comments:     []*types.Comment{{Author: "tester", Text: "stale comment", CreatedAt: base}},
+				Dependencies: []*types.Dependency{{IssueID: "rse-1", DependsOnID: "rse-2", Type: types.DepBlocks}},
+			},
 		}}, "tester", storage.BatchCreateOptions{
 			SkipPrefixValidation: true,
 			RejectStaleUpserts:   true,

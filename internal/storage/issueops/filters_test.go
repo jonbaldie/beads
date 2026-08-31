@@ -97,7 +97,7 @@ func TestBuildIssueFilterClauses_StatusFilter(t *testing.T) {
 	t.Parallel()
 
 	status := types.StatusOpen
-	clauses, args, err := BuildIssueFilterClauses("", types.IssueFilter{Status: &status}, IssuesFilterTables)
+	clauses, args, err := BuildIssueFilterClauses("", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Status: &status}}, IssuesFilterTables)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -116,7 +116,9 @@ func TestBuildIssueFilterClauses_ExcludeStatus(t *testing.T) {
 	t.Parallel()
 
 	filter := types.IssueFilter{
-		ExcludeStatus: []types.Status{types.StatusClosed, types.StatusOpen},
+		IssueFilterFlags: types.IssueFilterFlags{
+			ExcludeStatus: []types.Status{types.StatusClosed, types.StatusOpen},
+		},
 	}
 	clauses, args, err := BuildIssueFilterClauses("", filter, IssuesFilterTables)
 	if err != nil {
@@ -134,7 +136,7 @@ func TestBuildIssueFilterClausesUsesDirectIssueTypePredicates(t *testing.T) {
 	t.Parallel()
 
 	issueType := types.TypeTask
-	clauses, args, err := BuildIssueFilterClauses("", types.IssueFilter{IssueType: &issueType}, WispsFilterTables)
+	clauses, args, err := BuildIssueFilterClauses("", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{IssueType: &issueType}}, WispsFilterTables)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -150,7 +152,9 @@ func TestBuildIssueFilterClausesUsesDirectIssueTypePredicates(t *testing.T) {
 	}
 
 	clauses, args, err = BuildIssueFilterClauses("", types.IssueFilter{
-		ExcludeTypes: []types.IssueType{types.TypeTask, types.TypeBug},
+		IssueFilterHydrate: types.IssueFilterHydrate{
+			ExcludeTypes: []types.IssueType{types.TypeTask, types.TypeBug},
+		},
 	}, WispsFilterTables)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -171,7 +175,7 @@ func TestBuildIssueFilterClauses_PriorityRange(t *testing.T) {
 	t.Parallel()
 
 	min, max := 1, 3
-	filter := types.IssueFilter{PriorityMin: &min, PriorityMax: &max}
+	filter := types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{PriorityMin: &min, PriorityMax: &max}}
 	clauses, args, err := BuildIssueFilterClauses("", filter, IssuesFilterTables)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -187,7 +191,7 @@ func TestBuildIssueFilterClauses_PriorityRange(t *testing.T) {
 func TestBuildIssueFilterClauses_Labels(t *testing.T) {
 	t.Parallel()
 
-	filter := types.IssueFilter{Labels: []string{"bug", "urgent"}}
+	filter := types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Labels: []string{"bug", "urgent"}}}
 	clauses, args, err := BuildIssueFilterClauses("", filter, IssuesFilterTables)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -204,7 +208,7 @@ func TestBuildIssueFilterClauses_Labels(t *testing.T) {
 func TestBuildIssueFilterClauses_LabelsAny(t *testing.T) {
 	t.Parallel()
 
-	filter := types.IssueFilter{LabelsAny: []string{"bug", "feature", "docs"}}
+	filter := types.IssueFilter{IssueFilterCore: types.IssueFilterCore{LabelsAny: []string{"bug", "feature", "docs"}}}
 	clauses, args, err := BuildIssueFilterClauses("", filter, IssuesFilterTables)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -222,8 +226,10 @@ func TestBuildLabelDrivenSearchUsesLabelJoins(t *testing.T) {
 	t.Parallel()
 
 	filter := types.IssueFilter{
-		Labels:    []string{"bug", "urgent"},
-		LabelsAny: []string{"frontend", "backend"},
+		IssueFilterCore: types.IssueFilterCore{
+			Labels:    []string{"bug", "urgent"},
+			LabelsAny: []string{"frontend", "backend"},
+		},
 	}
 
 	plan := sqlbuild.BuildLabelDrivenSearch(filter, IssuesFilterTables)
@@ -251,7 +257,7 @@ func TestBuildLabelDrivenSearchUsesLabelJoins(t *testing.T) {
 func TestBuildIssueFilterClauses_ExcludeLabels(t *testing.T) {
 	t.Parallel()
 
-	filter := types.IssueFilter{ExcludeLabels: []string{"triage:pending", "wontfix"}}
+	filter := types.IssueFilter{IssueFilterCore: types.IssueFilterCore{ExcludeLabels: []string{"triage:pending", "wontfix"}}}
 	clauses, args, err := BuildIssueFilterClauses("", filter, IssuesFilterTables)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -272,8 +278,10 @@ func TestBuildIssueFilterClauses_ExcludeLabelsWithInclude(t *testing.T) {
 	t.Parallel()
 
 	filter := types.IssueFilter{
-		Labels:        []string{"backend"},
-		ExcludeLabels: []string{"triage:pending"},
+		IssueFilterCore: types.IssueFilterCore{
+			Labels:        []string{"backend"},
+			ExcludeLabels: []string{"triage:pending"},
+		},
 	}
 	clauses, args, err := BuildIssueFilterClauses("", filter, IssuesFilterTables)
 	if err != nil {
@@ -296,7 +304,7 @@ func TestBuildIssueFilterClauses_ExcludeLabelsWithInclude(t *testing.T) {
 func TestBuildIssueFilterClauses_LabelPattern(t *testing.T) {
 	t.Parallel()
 
-	filter := types.IssueFilter{LabelPattern: "tech-*"}
+	filter := types.IssueFilter{IssueFilterCore: types.IssueFilterCore{LabelPattern: "tech-*"}}
 	clauses, args, err := BuildIssueFilterClauses("", filter, IssuesFilterTables)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -318,7 +326,7 @@ func TestBuildIssueFilterClauses_LabelPattern(t *testing.T) {
 func TestBuildIssueFilterClauses_LabelPatternWispsTable(t *testing.T) {
 	t.Parallel()
 
-	filter := types.IssueFilter{LabelPattern: "back*"}
+	filter := types.IssueFilter{IssueFilterCore: types.IssueFilterCore{LabelPattern: "back*"}}
 	clauses, _, err := BuildIssueFilterClauses("", filter, WispsFilterTables)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -336,7 +344,7 @@ func TestBuildIssueFilterClauses_LabelPatternWispsTable(t *testing.T) {
 func TestBuildIssueFilterClauses_LabelRegex(t *testing.T) {
 	t.Parallel()
 
-	filter := types.IssueFilter{LabelRegex: "needs-.*"}
+	filter := types.IssueFilter{IssueFilterCore: types.IssueFilterCore{LabelRegex: "needs-.*"}}
 	clauses, args, err := BuildIssueFilterClauses("", filter, IssuesFilterTables)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -358,8 +366,10 @@ func TestBuildIssueFilterClauses_DateFilters(t *testing.T) {
 	now := time.Now()
 	yesterday := now.Add(-24 * time.Hour)
 	filter := types.IssueFilter{
-		CreatedAfter:  &yesterday,
-		CreatedBefore: &now,
+		IssueFilterMatch: types.IssueFilterMatch{
+			CreatedAfter:  &yesterday,
+			CreatedBefore: &now,
+		},
 	}
 	clauses, args, err := BuildIssueFilterClauses("", filter, IssuesFilterTables)
 	if err != nil {
@@ -375,7 +385,7 @@ func TestBuildIssueFilterClauses_DateFilters(t *testing.T) {
 
 func TestBuildIssueFilterClauses_DeferredIncludesStatus(t *testing.T) {
 	t.Parallel()
-	clauses, args, err := BuildIssueFilterClauses("", types.IssueFilter{Deferred: true}, IssuesFilterTables)
+	clauses, args, err := BuildIssueFilterClauses("", types.IssueFilter{IssueFilterHydrate: types.IssueFilterHydrate{Deferred: true}}, IssuesFilterTables)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -402,12 +412,12 @@ func TestBuildIssueFilterClauses_BooleanFilters(t *testing.T) {
 		name   string
 		filter types.IssueFilter
 	}{
-		{name: "empty description", filter: types.IssueFilter{EmptyDescription: true}},
-		{name: "no assignee", filter: types.IssueFilter{NoAssignee: true}},
-		{name: "no labels", filter: types.IssueFilter{NoLabels: true}},
-		{name: "no parent", filter: types.IssueFilter{NoParent: true}},
-		{name: "deferred", filter: types.IssueFilter{Deferred: true}},
-		{name: "overdue", filter: types.IssueFilter{Overdue: true}},
+		{name: "empty description", filter: types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{EmptyDescription: true}}},
+		{name: "no assignee", filter: types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{NoAssignee: true}}},
+		{name: "no labels", filter: types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{NoLabels: true}}},
+		{name: "no parent", filter: types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{NoParent: true}}},
+		{name: "deferred", filter: types.IssueFilter{IssueFilterHydrate: types.IssueFilterHydrate{Deferred: true}}},
+		{name: "overdue", filter: types.IssueFilter{IssueFilterHydrate: types.IssueFilterHydrate{Overdue: true}}},
 	}
 
 	for _, tt := range tests {
@@ -442,7 +452,7 @@ func TestBuildIssueFilterClauses_PinnedFilter(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			clauses, _, err := BuildIssueFilterClauses("", types.IssueFilter{Pinned: tt.pinned}, IssuesFilterTables)
+			clauses, _, err := BuildIssueFilterClauses("", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{Pinned: tt.pinned}}, IssuesFilterTables)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -472,7 +482,7 @@ func TestBuildIssueFilterClauses_IsBlockedFilter(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			clauses, args, err := BuildIssueFilterClauses("", types.IssueFilter{IsBlocked: tt.isBlocked}, IssuesFilterTables)
+			clauses, args, err := BuildIssueFilterClauses("", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{IsBlocked: tt.isBlocked}}, IssuesFilterTables)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -486,7 +496,7 @@ func TestBuildIssueFilterClauses_IsBlockedFilter(t *testing.T) {
 	}
 
 	// nil is the unset case: no is_blocked clause is emitted (filter is inert).
-	clauses, _, err := BuildIssueFilterClauses("", types.IssueFilter{IsBlocked: nil}, IssuesFilterTables)
+	clauses, _, err := BuildIssueFilterClauses("", types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{IsBlocked: nil}}, IssuesFilterTables)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -501,8 +511,10 @@ func TestBuildIssueFilterClauses_IDFilters(t *testing.T) {
 	t.Parallel()
 
 	filter := types.IssueFilter{
-		IDs:      []string{"bd-1", "bd-2", "bd-3"},
-		IDPrefix: "bd-",
+		IssueFilterCore: types.IssueFilterCore{
+			IDs:      []string{"bd-1", "bd-2", "bd-3"},
+			IDPrefix: "bd-",
+		},
 	}
 	clauses, args, err := BuildIssueFilterClauses("", filter, IssuesFilterTables)
 	if err != nil {
@@ -521,7 +533,7 @@ func TestBuildIssueFilterClauses_WispsTables(t *testing.T) {
 	t.Parallel()
 
 	// Verify that wisps tables produce different SQL than issues tables
-	filter := types.IssueFilter{NoParent: true}
+	filter := types.IssueFilter{IssueFilterFlags: types.IssueFilterFlags{NoParent: true}}
 
 	issuesClauses, _, err := BuildIssueFilterClauses("", filter, IssuesFilterTables)
 	if err != nil {
@@ -547,11 +559,17 @@ func TestBuildIssueFilterClauses_CombinedFilters(t *testing.T) {
 	priority := 2
 	now := time.Now()
 	filter := types.IssueFilter{
-		Status:       &status,
-		Priority:     &priority,
-		Labels:       []string{"bug"},
-		CreatedAfter: &now,
-		NoAssignee:   true,
+		IssueFilterCore: types.IssueFilterCore{
+			Status:   &status,
+			Priority: &priority,
+			Labels:   []string{"bug"},
+		},
+		IssueFilterMatch: types.IssueFilterMatch{
+			CreatedAfter: &now,
+		},
+		IssueFilterFlags: types.IssueFilterFlags{
+			NoAssignee: true,
+		},
 	}
 	clauses, args, err := BuildIssueFilterClauses("search term", filter, IssuesFilterTables)
 	if err != nil {

@@ -107,7 +107,7 @@ func TestHookFiringStoreBatchApplierPropagatesInnerError(t *testing.T) {
 func batchApplyItemResult(kind issueops.ItemKind, id string, changed bool) issueops.ItemResult {
 	result := issueops.ItemResult{Kind: kind, IssueID: id, Changed: changed}
 	if kind != issueops.ItemDepAdd {
-		result.Issue = &types.Issue{ID: id}
+		result.Issue = &types.Issue{IssueID: types.IssueID{ID: id}}
 	}
 	return result
 }
@@ -194,7 +194,7 @@ func TestHookBatchApplierFiresPerLandedItem(t *testing.T) {
 // outside the transaction that wrote them — so the snapshot the body hydrated
 // in-transaction is what a script sees.
 func TestHookBatchApplierHandsTheHookTheResultSnapshot(t *testing.T) {
-	landed := &types.Issue{ID: "bd-1", Title: "after the update"}
+	landed := &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueContent: types.IssueContent{Title: "after the update"}}
 	recorder := &recordingBatchApplyIssues{}
 	applier := &hookBatchApplier{
 		inner: &fakeBatchApplier{result: issueops.ApplyBatchResult{Items: []issueops.ItemResult{

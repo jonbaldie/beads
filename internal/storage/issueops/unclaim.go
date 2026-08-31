@@ -32,81 +32,84 @@ import (
 //
 //nolint:gosec // G201: table names come from WispTableRouting (hardcoded constants)
 func UnclaimIssueInTx(ctx context.Context, tx DBTX, id string, actor string, force bool) error {
-	// Route to the correct table (issues/wisps) automatically, matching
-	// ClaimIssueInTx — a wisp claim lives in the wisp tables, so its release
-	// must update them too rather than no-op against the permanent issues table.
+	target, err := loadUnclaimTarget(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+	if err := validateUnclaimTarget(target.issue, id, actor, force); err != nil {
+		return err
+	}
+	updated, err := updateUnclaimRow(ctx, tx, target.issueTable, id, target.issue.RowVersion)
+	if err != nil {
+		return err
+	}
+	if !updated {
+		return resolveUnclaimNoMatch(ctx, tx, id, actor, force, "")
+	}
+	return finishUnclaimInTx(ctx, tx, target.eventTable, id, actor, target.issue)
+}
+
+type unclaimTarget struct {
+	issueTable string
+	eventTable string
+	issue      *types.Issue
+}
+
+func loadUnclaimTarget(ctx context.Context, tx DBTX, id string) (unclaimTarget, error) {
 	isWisp := IsActiveWispInTx(ctx, tx, id)
 	issueTable, _, eventTable, _ := WispTableRouting(isWisp)
-
-	oldIssue, err := GetIssueInTx(ctx, tx, id)
+	issue, err := GetIssueInTx(ctx, tx, id)
 	if err != nil {
-		return fmt.Errorf("failed to get issue for unclaim: %w", err)
+		return unclaimTarget{}, fmt.Errorf("failed to get issue for unclaim: %w", err)
 	}
+	return unclaimTarget{issueTable: issueTable, eventTable: eventTable, issue: issue}, nil
+}
 
-	// Validate: cannot unclaim closed issues
-	if oldIssue.Status == types.StatusClosed {
+func validateUnclaimTarget(issue *types.Issue, id, actor string, force bool) error {
+	if issue.Status == types.StatusClosed {
 		return fmt.Errorf("cannot unclaim closed issue %s", id)
 	}
-
-	// Validate: must have an assignee to unclaim
-	if oldIssue.Assignee == "" {
+	if issue.Assignee == "" {
 		return fmt.Errorf("issue %s is not assigned", id)
 	}
-
-	// Validate ownership unless the caller forced the release. Without force, a
-	// process may only release its own claim. Compared under actorMatches, not
-	// verbatim, so a caller naming its own identity under a different layer's
-	// spelling (ga-5ksp5) is not refused as a stranger.
-	if !force && !actorMatches(oldIssue.Assignee, actor) {
+	if !force && !actorMatches(issue.Assignee, actor) {
 		return fmt.Errorf("%w: %s is held by %s; coordinate with the holder — pass --force only if their claim is abandoned (crashed agent, expired lease)",
-			storage.ErrNotOwner, id, oldIssue.Assignee)
+			storage.ErrNotOwner, id, issue.Assignee)
 	}
+	return nil
+}
 
-	now := time.Now().UTC()
-
-	// Atomic UPDATE: clear assignee, reset status to open, clear started_at,
-	// and rewrite row_lock. The predicate CASes on row_lock rather than
-	// assignee (ga-5ksp5): ownership was already authorized above (or bypassed
-	// by force) against the row read into oldIssue, and row_lock is rewritten
-	// by every path that mutates status/assignee/started_at (see the
-	// freshRowLock invariant in lease.go) — so requiring it to still equal
-	// oldIssue.RowVersion detects a claim that changed hands (or was released,
-	// or closed) between that read and this write exactly as precisely as the
-	// old `assignee = <actor>` predicate did, without embedding a
-	// spelling-sensitive string comparison in SQL. force does not exempt this
-	// check: force only widens WHO may unclaim, not whether the row is still
-	// the one we read.
+func updateUnclaimRow(ctx context.Context, tx DBTX, issueTable, id string, rowVersion int64) (bool, error) {
 	result, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		UPDATE %s
 		SET assignee = '', status = 'open', updated_at = ?,
 		    started_at = NULL, row_lock = ?
 		WHERE id = ? AND status IN ('open', 'in_progress') AND row_lock = ?
-	`, issueTable), now, freshRowLock(), id, oldIssue.RowVersion)
+	`, issueTable), time.Now().UTC(), freshRowLock(), id, rowVersion)
 	if err != nil {
-		return fmt.Errorf("failed to unclaim issue: %w", err)
+		return false, fmt.Errorf("failed to unclaim issue: %w", err)
 	}
-
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
+		return false, fmt.Errorf("failed to get rows affected: %w", err)
 	}
+	return rowsAffected > 0, nil
+}
 
-	if rowsAffected == 0 {
-		// The pre-checks passed, so a 0-row result means the row changed
-		// underneath us: re-read to disambiguate an ownership change from a
-		// status change. actorMatches, not verbatim, mirrors the precheck above.
-		current, gerr := GetIssueInTx(ctx, tx, id)
-		if gerr != nil {
-			return fmt.Errorf("failed to unclaim issue %s: no matching row", id)
-		}
+func resolveUnclaimNoMatch(ctx context.Context, tx DBTX, id, actor string, force bool, expectedAssignee string) error {
+	current, err := GetIssueInTx(ctx, tx, id)
+	if err != nil {
+		return fmt.Errorf("failed to unclaim issue %s: no matching row", id)
+	}
+	if expectedAssignee == "" {
 		if !force && !actorMatches(current.Assignee, actor) {
 			return fmt.Errorf("%w: %s is held by %s; coordinate with the holder — pass --force only if their claim is abandoned (crashed agent, expired lease)",
 				storage.ErrNotOwner, id, current.Assignee)
 		}
-		return fmt.Errorf("failed to unclaim issue %s: no matching row", id)
+	} else if !actorMatches(current.Assignee, expectedAssignee) {
+		return fmt.Errorf("%w: %s is held by %q, expected %q", storage.ErrAssigneeMismatch, id, current.Assignee, expectedAssignee)
 	}
-
-	return finishUnclaimInTx(ctx, tx, eventTable, id, actor, oldIssue)
+	return fmt.Errorf("failed to unclaim issue %s: no matching row", id)
 }
 
 // finishUnclaimInTx applies the post-UPDATE half of a release shared by
@@ -154,75 +157,29 @@ func UnclaimIssueIfAssigneeInTx(ctx context.Context, tx DBTX, id string, actor s
 	if expectedAssignee == "" {
 		return fmt.Errorf("conditional unclaim of %s: expected assignee must not be empty (use UnclaimIssueInTx for an unconditional release)", id)
 	}
-
-	// Route to the correct table (issues/wisps) automatically, matching
-	// UnclaimIssueInTx.
-	isWisp := IsActiveWispInTx(ctx, tx, id)
-	issueTable, _, eventTable, _ := WispTableRouting(isWisp)
-
-	oldIssue, err := GetIssueInTx(ctx, tx, id)
+	target, err := loadUnclaimTarget(ctx, tx, id)
 	if err != nil {
-		return fmt.Errorf("failed to get issue for unclaim: %w", err)
+		return err
 	}
+	if err := validateConditionalUnclaimTarget(target.issue, id, expectedAssignee); err != nil {
+		return err
+	}
+	updated, err := updateUnclaimRow(ctx, tx, target.issueTable, id, target.issue.RowVersion)
+	if err != nil {
+		return err
+	}
+	if !updated {
+		return resolveUnclaimNoMatch(ctx, tx, id, actor, false, expectedAssignee)
+	}
+	return finishUnclaimInTx(ctx, tx, target.eventTable, id, actor, target.issue)
+}
 
-	// Validate: cannot unclaim closed issues.
-	if oldIssue.Status == types.StatusClosed {
+func validateConditionalUnclaimTarget(issue *types.Issue, id, expectedAssignee string) error {
+	if issue.Status == types.StatusClosed {
 		return fmt.Errorf("cannot unclaim closed issue %s", id)
 	}
-
-	// Compare-and-swap precheck: a mismatched holder — including an
-	// already-released issue (empty assignee) — is a loud, typed no-op. Judged
-	// under actorMatches (ga-5ksp5), not verbatim equality, so expectedAssignee
-	// spelled under a different layer's separator convention than the stored
-	// assignee still counts as a match. The read and the UPDATE below run in
-	// the same transaction, so this check and the CAS WHERE clause see the
-	// same row state.
-	if !actorMatches(oldIssue.Assignee, expectedAssignee) {
-		return fmt.Errorf("%w: %s is held by %q, expected %q", storage.ErrAssigneeMismatch, id, oldIssue.Assignee, expectedAssignee)
+	if !actorMatches(issue.Assignee, expectedAssignee) {
+		return fmt.Errorf("%w: %s is held by %q, expected %q", storage.ErrAssigneeMismatch, id, issue.Assignee, expectedAssignee)
 	}
-
-	now := time.Now().UTC()
-
-	// Atomic UPDATE CASed on row_lock rather than assignee (ga-5ksp5): the
-	// Go-side check above already authorized the swap under actorMatches
-	// against the row read into oldIssue, and row_lock is rewritten by every
-	// path that mutates status/assignee/started_at (see the freshRowLock
-	// invariant in lease.go) — so requiring it to still equal
-	// oldIssue.RowVersion applies the same transition as UnclaimIssueInTx
-	// (assignee cleared, status reopened, started_at cleared, row_lock
-	// rewritten) while detecting a racing reclaim/close on the same row exactly
-	// as precisely as the old `assignee = <expectedAssignee>` predicate did,
-	// without embedding a spelling-sensitive string comparison in SQL.
-	result, err := tx.ExecContext(ctx, fmt.Sprintf(`
-		UPDATE %s
-		SET assignee = '', status = 'open', updated_at = ?,
-		    started_at = NULL, row_lock = ?
-		WHERE id = ? AND status IN ('open', 'in_progress') AND row_lock = ?
-	`, issueTable), now, freshRowLock(), id, oldIssue.RowVersion)
-	if err != nil {
-		return fmt.Errorf("failed to unclaim issue: %w", err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
-	}
-
-	if rowsAffected == 0 {
-		// The precheck passed and the read + UPDATE share this transaction, so a
-		// 0-row result is not an assignee race (the row cannot change under us
-		// mid-tx). Re-read and disambiguate, mirroring UnclaimIssueInTx: a
-		// mismatched holder (under actorMatches) is the CAS verdict
-		// (ErrAssigneeMismatch), otherwise the status is no longer releasable.
-		current, gerr := GetIssueInTx(ctx, tx, id)
-		if gerr != nil {
-			return fmt.Errorf("failed to unclaim issue %s: no matching row", id)
-		}
-		if !actorMatches(current.Assignee, expectedAssignee) {
-			return fmt.Errorf("%w: %s is held by %q, expected %q", storage.ErrAssigneeMismatch, id, current.Assignee, expectedAssignee)
-		}
-		return fmt.Errorf("failed to unclaim issue %s: no matching row", id)
-	}
-
-	return finishUnclaimInTx(ctx, tx, eventTable, id, actor, oldIssue)
+	return nil
 }

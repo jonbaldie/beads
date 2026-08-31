@@ -129,8 +129,8 @@ func TestCanonicalCyclePathsFindsSelfLoopsAndReportsNoneForAnAcyclicGraph(t *tes
 // cycle marked.
 func TestBuildCyclesReportsAnHonestPartial(t *testing.T) {
 	rows := map[string]*types.Issue{
-		"a": {ID: "a", Title: "A"},
-		"c": {ID: "c", Title: "C"},
+		"a": {IssueID: types.IssueID{ID: "a"}, IssueContent: types.IssueContent{Title: "A"}},
+		"c": {IssueID: types.IssueID{ID: "c"}, IssueContent: types.IssueContent{Title: "C"}},
 	}
 	cycles := BuildCycles([][]string{{"a", "b", "c"}}, func(id string) *types.Issue { return rows[id] })
 
@@ -178,7 +178,7 @@ func TestBuildCyclesLooksUpEachMemberOnce(t *testing.T) {
 	paths := [][]string{{"a", "b"}, {"a", "c"}, {"b", "c"}}
 	BuildCycles(paths, func(id string) *types.Issue {
 		calls[id]++
-		return &types.Issue{ID: id}
+		return &types.Issue{IssueID: types.IssueID{ID: id}}
 	})
 	for _, id := range []string{"a", "b", "c"} {
 		if calls[id] != 1 {
@@ -190,7 +190,7 @@ func TestBuildCyclesLooksUpEachMemberOnce(t *testing.T) {
 // TestBuildCyclesLeavesACompleteCycleUnmarked keeps Partial from becoming
 // decorative: it must be false when every member was described.
 func TestBuildCyclesLeavesACompleteCycleUnmarked(t *testing.T) {
-	cycles := BuildCycles([][]string{{"a", "b"}}, func(id string) *types.Issue { return &types.Issue{ID: id} })
+	cycles := BuildCycles([][]string{{"a", "b"}}, func(id string) *types.Issue { return &types.Issue{IssueID: types.IssueID{ID: id}} })
 	if cycles[0].Partial {
 		t.Error("Partial = true for a fully described cycle")
 	}

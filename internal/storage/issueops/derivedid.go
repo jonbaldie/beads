@@ -108,6 +108,20 @@ func InsertDerivedEvent(ctx context.Context, tx DBTX, table string, e AuxEvent) 
 //
 //nolint:gosec // G201: table is a hardcoded routing constant at every call site.
 func InsertDerivedEventReturningID(ctx context.Context, tx DBTX, table string, e AuxEvent) (string, error) {
+	e = normalizeDerivedEvent(table, e)
+	digest := derivedEventDigest(e)
+	taken, err := existingDerivedEventIDs(ctx, tx, table, e)
+	if err != nil {
+		return "", err
+	}
+	id := firstFreeDerivedID(table, digest, taken)
+	if err := insertDerivedEventRow(ctx, tx, table, id, e); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func normalizeDerivedEvent(table string, e AuxEvent) AuxEvent {
 	if e.CreatedAt == "" {
 		e.CreatedAt = NowAuxTime()
 	}
@@ -122,10 +136,18 @@ func InsertDerivedEventReturningID(ctx context.Context, tx DBTX, table string, e
 			}
 		}
 	}
+	return e
+}
+
+func derivedEventDigest(e AuxEvent) string {
 	digest := rowid.Digest([]sql.NullString{
 		str(e.IssueID), str(string(e.EventType)), str(e.Actor),
 		e.OldValue, e.NewValue, e.Comment, str(e.CreatedAt),
 	})
+	return digest
+}
+
+func existingDerivedEventIDs(ctx context.Context, tx DBTX, table string, e AuxEvent) (map[string]bool, error) {
 	taken := make(map[string]bool)
 	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
 		SELECT id FROM %s
@@ -134,30 +156,32 @@ func InsertDerivedEventReturningID(ctx context.Context, tx DBTX, table string, e
 		  AND created_at = ?`, table),
 		e.IssueID, string(e.EventType), e.Actor, e.OldValue, e.NewValue, e.Comment, e.CreatedAt)
 	if err != nil {
-		return "", fmt.Errorf("scan same-content events in %s: %w", table, err)
+		return nil, fmt.Errorf("scan same-content events in %s: %w", table, err)
 	}
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
 			_ = rows.Close()
-			return "", fmt.Errorf("scan same-content events in %s: %w", table, err)
+			return nil, fmt.Errorf("scan same-content events in %s: %w", table, err)
 		}
 		taken[id] = true
 	}
 	_ = rows.Close()
 	if err := rows.Err(); err != nil {
-		return "", fmt.Errorf("scan same-content events in %s: %w", table, err)
+		return nil, fmt.Errorf("scan same-content events in %s: %w", table, err)
 	}
+	return taken, nil
+}
 
-	id := firstFreeDerivedID(table, digest, taken)
+func insertDerivedEventRow(ctx context.Context, tx DBTX, table, id string, e AuxEvent) error {
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		INSERT INTO %s (id, issue_id, event_type, actor, old_value, new_value, comment, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, table),
 		id,
 		e.IssueID, string(e.EventType), e.Actor, e.OldValue, e.NewValue, e.Comment, e.CreatedAt); err != nil {
-		return "", fmt.Errorf("record event in %s: %w", table, err)
+		return fmt.Errorf("record event in %s: %w", table, err)
 	}
-	return id, nil
+	return nil
 }
 
 // NextLiveCommentTime returns the created_at to stamp on a comment being added

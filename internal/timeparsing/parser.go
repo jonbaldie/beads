@@ -88,18 +88,14 @@ func isCompactDuration(s string) bool {
 	return compactDurationRe.MatchString(s)
 }
 
-// nlpParser is the singleton natural language parser (olebedev/when).
-// Initialized lazily on first use.
-var nlpParser *when.Parser
-
-// getNLPParser returns the singleton NLP parser, initializing it if needed.
-func getNLPParser() *when.Parser {
-	if nlpParser == nil {
-		nlpParser = when.New(nil)
-		nlpParser.Add(en.All...)
-		nlpParser.Add(common.All...)
-	}
-	return nlpParser
+// newNLPParser creates the natural language parser used for one parse.
+// Keeping the parser local avoids process-wide mutable state and makes parsing
+// independent between concurrent callers.
+func newNLPParser() *when.Parser {
+	parser := when.New(nil)
+	parser.Add(en.All...)
+	parser.Add(common.All...)
+	return parser
 }
 
 // parseNaturalLanguage parses natural language time expressions using olebedev/when.
@@ -118,7 +114,7 @@ func getNLPParser() *when.Parser {
 //
 // Returns error if input cannot be parsed as natural language.
 func parseNaturalLanguage(s string, now time.Time) (time.Time, error) {
-	parser := getNLPParser()
+	parser := newNLPParser()
 	result, err := parser.Parse(s, now)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("NLP parse error: %w", err)

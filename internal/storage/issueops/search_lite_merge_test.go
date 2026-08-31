@@ -91,11 +91,17 @@ func TestSearchIssuesInTx_Lite_MergesAcrossIssuesAndWisps(t *testing.T) {
 			AddRow(liteMergeRow("bd-wisp-new", day(10))...))
 
 	filter := types.IssueFilter{
-		Lite:       true,
-		SortBy:     "created",
-		Limit:      2,
-		NoIDShrink: true,
-		SkipLabels: true,
+		IssueFilterCore: types.IssueFilterCore{
+			Limit: 2,
+		},
+		IssueFilterHydrate: types.IssueFilterHydrate{
+			NoIDShrink: true,
+			SkipLabels: true,
+		},
+		IssueFilterPage: types.IssueFilterPage{
+			Lite:   true,
+			SortBy: "created",
+		},
 	}
 
 	got, err := SearchIssuesInTx(context.Background(), tx, "", filter)

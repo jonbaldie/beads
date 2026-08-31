@@ -322,13 +322,36 @@ func assertRoleFixtureKitHooksAreUsable(t *testing.T, ctx context.Context, kit r
 
 	for _, id := range []string{issue, target} {
 		if err := kit.CreateIssue(ctx, &types.Issue{
-			ID: id, Title: id, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}, "seed"); err != nil {
 			t.Fatalf("kit.CreateIssue(%s): %v", id, err)
 		}
 	}
 	if err := kit.CreateWisp(ctx, &types.Issue{
-		ID: wisp, Title: wisp, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: wisp,
+		},
+		IssueContent: types.IssueContent{
+			Title: wisp,
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}, "seed"); err != nil {
 		t.Fatalf("kit.CreateWisp(%s): %v", wisp, err)
 	}

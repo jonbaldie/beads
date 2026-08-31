@@ -20,7 +20,7 @@ import (
 func seedIssues(t *testing.T, ctx context.Context, store *embeddeddolt.EmbeddedDoltStore, ids ...string) {
 	t.Helper()
 	for _, id := range ids {
-		issue := &types.Issue{ID: id, Title: id, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}
+		issue := &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}
 		if err := store.CreateIssue(ctx, issue, "seed"); err != nil {
 			t.Fatalf("CreateIssue(%s): %v", id, err)
 		}

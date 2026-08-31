@@ -75,28 +75,46 @@ func (s *sweeper) Sweep(ctx context.Context, req publicops.SweepRequest) (public
 // path and the committing one so the two cannot answer differently.
 func sweepInUOW(ctx context.Context, uw UnitOfWork, req publicops.SweepRequest) (publicops.SweepResult, error) {
 	result := publicops.SweepResult{DryRun: req.DryRun}
-
-	page, err := uw.IssueUseCase().SearchIssues(ctx, "", workapi.BuildSweepCandidateFilter(req))
+	kept, skips, err := loadSweepCandidates(ctx, uw, req)
 	if err != nil {
-		return publicops.SweepResult{}, fmt.Errorf("listing sweep candidates: %w", err)
+		return publicops.SweepResult{}, err
 	}
-
-	kept, skips := workapi.FilterSweepCandidates(page.Items, req.IDPattern, req.ClosedBefore)
 	result.Skipped = skips
 
 	if req.ProtectReferenced {
-		referenced, err := sweepReferencedInUOW(ctx, uw, kept)
+		kept, err = protectSweepCandidates(ctx, uw, kept, &result)
 		if err != nil {
 			return publicops.SweepResult{}, err
 		}
-		var count int
-		kept, count, result.ReferencedIDs = workapi.PartitionSweepReferenced(kept, referenced)
-		result.Skipped.Referenced = count
 	}
 
 	if len(kept) == 0 {
 		return result, nil
 	}
+	return deleteSweepCandidates(ctx, uw, req, kept, result)
+}
+
+func loadSweepCandidates(ctx context.Context, uw UnitOfWork, req publicops.SweepRequest) ([]*types.Issue, publicops.SweepSkips, error) {
+	page, err := uw.IssueUseCase().SearchIssues(ctx, "", workapi.BuildSweepCandidateFilter(req))
+	if err != nil {
+		return nil, publicops.SweepSkips{}, fmt.Errorf("listing sweep candidates: %w", err)
+	}
+	kept, skips := workapi.FilterSweepCandidates(page.Items, req.IDPattern, req.ClosedBefore)
+	return kept, skips, nil
+}
+
+func protectSweepCandidates(ctx context.Context, uw UnitOfWork, kept []*types.Issue, result *publicops.SweepResult) ([]*types.Issue, error) {
+	referenced, err := sweepReferencedInUOW(ctx, uw, kept)
+	if err != nil {
+		return nil, err
+	}
+	var count int
+	kept, count, result.ReferencedIDs = workapi.PartitionSweepReferenced(kept, referenced)
+	result.Skipped.Referenced = count
+	return kept, nil
+}
+
+func deleteSweepCandidates(ctx context.Context, uw UnitOfWork, req publicops.SweepRequest, kept []*types.Issue, result publicops.SweepResult) (publicops.SweepResult, error) {
 
 	ids := make([]string, len(kept))
 	for i, issue := range kept {
@@ -124,28 +142,33 @@ func sweepReferencedInUOW(ctx context.Context, uw UnitOfWork, candidates []*type
 	if len(candidates) == 0 {
 		return nil, nil
 	}
-	candidateIDs := make(map[string]bool, len(candidates))
-	for _, issue := range candidates {
-		candidateIDs[issue.ID] = true
+	matcher := workapi.NewCandidateIDMatcher(sweepCandidateIDs(candidates))
+	notDone, comments, err := loadSweepReferenceTargets(ctx, uw)
+	if err != nil {
+		return nil, err
 	}
-	matcher := workapi.NewCandidateIDMatcher(candidateIDs)
+	return collectSweepReferences(matcher, notDone, comments), nil
+}
 
+func sweepCandidateIDs(candidates []*types.Issue) map[string]bool {
+	ids := make(map[string]bool, len(candidates))
+	for _, issue := range candidates {
+		ids[issue.ID] = true
+	}
+	return ids
+}
+
+func loadSweepReferenceTargets(ctx context.Context, uw UnitOfWork) ([]*types.Issue, map[string][]*types.Comment, error) {
 	custom, err := uw.ConfigUseCase().GetCustomStatuses(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("reading custom statuses for reference scan: %w", err)
+		return nil, nil, fmt.Errorf("reading custom statuses for reference scan: %w", err)
 	}
 	page, err := uw.IssueUseCase().SearchIssues(ctx, "", workapi.BuildSweepReferenceScanFilter(custom))
 	if err != nil {
-		return nil, fmt.Errorf("scanning open beads for references: %w", err)
+		return nil, nil, fmt.Errorf("scanning open beads for references: %w", err)
 	}
 	notDone := page.Items
-
-	notDoneIDs := make([]string, 0, len(notDone))
-	for _, issue := range notDone {
-		if issue != nil {
-			notDoneIDs = append(notDoneIDs, issue.ID)
-		}
-	}
+	notDoneIDs := sweepReferenceIDs(notDone)
 	// BOTH PLANES, and this is not an optimization detail. The not-done set
 	// comes from SearchIssues, which merges the durable and wisp planes, so it
 	// contains wisps — and their comments live in wisp_comments, which
@@ -154,22 +177,31 @@ func sweepReferencedInUOW(ctx context.Context, uw UnitOfWork, candidates []*type
 	// `bd prune` deleted it on this route and kept it on the other. The
 	// contract says an implementation that cannot read the full set must fail
 	// the sweep rather than under-scan it.
-	//
-	// The full id list goes to both reads rather than being partitioned by a
-	// plane flag: an id lives in exactly one plane, so at most one side answers
-	// for it, and a mis-partition here would silently under-scan again.
 	comments, err := uw.CommentUseCase().GetCommentsForIssues(ctx, notDoneIDs)
 	if err != nil {
-		return nil, fmt.Errorf("scanning open beads for references: %w", err)
+		return nil, nil, fmt.Errorf("scanning open beads for references: %w", err)
 	}
 	wispComments, err := uw.CommentUseCase().GetCommentsForWisps(ctx, notDoneIDs)
 	if err != nil {
-		return nil, fmt.Errorf("scanning open wisps for references: %w", err)
+		return nil, nil, fmt.Errorf("scanning open wisps for references: %w", err)
 	}
 	for id, cs := range wispComments {
 		comments[id] = append(comments[id], cs...)
 	}
+	return notDone, comments, nil
+}
 
+func sweepReferenceIDs(notDone []*types.Issue) []string {
+	ids := make([]string, 0, len(notDone))
+	for _, issue := range notDone {
+		if issue != nil {
+			ids = append(ids, issue.ID)
+		}
+	}
+	return ids
+}
+
+func collectSweepReferences(matcher workapi.CandidateIDMatcher, notDone []*types.Issue, comments map[string][]*types.Comment) map[string]bool {
 	referenced := make(map[string]bool)
 	for _, issue := range notDone {
 		if issue == nil {
@@ -181,5 +213,5 @@ func sweepReferencedInUOW(ctx context.Context, uw UnitOfWork, candidates []*type
 			matcher.FindAll(c.Text, referenced)
 		}
 	}
-	return referenced, nil
+	return referenced
 }

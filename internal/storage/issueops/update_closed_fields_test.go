@@ -36,9 +36,9 @@ func clauseValues(t *testing.T, clauses []string, args []interface{}) map[string
 // after a generic reopen keeps the PREVIOUS close's session and `bd show`
 // misattributes it. Each default is suppressed by its own explicit key.
 func TestManageClosedAtMatchesCloseSemantics(t *testing.T) {
-	openIssue := &types.Issue{ID: "bd-1", Status: types.StatusOpen}
+	openIssue := &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}
 	closedAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	closedIssue := &types.Issue{ID: "bd-1", Status: types.StatusClosed, ClosedAt: &closedAt}
+	closedIssue := &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}, IssueTimes: types.IssueTimes{ClosedAt: &closedAt}}
 
 	tests := []struct {
 		name     string
@@ -137,8 +137,8 @@ func TestManageClosedAtMatchesCloseSemantics(t *testing.T) {
 // — stamping closed_at on a row that is or becomes closed — stays open.
 func TestValidateClosedAtCoherence(t *testing.T) {
 	stamp := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	openIssue := &types.Issue{ID: "bd-open", Status: types.StatusOpen}
-	closedIssue := &types.Issue{ID: "bd-closed", Status: types.StatusClosed, ClosedAt: &stamp}
+	openIssue := &types.Issue{IssueID: types.IssueID{ID: "bd-open"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}
+	closedIssue := &types.Issue{IssueID: types.IssueID{ID: "bd-closed"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}, IssueTimes: types.IssueTimes{ClosedAt: &stamp}}
 
 	tests := []struct {
 		name       string

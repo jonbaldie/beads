@@ -21,13 +21,21 @@ func TestUpdateMergeOps_DoltEngine(t *testing.T) {
 	ctx := t.Context()
 
 	issue := &types.Issue{
-		ID:        "mergeops-1",
-		Title:     "merge ops on dolt",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
-		Priority:  2,
-		Metadata:  json.RawMessage(`{"keep":"x"}`),
-		Notes:     "line1",
+		IssueID: types.IssueID{
+			ID: "mergeops-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "merge ops on dolt",
+			Notes: "line1",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: json.RawMessage(`{"keep":"x"}`),
+		},
 	}
 	if err := te.store.CreateIssue(ctx, issue, "actor"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -72,7 +80,7 @@ func TestUpdateMergeOps_DoltEngine_TwoIssues(t *testing.T) {
 		{"two-1", "first-notes"},
 		{"two-2", ""},
 	} {
-		iss := &types.Issue{ID: spec.id, Title: spec.id, Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2, Notes: spec.notes}
+		iss := &types.Issue{IssueID: types.IssueID{ID: spec.id}, IssueContent: types.IssueContent{Title: spec.id, Notes: spec.notes}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}}
 		if err := te.store.CreateIssue(ctx, iss, "actor"); err != nil {
 			t.Fatalf("CreateIssue(%s): %v", spec.id, err)
 		}

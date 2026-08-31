@@ -61,28 +61,28 @@ func CheckEligibilityInTx(ctx context.Context, tx *sql.Tx, issueID string, tier 
 
 	threshold := getCompactDaysInTx(ctx, tx, tier)
 	daysClosed := time.Since(closedAt.Time).Hours() / 24
+	return compactionEligibility(tier, compactionLevel, daysClosed, threshold)
+}
 
-	if tier == 1 {
+func compactionEligibility(tier, compactionLevel int, daysClosed float64, threshold int) (bool, string, error) {
+	switch tier {
+	case 1:
 		if compactionLevel >= 1 {
 			return false, "already compacted at tier 1 or higher", nil
 		}
-		if daysClosed < float64(threshold) {
-			return false, fmt.Sprintf("closed only %.0f days ago (need %d+)", daysClosed, threshold), nil
-		}
-	} else if tier == 2 {
+	case 2:
 		if compactionLevel >= 2 {
 			return false, "already compacted at tier 2", nil
 		}
 		if compactionLevel < 1 {
 			return false, "must be tier 1 compacted first", nil
 		}
-		if daysClosed < float64(threshold) {
-			return false, fmt.Sprintf("closed only %.0f days ago (need %d+)", daysClosed, threshold), nil
-		}
-	} else {
+	default:
 		return false, fmt.Sprintf("unsupported tier: %d", tier), nil
 	}
-
+	if daysClosed < float64(threshold) {
+		return false, fmt.Sprintf("closed only %.0f days ago (need %d+)", daysClosed, threshold), nil
+	}
 	return true, "", nil
 }
 
@@ -255,6 +255,52 @@ func GetMoleculeLastActivityInTx(ctx context.Context, tx *sql.Tx, moleculeID str
 	if isWisp {
 		parentCol = "depends_on_wisp_id"
 	}
+	childIDs, err := moleculeChildIDsInTx(ctx, tx, moleculeID, depTable, parentCol)
+	if err != nil {
+		return nil, err
+	}
+	if len(childIDs) == 0 {
+		return moleculeUpdatedResult(ctx, tx, issueTable, moleculeID)
+	}
+
+	activity := moleculeChildActivityInTx(ctx, tx, issueTable, childIDs)
+	if activity.updatedID == "" {
+		return nil, fmt.Errorf("no children found for molecule %s", moleculeID)
+	}
+	return moleculeActivityResult(moleculeID, activity), nil
+}
+
+func moleculeUpdatedResult(ctx context.Context, tx *sql.Tx, issueTable, moleculeID string) (*types.MoleculeLastActivity, error) {
+	var updatedAt time.Time
+	err := tx.QueryRowContext(ctx, fmt.Sprintf("SELECT updated_at FROM %s WHERE id = ?", issueTable), moleculeID).Scan(&updatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("molecule %s not found: %w", moleculeID, err)
+	}
+	return &types.MoleculeLastActivity{
+		MoleculeID:   moleculeID,
+		LastActivity: updatedAt,
+		Source:       "molecule_updated",
+	}, nil
+}
+
+func moleculeActivityResult(moleculeID string, activity moleculeActivity) *types.MoleculeLastActivity {
+	result := &types.MoleculeLastActivity{
+		MoleculeID:   moleculeID,
+		LastActivity: activity.updatedAt,
+		Source:       "step_updated",
+		SourceStepID: activity.updatedID,
+	}
+	if activity.closedAt.Valid && activity.closedAt.Time.After(activity.updatedAt) {
+		result.LastActivity = activity.closedAt.Time
+		result.Source = "step_closed"
+		if activity.closedID.Valid {
+			result.SourceStepID = activity.closedID.String
+		}
+	}
+	return result
+}
+
+func moleculeChildIDsInTx(ctx context.Context, tx *sql.Tx, moleculeID, depTable, parentCol string) ([]string, error) {
 
 	// Get child IDs
 	depRows, err := tx.QueryContext(ctx, fmt.Sprintf(`
@@ -274,29 +320,23 @@ func GetMoleculeLastActivityInTx(ctx context.Context, tx *sql.Tx, moleculeID str
 		childIDs = append(childIDs, id)
 	}
 	_ = depRows.Close()
+	return childIDs, nil
+}
 
-	if len(childIDs) == 0 {
-		var updatedAt time.Time
-		err := tx.QueryRowContext(ctx, fmt.Sprintf("SELECT updated_at FROM %s WHERE id = ?", issueTable), moleculeID).Scan(&updatedAt)
-		if err != nil {
-			return nil, fmt.Errorf("molecule %s not found: %w", moleculeID, err)
-		}
-		return &types.MoleculeLastActivity{
-			MoleculeID:   moleculeID,
-			LastActivity: updatedAt,
-			Source:       "molecule_updated",
-		}, nil
-	}
+type moleculeActivity struct {
+	updatedAt time.Time
+	updatedID string
+	closedAt  sql.NullTime
+	closedID  sql.NullString
+}
 
-	var lastUpdatedAt time.Time
-	var lastUpdatedID string
-	var lastClosedAt sql.NullTime
-	var lastClosedID sql.NullString
-
-	for start := 0; start < len(childIDs); start += queryBatchSize {
+func moleculeChildActivityInTx(ctx context.Context, tx *sql.Tx, issueTable string, childIDs []string) moleculeActivity {
+	var activity moleculeActivity
+	totalChildIDs := len(childIDs)
+	for start := 0; start < totalChildIDs; start += queryBatchSize {
 		end := start + queryBatchSize
-		if end > len(childIDs) {
-			end = len(childIDs)
+		if end > totalChildIDs {
+			end = totalChildIDs
 		}
 		batch := childIDs[start:end]
 		placeholders, args := buildSQLInClause(batch)
@@ -306,9 +346,9 @@ func GetMoleculeLastActivityInTx(ctx context.Context, tx *sql.Tx, moleculeID str
 		scanErr := tx.QueryRowContext(ctx, fmt.Sprintf(
 			"SELECT id, updated_at FROM %s WHERE id IN (%s) ORDER BY updated_at DESC LIMIT 1",
 			issueTable, placeholders), args...).Scan(&batchUpdatedID, &batchUpdatedAt)
-		if scanErr == nil && batchUpdatedAt.After(lastUpdatedAt) {
-			lastUpdatedAt = batchUpdatedAt
-			lastUpdatedID = batchUpdatedID
+		if scanErr == nil && batchUpdatedAt.After(activity.updatedAt) {
+			activity.updatedAt = batchUpdatedAt
+			activity.updatedID = batchUpdatedID
 		}
 
 		var batchClosedAt sql.NullTime
@@ -316,30 +356,10 @@ func GetMoleculeLastActivityInTx(ctx context.Context, tx *sql.Tx, moleculeID str
 		_ = tx.QueryRowContext(ctx, fmt.Sprintf(
 			"SELECT id, closed_at FROM %s WHERE id IN (%s) AND closed_at IS NOT NULL ORDER BY closed_at DESC LIMIT 1",
 			issueTable, placeholders), args...).Scan(&batchClosedID, &batchClosedAt)
-		if batchClosedAt.Valid && (!lastClosedAt.Valid || batchClosedAt.Time.After(lastClosedAt.Time)) {
-			lastClosedAt = batchClosedAt
-			lastClosedID = batchClosedID
+		if batchClosedAt.Valid && (!activity.closedAt.Valid || batchClosedAt.Time.After(activity.closedAt.Time)) {
+			activity.closedAt = batchClosedAt
+			activity.closedID = batchClosedID
 		}
 	}
-
-	if lastUpdatedID == "" {
-		return nil, fmt.Errorf("no children found for molecule %s", moleculeID)
-	}
-
-	result := &types.MoleculeLastActivity{
-		MoleculeID:   moleculeID,
-		LastActivity: lastUpdatedAt,
-		Source:       "step_updated",
-		SourceStepID: lastUpdatedID,
-	}
-
-	if lastClosedAt.Valid && lastClosedAt.Time.After(lastUpdatedAt) {
-		result.LastActivity = lastClosedAt.Time
-		result.Source = "step_closed"
-		if lastClosedID.Valid {
-			result.SourceStepID = lastClosedID.String
-		}
-	}
-
-	return result, nil
+	return activity
 }

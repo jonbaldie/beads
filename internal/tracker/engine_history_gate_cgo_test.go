@@ -42,11 +42,17 @@ func TestEmbeddedDoltExternalRefChangedAfterUsesHistoryFastPath(t *testing.T) {
 	}
 
 	issue := &types.Issue{
-		ID:        "gh4549-1",
-		Title:     "regression for GH#4549",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "gh4549-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "regression for GH#4549",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -87,9 +93,13 @@ func TestEmbeddedDoltExternalRefChangedAfterUsesHistoryFastPath(t *testing.T) {
 	// local's own timestamps predate asOf, so the coarse fallback heuristic
 	// would (wrongly) say "unchanged" here.
 	local := &types.Issue{
-		ID:        issue.ID,
-		CreatedAt: asOf.Add(-time.Hour),
-		UpdatedAt: asOf.Add(-time.Hour),
+		IssueID: types.IssueID{
+			ID: issue.ID,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: asOf.Add(-time.Hour),
+			UpdatedAt: asOf.Add(-time.Hour),
+		},
 	}
 
 	changed, err := e.externalRefChangedAfter(ctx, local, "new-ref", asOf)
@@ -122,11 +132,17 @@ func TestDoltStoreExternalRefChangedAfterUsesHistoryFastPath(t *testing.T) {
 
 	ctx := context.Background()
 	issue := &types.Issue{
-		ID:        "history-gate-1",
-		Title:     "regression for GH#4549",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "history-gate-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "regression for GH#4549",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "tester"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -159,9 +175,13 @@ func TestDoltStoreExternalRefChangedAfterUsesHistoryFastPath(t *testing.T) {
 
 	e := &Engine{Store: store}
 	local := &types.Issue{
-		ID:        issue.ID,
-		CreatedAt: asOf.Add(-time.Hour),
-		UpdatedAt: asOf.Add(-time.Hour),
+		IssueID: types.IssueID{
+			ID: issue.ID,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: asOf.Add(-time.Hour),
+			UpdatedAt: asOf.Add(-time.Hour),
+		},
 	}
 
 	changed, err := e.externalRefChangedAfter(ctx, local, "new-ref", asOf)

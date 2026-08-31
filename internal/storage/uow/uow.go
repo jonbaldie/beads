@@ -35,11 +35,29 @@ func NewUOW(ctx context.Context, p TxProvider) (UnitOfWork, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &baseUOW{tx: tx}, nil
+	u := &baseUOW{tx: tx}
+	u.journalAccess = &journalAccess{owner: u}
+	return u, nil
+}
+
+type journalAccess struct {
+	owner *baseUOW
+}
+
+func (a *journalAccess) EventsJournalUseCase() domain.EventsJournalUseCase {
+	if a == nil || a.owner == nil {
+		return nil
+	}
+	u := a.owner
+	if u.eventsJournalUseCase == nil {
+		u.eventsJournalUseCase = domain.NewEventsJournalUseCase(db.NewEventsJournalSQLRepository(u.tx.Runner()))
+	}
+	return u.eventsJournalUseCase
 }
 
 type baseUOW struct {
 	tx Tx
+	*journalAccess
 
 	configUseCase domain.ConfigUseCase
 	remoteUseCase domain.DoltRemoteUseCase
@@ -128,14 +146,4 @@ func (u *baseUOW) RawSQLUseCase() domain.RawSQLUseCase {
 		u.rawSQLUseCase = domain.NewRawSQLUseCase(db.NewRawSQLRepository(u.tx.Runner()))
 	}
 	return u.rawSQLUseCase
-}
-
-// EventsJournalUseCase serves `bd events` in proxied-server mode. The journal
-// is clone-local operational state reached through the same pinned transaction
-// as every other repository, so a caller needs no raw SQL connection for it.
-func (u *baseUOW) EventsJournalUseCase() domain.EventsJournalUseCase {
-	if u.eventsJournalUseCase == nil {
-		u.eventsJournalUseCase = domain.NewEventsJournalUseCase(db.NewEventsJournalSQLRepository(u.tx.Runner()))
-	}
-	return u.eventsJournalUseCase
 }

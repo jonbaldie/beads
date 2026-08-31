@@ -85,7 +85,16 @@ func newUOWJournalFixture(t *testing.T, ctx context.Context, prefix string) conf
 				return RunTx(ctx, provider, func(ctx context.Context, uw UnitOfWork) (string, error) {
 					_, err := uw.IssueUseCase().CreateIssue(ctx, domain.CreateIssueParams{
 						Issue: &types.Issue{
-							ID: id, Title: "t-" + id, IssueType: types.TypeTask, Status: types.StatusOpen,
+							IssueID: types.IssueID{
+								ID: id,
+							},
+							IssueContent: types.IssueContent{
+								Title: "t-" + id,
+							},
+							IssueWorkflow: types.IssueWorkflow{
+								IssueType: types.TypeTask,
+								Status:    types.StatusOpen,
+							},
 						},
 						ExplicitID: id,
 						CreateOnly: true,

@@ -39,213 +39,214 @@ const KeysetCreatedAtIDPredicate = "(created_at <= ? AND ((created_at < ?) OR (i
 // blockers") cannot live here and would need a separate outer predicate
 // parameter. See the SearchCountsSQL doc comment for why a violation fails loud.
 func BuildIssueFilterClauses(query string, filter types.IssueFilter, tables FilterTables) ([]string, []any, error) {
-	var whereClauses []string
-	var args []any
+	clauses := issueFilterClauses{tables: tables}
+	appendIssueSearchClauses(&clauses, query, filter)
+	appendIssueStatusClauses(&clauses, filter)
+	appendIssuePriorityAndIDClauses(&clauses, filter)
+	appendIssueParentAndPlanClauses(&clauses, filter)
+	appendIssueLabelClauses(&clauses, filter)
+	appendIssueStateClauses(&clauses, filter)
+	appendIssueTimeClauses(&clauses, filter)
+	if err := appendIssueMetadataClauses(&clauses, filter); err != nil {
+		return nil, nil, err
+	}
+	return clauses.where, clauses.args, nil
+}
 
+type issueFilterClauses struct {
+	where  []string
+	args   []any
+	tables FilterTables
+}
+
+func appendIssueSearchClauses(clauses *issueFilterClauses, query string, filter types.IssueFilter) {
 	if query != "" {
 		lowerQuery := strings.ToLower(query)
 		if LooksLikeIssueID(query) {
-			whereClauses = append(whereClauses, "(id = ? OR id LIKE ? OR LOWER(title) LIKE ? OR LOWER(external_ref) LIKE ?)")
-			args = append(args, lowerQuery, lowerQuery+"%", "%"+lowerQuery+"%", "%"+lowerQuery+"%")
+			clauses.where = append(clauses.where, "(id = ? OR id LIKE ? OR LOWER(title) LIKE ? OR LOWER(external_ref) LIKE ?)")
+			clauses.args = append(clauses.args, lowerQuery, lowerQuery+"%", "%"+lowerQuery+"%", "%"+lowerQuery+"%")
 		} else {
-			whereClauses = append(whereClauses, "(LOWER(title) LIKE ? OR id LIKE ?)")
+			clauses.where = append(clauses.where, "(LOWER(title) LIKE ? OR id LIKE ?)")
 			pattern := "%" + lowerQuery + "%"
-			args = append(args, pattern, pattern)
+			clauses.args = append(clauses.args, pattern, pattern)
 		}
 	}
-
-	if filter.TitleSearch != "" {
-		whereClauses = append(whereClauses, "LOWER(title) LIKE ?")
-		args = append(args, "%"+strings.ToLower(filter.TitleSearch)+"%")
-	}
-	if filter.TitleContains != "" {
-		whereClauses = append(whereClauses, "LOWER(title) LIKE ?")
-		args = append(args, "%"+strings.ToLower(filter.TitleContains)+"%")
-	}
-	if filter.DescriptionContains != "" {
-		whereClauses = append(whereClauses, "LOWER(description) LIKE ?")
-		args = append(args, "%"+strings.ToLower(filter.DescriptionContains)+"%")
-	}
-	if filter.NotesContains != "" {
-		whereClauses = append(whereClauses, "LOWER(notes) LIKE ?")
-		args = append(args, "%"+strings.ToLower(filter.NotesContains)+"%")
-	}
-	if filter.ExternalRefContains != "" {
-		whereClauses = append(whereClauses, "LOWER(external_ref) LIKE ?")
-		args = append(args, "%"+strings.ToLower(filter.ExternalRefContains)+"%")
-	}
+	appendTextFilter(clauses, "title", filter.TitleSearch)
+	appendTextFilter(clauses, "title", filter.TitleContains)
+	appendTextFilter(clauses, "description", filter.DescriptionContains)
+	appendTextFilter(clauses, "notes", filter.NotesContains)
+	appendTextFilter(clauses, "external_ref", filter.ExternalRefContains)
 	if filter.ExternalRef != nil {
-		whereClauses = append(whereClauses, "external_ref = ?")
-		args = append(args, *filter.ExternalRef)
+		clauses.where = append(clauses.where, "external_ref = ?")
+		clauses.args = append(clauses.args, *filter.ExternalRef)
 	}
+}
 
+func appendTextFilter(clauses *issueFilterClauses, column, value string) {
+	if value == "" {
+		return
+	}
+	clauses.where = append(clauses.where, fmt.Sprintf("LOWER(%s) LIKE ?", column))
+	clauses.args = append(clauses.args, "%"+strings.ToLower(value)+"%")
+}
+
+func appendIssueStatusClauses(clauses *issueFilterClauses, filter types.IssueFilter) {
 	if filter.Status != nil {
-		whereClauses = append(whereClauses, "status = ?")
-		args = append(args, *filter.Status)
+		clauses.where = append(clauses.where, "status = ?")
+		clauses.args = append(clauses.args, *filter.Status)
 	}
-	if len(filter.Statuses) > 0 {
-		placeholders := make([]string, len(filter.Statuses))
-		for i, s := range filter.Statuses {
-			placeholders[i] = "?"
-			args = append(args, string(s))
-		}
-		whereClauses = append(whereClauses, fmt.Sprintf("status IN (%s)", strings.Join(placeholders, ",")))
-	}
-	if len(filter.ExcludeStatus) > 0 {
-		placeholders := make([]string, len(filter.ExcludeStatus))
-		for i, s := range filter.ExcludeStatus {
-			placeholders[i] = "?"
-			args = append(args, string(s))
-		}
-		whereClauses = append(whereClauses, fmt.Sprintf("status NOT IN (%s)", strings.Join(placeholders, ",")))
-	}
-
+	appendStringEnumListClause(clauses, "status", "IN", filter.Statuses)
+	appendStringEnumListClause(clauses, "status", "NOT IN", filter.ExcludeStatus)
 	if filter.IssueType != nil {
-		whereClauses = append(whereClauses, "issue_type = ?")
-		args = append(args, *filter.IssueType)
+		clauses.where = append(clauses.where, "issue_type = ?")
+		clauses.args = append(clauses.args, *filter.IssueType)
 	}
-	if len(filter.ExcludeTypes) > 0 {
-		placeholders := make([]string, len(filter.ExcludeTypes))
-		for i, t := range filter.ExcludeTypes {
-			placeholders[i] = "?"
-			args = append(args, string(t))
-		}
-		whereClauses = append(whereClauses, fmt.Sprintf("issue_type NOT IN (%s)", strings.Join(placeholders, ",")))
-	}
-
+	appendStringEnumListClause(clauses, "issue_type", "NOT IN", filter.ExcludeTypes)
 	if filter.Assignee != nil {
-		whereClauses = append(whereClauses, "assignee = ?")
-		args = append(args, *filter.Assignee)
+		clauses.where = append(clauses.where, "assignee = ?")
+		clauses.args = append(clauses.args, *filter.Assignee)
 	}
+}
 
+func appendStringEnumListClause[T ~string](clauses *issueFilterClauses, column, operator string, values []T) {
+	if len(values) == 0 {
+		return
+	}
+	placeholders := make([]string, len(values))
+	for i, value := range values {
+		placeholders[i] = "?"
+		clauses.args = append(clauses.args, string(value))
+	}
+	clauses.where = append(clauses.where, fmt.Sprintf("%s %s (%s)", column, operator, strings.Join(placeholders, ",")))
+}
+
+func appendIssuePriorityAndIDClauses(clauses *issueFilterClauses, filter types.IssueFilter) {
 	if filter.Priority != nil {
-		whereClauses = append(whereClauses, "priority = ?")
-		args = append(args, *filter.Priority)
+		clauses.where = append(clauses.where, "priority = ?")
+		clauses.args = append(clauses.args, *filter.Priority)
 	}
 	if filter.PriorityMin != nil {
-		whereClauses = append(whereClauses, "priority >= ?")
-		args = append(args, *filter.PriorityMin)
+		clauses.where = append(clauses.where, "priority >= ?")
+		clauses.args = append(clauses.args, *filter.PriorityMin)
 	}
 	if filter.PriorityMax != nil {
-		whereClauses = append(whereClauses, "priority <= ?")
-		args = append(args, *filter.PriorityMax)
+		clauses.where = append(clauses.where, "priority <= ?")
+		clauses.args = append(clauses.args, *filter.PriorityMax)
 	}
-
-	if len(filter.IDs) > 0 {
-		placeholders := make([]string, len(filter.IDs))
-		for i, id := range filter.IDs {
-			placeholders[i] = "?"
-			args = append(args, id)
-		}
-		whereClauses = append(whereClauses, fmt.Sprintf("id IN (%s)", strings.Join(placeholders, ", ")))
-	}
+	appendStringListClause(clauses, "id", "IN", filter.IDs, ", ")
 	if filter.IDPrefix != "" {
-		whereClauses = append(whereClauses, "id LIKE ?")
-		args = append(args, filter.IDPrefix+"%")
+		clauses.where = append(clauses.where, "id LIKE ?")
+		clauses.args = append(clauses.args, filter.IDPrefix+"%")
 	}
 	if filter.SpecIDPrefix != "" {
-		whereClauses = append(whereClauses, "spec_id LIKE ?")
-		args = append(args, filter.SpecIDPrefix+"%")
+		clauses.where = append(clauses.where, "spec_id LIKE ?")
+		clauses.args = append(clauses.args, filter.SpecIDPrefix+"%")
 	}
+}
 
+func appendStringListClause(clauses *issueFilterClauses, column, operator string, values []string, separator string) {
+	if len(values) == 0 {
+		return
+	}
+	placeholders := make([]string, len(values))
+	for i, value := range values {
+		placeholders[i] = "?"
+		clauses.args = append(clauses.args, value)
+	}
+	clauses.where = append(clauses.where, fmt.Sprintf("%s %s (%s)", column, operator, strings.Join(placeholders, separator)))
+}
+
+func appendIssueParentAndPlanClauses(clauses *issueFilterClauses, filter types.IssueFilter) {
 	if filter.ParentID != nil {
 		parentID := *filter.ParentID
-		whereClauses = append(whereClauses, fmt.Sprintf("(id IN (SELECT issue_id FROM %s WHERE type = 'parent-child' AND %s = ?) OR (id LIKE CONCAT(?, '.%%') AND id NOT IN (SELECT issue_id FROM %s WHERE type = 'parent-child')))", tables.Dependencies, DepTargetExpr, tables.Dependencies))
-		args = append(args, parentID, parentID)
+		clauses.where = append(clauses.where, fmt.Sprintf("(id IN (SELECT issue_id FROM %s WHERE type = 'parent-child' AND %s = ?) OR (id LIKE CONCAT(?, '.%%') AND id NOT IN (SELECT issue_id FROM %s WHERE type = 'parent-child')))", clauses.tables.Dependencies, DepTargetExpr, clauses.tables.Dependencies))
+		clauses.args = append(clauses.args, parentID, parentID)
 	}
 	if filter.NoParent {
-		whereClauses = append(whereClauses, fmt.Sprintf("id NOT IN (SELECT issue_id FROM %s WHERE type = 'parent-child')", tables.Dependencies))
+		clauses.where = append(clauses.where, fmt.Sprintf("id NOT IN (SELECT issue_id FROM %s WHERE type = 'parent-child')", clauses.tables.Dependencies))
 	}
-
 	if filter.MolType != nil {
-		whereClauses = append(whereClauses, "mol_type = ?")
-		args = append(args, string(*filter.MolType))
+		clauses.where = append(clauses.where, "mol_type = ?")
+		clauses.args = append(clauses.args, string(*filter.MolType))
 	}
 	if filter.WispType != nil {
-		whereClauses = append(whereClauses, "wisp_type = ?")
-		args = append(args, string(*filter.WispType))
+		clauses.where = append(clauses.where, "wisp_type = ?")
+		clauses.args = append(clauses.args, string(*filter.WispType))
 	}
+}
 
-	if len(filter.Labels) > 0 {
-		for _, label := range filter.Labels {
-			whereClauses = append(whereClauses, fmt.Sprintf("id IN (SELECT issue_id FROM %s WHERE label = ?)", tables.Labels))
-			args = append(args, label)
-		}
+func appendIssueLabelClauses(clauses *issueFilterClauses, filter types.IssueFilter) {
+	for _, label := range filter.Labels {
+		clauses.where = append(clauses.where, fmt.Sprintf("id IN (SELECT issue_id FROM %s WHERE label = ?)", clauses.tables.Labels))
+		clauses.args = append(clauses.args, label)
 	}
-	if len(filter.LabelsAny) > 0 {
-		placeholders := make([]string, len(filter.LabelsAny))
-		for i, label := range filter.LabelsAny {
-			placeholders[i] = "?"
-			args = append(args, label)
-		}
-		whereClauses = append(whereClauses, fmt.Sprintf("id IN (SELECT issue_id FROM %s WHERE label IN (%s))", tables.Labels, strings.Join(placeholders, ", ")))
-	}
-	if len(filter.ExcludeLabels) > 0 {
-		placeholders := make([]string, len(filter.ExcludeLabels))
-		for i, label := range filter.ExcludeLabels {
-			placeholders[i] = "?"
-			args = append(args, label)
-		}
-		whereClauses = append(whereClauses, fmt.Sprintf("id NOT IN (SELECT issue_id FROM %s WHERE label IN (%s))", tables.Labels, strings.Join(placeholders, ", ")))
-	}
+	appendLabelListClause(clauses, clauses.tables.Labels, filter.LabelsAny, false)
+	appendLabelListClause(clauses, clauses.tables.Labels, filter.ExcludeLabels, true)
 	if filter.NoLabels {
-		whereClauses = append(whereClauses, fmt.Sprintf("id NOT IN (SELECT DISTINCT issue_id FROM %s)", tables.Labels))
+		clauses.where = append(clauses.where, fmt.Sprintf("id NOT IN (SELECT DISTINCT issue_id FROM %s)", clauses.tables.Labels))
 	}
 	if filter.LabelPattern != "" {
-		whereClauses = append(whereClauses, fmt.Sprintf("id IN (SELECT issue_id FROM %s WHERE label LIKE ? ESCAPE '|')", tables.Labels))
-		args = append(args, globToLikePattern(filter.LabelPattern))
+		clauses.where = append(clauses.where, fmt.Sprintf("id IN (SELECT issue_id FROM %s WHERE label LIKE ? ESCAPE '|')", clauses.tables.Labels))
+		clauses.args = append(clauses.args, globToLikePattern(filter.LabelPattern))
 	}
 	if filter.LabelRegex != "" {
-		whereClauses = append(whereClauses, fmt.Sprintf("id IN (SELECT issue_id FROM %s WHERE label REGEXP ?)", tables.Labels))
-		args = append(args, filter.LabelRegex)
+		clauses.where = append(clauses.where, fmt.Sprintf("id IN (SELECT issue_id FROM %s WHERE label REGEXP ?)", clauses.tables.Labels))
+		clauses.args = append(clauses.args, filter.LabelRegex)
 	}
+}
 
-	if filter.Pinned != nil {
-		if *filter.Pinned {
-			whereClauses = append(whereClauses, "pinned = 1")
-		} else {
-			whereClauses = append(whereClauses, "(pinned = 0 OR pinned IS NULL)")
-		}
+func appendLabelListClause(clauses *issueFilterClauses, table string, labels []string, exclude bool) {
+	if len(labels) == 0 {
+		return
 	}
+	placeholders := make([]string, len(labels))
+	for i, label := range labels {
+		placeholders[i] = "?"
+		clauses.args = append(clauses.args, label)
+	}
+	operator := "IN"
+	if exclude {
+		operator = "NOT IN"
+	}
+	clauses.where = append(clauses.where, fmt.Sprintf("id %s (SELECT issue_id FROM %s WHERE label IN (%s))", operator, table, strings.Join(placeholders, ", ")))
+}
+
+func appendIssueStateClauses(clauses *issueFilterClauses, filter types.IssueFilter) {
+	appendNullableBooleanClause(clauses, "pinned", filter.Pinned)
 	if filter.SourceRepo != nil {
-		whereClauses = append(whereClauses, "source_repo = ?")
-		args = append(args, *filter.SourceRepo)
+		clauses.where = append(clauses.where, "source_repo = ?")
+		clauses.args = append(clauses.args, *filter.SourceRepo)
 	}
-	if filter.Ephemeral != nil {
-		if *filter.Ephemeral {
-			whereClauses = append(whereClauses, "ephemeral = 1")
-		} else {
-			whereClauses = append(whereClauses, "(ephemeral = 0 OR ephemeral IS NULL)")
-		}
-	}
-	if filter.IsTemplate != nil {
-		if *filter.IsTemplate {
-			whereClauses = append(whereClauses, "is_template = 1")
-		} else {
-			whereClauses = append(whereClauses, "(is_template = 0 OR is_template IS NULL)")
-		}
-	}
+	appendNullableBooleanClause(clauses, "ephemeral", filter.Ephemeral)
+	appendNullableBooleanClause(clauses, "is_template", filter.IsTemplate)
 	if filter.IsBlocked != nil {
-		// is_blocked is NOT NULL DEFAULT 0 on both issues and wisps, so a plain
-		// equality is exact (no IS NULL arm needed) and index-backed by
-		// idx_issues_is_blocked(is_blocked, status). Bound as an int so the same
-		// clause is portable across every backend (Dolt/MySQL/SQLite native, and
-		// pgdialect rewrites ? → $n).
 		blocked := 0
 		if *filter.IsBlocked {
 			blocked = 1
 		}
-		whereClauses = append(whereClauses, "is_blocked = ?")
-		args = append(args, blocked)
+		clauses.where = append(clauses.where, "is_blocked = ?")
+		clauses.args = append(clauses.args, blocked)
 	}
-
 	if filter.EmptyDescription {
-		whereClauses = append(whereClauses, "(description IS NULL OR description = '')")
+		clauses.where = append(clauses.where, "(description IS NULL OR description = '')")
 	}
 	if filter.NoAssignee {
-		whereClauses = append(whereClauses, "(assignee IS NULL OR assignee = '')")
+		clauses.where = append(clauses.where, "(assignee IS NULL OR assignee = '')")
 	}
+}
 
+func appendNullableBooleanClause(clauses *issueFilterClauses, column string, value *bool) {
+	if value == nil {
+		return
+	}
+	if *value {
+		clauses.where = append(clauses.where, column+" = 1")
+		return
+	}
+	clauses.where = append(clauses.where, "("+column+" = 0 OR "+column+" IS NULL)")
+}
+
+func appendIssueTimeClauses(clauses *issueFilterClauses, filter types.IssueFilter) {
 	for _, tc := range []struct {
 		col, op string
 		v       *time.Time
@@ -264,39 +265,29 @@ func BuildIssueFilterClauses(query string, filter types.IssueFilter, tables Filt
 		{"due_at", "<", filter.DueBefore},
 	} {
 		if tc.v != nil {
-			whereClauses = append(whereClauses, fmt.Sprintf("%s %s ?", tc.col, tc.op))
-			args = append(args, tc.v.Format(time.RFC3339))
+			clauses.where = append(clauses.where, fmt.Sprintf("%s %s ?", tc.col, tc.op))
+			clauses.args = append(clauses.args, tc.v.Format(time.RFC3339))
 		}
 	}
-
 	if filter.AfterCreatedAt != nil {
-		// Bind the cursor time as time.Time, not a formatted string: the issues/
-		// wisps created_at columns are DATETIME (NUMERIC affinity), so an RFC3339
-		// string parameter mis-compares on the SQLite backend, while a time.Time
-		// value compares correctly on every backend — the same binding EventsSince
-		// uses. Bound twice (the sargable upper bound and the strict bound), then
-		// the id tie-break.
 		ac := *filter.AfterCreatedAt
-		whereClauses = append(whereClauses, KeysetCreatedAtIDPredicate)
-		args = append(args, ac, ac, filter.AfterID)
+		clauses.where = append(clauses.where, KeysetCreatedAtIDPredicate)
+		clauses.args = append(clauses.args, ac, ac, filter.AfterID)
 	}
-
 	if filter.Deferred {
-		whereClauses = append(whereClauses, "(defer_until IS NOT NULL OR status = ?)")
-		args = append(args, types.StatusDeferred)
+		clauses.where = append(clauses.where, "(defer_until IS NOT NULL OR status = ?)")
+		clauses.args = append(clauses.args, types.StatusDeferred)
 	}
 	if filter.Overdue {
-		whereClauses = append(whereClauses, "due_at IS NOT NULL AND due_at < ? AND status != ?")
-		args = append(args, time.Now().UTC().Format(time.RFC3339), types.StatusClosed)
+		clauses.where = append(clauses.where, "due_at IS NOT NULL AND due_at < ? AND status != ?")
+		clauses.args = append(clauses.args, time.Now().UTC().Format(time.RFC3339), types.StatusClosed)
 	}
+}
 
+func appendIssueMetadataClauses(clauses *issueFilterClauses, filter types.IssueFilter) error {
 	var err error
-	whereClauses, args, err = AppendMetadataClauses(whereClauses, args, filter.HasMetadataKey, filter.MetadataFields)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return whereClauses, args, nil
+	clauses.where, clauses.args, err = AppendMetadataClauses(clauses.where, clauses.args, filter.HasMetadataKey, filter.MetadataFields)
+	return err
 }
 
 // AppendMetadataClauses appends JSON metadata predicates (has-key and exact
@@ -358,10 +349,29 @@ func LooksLikeIssueID(query string) bool {
 	if strings.Contains(query, " ") {
 		return false
 	}
+	return issueIDCharsOnly(query)
+}
+
+func issueIDCharsOnly(query string) bool {
 	for _, c := range query {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '-' || c == '.') {
+		if !isIssueIDChar(c) {
 			return false
 		}
 	}
 	return true
+}
+
+func isIssueIDChar(c rune) bool {
+	switch {
+	case c >= '0' && c <= '9':
+		return true
+	case c >= 'a' && c <= 'z':
+		return true
+	case c >= 'A' && c <= 'Z':
+		return true
+	case c == '-' || c == '.':
+		return true
+	default:
+		return false
+	}
 }

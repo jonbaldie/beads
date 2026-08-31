@@ -234,7 +234,7 @@ func TestPristineEmbeddedDoltFixtureRelocatesPrefixes(t *testing.T) {
 		}
 	}
 
-	issue := &types.Issue{Title: "only alpha has this", Status: types.StatusOpen, IssueType: types.TypeTask}
+	issue := &types.Issue{IssueContent: types.IssueContent{Title: "only alpha has this"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask}}
 	if err := alpha.store.CreateIssue(t.Context(), issue, "test"); err != nil {
 		t.Fatalf("create alpha issue: %v", err)
 	}

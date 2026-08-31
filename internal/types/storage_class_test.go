@@ -56,10 +56,10 @@ func TestEffectiveStorageClass(t *testing.T) {
 		want  StorageClass
 	}{
 		{"default is versioned", Issue{}, StorageClassVersioned},
-		{"wisp plane is ephemeral", Issue{Ephemeral: true}, StorageClassEphemeral},
-		{"no-history plane is ephemeral", Issue{NoHistory: true}, StorageClassEphemeral},
-		{"explicit wins", Issue{StorageClass: StorageClassUnversioned}, StorageClassUnversioned},
-		{"explicit ephemeral on wisp plane", Issue{Ephemeral: true, StorageClass: StorageClassEphemeral}, StorageClassEphemeral},
+		{"wisp plane is ephemeral", Issue{IssueWisp: IssueWisp{Ephemeral: true}}, StorageClassEphemeral},
+		{"no-history plane is ephemeral", Issue{IssueWisp: IssueWisp{NoHistory: true}}, StorageClassEphemeral},
+		{"explicit wins", Issue{IssueWisp: IssueWisp{StorageClass: StorageClassUnversioned}}, StorageClassUnversioned},
+		{"explicit ephemeral on wisp plane", Issue{IssueWisp: IssueWisp{Ephemeral: true, StorageClass: StorageClassEphemeral}}, StorageClassEphemeral},
 	}
 	for _, tc := range cases {
 		if got := tc.issue.EffectiveStorageClass(); got != tc.want {
@@ -70,13 +70,21 @@ func TestEffectiveStorageClass(t *testing.T) {
 
 func validBaseIssue() Issue {
 	return Issue{
-		ID:        "bd-sc1",
-		Title:     "t",
-		Status:    StatusOpen,
-		IssueType: TypeTask,
-		Priority:  2,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		IssueID: IssueID{
+			ID: "bd-sc1",
+		},
+		IssueContent: IssueContent{
+			Title: "t",
+		},
+		IssueWorkflow: IssueWorkflow{
+			Status:    StatusOpen,
+			IssueType: TypeTask,
+			Priority:  2,
+		},
+		IssueTimes: IssueTimes{
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
 	}
 }
 
@@ -178,22 +186,22 @@ func TestNormalizePersistenceMode(t *testing.T) {
 		wantStorageClass             StorageClass
 	}{
 		{Issue{}, PersistenceModePersistent, false, false, ""},
-		{Issue{StorageClass: StorageClassVersioned}, PersistenceModePersistent, false, false, StorageClassVersioned},
+		{Issue{IssueWisp: IssueWisp{StorageClass: StorageClassVersioned}}, PersistenceModePersistent, false, false, StorageClassVersioned},
 		{Issue{}, PersistenceModeEphemeral, true, false, ""},
 		{Issue{}, PersistenceModeNoHistory, false, true, ""},
-		{Issue{StorageClass: StorageClassVersioned}, PersistenceModeEphemeral, true, false, ""},
-		{Issue{StorageClass: StorageClassVersioned}, PersistenceModeNoHistory, false, true, ""},
-		{Issue{Ephemeral: true, StorageClass: StorageClassEphemeral}, PersistenceModeEphemeral, true, false, StorageClassEphemeral},
-		{Issue{NoHistory: true, StorageClass: StorageClassEphemeral}, PersistenceModeNoHistory, false, true, StorageClassEphemeral},
-		{Issue{Ephemeral: true, StorageClass: StorageClassEphemeral}, PersistenceModeNoHistory, false, true, StorageClassEphemeral},
-		{Issue{NoHistory: true, StorageClass: StorageClassEphemeral}, PersistenceModeEphemeral, true, false, StorageClassEphemeral},
-		{Issue{Ephemeral: true, StorageClass: StorageClassEphemeral}, PersistenceModePersistent, false, false, ""},
-		{Issue{NoHistory: true, StorageClass: StorageClassEphemeral}, PersistenceModePersistent, false, false, ""},
-		{Issue{StorageClass: StorageClassUnversioned}, PersistenceModePersistent, false, false, StorageClassUnversioned},
-		{Issue{Ephemeral: true}, PersistenceModeEphemeral, true, false, ""},
-		{Issue{NoHistory: true}, PersistenceModeNoHistory, false, true, ""},
-		{Issue{Ephemeral: true}, PersistenceModeNoHistory, false, true, ""},
-		{Issue{NoHistory: true}, PersistenceModeEphemeral, true, false, ""},
+		{Issue{IssueWisp: IssueWisp{StorageClass: StorageClassVersioned}}, PersistenceModeEphemeral, true, false, ""},
+		{Issue{IssueWisp: IssueWisp{StorageClass: StorageClassVersioned}}, PersistenceModeNoHistory, false, true, ""},
+		{Issue{IssueWisp: IssueWisp{Ephemeral: true, StorageClass: StorageClassEphemeral}}, PersistenceModeEphemeral, true, false, StorageClassEphemeral},
+		{Issue{IssueWisp: IssueWisp{NoHistory: true, StorageClass: StorageClassEphemeral}}, PersistenceModeNoHistory, false, true, StorageClassEphemeral},
+		{Issue{IssueWisp: IssueWisp{Ephemeral: true, StorageClass: StorageClassEphemeral}}, PersistenceModeNoHistory, false, true, StorageClassEphemeral},
+		{Issue{IssueWisp: IssueWisp{NoHistory: true, StorageClass: StorageClassEphemeral}}, PersistenceModeEphemeral, true, false, StorageClassEphemeral},
+		{Issue{IssueWisp: IssueWisp{Ephemeral: true, StorageClass: StorageClassEphemeral}}, PersistenceModePersistent, false, false, ""},
+		{Issue{IssueWisp: IssueWisp{NoHistory: true, StorageClass: StorageClassEphemeral}}, PersistenceModePersistent, false, false, ""},
+		{Issue{IssueWisp: IssueWisp{StorageClass: StorageClassUnversioned}}, PersistenceModePersistent, false, false, StorageClassUnversioned},
+		{Issue{IssueWisp: IssueWisp{Ephemeral: true}}, PersistenceModeEphemeral, true, false, ""},
+		{Issue{IssueWisp: IssueWisp{NoHistory: true}}, PersistenceModeNoHistory, false, true, ""},
+		{Issue{IssueWisp: IssueWisp{Ephemeral: true}}, PersistenceModeNoHistory, false, true, ""},
+		{Issue{IssueWisp: IssueWisp{NoHistory: true}}, PersistenceModeEphemeral, true, false, ""},
 	}
 	for _, tc := range cases {
 		ephemeral, noHistory, storageClass, err := NormalizePersistenceMode(tc.current, tc.mode)
@@ -252,7 +260,7 @@ func TestNormalizePersistenceModeReturnsValidIssueStates(t *testing.T) {
 }
 
 func TestNormalizePersistenceModeRejectsIncoherentWispFlags(t *testing.T) {
-	current := Issue{Ephemeral: true, NoHistory: true}
+	current := Issue{IssueWisp: IssueWisp{Ephemeral: true, NoHistory: true}}
 	for _, target := range []PersistenceMode{
 		PersistenceModePersistent,
 		PersistenceModeEphemeral,
@@ -270,11 +278,11 @@ func TestNormalizePersistenceModeRejectsPlaneClassIncoherence(t *testing.T) {
 		current Issue
 		target  PersistenceMode
 	}{
-		{"ephemeral with explicit versioned", Issue{Ephemeral: true, StorageClass: StorageClassVersioned}, PersistenceModeEphemeral},
-		{"no history with explicit versioned", Issue{NoHistory: true, StorageClass: StorageClassVersioned}, PersistenceModeNoHistory},
-		{"ephemeral with unversioned", Issue{Ephemeral: true, StorageClass: StorageClassUnversioned}, PersistenceModeEphemeral},
-		{"no history with unversioned", Issue{NoHistory: true, StorageClass: StorageClassUnversioned}, PersistenceModeNoHistory},
-		{"durable with explicit ephemeral", Issue{StorageClass: StorageClassEphemeral}, PersistenceModePersistent},
+		{"ephemeral with explicit versioned", Issue{IssueWisp: IssueWisp{Ephemeral: true, StorageClass: StorageClassVersioned}}, PersistenceModeEphemeral},
+		{"no history with explicit versioned", Issue{IssueWisp: IssueWisp{NoHistory: true, StorageClass: StorageClassVersioned}}, PersistenceModeNoHistory},
+		{"ephemeral with unversioned", Issue{IssueWisp: IssueWisp{Ephemeral: true, StorageClass: StorageClassUnversioned}}, PersistenceModeEphemeral},
+		{"no history with unversioned", Issue{IssueWisp: IssueWisp{NoHistory: true, StorageClass: StorageClassUnversioned}}, PersistenceModeNoHistory},
+		{"durable with explicit ephemeral", Issue{IssueWisp: IssueWisp{StorageClass: StorageClassEphemeral}}, PersistenceModePersistent},
 	}
 	for _, tc := range cases {
 		if _, _, _, err := NormalizePersistenceMode(tc.current, tc.target); err == nil {
@@ -292,7 +300,7 @@ func TestNormalizePersistenceModeRejectsUnsetAndUnknown(t *testing.T) {
 }
 
 func TestNormalizePersistenceModeRejectsUnversionedDemotion(t *testing.T) {
-	current := Issue{StorageClass: StorageClassUnversioned}
+	current := Issue{IssueWisp: IssueWisp{StorageClass: StorageClassUnversioned}}
 	for _, target := range []PersistenceMode{PersistenceModeEphemeral, PersistenceModeNoHistory} {
 		if _, _, _, err := NormalizePersistenceMode(current, target); err == nil {
 			t.Errorf("NormalizePersistenceMode(unversioned, %q) succeeded, want error", target)

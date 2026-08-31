@@ -15,98 +15,172 @@ type PersistenceMoveResult struct {
 
 // MoveIssuePersistenceInTx moves a complete issue aggregate to the requested persistence mode.
 func MoveIssuePersistenceInTx(ctx context.Context, tx DBTX, current *types.Issue, mode types.PersistenceMode) (PersistenceMoveResult, error) {
+	move, err := preparePersistenceMove(ctx, tx, current, mode)
+	if err != nil {
+		return PersistenceMoveResult{}, err
+	}
+	if persistenceMoveIsNoop(move) {
+		return PersistenceMoveResult{}, nil
+	}
+	if move.sourceWisp == move.targetWisp {
+		return normalizePersistenceMove(ctx, tx, move)
+	}
+	return executePersistenceMove(ctx, tx, move)
+}
+
+type persistenceMove struct {
+	current      *types.Issue
+	ephemeral    bool
+	noHistory    bool
+	storageClass types.StorageClass
+	sourceWisp   bool
+	targetWisp   bool
+}
+
+func preparePersistenceMove(ctx context.Context, tx DBTX, current *types.Issue, mode types.PersistenceMode) (persistenceMove, error) {
 	if tx == nil || current == nil || current.ID == "" {
-		return PersistenceMoveResult{}, fmt.Errorf("move issue persistence: issue and transaction are required")
+		return persistenceMove{}, fmt.Errorf("move issue persistence: issue and transaction are required")
 	}
 	ephemeral, noHistory, storageClass, err := types.NormalizePersistenceMode(*current, mode)
 	if err != nil {
-		return PersistenceMoveResult{}, err
+		return persistenceMove{}, err
 	}
 	sourceWisp, err := isActiveWispForPersistenceMove(ctx, tx, current.ID)
 	if err != nil {
+		return persistenceMove{}, err
+	}
+	return persistenceMove{
+		current:      current,
+		ephemeral:    ephemeral,
+		noHistory:    noHistory,
+		storageClass: storageClass,
+		sourceWisp:   sourceWisp,
+		targetWisp:   ephemeral || noHistory,
+	}, nil
+}
+
+func persistenceMoveIsNoop(move persistenceMove) bool {
+	return move.sourceWisp == move.targetWisp &&
+		move.current.Ephemeral == move.ephemeral &&
+		move.current.NoHistory == move.noHistory &&
+		move.current.StorageClass.Normalize() == move.storageClass.Normalize()
+}
+
+func normalizePersistenceMove(ctx context.Context, tx DBTX, move persistenceMove) (PersistenceMoveResult, error) {
+	// THE TABLE IS THE ROW'S OWN PLANE, not `wisps`. This branch runs when
+	// no move is needed but the flags still disagree with the row, and that
+	// state is reachable in the ISSUES plane: a durable row carrying
+	// ephemeral = 1 is exactly what the pre-role proxied update produced,
+	// and `bd update --persistent` is the command an operator reaches for
+	// to repair it. Hardcoding `wisps` sent that repair at the wrong table,
+	// where it matched nothing and still reported success.
+	table := persistenceIssueTable(move.sourceWisp)
+	if err := normalizePersistenceRow(ctx, tx, table, move); err != nil {
 		return PersistenceMoveResult{}, err
 	}
-	targetWisp := ephemeral || noHistory
-	if sourceWisp == targetWisp && current.Ephemeral == ephemeral && current.NoHistory == noHistory && current.StorageClass.Normalize() == storageClass.Normalize() {
-		return PersistenceMoveResult{}, nil
+	// The flags are part of the bead snapshot, so a normalize journals as
+	// an update. The no-change early return above emits nothing.
+	if err := RecordEventInTx(ctx, tx, EventUpdate, move.current.ID); err != nil {
+		return PersistenceMoveResult{}, err
 	}
+	return PersistenceMoveResult{Changed: true, ChangedTables: map[string]bool{table: true}}, nil
+}
+
+func normalizePersistenceRow(ctx context.Context, tx DBTX, table string, move persistenceMove) error {
+	//nolint:gosec // G201: table comes from persistenceIssueTable, not from input.
+	res, err := tx.ExecContext(ctx, `UPDATE `+table+` SET ephemeral = ?, no_history = ?, storage_class = ?, row_lock = ? WHERE id = ?`, move.ephemeral, move.noHistory, move.storageClass.Normalize(), FreshRowLock(), move.current.ID)
+	if err != nil {
+		return fmt.Errorf("normalize local issue persistence: %w", err)
+	}
+	// Changed: true is a claim about the database, so check it rather than
+	// assert it. A zero-row update here means the row is not where the
+	// plane probe said it was, and reporting success would hand the caller
+	// a repair that did not happen.
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return fmt.Errorf("normalize local issue persistence: %s names no row in %s", move.current.ID, table)
+	}
+	return nil
+}
+
+func executePersistenceMove(ctx context.Context, tx DBTX, move persistenceMove) (PersistenceMoveResult, error) {
 	result := PersistenceMoveResult{Changed: true, ChangedTables: map[string]bool{}}
-	if sourceWisp == targetWisp {
-		// THE TABLE IS THE ROW'S OWN PLANE, not `wisps`. This branch runs when
-		// no move is needed but the flags still disagree with the row, and that
-		// state is reachable in the ISSUES plane: a durable row carrying
-		// ephemeral = 1 is exactly what the pre-role proxied update produced,
-		// and `bd update --persistent` is the command an operator reaches for
-		// to repair it. Hardcoding `wisps` sent that repair at the wrong table,
-		// where it matched nothing and still reported success.
-		table := persistenceIssueTable(sourceWisp)
-		//nolint:gosec // G201: table comes from persistenceIssueTable, not from input.
-		res, err := tx.ExecContext(ctx, `UPDATE `+table+` SET ephemeral = ?, no_history = ?, storage_class = ?, row_lock = ? WHERE id = ?`, ephemeral, noHistory, storageClass.Normalize(), FreshRowLock(), current.ID)
-		if err != nil {
-			return PersistenceMoveResult{}, fmt.Errorf("normalize local issue persistence: %w", err)
-		}
-		// Changed: true is a claim about the database, so check it rather than
-		// assert it. A zero-row update here means the row is not where the
-		// plane probe said it was, and reporting success would hand the caller
-		// a repair that did not happen.
-		if n, err := res.RowsAffected(); err == nil && n == 0 {
-			return PersistenceMoveResult{}, fmt.Errorf("normalize local issue persistence: %s names no row in %s", current.ID, table)
-		}
-		result.ChangedTables[table] = true
-		// The flags are part of the bead snapshot, so a normalize journals as
-		// an update. The no-change early return above emits nothing.
-		if err := RecordEventInTx(ctx, tx, EventUpdate, current.ID); err != nil {
-			return PersistenceMoveResult{}, err
-		}
-		return result, nil
+	if err := preparePersistenceAggregate(ctx, tx, move); err != nil {
+		return PersistenceMoveResult{}, err
 	}
-	if !sourceWisp && targetWisp {
-		if err := rejectPersistenceDemotion(ctx, tx, current.ID); err != nil {
-			return PersistenceMoveResult{}, err
-		}
-	}
-	move := *current
-	move.Ephemeral, move.NoHistory, move.StorageClass, move.RowVersion = ephemeral, noHistory, storageClass, FreshRowLock()
-	if err := InsertIssueStrictInTx(ctx, tx, persistenceIssueTable(targetWisp), &move); err != nil {
-		return PersistenceMoveResult{}, fmt.Errorf("insert moved issue %s: %w", current.ID, err)
-	}
-	auxTables, err := copyPersistenceAuxiliary(ctx, tx, current.ID, sourceWisp, targetWisp)
+	auxTables, err := copyPersistenceAuxiliary(ctx, tx, move.current.ID, move.sourceWisp, move.targetWisp)
 	if err != nil {
 		return PersistenceMoveResult{}, err
 	}
 	for table := range auxTables {
 		result.ChangedTables[table] = true
 	}
-	if targetWisp {
-		inboundTables, err := inboundPersistenceDependencyTables(ctx, tx, current.ID, "depends_on_issue_id")
-		if err != nil {
-			return PersistenceMoveResult{}, err
-		}
-		if err := RetargetInboundDependenciesToWispInTx(ctx, tx, current.ID); err != nil {
-			return PersistenceMoveResult{}, err
-		}
-		for table := range inboundTables {
-			result.ChangedTables[table] = true
-		}
-		if err := DeleteLeaseInTx(ctx, tx, current.ID); err != nil {
-			return PersistenceMoveResult{}, err
-		}
-	} else {
-		inboundTables, err := inboundPersistenceDependencyTables(ctx, tx, current.ID, "depends_on_wisp_id")
-		if err != nil {
-			return PersistenceMoveResult{}, err
-		}
-		if err := RetargetInboundDependenciesToIssueInTx(ctx, tx, current.ID); err != nil {
-			return PersistenceMoveResult{}, err
-		}
-		for table := range inboundTables {
-			result.ChangedTables[table] = true
+	inboundTables, err := retargetPersistenceInbound(ctx, tx, move)
+	if err != nil {
+		return PersistenceMoveResult{}, err
+	}
+	for table := range inboundTables {
+		result.ChangedTables[table] = true
+	}
+	if err := deletePersistenceSource(ctx, tx, move); err != nil {
+		return PersistenceMoveResult{}, err
+	}
+	return finishPersistenceMove(ctx, tx, move, result)
+}
+
+func preparePersistenceAggregate(ctx context.Context, tx DBTX, move persistenceMove) error {
+	if !move.sourceWisp && move.targetWisp {
+		if err := rejectPersistenceDemotion(ctx, tx, move.current.ID); err != nil {
+			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE id = ?`, persistenceIssueTable(sourceWisp)), current.ID); err != nil {
-		return PersistenceMoveResult{}, fmt.Errorf("delete moved issue %s: %w", current.ID, err)
+	if err := insertPersistenceTarget(ctx, tx, move); err != nil {
+		return err
 	}
-	issues, wisps, err := affectedForPersistenceMove(ctx, tx, current.ID, targetWisp)
+	return nil
+}
+
+func insertPersistenceTarget(ctx context.Context, tx DBTX, move persistenceMove) error {
+	moved := *move.current
+	moved.Ephemeral, moved.NoHistory, moved.StorageClass, moved.RowVersion = move.ephemeral, move.noHistory, move.storageClass, FreshRowLock()
+	if err := InsertIssueStrictInTx(ctx, tx, persistenceIssueTable(move.targetWisp), &moved); err != nil {
+		return fmt.Errorf("insert moved issue %s: %w", move.current.ID, err)
+	}
+	return nil
+}
+
+func retargetPersistenceInbound(ctx context.Context, tx DBTX, move persistenceMove) (map[string]bool, error) {
+	targetColumn := "depends_on_wisp_id"
+	if move.targetWisp {
+		targetColumn = "depends_on_issue_id"
+	}
+	inboundTables, err := inboundPersistenceDependencyTables(ctx, tx, move.current.ID, targetColumn)
+	if err != nil {
+		return nil, err
+	}
+	if move.targetWisp {
+		if err := RetargetInboundDependenciesToWispInTx(ctx, tx, move.current.ID); err != nil {
+			return nil, err
+		}
+		if err := DeleteLeaseInTx(ctx, tx, move.current.ID); err != nil {
+			return nil, err
+		}
+		return inboundTables, nil
+	}
+	if err := RetargetInboundDependenciesToIssueInTx(ctx, tx, move.current.ID); err != nil {
+		return nil, err
+	}
+	return inboundTables, nil
+}
+
+func deletePersistenceSource(ctx context.Context, tx DBTX, move persistenceMove) error {
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE id = ?`, persistenceIssueTable(move.sourceWisp)), move.current.ID); err != nil {
+		return fmt.Errorf("delete moved issue %s: %w", move.current.ID, err)
+	}
+	return nil
+}
+
+func finishPersistenceMove(ctx context.Context, tx DBTX, move persistenceMove, result PersistenceMoveResult) (PersistenceMoveResult, error) {
+	issues, wisps, err := affectedForPersistenceMove(ctx, tx, move.current.ID, move.targetWisp)
 	if err != nil {
 		return PersistenceMoveResult{}, err
 	}
@@ -120,12 +194,12 @@ func MoveIssuePersistenceInTx(ctx context.Context, tx DBTX, current *types.Issue
 	if recompute.WispRowsChanged {
 		result.ChangedTables["wisps"] = true
 	}
-	result.ChangedTables[persistenceIssueTable(sourceWisp)] = true
-	result.ChangedTables[persistenceIssueTable(targetWisp)] = true
+	result.ChangedTables[persistenceIssueTable(move.sourceWisp)] = true
+	result.ChangedTables[persistenceIssueTable(move.targetWisp)] = true
 	// The bead keeps its ID across a plane move; only where it is stored
 	// changes. Journal one update carrying the moved snapshot, after derived
 	// blocked-state maintenance has settled.
-	if err := RecordEventInTx(ctx, tx, EventUpdate, current.ID); err != nil {
+	if err := RecordEventInTx(ctx, tx, EventUpdate, move.current.ID); err != nil {
 		return PersistenceMoveResult{}, err
 	}
 	return result, nil

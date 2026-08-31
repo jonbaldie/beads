@@ -156,185 +156,149 @@ func LargeFromJSONL(ctx context.Context, store *dolt.DoltStore, tempDir string) 
 // generateIssuesWithConfig creates issues with realistic epic hierarchies and cross-links using provided configuration
 func generateIssuesWithConfig(ctx context.Context, store *dolt.DoltStore, cfg DataConfig) error {
 	rng := rand.New(rand.NewSource(cfg.RandSeed)) // #nosec G404 -- deterministic math/rand used for repeatable fixture data
-
-	// Calculate breakdown using configuration ratios
 	numEpics := int(float64(cfg.TotalIssues) * cfg.EpicRatio)
 	numFeatures := int(float64(cfg.TotalIssues) * cfg.FeatureRatio)
 	numTasks := cfg.TotalIssues - numEpics - numFeatures
 
-	// Track created issues for cross-linking
-	var allIssues []*types.Issue
-	epicIssues := make([]*types.Issue, 0, numEpics)
-	featureIssues := make([]*types.Issue, 0, numFeatures)
-	taskIssues := make([]*types.Issue, 0, numTasks)
-
-	// Progress tracking
-	createdIssues := 0
-	lastPctLogged := -1
-
-	logProgress := func() {
-		pct := (createdIssues * 100) / cfg.TotalIssues
-		if pct >= lastPctLogged+10 {
-			fmt.Printf("  Progress: %d%% (%d/%d issues created)\n", pct, createdIssues, cfg.TotalIssues)
-			lastPctLogged = pct
-		}
+	progress := &generationProgress{total: cfg.TotalIssues, lastPercent: -1}
+	epicIssues, err := generateEpics(ctx, store, cfg, rng, progress)
+	if err != nil {
+		return err
 	}
-
-	// Create epics
-	for i := 0; i < numEpics; i++ {
-		issue := &types.Issue{
-			Title:       fmt.Sprintf("%s (Epic %d)", epicTitles[i%len(epicTitles)], i),
-			Description: fmt.Sprintf("Epic for %s", epicTitles[i%len(epicTitles)]),
-			Status:      randomStatus(rng, cfg.OpenRatio),
-			Priority:    randomPriority(rng),
-			IssueType:   types.TypeEpic,
-			Assignee:    commonAssignees[rng.Intn(len(commonAssignees))],
-			CreatedAt:   randomTime(rng, cfg.MaxEpicAgeDays),
-			UpdatedAt:   time.Now(),
-		}
-
-		if issue.Status == types.StatusClosed {
-			closedAt := randomTime(rng, cfg.MaxClosedAgeDays)
-			issue.ClosedAt = &closedAt
-		}
-
-		if err := store.CreateIssue(ctx, issue, "fixture"); err != nil {
-			return fmt.Errorf("failed to create epic: %w", err)
-		}
-
-		// Add labels to epics
-		for j := 0; j < rng.Intn(3)+1; j++ {
-			label := commonLabels[rng.Intn(len(commonLabels))]
-			_ = store.AddLabel(ctx, issue.ID, label, "fixture")
-		}
-
-		epicIssues = append(epicIssues, issue)
-		allIssues = append(allIssues, issue)
-		createdIssues++
-		logProgress()
+	featureIssues, err := generateFeatures(ctx, store, cfg, rng, progress, epicIssues)
+	if err != nil {
+		return err
 	}
-
-	// Create features under epics
-	for i := 0; i < numFeatures; i++ {
-		parentEpic := epicIssues[i%len(epicIssues)]
-
-		issue := &types.Issue{
-			Title:       fmt.Sprintf("%s (Feature %d)", featureTitles[i%len(featureTitles)], i),
-			Description: fmt.Sprintf("Feature under %s", parentEpic.Title),
-			Status:      randomStatus(rng, cfg.OpenRatio),
-			Priority:    randomPriority(rng),
-			IssueType:   types.TypeFeature,
-			Assignee:    commonAssignees[rng.Intn(len(commonAssignees))],
-			CreatedAt:   randomTime(rng, cfg.MaxFeatureAgeDays),
-			UpdatedAt:   time.Now(),
-		}
-
-		if issue.Status == types.StatusClosed {
-			closedAt := randomTime(rng, cfg.MaxClosedAgeDays)
-			issue.ClosedAt = &closedAt
-		}
-
-		if err := store.CreateIssue(ctx, issue, "fixture"); err != nil {
-			return fmt.Errorf("failed to create feature: %w", err)
-		}
-
-		// Add parent-child dependency to epic
-		dep := &types.Dependency{
-			IssueID:     issue.ID,
-			DependsOnID: parentEpic.ID,
-			Type:        types.DepParentChild,
-			CreatedAt:   time.Now(),
-			CreatedBy:   "fixture",
-		}
-		if err := store.AddDependency(ctx, dep, "fixture"); err != nil {
-			return fmt.Errorf("failed to add feature-epic dependency: %w", err)
-		}
-
-		// Add labels
-		for j := 0; j < rng.Intn(3)+1; j++ {
-			label := commonLabels[rng.Intn(len(commonLabels))]
-			_ = store.AddLabel(ctx, issue.ID, label, "fixture")
-		}
-
-		featureIssues = append(featureIssues, issue)
-		allIssues = append(allIssues, issue)
-		createdIssues++
-		logProgress()
-	}
-
-	// Create tasks under features
-	for i := 0; i < numTasks; i++ {
-		parentFeature := featureIssues[i%len(featureIssues)]
-
-		issue := &types.Issue{
-			Title:       fmt.Sprintf("%s (Task %d)", taskTitles[i%len(taskTitles)], i),
-			Description: fmt.Sprintf("Task under %s", parentFeature.Title),
-			Status:      randomStatus(rng, cfg.OpenRatio),
-			Priority:    randomPriority(rng),
-			IssueType:   types.TypeTask,
-			Assignee:    commonAssignees[rng.Intn(len(commonAssignees))],
-			CreatedAt:   randomTime(rng, cfg.MaxTaskAgeDays),
-			UpdatedAt:   time.Now(),
-		}
-
-		if issue.Status == types.StatusClosed {
-			closedAt := randomTime(rng, cfg.MaxClosedAgeDays)
-			issue.ClosedAt = &closedAt
-		}
-
-		if err := store.CreateIssue(ctx, issue, "fixture"); err != nil {
-			return fmt.Errorf("failed to create task: %w", err)
-		}
-
-		// Add parent-child dependency to feature
-		dep := &types.Dependency{
-			IssueID:     issue.ID,
-			DependsOnID: parentFeature.ID,
-			Type:        types.DepParentChild,
-			CreatedAt:   time.Now(),
-			CreatedBy:   "fixture",
-		}
-		if err := store.AddDependency(ctx, dep, "fixture"); err != nil {
-			return fmt.Errorf("failed to add task-feature dependency: %w", err)
-		}
-
-		// Add labels
-		for j := 0; j < rng.Intn(2)+1; j++ {
-			label := commonLabels[rng.Intn(len(commonLabels))]
-			_ = store.AddLabel(ctx, issue.ID, label, "fixture")
-		}
-
-		taskIssues = append(taskIssues, issue)
-		allIssues = append(allIssues, issue)
-		createdIssues++
-		logProgress()
+	taskIssues, err := generateTasks(ctx, store, cfg, rng, progress, featureIssues)
+	if err != nil {
+		return err
 	}
 
 	fmt.Printf("  Progress: 100%% (%d/%d issues created) - Complete!\n", cfg.TotalIssues, cfg.TotalIssues)
 
-	// Add cross-links between tasks across epics using configured ratio
-	numCrossLinks := int(float64(numTasks) * cfg.CrossLinkRatio)
-	for i := 0; i < numCrossLinks; i++ {
-		fromTask := taskIssues[rng.Intn(len(taskIssues))]
-		toTask := taskIssues[rng.Intn(len(taskIssues))]
+	if err := generateCrossLinks(ctx, store, rng, taskIssues, numTasks, cfg.CrossLinkRatio); err != nil {
+		return err
+	}
 
-		// Avoid self-dependencies
+	return nil
+}
+
+type generationProgress struct {
+	total       int
+	created     int
+	lastPercent int
+}
+
+func (p *generationProgress) note() {
+	pct := (p.created * 100) / p.total
+	if pct >= p.lastPercent+10 {
+		fmt.Printf("  Progress: %d%% (%d/%d issues created)\n", pct, p.created, p.total)
+		p.lastPercent = pct
+	}
+}
+
+func generateEpics(ctx context.Context, store *dolt.DoltStore, cfg DataConfig, rng *rand.Rand, progress *generationProgress) ([]*types.Issue, error) {
+	numEpics := int(float64(cfg.TotalIssues) * cfg.EpicRatio)
+	epics := make([]*types.Issue, 0, numEpics)
+	for i := 0; i < numEpics; i++ {
+		name := epicTitles[i%len(epicTitles)]
+		issue := newFixtureIssue(fmt.Sprintf("%s (Epic %d)", name, i), fmt.Sprintf("Epic for %s", name), types.TypeEpic, cfg.MaxEpicAgeDays, cfg, rng)
+		if err := store.CreateIssue(ctx, issue, "fixture"); err != nil {
+			return nil, fmt.Errorf("failed to create epic: %w", err)
+		}
+		addFixtureLabels(ctx, store, issue, rng, 3)
+		epics = append(epics, issue)
+		progress.created++
+		progress.note()
+	}
+	return epics, nil
+}
+
+func generateFeatures(ctx context.Context, store *dolt.DoltStore, cfg DataConfig, rng *rand.Rand, progress *generationProgress, epics []*types.Issue) ([]*types.Issue, error) {
+	numFeatures := int(float64(cfg.TotalIssues) * cfg.FeatureRatio)
+	features := make([]*types.Issue, 0, numFeatures)
+	for i := 0; i < numFeatures; i++ {
+		parent := epics[i%len(epics)]
+		name := featureTitles[i%len(featureTitles)]
+		issue := newFixtureIssue(fmt.Sprintf("%s (Feature %d)", name, i), fmt.Sprintf("Feature under %s", parent.Title), types.TypeFeature, cfg.MaxFeatureAgeDays, cfg, rng)
+		if err := store.CreateIssue(ctx, issue, "fixture"); err != nil {
+			return nil, fmt.Errorf("failed to create feature: %w", err)
+		}
+		if err := addFixtureParent(ctx, store, issue, parent, "feature-epic"); err != nil {
+			return nil, err
+		}
+		addFixtureLabels(ctx, store, issue, rng, 3)
+		features = append(features, issue)
+		progress.created++
+		progress.note()
+	}
+	return features, nil
+}
+
+func generateTasks(ctx context.Context, store *dolt.DoltStore, cfg DataConfig, rng *rand.Rand, progress *generationProgress, features []*types.Issue) ([]*types.Issue, error) {
+	numTasks := cfg.TotalIssues - int(float64(cfg.TotalIssues)*cfg.EpicRatio) - int(float64(cfg.TotalIssues)*cfg.FeatureRatio)
+	tasks := make([]*types.Issue, 0, numTasks)
+	for i := 0; i < numTasks; i++ {
+		parent := features[i%len(features)]
+		name := taskTitles[i%len(taskTitles)]
+		issue := newFixtureIssue(fmt.Sprintf("%s (Task %d)", name, i), fmt.Sprintf("Task under %s", parent.Title), types.TypeTask, cfg.MaxTaskAgeDays, cfg, rng)
+		if err := store.CreateIssue(ctx, issue, "fixture"); err != nil {
+			return nil, fmt.Errorf("failed to create task: %w", err)
+		}
+		if err := addFixtureParent(ctx, store, issue, parent, "task-feature"); err != nil {
+			return nil, err
+		}
+		addFixtureLabels(ctx, store, issue, rng, 2)
+		tasks = append(tasks, issue)
+		progress.created++
+		progress.note()
+	}
+	return tasks, nil
+}
+
+func newFixtureIssue(title, description string, issueType types.IssueType, maxAgeDays int, cfg DataConfig, rng *rand.Rand) *types.Issue {
+	issue := &types.Issue{
+		IssueContent: types.IssueContent{Title: title, Description: description},
+		IssueWorkflow: types.IssueWorkflow{
+			Status: randomStatus(rng, cfg.OpenRatio), Priority: randomPriority(rng),
+			IssueType: issueType, Assignee: commonAssignees[rng.Intn(len(commonAssignees))],
+		},
+		IssueTimes: types.IssueTimes{CreatedAt: randomTime(rng, maxAgeDays), UpdatedAt: time.Now()},
+	}
+	if issue.Status == types.StatusClosed {
+		closedAt := randomTime(rng, cfg.MaxClosedAgeDays)
+		issue.ClosedAt = &closedAt
+	}
+	return issue
+}
+
+func addFixtureLabels(ctx context.Context, store *dolt.DoltStore, issue *types.Issue, rng *rand.Rand, maxLabels int) {
+	for j := 0; j < rng.Intn(maxLabels)+1; j++ {
+		label := commonLabels[rng.Intn(len(commonLabels))]
+		_ = store.AddLabel(ctx, issue.ID, label, "fixture")
+	}
+}
+
+func addFixtureParent(ctx context.Context, store *dolt.DoltStore, issue, parent *types.Issue, relation string) error {
+	dep := &types.Dependency{IssueID: issue.ID, DependsOnID: parent.ID, Type: types.DepParentChild, CreatedAt: time.Now(), CreatedBy: "fixture"}
+	if err := store.AddDependency(ctx, dep, "fixture"); err != nil {
+		return fmt.Errorf("failed to add %s dependency: %w", relation, err)
+	}
+	return nil
+}
+
+func generateCrossLinks(ctx context.Context, store *dolt.DoltStore, rng *rand.Rand, tasks []*types.Issue, numTasks int, ratio float64) error {
+	numCrossLinks := int(float64(numTasks) * ratio)
+	for i := 0; i < numCrossLinks; i++ {
+		fromTask := tasks[rng.Intn(len(tasks))]
+		toTask := tasks[rng.Intn(len(tasks))]
 		if fromTask.ID == toTask.ID {
 			continue
 		}
-
-		dep := &types.Dependency{
-			IssueID:     fromTask.ID,
-			DependsOnID: toTask.ID,
-			Type:        types.DepBlocks,
-			CreatedAt:   time.Now(),
-			CreatedBy:   "fixture",
-		}
-
-		// Ignore cycle errors for cross-links (they're expected)
+		dep := &types.Dependency{IssueID: fromTask.ID, DependsOnID: toTask.ID, Type: types.DepBlocks, CreatedAt: time.Now(), CreatedBy: "fixture"}
+		// Ignore cycle errors for cross-links (they're expected).
 		_ = store.AddDependency(ctx, dep, "fixture")
 	}
-
 	return nil
 }
 
@@ -415,77 +379,94 @@ func exportToJSONL(ctx context.Context, store *dolt.DoltStore, path string) erro
 
 // importFromJSONL imports issues from a JSONL file
 func importFromJSONL(ctx context.Context, store *dolt.DoltStore, path string) error {
-	// Read JSONL file
+	data, err := readFixtureJSONL(path)
+	if err != nil {
+		return err
+	}
+	issues, err := parseFixtureIssues(data)
+	if err != nil {
+		return err
+	}
+	metadata, err := createFixtureIssues(ctx, store, issues)
+	if err != nil {
+		return err
+	}
+	return restoreFixtureRelations(ctx, store, metadata)
+}
+
+func readFixtureJSONL(path string) ([]byte, error) {
 	// #nosec G304 -- fixture imports from deterministic file created earlier in test
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("failed to read JSONL file: %w", err)
+		return nil, fmt.Errorf("failed to read JSONL file: %w", err)
 	}
+	return data, nil
+}
 
-	// Parse issues
+func parseFixtureIssues(data []byte) ([]*types.Issue, error) {
 	var issues []*types.Issue
-	lines := string(data)
-	for i, line := range splitLines(lines) {
+	for i, line := range splitLines(string(data)) {
 		if len(line) == 0 {
 			continue
 		}
-
 		var issue types.Issue
 		if err := json.Unmarshal([]byte(line), &issue); err != nil {
-			return fmt.Errorf("failed to parse issue at line %d: %w", i+1, err)
+			return nil, fmt.Errorf("failed to parse issue at line %d: %w", i+1, err)
 		}
-
 		issues = append(issues, &issue)
 	}
+	return issues, nil
+}
 
-	// Import issues directly using storage interface
-	// Step 1: Create all issues first (without dependencies/labels)
-	type savedMetadata struct {
-		deps   []*types.Dependency
-		labels []string
-	}
-	metadata := make(map[string]savedMetadata)
+type savedFixtureMetadata struct {
+	deps   []*types.Dependency
+	labels []string
+}
 
+func createFixtureIssues(ctx context.Context, store *dolt.DoltStore, issues []*types.Issue) (map[string]savedFixtureMetadata, error) {
+	metadata := make(map[string]savedFixtureMetadata)
 	for _, issue := range issues {
-		// Save dependencies and labels for later
-		metadata[issue.ID] = savedMetadata{
-			deps:   issue.Dependencies,
-			labels: issue.Labels,
-		}
+		metadata[issue.ID] = savedFixtureMetadata{deps: issue.Dependencies, labels: issue.Labels}
 		issue.Dependencies = nil
 		issue.Labels = nil
-
 		if err := store.CreateIssue(ctx, issue, "fixture"); err != nil {
-			return fmt.Errorf("failed to create issue %s: %w", issue.ID, err)
+			return nil, fmt.Errorf("failed to create issue %s: %w", issue.ID, err)
 		}
 	}
+	return metadata, nil
+}
 
-	// Step 2: Add all dependencies (now that all issues exist)
+func restoreFixtureRelations(ctx context.Context, store *dolt.DoltStore, metadata map[string]savedFixtureMetadata) error {
 	for issueID, meta := range metadata {
-		for _, dep := range meta.deps {
-			if err := store.AddDependency(ctx, dep, "fixture"); err != nil {
-				// Ignore duplicate and cycle errors
-				if !strings.Contains(err.Error(), "already exists") &&
-					!strings.Contains(err.Error(), "cycle") {
-					return fmt.Errorf("failed to add dependency for %s: %w", issueID, err)
-				}
-			}
+		if err := restoreFixtureDependencies(ctx, store, issueID, meta.deps); err != nil {
+			return err
 		}
-
-		// Add labels
 		for _, label := range meta.labels {
 			_ = store.AddLabel(ctx, issueID, label, "fixture")
 		}
 	}
-
 	return nil
+}
+
+func restoreFixtureDependencies(ctx context.Context, store *dolt.DoltStore, issueID string, deps []*types.Dependency) error {
+	for _, dep := range deps {
+		if err := store.AddDependency(ctx, dep, "fixture"); err != nil && !isIgnorableFixtureDependencyError(err) {
+			return fmt.Errorf("failed to add dependency for %s: %w", issueID, err)
+		}
+	}
+	return nil
+}
+
+func isIgnorableFixtureDependencyError(err error) bool {
+	return strings.Contains(err.Error(), "already exists") || strings.Contains(err.Error(), "cycle")
 }
 
 // splitLines splits a string by newlines
 func splitLines(s string) []string {
 	var lines []string
 	start := 0
-	for i := 0; i < len(s); i++ {
+	n := len(s)
+	for i := 0; i < n; i++ {
 		if s[i] == '\n' {
 			lines = append(lines, s[start:i])
 			start = i + 1

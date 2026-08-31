@@ -62,7 +62,12 @@ func PruneTreeByStatus(nodes []*types.TreeNode, status types.Status) []*types.Tr
 	if len(nodes) == 0 {
 		return nodes
 	}
-	keep := make(map[string]bool, len(nodes))
+	parentOf := treeParentMap(nodes)
+	keep := treeStatusKeepSet(nodes, status, parentOf)
+	return filterTreeNodes(nodes, keep)
+}
+
+func treeParentMap(nodes []*types.TreeNode) map[string]string {
 	parentOf := make(map[string]string, len(nodes))
 	for _, node := range nodes {
 		if node == nil {
@@ -72,6 +77,11 @@ func PruneTreeByStatus(nodes []*types.TreeNode, status types.Status) []*types.Tr
 			parentOf[node.ID] = node.ParentID
 		}
 	}
+	return parentOf
+}
+
+func treeStatusKeepSet(nodes []*types.TreeNode, status types.Status, parentOf map[string]string) map[string]bool {
+	keep := make(map[string]bool, len(nodes))
 	for _, node := range nodes {
 		if node == nil || node.Status != status || keep[node.ID] {
 			continue
@@ -90,6 +100,10 @@ func PruneTreeByStatus(nodes []*types.TreeNode, status types.Status) []*types.Tr
 			current = parent
 		}
 	}
+	return keep
+}
+
+func filterTreeNodes(nodes []*types.TreeNode, keep map[string]bool) []*types.TreeNode {
 	filtered := make([]*types.TreeNode, 0, len(nodes))
 	for _, node := range nodes {
 		if node != nil && keep[node.ID] {

@@ -15,59 +15,72 @@ import (
 	"github.com/jonbaldie/beads/internal/storage/dbproxy/server"
 )
 
-func NewExternalDoltServerUOWProvider(
-	ctx context.Context,
-	serverRootDir string,
-	database string,
-	serverLogFilePath string,
-	external configfile.ExternalDoltConfig,
-	rootUser string,
-	rootPassword string,
-	proxyPort int,
-	idleTimeout time.Duration,
-	teamServer bool,
-	expectedProjectID string,
-	opts ...ProviderOption,
-) (UnitOfWorkProvider, error) {
-	if idleTimeout == 0 {
-		idleTimeout = defaultProxyIdleTimeout
-	}
-	if database == "" {
-		return nil, fmt.Errorf("uow: database name must not be empty (caller should default to %q)", "beads")
-	}
-	if rootUser == "" {
-		return nil, fmt.Errorf("uow: rootUser must not be empty")
-	}
-	if err := external.Validate(); err != nil {
-		return nil, fmt.Errorf("uow: external: %w", err)
-	}
+// ExternalDoltServerUOWOptions describes an externally managed Dolt server
+// and the schema context used by its provider.
+type ExternalDoltServerUOWOptions struct {
+	ServerRootDir     string
+	Database          string
+	ServerLogFilePath string
+	External          configfile.ExternalDoltConfig
+	RootUser          string
+	RootPassword      string
+	ProxyPort         int
+	IdleTimeout       time.Duration
+	TeamServer        bool
+	ExpectedProjectID string
+}
 
-	absServerRootDir, err := filepath.Abs(serverRootDir)
+func NewExternalDoltServerUOWProvider(ctx context.Context, cfg ExternalDoltServerUOWOptions, opts ...ProviderOption) (UnitOfWorkProvider, error) {
+	if cfg.IdleTimeout == 0 {
+		cfg.IdleTimeout = defaultProxyIdleTimeout
+	}
+	if err := validateExternalDoltServerOptions(cfg); err != nil {
+		return nil, err
+	}
+	ep, tlsConfigName, err := openExternalDoltServerEndpoint(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("uow: resolving server root dir: %w", err)
+		return nil, err
 	}
 
+	return openAndInitSchema(ctx, ep, cfg.Database, cfg.RootUser, cfg.RootPassword, tlsConfigName, cfg.TeamServer, cfg.ExpectedProjectID, applyProviderOptions(opts))
+}
+
+func validateExternalDoltServerOptions(cfg ExternalDoltServerUOWOptions) error {
+	if cfg.Database == "" {
+		return fmt.Errorf("uow: database name must not be empty (caller should default to %q)", "beads")
+	}
+	if cfg.RootUser == "" {
+		return fmt.Errorf("uow: rootUser must not be empty")
+	}
+	if err := cfg.External.Validate(); err != nil {
+		return fmt.Errorf("uow: external: %w", err)
+	}
+	return nil
+}
+
+func openExternalDoltServerEndpoint(cfg ExternalDoltServerUOWOptions) (proxy.Endpoint, string, error) {
+	absServerRootDir, err := filepath.Abs(cfg.ServerRootDir)
+	if err != nil {
+		return proxy.Endpoint{}, "", fmt.Errorf("uow: resolving server root dir: %w", err)
+	}
 	if err := os.MkdirAll(absServerRootDir, config.BeadsDirPerm); err != nil {
-		return nil, fmt.Errorf("uow: creating server root directory: %w", err)
+		return proxy.Endpoint{}, "", fmt.Errorf("uow: creating server root directory: %w", err)
 	}
-
-	tlsConfigName, err := registerExternalTLSConfig(external)
+	tlsConfigName, err := registerExternalTLSConfig(cfg.External)
 	if err != nil {
-		return nil, fmt.Errorf("uow: external TLS: %w", err)
+		return proxy.Endpoint{}, "", fmt.Errorf("uow: external TLS: %w", err)
 	}
-
 	ep, err := proxy.GetCreateDatabaseProxyServerEndpoint(absServerRootDir, proxy.OpenOpts{
 		Backend:     proxy.BackendExternal,
-		LogFilePath: serverLogFilePath,
-		External:    external,
-		IdleTimeout: idleTimeout,
-		Port:        proxyPort,
+		LogFilePath: cfg.ServerLogFilePath,
+		External:    cfg.External,
+		IdleTimeout: cfg.IdleTimeout,
+		Port:        cfg.ProxyPort,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("uow: get proxy endpoint: %w", err)
+		return proxy.Endpoint{}, "", fmt.Errorf("uow: get proxy endpoint: %w", err)
 	}
-
-	return openAndInitSchema(ctx, ep, database, rootUser, rootPassword, tlsConfigName, teamServer, expectedProjectID, applyProviderOptions(opts))
+	return ep, tlsConfigName, nil
 }
 
 func registerExternalTLSConfig(external configfile.ExternalDoltConfig) (string, error) {

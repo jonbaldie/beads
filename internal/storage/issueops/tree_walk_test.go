@@ -20,22 +20,22 @@ import (
 func TestPruneTreeByStatus(t *testing.T) {
 	tree := []*types.TreeNode{
 		{
-			Issue:    types.Issue{ID: "BD-1", Title: "Parent", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "BD-1"}, IssueContent: types.IssueContent{Title: "Parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    0,
 			ParentID: "",
 		},
 		{
-			Issue:    types.Issue{ID: "BD-2", Title: "Open Child", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "BD-2"}, IssueContent: types.IssueContent{Title: "Open Child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    1,
 			ParentID: "BD-1",
 		},
 		{
-			Issue:    types.Issue{ID: "BD-3", Title: "Closed Child", Status: types.StatusClosed},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "BD-3"}, IssueContent: types.IssueContent{Title: "Closed Child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}},
 			Depth:    1,
 			ParentID: "BD-1",
 		},
 		{
-			Issue:    types.Issue{ID: "BD-4", Title: "Open Grandchild", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "BD-4"}, IssueContent: types.IssueContent{Title: "Open Grandchild"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    2,
 			ParentID: "BD-3",
 		},
@@ -120,24 +120,24 @@ func TestMergeBidirectionalTree_OnlyDown(t *testing.T) {
 	// Test with only down tree (dependencies)
 	downTree := []*types.TreeNode{
 		{
-			Issue:    types.Issue{ID: "test-root", Title: "Root", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "test-root"}, IssueContent: types.IssueContent{Title: "Root"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    0,
 			ParentID: "",
 		},
 		{
-			Issue:    types.Issue{ID: "dep-1", Title: "Dependency 1", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "dep-1"}, IssueContent: types.IssueContent{Title: "Dependency 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    1,
 			ParentID: "test-root",
 		},
 		{
-			Issue:    types.Issue{ID: "dep-2", Title: "Dependency 2", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "dep-2"}, IssueContent: types.IssueContent{Title: "Dependency 2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    1,
 			ParentID: "test-root",
 		},
 	}
 	upTree := []*types.TreeNode{
 		{
-			Issue:    types.Issue{ID: "test-root", Title: "Root", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "test-root"}, IssueContent: types.IssueContent{Title: "Root"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    0,
 			ParentID: "",
 		},
@@ -174,24 +174,24 @@ func TestMergeBidirectionalTree_WithDependents(t *testing.T) {
 	// Test with both dependencies and dependents
 	downTree := []*types.TreeNode{
 		{
-			Issue:    types.Issue{ID: "test-root", Title: "Root", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "test-root"}, IssueContent: types.IssueContent{Title: "Root"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    0,
 			ParentID: "",
 		},
 		{
-			Issue:    types.Issue{ID: "dep-1", Title: "Dependency 1", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "dep-1"}, IssueContent: types.IssueContent{Title: "Dependency 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    1,
 			ParentID: "test-root",
 		},
 	}
 	upTree := []*types.TreeNode{
 		{
-			Issue:    types.Issue{ID: "test-root", Title: "Root", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "test-root"}, IssueContent: types.IssueContent{Title: "Root"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    0,
 			ParentID: "",
 		},
 		{
-			Issue:    types.Issue{ID: "dependent-1", Title: "Dependent 1", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "dependent-1"}, IssueContent: types.IssueContent{Title: "Dependent 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    1,
 			ParentID: "test-root",
 		},
@@ -229,34 +229,34 @@ func TestMergeBidirectionalTree_MultipleDepth(t *testing.T) {
 	// Test with multi-level hierarchies
 	downTree := []*types.TreeNode{
 		{
-			Issue:    types.Issue{ID: "root", Title: "Root", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "root"}, IssueContent: types.IssueContent{Title: "Root"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    0,
 			ParentID: "",
 		},
 		{
-			Issue:    types.Issue{ID: "dep-1", Title: "Dep 1", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "dep-1"}, IssueContent: types.IssueContent{Title: "Dep 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    1,
 			ParentID: "root",
 		},
 		{
-			Issue:    types.Issue{ID: "dep-1-1", Title: "Dep 1.1", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "dep-1-1"}, IssueContent: types.IssueContent{Title: "Dep 1.1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    2,
 			ParentID: "dep-1",
 		},
 	}
 	upTree := []*types.TreeNode{
 		{
-			Issue:    types.Issue{ID: "root", Title: "Root", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "root"}, IssueContent: types.IssueContent{Title: "Root"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    0,
 			ParentID: "",
 		},
 		{
-			Issue:    types.Issue{ID: "dependent-1", Title: "Dependent 1", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "dependent-1"}, IssueContent: types.IssueContent{Title: "Dependent 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    1,
 			ParentID: "root",
 		},
 		{
-			Issue:    types.Issue{ID: "dependent-1-1", Title: "Dependent 1.1", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "dependent-1-1"}, IssueContent: types.IssueContent{Title: "Dependent 1.1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    2,
 			ParentID: "dependent-1",
 		},
@@ -295,14 +295,14 @@ func TestMergeBidirectionalTree_ExcludesRootFromUp(t *testing.T) {
 	// Test that root is excluded from upTree
 	downTree := []*types.TreeNode{
 		{
-			Issue:    types.Issue{ID: "root", Title: "Root", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "root"}, IssueContent: types.IssueContent{Title: "Root"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    0,
 			ParentID: "",
 		},
 	}
 	upTree := []*types.TreeNode{
 		{
-			Issue:    types.Issue{ID: "root", Title: "Root", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "root"}, IssueContent: types.IssueContent{Title: "Root"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    0,
 			ParentID: "",
 		},
@@ -324,24 +324,24 @@ func TestMergeBidirectionalTree_PreservesDepth(t *testing.T) {
 	// Test that depth values are preserved from original trees
 	downTree := []*types.TreeNode{
 		{
-			Issue:    types.Issue{ID: "root", Title: "Root", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "root"}, IssueContent: types.IssueContent{Title: "Root"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    0,
 			ParentID: "",
 		},
 		{
-			Issue:    types.Issue{ID: "dep-1", Title: "Dep 1", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "dep-1"}, IssueContent: types.IssueContent{Title: "Dep 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    5, // Non-standard depth to verify preservation
 			ParentID: "root",
 		},
 	}
 	upTree := []*types.TreeNode{
 		{
-			Issue:    types.Issue{ID: "root", Title: "Root", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "root"}, IssueContent: types.IssueContent{Title: "Root"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    0,
 			ParentID: "",
 		},
 		{
-			Issue:    types.Issue{ID: "dependent-1", Title: "Dependent 1", Status: types.StatusOpen},
+			Issue:    types.Issue{IssueID: types.IssueID{ID: "dependent-1"}, IssueContent: types.IssueContent{Title: "Dependent 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}},
 			Depth:    3, // Different depth
 			ParentID: "root",
 		},
@@ -444,8 +444,8 @@ func TestValidateWalkTreeRequest(t *testing.T) {
 // than as a lone root.
 func TestPruneTreeByStatusMatchingNothingReturnsNothing(t *testing.T) {
 	tree := []*types.TreeNode{
-		{Issue: types.Issue{ID: "root", Status: types.StatusOpen}},
-		{Issue: types.Issue{ID: "child", Status: types.StatusOpen}, Depth: 1, ParentID: "root"},
+		{Issue: types.Issue{IssueID: types.IssueID{ID: "root"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}},
+		{Issue: types.Issue{IssueID: types.IssueID{ID: "child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}, Depth: 1, ParentID: "root"},
 	}
 	if got := PruneTreeByStatus(tree, types.StatusClosed); len(got) != 0 {
 		t.Fatalf("PruneTreeByStatus kept %d nodes, want 0: the root is kept only as an ancestor", len(got))
@@ -463,9 +463,9 @@ func TestPruneTreeByStatusMatchingNothingReturnsNothing(t *testing.T) {
 // tree.
 func TestPruneTreeByStatusKeepsAMatchBehindANonMatch(t *testing.T) {
 	tree := []*types.TreeNode{
-		{Issue: types.Issue{ID: "root", Status: types.StatusOpen}},
-		{Issue: types.Issue{ID: "mid", Status: types.StatusClosed}, Depth: 1, ParentID: "root"},
-		{Issue: types.Issue{ID: "deep", Status: types.StatusOpen}, Depth: 2, ParentID: "mid"},
+		{Issue: types.Issue{IssueID: types.IssueID{ID: "root"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}},
+		{Issue: types.Issue{IssueID: types.IssueID{ID: "mid"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}}, Depth: 1, ParentID: "root"},
+		{Issue: types.Issue{IssueID: types.IssueID{ID: "deep"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}, Depth: 2, ParentID: "mid"},
 	}
 	got := PruneTreeByStatus(tree, types.StatusOpen)
 	var ids []string
@@ -487,9 +487,9 @@ func TestPruneTreeByStatusKeepsAMatchBehindANonMatch(t *testing.T) {
 // is cloned, so a caller mutating the merged answer cannot reach into the slice
 // the up walk returned.
 func TestMergeBidirectionalTreeCopiesTheUpNodes(t *testing.T) {
-	upNode := &types.TreeNode{Issue: types.Issue{ID: "dependent"}, Depth: 1, ParentID: "root"}
-	downTree := []*types.TreeNode{{Issue: types.Issue{ID: "root"}}}
-	upTree := []*types.TreeNode{{Issue: types.Issue{ID: "root"}}, upNode}
+	upNode := &types.TreeNode{Issue: types.Issue{IssueID: types.IssueID{ID: "dependent"}}, Depth: 1, ParentID: "root"}
+	downTree := []*types.TreeNode{{Issue: types.Issue{IssueID: types.IssueID{ID: "root"}}}}
+	upTree := []*types.TreeNode{{Issue: types.Issue{IssueID: types.IssueID{ID: "root"}}}, upNode}
 
 	merged := MergeBidirectionalTree(downTree, upTree, "root")
 	if len(merged) != 2 {

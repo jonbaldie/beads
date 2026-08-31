@@ -17,7 +17,7 @@ func TestCloneIssueOperationRequestsDeepCopyMutableFields(t *testing.T) {
 	now := time.Now().UTC()
 	request := publicops.CreateRequest{
 		Actor:        "actor",
-		Issue:        &publicops.Issue{Labels: []string{"one"}, Metadata: metadata, EstimatedMinutes: &value, ExternalRef: &ref, StartedAt: &now, ClosedAt: &now, LeaseExpiresAt: &now, HeartbeatAt: &now, DueAt: &now, DeferUntil: &now, CompactedAt: &now, CompactedAtCommit: &ref, Dependencies: []*types.Dependency{{Metadata: "dependency"}}, Comments: []*types.Comment{{Text: "nested"}}, BondedFrom: []types.BondRef{{SourceID: "source"}}, Waiters: []string{"waiter"}},
+		Issue:        &publicops.Issue{IssueGraph: types.IssueGraph{Labels: []string{"one"}, Dependencies: []*types.Dependency{{Metadata: "dependency"}}, Comments: []*types.Comment{{Text: "nested"}}}, IssueMeta: types.IssueMeta{Metadata: metadata, ExternalRef: &ref, CompactedAt: &now, CompactedAtCommit: &ref}, IssueWorkflow: types.IssueWorkflow{EstimatedMinutes: &value}, IssueTimes: types.IssueTimes{StartedAt: &now, ClosedAt: &now}, IssueLease: types.IssueLease{LeaseExpiresAt: &now, HeartbeatAt: &now, DueAt: &now, DeferUntil: &now}, IssueCoord: types.IssueCoord{BondedFrom: []types.BondRef{{SourceID: "source"}}, Waiters: []string{"waiter"}}},
 		Dependencies: []publicops.CreateDependency{{TargetID: "target"}},
 		WaitsFor:     &publicops.WaitsFor{SpawnerID: "parent"},
 	}

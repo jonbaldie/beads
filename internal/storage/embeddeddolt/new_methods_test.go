@@ -17,11 +17,17 @@ func TestReopenIssue(t *testing.T) {
 		ctx := t.Context()
 
 		issue := &types.Issue{
-			ID:        "ro-1",
-			Title:     "Reopen test",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "ro-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Reopen test",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := te.store.CreateIssue(ctx, issue, "tester"); err != nil {
 			t.Fatalf("CreateIssue: %v", err)
@@ -70,11 +76,17 @@ func TestUpdateIssueType(t *testing.T) {
 		ctx := t.Context()
 
 		issue := &types.Issue{
-			ID:        "ut-1",
-			Title:     "Type change test",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "ut-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Type change test",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := te.store.CreateIssue(ctx, issue, "tester"); err != nil {
 			t.Fatalf("CreateIssue: %v", err)
@@ -103,11 +115,17 @@ func TestListWisps(t *testing.T) {
 
 		// Create a regular (non-ephemeral) issue.
 		regular := &types.Issue{
-			ID:        "lw-regular",
-			Title:     "Regular issue",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "lw-regular",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Regular issue",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := te.store.CreateIssue(ctx, regular, "tester"); err != nil {
 			t.Fatalf("CreateIssue (regular): %v", err)
@@ -115,12 +133,20 @@ func TestListWisps(t *testing.T) {
 
 		// Create an ephemeral issue (wisp).
 		wisp := &types.Issue{
-			ID:        "lw-wisp-1",
-			Title:     "Ephemeral wisp",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
-			Ephemeral: true,
+			IssueID: types.IssueID{
+				ID: "lw-wisp-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Ephemeral wisp",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		}
 		if err := te.store.CreateIssue(ctx, wisp, "tester"); err != nil {
 			t.Fatalf("CreateIssue (wisp): %v", err)
@@ -153,11 +179,17 @@ func TestListWisps(t *testing.T) {
 
 		// Create only a regular issue.
 		regular := &types.Issue{
-			ID:        "le-1",
-			Title:     "Regular only",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "le-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Regular only",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := te.store.CreateIssue(ctx, regular, "tester"); err != nil {
 			t.Fatalf("CreateIssue: %v", err)
@@ -182,11 +214,17 @@ func TestGetReadyWorkMoleculeFilter(t *testing.T) {
 
 		// Create a molecule (parent).
 		mol := &types.Issue{
-			ID:        "gm-mol-1",
-			Title:     "Test molecule",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeMolecule,
+			IssueID: types.IssueID{
+				ID: "gm-mol-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Test molecule",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeMolecule,
+			},
 		}
 		if err := te.store.CreateIssue(ctx, mol, "tester"); err != nil {
 			t.Fatalf("CreateIssue (molecule): %v", err)
@@ -194,18 +232,30 @@ func TestGetReadyWorkMoleculeFilter(t *testing.T) {
 
 		// Create child issues of this molecule.
 		child1 := &types.Issue{
-			ID:        "gm-child-1",
-			Title:     "Child 1",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "gm-child-1",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Child 1",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		child2 := &types.Issue{
-			ID:        "gm-child-2",
-			Title:     "Child 2",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "gm-child-2",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Child 2",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := te.store.CreateIssue(ctx, child1, "tester"); err != nil {
 			t.Fatalf("CreateIssue (child1): %v", err)
@@ -216,11 +266,17 @@ func TestGetReadyWorkMoleculeFilter(t *testing.T) {
 
 		// Create an unrelated issue (not a child of the molecule).
 		unrelated := &types.Issue{
-			ID:        "gm-other",
-			Title:     "Unrelated",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "gm-other",
+			},
+			IssueContent: types.IssueContent{
+				Title: "Unrelated",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}
 		if err := te.store.CreateIssue(ctx, unrelated, "tester"); err != nil {
 			t.Fatalf("CreateIssue (unrelated): %v", err)
@@ -246,7 +302,9 @@ func TestGetReadyWorkMoleculeFilter(t *testing.T) {
 
 		// GetReadyWork filtered by MoleculeID should return only children.
 		filter := types.WorkFilter{
-			MoleculeID: "gm-mol-1",
+			WorkFilterCore: types.WorkFilterCore{
+				MoleculeID: "gm-mol-1",
+			},
 		}
 		ready, err := te.store.GetReadyWork(ctx, filter)
 		if err != nil {
@@ -321,116 +379,156 @@ func TestGetReadyWorkIncludeEphemeralAppliesWispFilters(t *testing.T) {
 	}
 
 	matching := &types.Issue{
-		ID:        "rwf-wisp-filter-match",
-		Title:     "Matching routed wisp",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
-		Metadata:  []byte(`{"gc.routed_to":"beads/workflows.kimi"}`),
+		IssueID: types.IssueID{
+			ID: "rwf-wisp-filter-match",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Matching routed wisp",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: []byte(`{"gc.routed_to":"beads/workflows.kimi"}`),
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	assigned := &types.Issue{
-		ID:        "rwf-wisp-filter-assigned",
-		Title:     "Assigned routed wisp",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
-		Assignee:  "beads--control-dispatcher",
-		Ephemeral: true,
-		Metadata:  []byte(`{"gc.routed_to":"beads/workflows.kimi"}`),
+		IssueID: types.IssueID{
+			ID: "rwf-wisp-filter-assigned",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Assigned routed wisp",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+			Assignee:  "beads--control-dispatcher",
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: []byte(`{"gc.routed_to":"beads/workflows.kimi"}`),
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	wrongRoute := &types.Issue{
-		ID:        "rwf-wisp-filter-wrong-route",
-		Title:     "Wrong routed wisp",
-		Status:    types.StatusOpen,
-		Priority:  1,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
-		Metadata:  []byte(`{"gc.routed_to":"beads/workflows.codex-max"}`),
+		IssueID: types.IssueID{
+			ID: "rwf-wisp-filter-wrong-route",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Wrong routed wisp",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  1,
+			IssueType: types.TypeTask,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: []byte(`{"gc.routed_to":"beads/workflows.codex-max"}`),
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	for _, issue := range []*types.Issue{matching, assigned, wrongRoute} {
 		createIssue(issue)
 	}
 
 	ids := readyIDs(types.WorkFilter{
-		Status:     types.StatusOpen,
-		Unassigned: true,
-		MetadataFields: map[string]string{
-			"gc.routed_to": "beads/workflows.kimi",
+		WorkFilterCore: types.WorkFilterCore{
+			Status:     types.StatusOpen,
+			Unassigned: true,
+		},
+		WorkFilterExtra: types.WorkFilterExtra{
+			MetadataFields: map[string]string{
+				"gc.routed_to": "beads/workflows.kimi",
+			},
 		},
 	})
 	assertReady(ids, matching.ID, assigned.ID, wrongRoute.ID)
 
-	labelsMatch := &types.Issue{ID: "rwf-labels-match", Title: "Labels match", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, Ephemeral: true, Labels: []string{"route", "keep"}}
-	labelsWrong := &types.Issue{ID: "rwf-labels-wrong", Title: "Labels wrong", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, Ephemeral: true, Labels: []string{"other", "keep"}}
-	labelsExcluded := &types.Issue{ID: "rwf-labels-excluded", Title: "Labels excluded", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, Ephemeral: true, Labels: []string{"route", "skip"}}
+	labelsMatch := &types.Issue{IssueID: types.IssueID{ID: "rwf-labels-match"}, IssueContent: types.IssueContent{Title: "Labels match"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}, IssueGraph: types.IssueGraph{Labels: []string{"route", "keep"}}, IssueWisp: types.IssueWisp{Ephemeral: true}}
+	labelsWrong := &types.Issue{IssueID: types.IssueID{ID: "rwf-labels-wrong"}, IssueContent: types.IssueContent{Title: "Labels wrong"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}, IssueGraph: types.IssueGraph{Labels: []string{"other", "keep"}}, IssueWisp: types.IssueWisp{Ephemeral: true}}
+	labelsExcluded := &types.Issue{IssueID: types.IssueID{ID: "rwf-labels-excluded"}, IssueContent: types.IssueContent{Title: "Labels excluded"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}, IssueGraph: types.IssueGraph{Labels: []string{"route", "skip"}}, IssueWisp: types.IssueWisp{Ephemeral: true}}
 	for _, issue := range []*types.Issue{labelsMatch, labelsWrong, labelsExcluded} {
 		createIssue(issue)
 	}
 	ids = readyIDs(types.WorkFilter{
-		Status:        types.StatusOpen,
-		LabelsAny:     []string{"route"},
-		ExcludeLabels: []string{"skip"},
+		WorkFilterCore: types.WorkFilterCore{
+			Status:        types.StatusOpen,
+			LabelsAny:     []string{"route"},
+			ExcludeLabels: []string{"skip"},
+		},
 	})
 	assertReady(ids, labelsMatch.ID, labelsWrong.ID, labelsExcluded.ID)
 
 	alice := "alice"
-	metaAssigneeMatch := &types.Issue{ID: "rwf-meta-assignee-match", Title: "Metadata assignee match", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, Assignee: alice, Ephemeral: true, Metadata: []byte(`{"flag":"yes"}`)}
-	metaAssigneeMissing := &types.Issue{ID: "rwf-meta-assignee-missing", Title: "Metadata missing", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, Assignee: alice, Ephemeral: true}
-	metaAssigneeWrong := &types.Issue{ID: "rwf-meta-assignee-wrong", Title: "Assignee wrong", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, Assignee: "bob", Ephemeral: true, Metadata: []byte(`{"flag":"yes"}`)}
+	metaAssigneeMatch := &types.Issue{IssueID: types.IssueID{ID: "rwf-meta-assignee-match"}, IssueContent: types.IssueContent{Title: "Metadata assignee match"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, Assignee: alice}, IssueMeta: types.IssueMeta{Metadata: []byte(`{"flag":"yes"}`)}, IssueWisp: types.IssueWisp{Ephemeral: true}}
+	metaAssigneeMissing := &types.Issue{IssueID: types.IssueID{ID: "rwf-meta-assignee-missing"}, IssueContent: types.IssueContent{Title: "Metadata missing"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, Assignee: alice}, IssueWisp: types.IssueWisp{Ephemeral: true}}
+	metaAssigneeWrong := &types.Issue{IssueID: types.IssueID{ID: "rwf-meta-assignee-wrong"}, IssueContent: types.IssueContent{Title: "Assignee wrong"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, Assignee: "bob"}, IssueMeta: types.IssueMeta{Metadata: []byte(`{"flag":"yes"}`)}, IssueWisp: types.IssueWisp{Ephemeral: true}}
 	for _, issue := range []*types.Issue{metaAssigneeMatch, metaAssigneeMissing, metaAssigneeWrong} {
 		createIssue(issue)
 	}
 	ids = readyIDs(types.WorkFilter{
-		Status:         types.StatusOpen,
-		Assignee:       &alice,
-		HasMetadataKey: "flag",
+		WorkFilterCore: types.WorkFilterCore{
+			Status:   types.StatusOpen,
+			Assignee: &alice,
+		},
+		WorkFilterExtra: types.WorkFilterExtra{
+			HasMetadataKey: "flag",
+		},
 	})
 	assertReady(ids, metaAssigneeMatch.ID, metaAssigneeMissing.ID, metaAssigneeWrong.ID)
 
-	typeMatch := &types.Issue{ID: "rwf-type-match", Title: "Type match", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeBug, Ephemeral: true}
-	typeWrong := &types.Issue{ID: "rwf-type-wrong", Title: "Type wrong", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, Ephemeral: true}
-	excludeTypeMatch := &types.Issue{ID: "rwf-exclude-type-match", Title: "Exclude type match", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, Ephemeral: true}
-	excludeTypeWrong := &types.Issue{ID: "rwf-exclude-type-wrong", Title: "Exclude type wrong", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeBug, Ephemeral: true}
+	typeMatch := &types.Issue{IssueID: types.IssueID{ID: "rwf-type-match"}, IssueContent: types.IssueContent{Title: "Type match"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeBug}, IssueWisp: types.IssueWisp{Ephemeral: true}}
+	typeWrong := &types.Issue{IssueID: types.IssueID{ID: "rwf-type-wrong"}, IssueContent: types.IssueContent{Title: "Type wrong"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}
+	excludeTypeMatch := &types.Issue{IssueID: types.IssueID{ID: "rwf-exclude-type-match"}, IssueContent: types.IssueContent{Title: "Exclude type match"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}
+	excludeTypeWrong := &types.Issue{IssueID: types.IssueID{ID: "rwf-exclude-type-wrong"}, IssueContent: types.IssueContent{Title: "Exclude type wrong"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeBug}, IssueWisp: types.IssueWisp{Ephemeral: true}}
 	for _, issue := range []*types.Issue{typeMatch, typeWrong, excludeTypeMatch, excludeTypeWrong} {
 		createIssue(issue)
 	}
-	ids = readyIDs(types.WorkFilter{Status: types.StatusOpen, Type: string(types.TypeBug)})
+	ids = readyIDs(types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Status: types.StatusOpen, Type: string(types.TypeBug)}})
 	assertReady(ids, typeMatch.ID, typeWrong.ID)
-	ids = readyIDs(types.WorkFilter{Status: types.StatusOpen, ExcludeTypes: []types.IssueType{types.TypeBug}})
+	ids = readyIDs(types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Status: types.StatusOpen}, WorkFilterExtra: types.WorkFilterExtra{ExcludeTypes: []types.IssueType{types.TypeBug}}})
 	assertReady(ids, excludeTypeMatch.ID, excludeTypeWrong.ID)
 
 	swarm := types.MolTypeSwarm
 	errorWisp := types.WispTypeError
-	typeClassMatch := &types.Issue{ID: "rwf-class-match", Title: "Class match", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, Ephemeral: true, MolType: swarm, WispType: errorWisp}
-	typeClassWrong := &types.Issue{ID: "rwf-class-wrong", Title: "Class wrong", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, Ephemeral: true, MolType: swarm, WispType: types.WispTypePing}
+	typeClassMatch := &types.Issue{IssueID: types.IssueID{ID: "rwf-class-match"}, IssueContent: types.IssueContent{Title: "Class match"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true, WispType: errorWisp}, IssueCoord: types.IssueCoord{MolType: swarm}}
+	typeClassWrong := &types.Issue{IssueID: types.IssueID{ID: "rwf-class-wrong"}, IssueContent: types.IssueContent{Title: "Class wrong"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true, WispType: types.WispTypePing}, IssueCoord: types.IssueCoord{MolType: swarm}}
 	for _, issue := range []*types.Issue{typeClassMatch, typeClassWrong} {
 		createIssue(issue)
 	}
-	ids = readyIDs(types.WorkFilter{Status: types.StatusOpen, MolType: &swarm, WispType: &errorWisp})
+	ids = readyIDs(types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Status: types.StatusOpen}, WorkFilterExtra: types.WorkFilterExtra{MolType: &swarm, WispType: &errorWisp}})
 	assertReady(ids, typeClassMatch.ID, typeClassWrong.ID)
 
-	molecule := &types.Issue{ID: "rwf-molecule", Title: "Molecule", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic}
-	moleculeMatch := &types.Issue{ID: "rwf-molecule-match", Title: "Molecule child", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, Ephemeral: true}
-	moleculeWrong := &types.Issue{ID: "rwf-molecule-wrong", Title: "Molecule non-child", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, Ephemeral: true}
+	molecule := &types.Issue{IssueID: types.IssueID{ID: "rwf-molecule"}, IssueContent: types.IssueContent{Title: "Molecule"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic}}
+	moleculeMatch := &types.Issue{IssueID: types.IssueID{ID: "rwf-molecule-match"}, IssueContent: types.IssueContent{Title: "Molecule child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}
+	moleculeWrong := &types.Issue{IssueID: types.IssueID{ID: "rwf-molecule-wrong"}, IssueContent: types.IssueContent{Title: "Molecule non-child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}
 	for _, issue := range []*types.Issue{molecule, moleculeMatch, moleculeWrong} {
 		createIssue(issue)
 	}
 	addDep(moleculeMatch.ID, molecule.ID, types.DepParentChild)
-	ids = readyIDs(types.WorkFilter{Status: types.StatusOpen, MoleculeID: molecule.ID})
+	ids = readyIDs(types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Status: types.StatusOpen, MoleculeID: molecule.ID}})
 	assertReady(ids, moleculeMatch.ID, moleculeWrong.ID)
 
-	root := &types.Issue{ID: "rwf-root", Title: "Root", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic}
-	child := &types.Issue{ID: "rwf-child", Title: "Child", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
-	recursiveMatch := &types.Issue{ID: "rwf-recursive-match", Title: "Recursive wisp child", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, Ephemeral: true}
-	recursiveWrong := &types.Issue{ID: "rwf-recursive-wrong", Title: "Recursive wisp wrong", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, Ephemeral: true}
+	root := &types.Issue{IssueID: types.IssueID{ID: "rwf-root"}, IssueContent: types.IssueContent{Title: "Root"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeEpic}}
+	child := &types.Issue{IssueID: types.IssueID{ID: "rwf-child"}, IssueContent: types.IssueContent{Title: "Child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}}
+	recursiveMatch := &types.Issue{IssueID: types.IssueID{ID: "rwf-recursive-match"}, IssueContent: types.IssueContent{Title: "Recursive wisp child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}
+	recursiveWrong := &types.Issue{IssueID: types.IssueID{ID: "rwf-recursive-wrong"}, IssueContent: types.IssueContent{Title: "Recursive wisp wrong"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}
 	for _, issue := range []*types.Issue{root, child, recursiveMatch, recursiveWrong} {
 		createIssue(issue)
 	}
 	addDep(child.ID, root.ID, types.DepParentChild)
 	addDep(recursiveMatch.ID, child.ID, types.DepParentChild)
 	parentID := root.ID
-	ids = readyIDs(types.WorkFilter{Status: types.StatusOpen, ParentID: &parentID})
+	ids = readyIDs(types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Status: types.StatusOpen, ParentID: &parentID}})
 	assertReady(ids, recursiveMatch.ID, recursiveWrong.ID)
 }
 
@@ -460,9 +558,13 @@ func TestGetReadyWorkIncludeEphemeralExcludesNonReadyWisps(t *testing.T) {
 	readyIDs := func(includeDeferred bool) map[string]bool {
 		t.Helper()
 		ready, err := te.store.GetReadyWork(ctx, types.WorkFilter{
-			Status:           types.StatusOpen,
-			IncludeEphemeral: true,
-			IncludeDeferred:  includeDeferred,
+			WorkFilterCore: types.WorkFilterCore{
+				Status: types.StatusOpen,
+			},
+			WorkFilterExtra: types.WorkFilterExtra{
+				IncludeEphemeral: true,
+				IncludeDeferred:  includeDeferred,
+			},
 		})
 		if err != nil {
 			t.Fatalf("GetReadyWork: %v", err)
@@ -474,13 +576,13 @@ func TestGetReadyWorkIncludeEphemeralExcludesNonReadyWisps(t *testing.T) {
 		return ids
 	}
 
-	ready := &types.Issue{ID: "rwn-ready", Title: "Ready wisp", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, Ephemeral: true}
-	pinned := &types.Issue{ID: "rwn-pinned", Title: "Pinned wisp", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, Ephemeral: true, Pinned: true}
-	deferred := &types.Issue{ID: "rwn-deferred", Title: "Deferred wisp", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, Ephemeral: true, DeferUntil: &future}
-	deferredParent := &types.Issue{ID: "rwn-deferred-parent", Title: "Deferred parent", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, DeferUntil: &future}
-	childOfDeferred := &types.Issue{ID: "rwn-child-of-deferred", Title: "Child of deferred", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, Ephemeral: true}
-	blocked := &types.Issue{ID: "rwn-blocked", Title: "Blocked wisp", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask, Ephemeral: true}
-	blocker := &types.Issue{ID: "rwn-blocker", Title: "Blocker", Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}
+	ready := &types.Issue{IssueID: types.IssueID{ID: "rwn-ready"}, IssueContent: types.IssueContent{Title: "Ready wisp"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}
+	pinned := &types.Issue{IssueID: types.IssueID{ID: "rwn-pinned"}, IssueContent: types.IssueContent{Title: "Pinned wisp"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true, Pinned: true}}
+	deferred := &types.Issue{IssueID: types.IssueID{ID: "rwn-deferred"}, IssueContent: types.IssueContent{Title: "Deferred wisp"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}, IssueLease: types.IssueLease{DeferUntil: &future}, IssueWisp: types.IssueWisp{Ephemeral: true}}
+	deferredParent := &types.Issue{IssueID: types.IssueID{ID: "rwn-deferred-parent"}, IssueContent: types.IssueContent{Title: "Deferred parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}, IssueLease: types.IssueLease{DeferUntil: &future}}
+	childOfDeferred := &types.Issue{IssueID: types.IssueID{ID: "rwn-child-of-deferred"}, IssueContent: types.IssueContent{Title: "Child of deferred"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}
+	blocked := &types.Issue{IssueID: types.IssueID{ID: "rwn-blocked"}, IssueContent: types.IssueContent{Title: "Blocked wisp"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}
+	blocker := &types.Issue{IssueID: types.IssueID{ID: "rwn-blocker"}, IssueContent: types.IssueContent{Title: "Blocker"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 1, IssueType: types.TypeTask}}
 	for _, issue := range []*types.Issue{ready, pinned, deferred, deferredParent, childOfDeferred, blocked, blocker} {
 		createIssue(issue)
 	}

@@ -148,8 +148,8 @@ func TestLoadStatusByIDInTxPrefersWispOnCollision(t *testing.T) {
 func TestMergeReadyWispsPrefersWispOnCollision(t *testing.T) {
 	t.Parallel()
 
-	issuesCopy := &types.Issue{ID: "dup-id", Status: types.StatusOpen, Title: "issues copy"}
-	wispCopy := &types.Issue{ID: "dup-id", Status: types.StatusClosed, Title: "wisp canonical"}
+	issuesCopy := &types.Issue{IssueID: types.IssueID{ID: "dup-id"}, IssueContent: types.IssueContent{Title: "issues copy"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}
+	wispCopy := &types.Issue{IssueID: types.IssueID{ID: "dup-id"}, IssueContent: types.IssueContent{Title: "wisp canonical"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusClosed}}
 
 	got := mergeReadyWisps(
 		[]*types.Issue{issuesCopy},
@@ -257,7 +257,7 @@ func TestGetReadyWorkInTxStatusesSingleQuery(t *testing.T) {
 	got, err := GetReadyWorkInTx(
 		context.Background(),
 		tx,
-		types.WorkFilter{Statuses: []types.Status{"open", "blocked"}},
+		types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Statuses: []types.Status{"open", "blocked"}}},
 	)
 	if err != nil {
 		t.Fatalf("GetReadyWorkInTx: %v", err)
@@ -273,7 +273,7 @@ func TestGetReadyWorkInTxStatusesSingleQuery(t *testing.T) {
 func TestReadyWorkWispIssueFilterPropagatesStatuses(t *testing.T) {
 	t.Parallel()
 
-	filter := readyWorkWispIssueFilter(types.WorkFilter{Statuses: []types.Status{"open", "blocked"}})
+	filter := readyWorkWispIssueFilter(types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Statuses: []types.Status{"open", "blocked"}}})
 	if filter.Status != nil {
 		t.Fatalf("wisp filter Status = %v, want nil", *filter.Status)
 	}

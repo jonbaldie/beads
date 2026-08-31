@@ -133,24 +133,9 @@ func ExecuteCreateBatch(ctx context.Context, tx *sql.Tx, request publicops.Creat
 	}
 	infraTypes := ResolveInfraTypesInTx(ctx, tx)
 
-	issues := make([]*types.Issue, len(attempt.Items))
-	for i, item := range attempt.Items {
-		prepared, err := PreparePublicCreateRequest(CreateBatchItemRequest(attempt, item), createContext)
-		if err != nil {
-			return publicops.CreateBatchResult{}, nil, CreateBatchItemError(i, err)
-		}
-		issue := prepared.Issue
-		// Configured infra types live in the wisp tables, the same routing
-		// ExecuteCreate applies. Mark the issue BEFORE its ID is assigned so ID
-		// generation, the create-only guard and table routing all agree.
-		if !issue.Ephemeral && !issue.NoHistory && infraTypes[string(issue.IssueType)] {
-			issue.Ephemeral = true
-		}
-		if err := assignCreateIssueIDInTx(ctx, tx, batch, issue, attempt.Actor); err != nil {
-			return publicops.CreateBatchResult{}, nil, CreateBatchItemError(i, ClassifyPublicCreateError(err))
-		}
-		issue.Dependencies = storage.CreatePublicCreateDependencies(issue.ID, prepared)
-		issues[i] = issue
+	issues, err := prepareCreateBatchIssues(ctx, tx, attempt, batch, createContext, infraTypes)
+	if err != nil {
+		return publicops.CreateBatchResult{}, nil, err
 	}
 
 	var skipped []skippedDependency
@@ -171,14 +156,44 @@ func ExecuteCreateBatch(ctx context.Context, tx *sql.Tx, request publicops.Creat
 	tables := ChangedTables{}
 	tables.Merge(CreateIssuesDirtyTables(ctx, issues, created))
 	result := publicops.CreateBatchResult{Issues: make([]*types.Issue, len(issues))}
+	if err := hydrateCreateBatchIssues(ctx, tx, issues, &result); err != nil {
+		return publicops.CreateBatchResult{}, nil, err
+	}
+	return result, tables, nil
+}
+
+func prepareCreateBatchIssues(ctx context.Context, tx *sql.Tx, request publicops.CreateBatchRequest, batch *BatchContext, createContext PublicCreateContext, infraTypes map[string]bool) ([]*types.Issue, error) {
+	issues := make([]*types.Issue, len(request.Items))
+	for i, item := range request.Items {
+		prepared, err := PreparePublicCreateRequest(CreateBatchItemRequest(request, item), createContext)
+		if err != nil {
+			return nil, CreateBatchItemError(i, err)
+		}
+		issue := prepared.Issue
+		// Configured infra types live in the wisp tables, the same routing
+		// ExecuteCreate applies. Mark the issue BEFORE its ID is assigned so ID
+		// generation, the create-only guard and table routing all agree.
+		if !issue.Ephemeral && !issue.NoHistory && infraTypes[string(issue.IssueType)] {
+			issue.Ephemeral = true
+		}
+		if err := assignCreateIssueIDInTx(ctx, tx, batch, issue, request.Actor); err != nil {
+			return nil, CreateBatchItemError(i, ClassifyPublicCreateError(err))
+		}
+		issue.Dependencies = storage.CreatePublicCreateDependencies(issue.ID, prepared)
+		issues[i] = issue
+	}
+	return issues, nil
+}
+
+func hydrateCreateBatchIssues(ctx context.Context, tx *sql.Tx, issues []*types.Issue, result *publicops.CreateBatchResult) error {
 	for i, issue := range issues {
 		hydrated, err := HydrateIssueOperationResult(ctx, tx, issue.ID, false)
 		if err != nil {
-			return publicops.CreateBatchResult{}, nil, err
+			return err
 		}
 		result.Issues[i] = hydrated
 	}
-	return result, tables, nil
+	return nil
 }
 
 // CrossPlaneBatchEdgeError is the refusal the store-backed body raises from
@@ -206,33 +221,48 @@ func CrossPlaneBatchEdgeError(sourceID, targetID string) error {
 // reach inside the batch. infraTypes promotes the same types both bodies
 // promote, so the plane a row lands in is decided the same way it will be.
 func ValidateCreateBatchPlanes(request publicops.CreateBatchRequest, infraTypes map[string]bool) error {
-	wispByID := make(map[string]bool, len(request.Items))
-	var hasDurable, hasWisp bool
-	planeOf := func(issue *publicops.Issue) bool {
-		return issue.Ephemeral || issue.NoHistory || infraTypes[string(issue.IssueType)]
-	}
-	for _, item := range request.Items {
-		if item.Issue == nil {
-			continue
-		}
-		wisp := planeOf(item.Issue)
-		if wisp {
-			hasWisp = true
-		} else {
-			hasDurable = true
-		}
-		if item.Issue.ID != "" {
-			wispByID[item.Issue.ID] = wisp
-		}
-	}
-	if !hasDurable || !hasWisp {
+	planes := collectCreateBatchPlanes(request, infraTypes)
+	if !planes.hasDurable || !planes.hasWisp {
 		return nil
 	}
+	return validateCreateBatchEdges(request, planes.wispByID, infraTypes)
+}
+
+type createBatchPlanes struct {
+	wispByID   map[string]bool
+	hasDurable bool
+	hasWisp    bool
+}
+
+func collectCreateBatchPlanes(request publicops.CreateBatchRequest, infraTypes map[string]bool) createBatchPlanes {
+	planes := createBatchPlanes{wispByID: make(map[string]bool, len(request.Items))}
 	for _, item := range request.Items {
 		if item.Issue == nil {
 			continue
 		}
-		source := planeOf(item.Issue)
+		wisp := createBatchIssueIsWisp(item.Issue, infraTypes)
+		if wisp {
+			planes.hasWisp = true
+		} else {
+			planes.hasDurable = true
+		}
+		if item.Issue.ID != "" {
+			planes.wispByID[item.Issue.ID] = wisp
+		}
+	}
+	return planes
+}
+
+func createBatchIssueIsWisp(issue *publicops.Issue, infraTypes map[string]bool) bool {
+	return issue.Ephemeral || issue.NoHistory || infraTypes[string(issue.IssueType)]
+}
+
+func validateCreateBatchEdges(request publicops.CreateBatchRequest, wispByID map[string]bool, infraTypes map[string]bool) error {
+	for _, item := range request.Items {
+		if item.Issue == nil {
+			continue
+		}
+		source := createBatchIssueIsWisp(item.Issue, infraTypes)
 		for _, dep := range item.Dependencies {
 			target, inBatch := wispByID[dep.TargetID]
 			if inBatch && source != target {

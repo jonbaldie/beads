@@ -51,38 +51,57 @@ func (o *batchCloser) CloseBatch(ctx context.Context, request publicops.CloseBat
 	if err := storageissueops.ValidateCloseBatchRequest(request); err != nil {
 		return publicops.CloseBatchResult{}, err
 	}
-	var claimFilter *types.WorkFilter
-	if request.ClaimNext != nil {
-		filter, err := workapi.BuildReadyFilter(*request.ClaimNext)
-		if err != nil {
-			return publicops.CloseBatchResult{}, err
-		}
-		claimFilter = &filter
+	claimFilter, err := buildBatchClaimFilter(request)
+	if err != nil {
+		return publicops.CloseBatchResult{}, err
 	}
 
 	return RunTxResult(ctx, o.provider, func(ctx context.Context, uw UnitOfWork) (publicops.CloseBatchResult, string, error) {
-		result := publicops.CloseBatchResult{Outcomes: make([]publicops.CloseOutcome, len(request.Items))}
-		landed := 0
-		for i, item := range request.Items {
-			outcome := closeBatchItem(ctx, uw, request, item)
-			result.Outcomes[i] = outcome
-			// Changed, not "no error": an idempotent re-close persisted
-			// nothing, so a batch of them lands nothing and earns no claim.
-			if outcome.Err == nil && outcome.Changed {
-				landed++
-			}
-		}
-
-		if claimFilter != nil && landed > 0 {
-			claimed, err := ClaimNextInUOW(ctx, uw, request.Actor, *claimFilter)
-			if err != nil {
-				return publicops.CloseBatchResult{}, "", err
-			}
-			result.ClaimedNext = claimed
+		result, landed := closeBatchItems(ctx, uw, request)
+		if err := claimNextBatchItem(ctx, uw, request, claimFilter, landed, &result); err != nil {
+			return publicops.CloseBatchResult{}, "", err
 		}
 
 		return result, storageissueops.CloseBatchCommitMessage(result), nil
 	})
+}
+
+func buildBatchClaimFilter(request publicops.CloseBatchRequest) (*types.WorkFilter, error) {
+	if request.ClaimNext == nil {
+		return nil, nil
+	}
+	filter, err := workapi.BuildReadyFilter(*request.ClaimNext)
+	if err != nil {
+		return nil, err
+	}
+	return &filter, nil
+}
+
+func closeBatchItems(ctx context.Context, uw UnitOfWork, request publicops.CloseBatchRequest) (publicops.CloseBatchResult, int) {
+	result := publicops.CloseBatchResult{Outcomes: make([]publicops.CloseOutcome, len(request.Items))}
+	landed := 0
+	for i, item := range request.Items {
+		outcome := closeBatchItem(ctx, uw, request, item)
+		result.Outcomes[i] = outcome
+		// Changed, not "no error": an idempotent re-close persisted
+		// nothing, so a batch of them lands nothing and earns no claim.
+		if outcome.Err == nil && outcome.Changed {
+			landed++
+		}
+	}
+	return result, landed
+}
+
+func claimNextBatchItem(ctx context.Context, uw UnitOfWork, request publicops.CloseBatchRequest, filter *types.WorkFilter, landed int, result *publicops.CloseBatchResult) error {
+	if filter == nil || landed == 0 {
+		return nil
+	}
+	claimed, err := ClaimNextInUOW(ctx, uw, request.Actor, *filter)
+	if err != nil {
+		return err
+	}
+	result.ClaimedNext = claimed
+	return nil
 }
 
 // closeBatchItem closes one item, reporting its refusal rather than raising

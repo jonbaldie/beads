@@ -69,13 +69,23 @@ func UpdateFields(patch publicops.IssuePatch) map[string]interface{} {
 // the canonical field values every backend must reject identically. Backends
 // call it before touching the row so an invalid patch cannot half-apply.
 func ValidateUpdateRequest(request publicops.UpdateRequest) error {
+	if err := validateUpdateGuards(request); err != nil {
+		return err
+	}
+	return validateUpdatePatch(request.Patch)
+}
+
+func validateUpdateGuards(request publicops.UpdateRequest) error {
 	if request.Claim && (request.ExpectedAssignee != nil || request.ExpectedStatus != nil) {
 		return fmt.Errorf("%w: claim cannot use expected assignee or status", storage.ErrValidation)
 	}
 	if request.ForceAssigneeTransfer && (request.Claim || !request.Patch.Assignee.Set || request.ExpectedAssignee != nil) {
 		return fmt.Errorf("%w: invalid forced assignee transfer", storage.ErrValidation)
 	}
-	patch := request.Patch
+	return nil
+}
+
+func validateUpdatePatch(patch publicops.IssuePatch) error {
 	if patch.Title.Set {
 		if err := types.ValidateIssueTitle(patch.Title.Value); err != nil {
 			return fmt.Errorf("%w: update title: %w", storage.ErrValidation, err)
@@ -108,23 +118,40 @@ func ValidateMetadataPatch(patch publicops.MetadataPatch) error {
 // ValidateScalarUpdates checks typed scalar values before they reach SQL.
 func ValidateScalarUpdates(ctx context.Context, tx DBTX, updates map[string]interface{}) error {
 	if rawType, ok := updates["issue_type"]; ok {
-		var issueType types.IssueType
-		switch value := rawType.(type) {
-		case types.IssueType:
-			issueType = value
-		case string:
-			issueType = types.IssueType(value)
-		default:
-			return fmt.Errorf("%w: invalid issue type %v", storage.ErrValidation, rawType)
-		}
-		customTypes, err := ResolveCustomTypesInTx(ctx, tx)
-		if err != nil {
-			return fmt.Errorf("resolve custom issue types: %w", err)
-		}
-		if !issueType.IsValidWithCustom(customTypes) {
-			return fmt.Errorf("%w: invalid issue type %s", storage.ErrValidation, issueType)
+		if err := validateIssueTypeUpdate(ctx, tx, rawType); err != nil {
+			return err
 		}
 	}
+	return validateAssigneeOwnerUpdates(updates)
+}
+
+func validateIssueTypeUpdate(ctx context.Context, tx DBTX, rawType interface{}) error {
+	issueType, err := issueTypeFromUpdate(rawType)
+	if err != nil {
+		return err
+	}
+	customTypes, err := ResolveCustomTypesInTx(ctx, tx)
+	if err != nil {
+		return fmt.Errorf("resolve custom issue types: %w", err)
+	}
+	if !issueType.IsValidWithCustom(customTypes) {
+		return fmt.Errorf("%w: invalid issue type %s", storage.ErrValidation, issueType)
+	}
+	return nil
+}
+
+func issueTypeFromUpdate(rawType interface{}) (types.IssueType, error) {
+	switch value := rawType.(type) {
+	case types.IssueType:
+		return value, nil
+	case string:
+		return types.IssueType(value), nil
+	default:
+		return "", fmt.Errorf("%w: invalid issue type %v", storage.ErrValidation, rawType)
+	}
+}
+
+func validateAssigneeOwnerUpdates(updates map[string]interface{}) error {
 	for _, field := range []string{"assignee", "owner"} {
 		if raw, ok := updates[field]; ok {
 			if value, ok := raw.(string); ok {
@@ -157,19 +184,30 @@ func ValidateScalarUpdates(ctx context.Context, tx DBTX, updates map[string]inte
 // that wants the config read only when it matters calls with nil first and
 // re-evaluates with the loaded aliases on refusal.
 func AuthorizeAssigneeTransferWithPools(before *types.Issue, request publicops.UpdateRequest, pools []string) error {
-	if !request.Patch.Assignee.Set || actorMatches(request.Patch.Assignee.Value, before.Assignee) || request.ExpectedAssignee != nil || request.ForceAssigneeTransfer || before.Status != types.StatusInProgress || before.Assignee == "" || actorMatches(before.Assignee, request.Actor) {
+	if assigneeTransferIsAllowed(before, request) {
 		return nil
 	}
+	if assigneeIsPool(before.Assignee, pools) {
+		return nil
+	}
+	return fmt.Errorf("%w: issue %s is assigned to %q", storage.ErrAlreadyClaimed, before.ID, before.Assignee)
+}
+
+func assigneeTransferIsAllowed(before *types.Issue, request publicops.UpdateRequest) bool {
+	return !request.Patch.Assignee.Set || actorMatches(request.Patch.Assignee.Value, before.Assignee) || request.ExpectedAssignee != nil || request.ForceAssigneeTransfer || before.Status != types.StatusInProgress || before.Assignee == "" || actorMatches(before.Assignee, request.Actor)
+}
+
+func assigneeIsPool(assignee string, pools []string) bool {
 	// Exact-string membership, deliberately not actorMatches (ga-v2k49, same
 	// reason as claim.go's identical pool checks): a pool alias is a literal
 	// claim.pools config value, not a Gas Town identity that gets respelled
 	// per layer, so there is no cross-spelling variant to reconcile.
 	for _, pool := range pools {
-		if pool == before.Assignee {
-			return nil
+		if pool == assignee {
+			return true
 		}
 	}
-	return fmt.Errorf("%w: issue %s is assigned to %q", storage.ErrAlreadyClaimed, before.ID, before.Assignee)
+	return false
 }
 
 // AuthorizeAssigneeTransfer protects an active assignment from unguarded transfer.
@@ -186,70 +224,16 @@ func AuthorizeAssigneeTransfer(ctx context.Context, tx DBTX, before *types.Issue
 
 // ApplyMetadataPatch returns the canonical metadata value and whether it changes.
 func ApplyMetadataPatch(current json.RawMessage, patch publicops.MetadataPatch) (json.RawMessage, bool, error) {
-	if !patch.Replace.Set && !patch.Merge.Set && len(patch.Set) == 0 && len(patch.Unset) == 0 {
+	if metadataPatchIsEmpty(patch) {
 		return current, false, nil
 	}
-	setKeys := make([]string, 0, len(patch.Set))
-	for key := range patch.Set {
-		setKeys = append(setKeys, key)
+	setKeys := sortedMetadataSetKeys(patch.Set)
+	if err := validateMetadataPatchKeys(setKeys, patch.Unset); err != nil {
+		return nil, false, err
 	}
-	sort.Strings(setKeys)
-	for _, key := range setKeys {
-		if err := storage.ValidateMetadataKey(key); err != nil {
-			return nil, false, fmt.Errorf("%w: %w", storage.ErrValidation, err)
-		}
-	}
-	for _, key := range patch.Unset {
-		if err := storage.ValidateMetadataKey(key); err != nil {
-			return nil, false, fmt.Errorf("%w: %w", storage.ErrValidation, err)
-		}
-	}
-	var next json.RawMessage
-	if patch.Replace.Set {
-		next = append(json.RawMessage(nil), patch.Replace.Value...)
-		if len(next) == 0 {
-			next = json.RawMessage(`{}`)
-		}
-		if !json.Valid(next) {
-			return nil, false, fmt.Errorf("%w: metadata replacement is not valid JSON", storage.ErrValidation)
-		}
-	} else {
-		next = append(json.RawMessage(nil), current...)
-		if patch.Merge.Set {
-			// A JSON null unmarshals into a nil overlay map, so the merge
-			// below would silently accept it as "change nothing".
-			if strings.TrimSpace(string(patch.Merge.Value)) == "null" {
-				return nil, false, fmt.Errorf("%w: metadata merge must be a JSON object", storage.ErrValidation)
-			}
-			merged, err := storage.MergeMetadataJSON(next, patch.Merge.Value)
-			if err != nil {
-				return nil, false, fmt.Errorf("%w: metadata merge: %v", storage.ErrValidation, err)
-			}
-			next = merged
-		}
-		if len(patch.Set) > 0 || len(patch.Unset) > 0 {
-			values := make(map[string]json.RawMessage)
-			if len(next) > 0 && string(next) != "null" {
-				if err := json.Unmarshal(next, &values); err != nil {
-					return nil, false, fmt.Errorf("%w: metadata edits require an object: %v", storage.ErrValidation, err)
-				}
-			}
-			for _, key := range setKeys {
-				value := patch.Set[key]
-				if !json.Valid(value) {
-					return nil, false, fmt.Errorf("%w: metadata value for key %q is not valid JSON", storage.ErrValidation, key)
-				}
-				values[key] = append(json.RawMessage(nil), value...)
-			}
-			for _, key := range patch.Unset {
-				delete(values, key)
-			}
-			encoded, err := json.Marshal(values)
-			if err != nil {
-				return nil, false, fmt.Errorf("%w: encode metadata edits: %v", storage.ErrValidation, err)
-			}
-			next = encoded
-		}
+	next, err := applyMetadataPatchValue(current, patch, setKeys)
+	if err != nil {
+		return nil, false, err
 	}
 	if err := ValidateMetadataIfConfigured(next); err != nil {
 		return nil, false, err
@@ -259,6 +243,94 @@ func ApplyMetadataPatch(current json.RawMessage, patch publicops.MetadataPatch) 
 		return nil, false, fmt.Errorf("%w: compare metadata: %v", storage.ErrValidation, err)
 	}
 	return next, changed, nil
+}
+
+func metadataPatchIsEmpty(patch publicops.MetadataPatch) bool {
+	return !patch.Replace.Set && !patch.Merge.Set && len(patch.Set) == 0 && len(patch.Unset) == 0
+}
+
+func sortedMetadataSetKeys(values map[string]json.RawMessage) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func validateMetadataPatchKeys(setKeys, unsetKeys []string) error {
+	for _, key := range append(setKeys, unsetKeys...) {
+		if err := storage.ValidateMetadataKey(key); err != nil {
+			return fmt.Errorf("%w: %w", storage.ErrValidation, err)
+		}
+	}
+	return nil
+}
+
+func applyMetadataPatchValue(current json.RawMessage, patch publicops.MetadataPatch, setKeys []string) (json.RawMessage, error) {
+	if patch.Replace.Set {
+		return metadataReplacementValue(patch.Replace.Value)
+	}
+	next := append(json.RawMessage(nil), current...)
+	if patch.Merge.Set {
+		merged, err := mergeMetadataValue(next, patch.Merge.Value)
+		if err != nil {
+			return nil, err
+		}
+		next = merged
+	}
+	if len(patch.Set) == 0 && len(patch.Unset) == 0 {
+		return next, nil
+	}
+	return applyMetadataSetUnset(next, patch, setKeys)
+}
+
+func metadataReplacementValue(value json.RawMessage) (json.RawMessage, error) {
+	next := append(json.RawMessage(nil), value...)
+	if len(next) == 0 {
+		next = json.RawMessage(`{}`)
+	}
+	if !json.Valid(next) {
+		return nil, fmt.Errorf("%w: metadata replacement is not valid JSON", storage.ErrValidation)
+	}
+	return next, nil
+}
+
+func mergeMetadataValue(current, merge json.RawMessage) (json.RawMessage, error) {
+	// A JSON null unmarshals into a nil overlay map, so the merge below would
+	// silently accept it as "change nothing".
+	if strings.TrimSpace(string(merge)) == "null" {
+		return nil, fmt.Errorf("%w: metadata merge must be a JSON object", storage.ErrValidation)
+	}
+	merged, err := storage.MergeMetadataJSON(current, merge)
+	if err != nil {
+		return nil, fmt.Errorf("%w: metadata merge: %v", storage.ErrValidation, err)
+	}
+	return merged, nil
+}
+
+func applyMetadataSetUnset(next json.RawMessage, patch publicops.MetadataPatch, setKeys []string) (json.RawMessage, error) {
+	values := make(map[string]json.RawMessage)
+	if len(next) > 0 && string(next) != "null" {
+		if err := json.Unmarshal(next, &values); err != nil {
+			return nil, fmt.Errorf("%w: metadata edits require an object: %v", storage.ErrValidation, err)
+		}
+	}
+	for _, key := range setKeys {
+		value := patch.Set[key]
+		if !json.Valid(value) {
+			return nil, fmt.Errorf("%w: metadata value for key %q is not valid JSON", storage.ErrValidation, key)
+		}
+		values[key] = append(json.RawMessage(nil), value...)
+	}
+	for _, key := range patch.Unset {
+		delete(values, key)
+	}
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return nil, fmt.Errorf("%w: encode metadata edits: %v", storage.ErrValidation, err)
+	}
+	return encoded, nil
 }
 
 func metadataChanged(current, next json.RawMessage) (bool, error) {
@@ -290,6 +362,17 @@ func ApplyLabelPatch(ctx context.Context, tx DBTX, current *types.Issue, patch p
 		return false, nil
 	}
 	existing := stringSet(current.Labels)
+	target := labelPatchTarget(existing, patch)
+	if sameStringSet(existing, target) {
+		return false, nil
+	}
+	if err := applyLabelSetDifference(ctx, tx, current.ID, existing, target, actor); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func labelPatchTarget(existing map[string]struct{}, patch publicops.LabelPatch) map[string]struct{} {
 	target := make(map[string]struct{}, len(existing)+len(patch.Add))
 	if !patch.Replace.Set {
 		for label := range existing {
@@ -325,20 +408,21 @@ func ApplyLabelPatch(ctx context.Context, tx DBTX, current *types.Issue, patch p
 	for _, label := range patch.Remove {
 		delete(target, label)
 	}
-	if sameStringSet(existing, target) {
-		return false, nil
-	}
+	return target
+}
+
+func applyLabelSetDifference(ctx context.Context, tx DBTX, issueID string, existing, target map[string]struct{}, actor string) error {
 	for _, label := range stringSetDifference(existing, target) {
-		if err := RemoveLabelInTx(ctx, tx, "", "", current.ID, label, actor); err != nil {
-			return false, err
+		if err := RemoveLabelInTx(ctx, tx, "", "", issueID, label, actor); err != nil {
+			return err
 		}
 	}
 	for _, label := range stringSetDifference(target, existing) {
-		if err := AddLabelInTx(ctx, tx, "", "", current.ID, label, actor); err != nil {
-			return false, err
+		if err := AddLabelInTx(ctx, tx, "", "", issueID, label, actor); err != nil {
+			return err
 		}
 	}
-	return true, nil
+	return nil
 }
 
 // ParentPatchResult reports the concrete changes made by ApplyParentPatch.
@@ -353,35 +437,56 @@ func ApplyParentPatch(ctx context.Context, tx DBTX, current *types.Issue, parent
 	if !parent.Set {
 		return ParentPatchResult{}, nil
 	}
-	dependencies, err := GetDependencyRecordsForIssuesInTx(ctx, tx, []string{current.ID})
+	existing, err := currentParentIDsInTx(ctx, tx, current.ID)
 	if err != nil {
 		return ParentPatchResult{}, err
 	}
+	target := parentPatchTarget(parent.Value)
+	if sameStringSet(existing, target) {
+		return ParentPatchResult{}, nil
+	}
+	recomputed, err := applyParentSetDifference(ctx, tx, current.ID, existing, target, actor)
+	if err != nil {
+		return ParentPatchResult{}, err
+	}
+	return ParentPatchResult{Changed: true, IssueRowsChanged: recomputed.IssueRowsChanged, WispRowsChanged: recomputed.WispRowsChanged}, nil
+}
+
+func currentParentIDsInTx(ctx context.Context, tx DBTX, issueID string) (map[string]struct{}, error) {
+	dependencies, err := GetDependencyRecordsForIssuesInTx(ctx, tx, []string{issueID})
+	if err != nil {
+		return nil, err
+	}
 	existing := map[string]struct{}{}
-	for _, dependency := range dependencies[current.ID] {
+	for _, dependency := range dependencies[issueID] {
 		if dependency.Type == types.DepParentChild {
 			existing[dependency.DependsOnID] = struct{}{}
 		}
 	}
+	return existing, nil
+}
+
+func parentPatchTarget(parentID string) map[string]struct{} {
 	target := map[string]struct{}{}
-	if parent.Value != "" {
-		target[parent.Value] = struct{}{}
+	if parentID != "" {
+		target[parentID] = struct{}{}
 	}
-	if sameStringSet(existing, target) {
-		return ParentPatchResult{}, nil
-	}
+	return target
+}
+
+func applyParentSetDifference(ctx context.Context, tx DBTX, issueID string, existing, target map[string]struct{}, actor string) (RecomputeIsBlockedResult, error) {
 	var recomputed RecomputeIsBlockedResult
 	for _, parentID := range stringSetDifference(existing, target) {
-		if _, err := removeDependencyInTx(ctx, tx, current.ID, parentID, actor, false, &recomputed); err != nil {
-			return ParentPatchResult{}, err
+		if _, err := removeDependencyInTx(ctx, tx, issueID, parentID, actor, false, &recomputed); err != nil {
+			return RecomputeIsBlockedResult{}, err
 		}
 	}
 	for _, parentID := range stringSetDifference(target, existing) {
-		if _, err := addDependencyInTx(ctx, tx, &types.Dependency{IssueID: current.ID, DependsOnID: parentID, Type: types.DepParentChild}, actor, AddDependencyOpts{}, &recomputed); err != nil {
-			return ParentPatchResult{}, err
+		if _, err := addDependencyInTx(ctx, tx, &types.Dependency{IssueID: issueID, DependsOnID: parentID, Type: types.DepParentChild}, actor, AddDependencyOpts{}, &recomputed); err != nil {
+			return RecomputeIsBlockedResult{}, err
 		}
 	}
-	return ParentPatchResult{Changed: true, IssueRowsChanged: recomputed.IssueRowsChanged, WispRowsChanged: recomputed.WispRowsChanged}, nil
+	return recomputed, nil
 }
 
 func stringSet(values []string) map[string]struct{} {

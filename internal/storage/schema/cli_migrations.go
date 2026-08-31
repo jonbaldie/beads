@@ -27,61 +27,28 @@ package schema
 // scripts/check-migration-hygiene.sh flags new migrations that use PREPARE'd
 // DML instead of that pattern.
 func cliCompatibleMigrationSQL(name, sqlText string) string {
-	switch name {
-	case "0008_create_child_counters.up.sql":
-		// Fresh bundle bakes the final FK shape that runtime reaches after
-		// 0039 drops the original FK and ignored migration 0002 re-adds it.
-		return cliMigration0008CreateChildCounters
-	case "0023_add_no_history_column.up.sql":
-		return cliMigration0023AddNoHistoryColumn
-	case "0027_add_started_at.up.sql":
-		return cliMigration0027AddStartedAt
-	case "0032_drop_schema_migrations_applied_at.up.sql":
-		return cliMigration0032DropSchemaMigrationsAppliedAt
-	case "0033_add_wisp_type_column.up.sql":
-		// No-op on fresh schema: wisp_type is already in squashed base 0001.
-		return "SELECT 1;"
-	case "0034_add_spec_id_column.up.sql":
-		// No-op on fresh schema: spec_id and idx_issues_spec_id are in 0001.
-		return "SELECT 1;"
-	case "0039_drop_child_counters_fk.up.sql":
-		// No-op here because 0008 already emits the final ignored-0002 FK.
-		return "SELECT 1;"
-	case "0041_split_dependencies_target.up.sql":
-		return cliMigration0041SplitDependenciesTarget
-	case "0043_drop_dependencies_generated_column.up.sql":
-		return cliMigration0043DropDependenciesGeneratedColumn
-	case "0046_add_is_blocked.up.sql":
-		// Fresh databases contain no issue graph, so only the schema delta is
-		// needed; the source migration's recursive backfill is dead work here.
-		return cliMigration0046AddIsBlocked
-	case "0049_longtext_large_content_columns.up.sql":
-		return cliMigration0049LongtextLargeContentColumns
-	case "0051_drop_aux_id_defaults.up.sql":
-		// Direct DDL: the source migration's PREPARE/EXECUTE guards exist for
-		// re-run safety on upgraded databases; a fresh bundle always has the
-		// 0004/0005/0009/0010 defaults to drop.
-		return cliMigration0051DropAuxIDDefaults
-	case "0053_repair_rig_wisps.up.sql":
-		// The source migration uses PREPARE guards so older upgraded
-		// workspaces without local wisp tables can no-op safely. Fresh CLI
-		// bundles already have the base wisp tables, and the Dolt CLI test
-		// path needs direct DML for deterministic fixture repair.
-		return cliMigration0053RepairRigWisps
-	case "0054_add_lease_columns.up.sql":
-		// Fresh bundle bakes the lease columns directly: the Dolt CLI does not
-		// apply the prepared ALTER TABLE statements the runtime migration uses
-		// for idempotent re-runs on upgraded databases.
-		return cliMigration0054AddLeaseColumns
-	case "0055_move_leases_to_table.up.sql":
-		// Direct DDL for the same reason as 0054. A fresh bundle has no live
-		// leases to copy (0054 just added empty columns), so this is pure
-		// schema delta: create the ephemeral leases table, drop the issues/
-		// wisps lease columns 0054 added. row_lock stays (see the migration).
-		return cliMigration0055MoveLeasesToTable
-	default:
-		return sqlText
+	if override, ok := cliMigrationOverrides[name]; ok {
+		return override
 	}
+	return sqlText
+}
+
+var cliMigrationOverrides = map[string]string{
+	"0008_create_child_counters.up.sql":              cliMigration0008CreateChildCounters,
+	"0023_add_no_history_column.up.sql":              cliMigration0023AddNoHistoryColumn,
+	"0027_add_started_at.up.sql":                     cliMigration0027AddStartedAt,
+	"0032_drop_schema_migrations_applied_at.up.sql":  cliMigration0032DropSchemaMigrationsAppliedAt,
+	"0033_add_wisp_type_column.up.sql":               "SELECT 1;",
+	"0034_add_spec_id_column.up.sql":                 "SELECT 1;",
+	"0039_drop_child_counters_fk.up.sql":             "SELECT 1;",
+	"0041_split_dependencies_target.up.sql":          cliMigration0041SplitDependenciesTarget,
+	"0043_drop_dependencies_generated_column.up.sql": cliMigration0043DropDependenciesGeneratedColumn,
+	"0046_add_is_blocked.up.sql":                     cliMigration0046AddIsBlocked,
+	"0049_longtext_large_content_columns.up.sql":     cliMigration0049LongtextLargeContentColumns,
+	"0051_drop_aux_id_defaults.up.sql":               cliMigration0051DropAuxIDDefaults,
+	"0053_repair_rig_wisps.up.sql":                   cliMigration0053RepairRigWisps,
+	"0054_add_lease_columns.up.sql":                  cliMigration0054AddLeaseColumns,
+	"0055_move_leases_to_table.up.sql":               cliMigration0055MoveLeasesToTable,
 }
 
 const cliMigration0008CreateChildCounters = `CREATE TABLE IF NOT EXISTS child_counters (

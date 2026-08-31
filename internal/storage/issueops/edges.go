@@ -137,39 +137,55 @@ func PresentIssueOrWispIDsInTx(ctx context.Context, tx DBTX, ids []string) (map[
 		return present, nil
 	}
 	for _, table := range []string{"issues", "wisps"} {
-		for start := 0; start < len(ids); start += queryBatchSize {
-			end := start + queryBatchSize
-			if end > len(ids) {
-				end = len(ids)
-			}
-			batch := ids[start:end]
-			placeholders := make([]string, len(batch))
-			args := make([]any, len(batch))
-			for i, id := range batch {
-				placeholders[i] = "?"
-				args[i] = id
-			}
-			rows, err := tx.QueryContext(ctx, fmt.Sprintf(
-				"SELECT id FROM %s WHERE id IN (%s)", table, strings.Join(placeholders, ",")), args...)
-			if err != nil {
-				if isTableNotExistError(err) {
-					break
-				}
-				return nil, fmt.Errorf("check issue existence in %s: %w", table, err)
-			}
-			for rows.Next() {
-				var id string
-				if scanErr := rows.Scan(&id); scanErr != nil {
-					_ = rows.Close()
-					return nil, fmt.Errorf("check issue existence in %s: scan: %w", table, scanErr)
-				}
-				present[id] = struct{}{}
-			}
-			_ = rows.Close()
-			if err := rows.Err(); err != nil {
-				return nil, fmt.Errorf("check issue existence in %s: rows: %w", table, err)
-			}
+		tablePresent, missing, err := presentIDsInTable(ctx, tx, table, ids)
+		if err != nil {
+			return nil, err
+		}
+		if missing {
+			continue
+		}
+		for id := range tablePresent {
+			present[id] = struct{}{}
 		}
 	}
 	return present, nil
+}
+
+func presentIDsInTable(ctx context.Context, tx DBTX, table string, ids []string) (map[string]struct{}, bool, error) {
+	present := make(map[string]struct{}, len(ids))
+	totalIDs := len(ids)
+	for start := 0; start < totalIDs; start += queryBatchSize {
+		end := start + queryBatchSize
+		if end > totalIDs {
+			end = totalIDs
+		}
+		batch := ids[start:end]
+		placeholders := make([]string, len(batch))
+		args := make([]any, len(batch))
+		for i, id := range batch {
+			placeholders[i] = "?"
+			args[i] = id
+		}
+		rows, err := tx.QueryContext(ctx, fmt.Sprintf(
+			"SELECT id FROM %s WHERE id IN (%s)", table, strings.Join(placeholders, ",")), args...)
+		if err != nil {
+			if isTableNotExistError(err) {
+				return present, true, nil
+			}
+			return nil, false, fmt.Errorf("check issue existence in %s: %w", table, err)
+		}
+		for rows.Next() {
+			var id string
+			if scanErr := rows.Scan(&id); scanErr != nil {
+				_ = rows.Close()
+				return nil, false, fmt.Errorf("check issue existence in %s: scan: %w", table, scanErr)
+			}
+			present[id] = struct{}{}
+		}
+		_ = rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, false, fmt.Errorf("check issue existence in %s: rows: %w", table, err)
+		}
+	}
+	return present, false, nil
 }

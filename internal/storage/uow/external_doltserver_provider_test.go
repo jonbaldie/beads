@@ -42,16 +42,12 @@ func TestNewExternalDoltServerUOWProvider_ValidationErrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			p, err := NewExternalDoltServerUOWProvider(
 				context.Background(),
-				t.TempDir(),
-				tc.database,
-				"",
-				tc.external,
-				tc.rootUser,
-				"",
-				0,
-				0,
-				false,
-				"",
+				ExternalDoltServerUOWOptions{
+					ServerRootDir: t.TempDir(),
+					Database:      tc.database,
+					External:      tc.external,
+					RootUser:      tc.rootUser,
+				},
 			)
 			assert.Nil(t, p)
 			require.Error(t, err)
@@ -86,16 +82,13 @@ func TestNewExternalDoltServerUOWProvider_EndToEnd(t *testing.T) {
 
 	provider, err := NewExternalDoltServerUOWProvider(
 		ctx,
-		storeRootDir,
-		"beads_test",
-		logPath,
-		configfile.ExternalDoltConfig{Host: "127.0.0.1", Port: portInt},
-		"root",
-		"",
-		0,
-		0,
-		false,
-		"",
+		ExternalDoltServerUOWOptions{
+			ServerRootDir:     storeRootDir,
+			Database:          "beads_test",
+			ServerLogFilePath: logPath,
+			External:          configfile.ExternalDoltConfig{Host: "127.0.0.1", Port: portInt},
+			RootUser:          "root",
+		},
 	)
 	require.NoError(t, err)
 	require.NotNil(t, provider)
@@ -163,16 +156,13 @@ func TestNewExternalDoltServerUOWProvider_ConcurrentInstantiation(t *testing.T) 
 			defer wg.Done()
 			p, err := NewExternalDoltServerUOWProvider(
 				context.Background(),
-				storeRootDir,
-				"beads_test",
-				logPath,
-				external,
-				"root",
-				"",
-				0,
-				0,
-				false,
-				"",
+				ExternalDoltServerUOWOptions{
+					ServerRootDir:     storeRootDir,
+					Database:          "beads_test",
+					ServerLogFilePath: logPath,
+					External:          external,
+					RootUser:          "root",
+				},
 			)
 			results[i] = result{provider: p, err: err}
 		}()
@@ -258,16 +248,13 @@ func TestNewExternalDoltServerUOWProvider_FreshInitSelfHealsAfterMidPassFailure(
 
 	provider, err := NewExternalDoltServerUOWProvider(
 		ctx,
-		storeRootDir,
-		"beads_fresh_heal",
-		logPath,
-		configfile.ExternalDoltConfig{Host: "127.0.0.1", Port: portInt},
-		"root",
-		"",
-		0,
-		0,
-		false,
-		"",
+		ExternalDoltServerUOWOptions{
+			ServerRootDir:     storeRootDir,
+			Database:          "beads_fresh_heal",
+			ServerLogFilePath: logPath,
+			External:          configfile.ExternalDoltConfig{Host: "127.0.0.1", Port: portInt},
+			RootUser:          "root",
+		},
 	)
 	require.NoError(t, err, "fresh init must converge after a mid-pass transient failure, not trip the #4566 guard on its own bootstrap debris")
 	require.NotNil(t, provider)
@@ -342,16 +329,13 @@ func TestNewExternalDoltServerUOWProvider_PreexistingDirtyDatabaseIsNotHealed(t 
 
 	provider, err := NewExternalDoltServerUOWProvider(
 		ctx,
-		storeRootDir,
-		"beads_loser",
-		logPath,
-		configfile.ExternalDoltConfig{Host: "127.0.0.1", Port: portInt},
-		"root",
-		"",
-		0,
-		0,
-		false,
-		"",
+		ExternalDoltServerUOWOptions{
+			ServerRootDir:     storeRootDir,
+			Database:          "beads_loser",
+			ServerLogFilePath: logPath,
+			External:          configfile.ExternalDoltConfig{Host: "127.0.0.1", Port: portInt},
+			RootUser:          "root",
+		},
 	)
 	if provider != nil {
 		t.Cleanup(func() { _ = provider.Close(context.Background()) })

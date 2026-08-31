@@ -100,9 +100,7 @@ func newMetadataPatchOperations(t *testing.T, ctx context.Context) issueops.Life
 
 func createMetadataPatchIssue(t *testing.T, ctx context.Context, operations issueops.Lifecycle, id string) string {
 	t.Helper()
-	created, err := operations.Create(ctx, issueops.CreateRequest{Actor: "tester", Issue: &issueops.Issue{
-		ID: id, Title: id, IssueType: types.TypeTask, Priority: 2, Metadata: json.RawMessage(`{"keep":"yes","remove":"gone","overlap":"old","stable":true}`),
-	}})
+	created, err := operations.Create(ctx, issueops.CreateRequest{Actor: "tester", Issue: &issueops.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}, IssueMeta: types.IssueMeta{Metadata: json.RawMessage(`{"keep":"yes","remove":"gone","overlap":"old","stable":true}`)}}})
 	if err != nil {
 		t.Fatalf("Create(%q) error = %v", id, err)
 	}

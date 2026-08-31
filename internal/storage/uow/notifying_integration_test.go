@@ -39,7 +39,7 @@ func TestNotifyingProviderOverARealProvider(t *testing.T) {
 
 	t.Run("PayloadCarriesLabels", func(t *testing.T) {
 		create(t, domain.CreateIssueParams{
-			Issue:      &types.Issue{ID: "nfy-labels", Title: "Labelled", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
+			Issue:      &types.Issue{IssueID: types.IssueID{ID: "nfy-labels"}, IssueContent: types.IssueContent{Title: "Labelled"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
 			ExplicitID: "nfy-labels",
 			CreateOnly: true,
 		})
@@ -67,7 +67,7 @@ func TestNotifyingProviderOverARealProvider(t *testing.T) {
 	t.Run("CreatePayloadCarriesItsInitialLabels", func(t *testing.T) {
 		runner.reset()
 		create(t, domain.CreateIssueParams{
-			Issue:      &types.Issue{ID: "nfy-initial", Title: "Born labelled", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
+			Issue:      &types.Issue{IssueID: types.IssueID{ID: "nfy-initial"}, IssueContent: types.IssueContent{Title: "Born labelled"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
 			ExplicitID: "nfy-initial",
 			Labels:     []string{"lane:initial"},
 			CreateOnly: true,
@@ -88,14 +88,14 @@ func TestNotifyingProviderOverARealProvider(t *testing.T) {
 
 	t.Run("ReverseEdgeTellsTheFarEndWithItsGraph", func(t *testing.T) {
 		create(t, domain.CreateIssueParams{
-			Issue:      &types.Issue{ID: "nfy-target", Title: "Existing", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
+			Issue:      &types.Issue{IssueID: types.IssueID{ID: "nfy-target"}, IssueContent: types.IssueContent{Title: "Existing"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
 			ExplicitID: "nfy-target",
 			CreateOnly: true,
 		})
 
 		runner.reset()
 		create(t, domain.CreateIssueParams{
-			Issue:      &types.Issue{ID: "nfy-source", Title: "New", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
+			Issue:      &types.Issue{IssueID: types.IssueID{ID: "nfy-source"}, IssueContent: types.IssueContent{Title: "New"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
 			ExplicitID: "nfy-source",
 			CreateOnly: true,
 			// `bd create --blocks nfy-target`: the edge LEAVES the existing
@@ -115,14 +115,14 @@ func TestNotifyingProviderOverARealProvider(t *testing.T) {
 
 	t.Run("ForwardEdgeUpdatesTheCreatedRowWithItsGraph", func(t *testing.T) {
 		create(t, domain.CreateIssueParams{
-			Issue:      &types.Issue{ID: "nfy-parent", Title: "Parent", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
+			Issue:      &types.Issue{IssueID: types.IssueID{ID: "nfy-parent"}, IssueContent: types.IssueContent{Title: "Parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
 			ExplicitID: "nfy-parent",
 			CreateOnly: true,
 		})
 
 		runner.reset()
 		create(t, domain.CreateIssueParams{
-			Issue:      &types.Issue{ID: "nfy-child", Title: "Child", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
+			Issue:      &types.Issue{IssueID: types.IssueID{ID: "nfy-child"}, IssueContent: types.IssueContent{Title: "Child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
 			ExplicitID: "nfy-child",
 			CreateOnly: true,
 			// `bd create --parent nfy-parent`: the edge leaves the NEW row.
@@ -145,8 +145,20 @@ func TestNotifyingProviderOverARealProvider(t *testing.T) {
 		if err := RunTx(ctx, provider, func(ctx context.Context, uw UnitOfWork) (string, error) {
 			_, err := uw.IssueUseCase().CreateWisp(ctx, domain.CreateIssueParams{
 				Issue: &types.Issue{
-					ID: "nfy-wisp-target", Title: "Ephemeral target", Status: types.StatusOpen,
-					IssueType: types.TypeTask, Priority: 2, Ephemeral: true,
+					IssueID: types.IssueID{
+						ID: "nfy-wisp-target",
+					},
+					IssueContent: types.IssueContent{
+						Title: "Ephemeral target",
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Status:    types.StatusOpen,
+						IssueType: types.TypeTask,
+						Priority:  2,
+					},
+					IssueWisp: types.IssueWisp{
+						Ephemeral: true,
+					},
 				},
 				ExplicitID: "nfy-wisp-target",
 				CreateOnly: true,
@@ -158,7 +170,7 @@ func TestNotifyingProviderOverARealProvider(t *testing.T) {
 
 		runner.reset()
 		create(t, domain.CreateIssueParams{
-			Issue:      &types.Issue{ID: "nfy-cross", Title: "Durable source", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
+			Issue:      &types.Issue{IssueID: types.IssueID{ID: "nfy-cross"}, IssueContent: types.IssueContent{Title: "Durable source"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
 			ExplicitID: "nfy-cross",
 			CreateOnly: true,
 			Dependencies: []domain.DependencySpec{
@@ -173,7 +185,7 @@ func TestNotifyingProviderOverARealProvider(t *testing.T) {
 
 	t.Run("GraphApplyReportsItsNodesAndEveryEdgeSource", func(t *testing.T) {
 		create(t, domain.CreateIssueParams{
-			Issue:      &types.Issue{ID: "nfy-graph-live", Title: "Lives outside the plan", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
+			Issue:      &types.Issue{IssueID: types.IssueID{ID: "nfy-graph-live"}, IssueContent: types.IssueContent{Title: "Lives outside the plan"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
 			ExplicitID: "nfy-graph-live",
 			CreateOnly: true,
 		})
@@ -181,8 +193,8 @@ func TestNotifyingProviderOverARealProvider(t *testing.T) {
 		runner.reset()
 		plan := domain.GraphPlan{
 			Nodes: []domain.GraphNode{
-				{Key: "root", Issue: &types.Issue{ID: "nfy-graph-root", Title: "Plan root", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
-				{Key: "child", Issue: &types.Issue{ID: "nfy-graph-child", Title: "Plan child", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}, ParentKey: "root"},
+				{Key: "root", Issue: &types.Issue{IssueID: types.IssueID{ID: "nfy-graph-root"}, IssueContent: types.IssueContent{Title: "Plan root"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}}},
+				{Key: "child", Issue: &types.Issue{IssueID: types.IssueID{ID: "nfy-graph-child"}, IssueContent: types.IssueContent{Title: "Plan child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}}, ParentKey: "root"},
 			},
 			// The from-side is a row the plan did NOT create, so no create
 			// event names it — only the edge update tells its watchers.
@@ -221,7 +233,7 @@ func TestNotifyingProviderOverARealProvider(t *testing.T) {
 		}
 
 		create(t, domain.CreateIssueParams{
-			Issue:      &types.Issue{ID: "nfy-life-target", Title: "Existing", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
+			Issue:      &types.Issue{IssueID: types.IssueID{ID: "nfy-life-target"}, IssueContent: types.IssueContent{Title: "Existing"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
 			ExplicitID: "nfy-life-target",
 			CreateOnly: true,
 		})
@@ -229,7 +241,7 @@ func TestNotifyingProviderOverARealProvider(t *testing.T) {
 		runner.reset()
 		if _, err := lifecycle.Create(ctx, publicops.CreateRequest{
 			Actor: "notify-test",
-			Issue: &types.Issue{ID: "nfy-life-src", Title: "Lifecycle create", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
+			Issue: &types.Issue{IssueID: types.IssueID{ID: "nfy-life-src"}, IssueContent: types.IssueContent{Title: "Lifecycle create"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
 			Dependencies: []publicops.CreateDependency{
 				{Type: types.DepBlocks, TargetID: "nfy-life-target", Reverse: true},
 			},
@@ -290,8 +302,8 @@ func TestNotifyingProviderOverARealProvider(t *testing.T) {
 			Actor:  "notify-test",
 			Source: "notifying_integration_test",
 			Issues: []*types.Issue{
-				{ID: "nfy-import-1", Title: "Imported one", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
-				{ID: "nfy-import-2", Title: "Imported two", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
+				{IssueID: types.IssueID{ID: "nfy-import-1"}, IssueContent: types.IssueContent{Title: "Imported one"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
+				{IssueID: types.IssueID{ID: "nfy-import-2"}, IssueContent: types.IssueContent{Title: "Imported two"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
 			},
 		})
 		if err != nil {

@@ -165,51 +165,65 @@ func writeCanonicalMetadataJSON(buf *bytes.Buffer, value any) error {
 	case nil:
 		buf.WriteString("null")
 	case bool:
-		if typed {
-			buf.WriteString("true")
-		} else {
-			buf.WriteString("false")
-		}
+		writeCanonicalBool(buf, typed)
 	case json.Number:
 		buf.WriteString(typed.String())
 	case string:
 		return writeCanonicalMetadataString(buf, typed)
 	case []any:
-		buf.WriteByte('[')
-		for i, item := range typed {
-			if i > 0 {
-				buf.WriteByte(',')
-			}
-			if err := writeCanonicalMetadataJSON(buf, item); err != nil {
-				return err
-			}
-		}
-		buf.WriteByte(']')
+		return writeCanonicalArray(buf, typed)
 	case map[string]any:
-		keys := make([]string, 0, len(typed))
-		for key := range typed {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		buf.WriteByte('{')
-		for i, key := range keys {
-			if i > 0 {
-				buf.WriteByte(',')
-			}
-			if err := writeCanonicalMetadataString(buf, key); err != nil {
-				return err
-			}
-			buf.WriteByte(':')
-			if err := writeCanonicalMetadataJSON(buf, typed[key]); err != nil {
-				return err
-			}
-		}
-		buf.WriteByte('}')
+		return writeCanonicalObject(buf, typed)
 	default:
 		// encoding/json produces only the cases above for an `any` target with
 		// UseNumber set, so reaching this means the decoder changed under us.
 		return fmt.Errorf("cannot canonicalize %T", value)
 	}
+	return nil
+}
+
+func writeCanonicalBool(buf *bytes.Buffer, value bool) {
+	if value {
+		buf.WriteString("true")
+		return
+	}
+	buf.WriteString("false")
+}
+
+func writeCanonicalArray(buf *bytes.Buffer, values []any) error {
+	buf.WriteByte('[')
+	for i, item := range values {
+		if i > 0 {
+			buf.WriteByte(',')
+		}
+		if err := writeCanonicalMetadataJSON(buf, item); err != nil {
+			return err
+		}
+	}
+	buf.WriteByte(']')
+	return nil
+}
+
+func writeCanonicalObject(buf *bytes.Buffer, values map[string]any) error {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	buf.WriteByte('{')
+	for i, key := range keys {
+		if i > 0 {
+			buf.WriteByte(',')
+		}
+		if err := writeCanonicalMetadataString(buf, key); err != nil {
+			return err
+		}
+		buf.WriteByte(':')
+		if err := writeCanonicalMetadataJSON(buf, values[key]); err != nil {
+			return err
+		}
+	}
+	buf.WriteByte('}')
 	return nil
 }
 

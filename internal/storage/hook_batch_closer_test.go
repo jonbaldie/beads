@@ -77,7 +77,7 @@ func TestHookFiringStoreBatchCloserPropagatesInnerError(t *testing.T) {
 // that only counted firings would pass a wrapper that announced the re-close
 // and dropped the real one.
 func TestHookBatchCloserFiresOncePerLandedItem(t *testing.T) {
-	issue := func(id string) *types.Issue { return &types.Issue{ID: id} }
+	issue := func(id string) *types.Issue { return &types.Issue{IssueID: types.IssueID{ID: id}} }
 	for _, test := range []struct {
 		name  string
 		inner *fakeBatchCloser
@@ -145,7 +145,7 @@ func TestHookBatchCloserFiresOncePerLandedItem(t *testing.T) {
 // infrastructure, so there is no landed item to announce.
 func TestHookBatchCloserFiresNothingOnRequestFailure(t *testing.T) {
 	inner := &fakeBatchCloser{
-		result: issueops.CloseBatchResult{Outcomes: []issueops.CloseOutcome{{IssueID: "bd-1", Issue: &types.Issue{ID: "bd-1"}}}},
+		result: issueops.CloseBatchResult{Outcomes: []issueops.CloseOutcome{{IssueID: "bd-1", Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-1"}}}}},
 		err:    errors.New("boom"),
 	}
 	recorder := &recordingIssueOperationHooks{}

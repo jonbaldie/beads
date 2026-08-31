@@ -85,32 +85,51 @@ func sweepReferencedInTx(ctx context.Context, tx *sql.Tx, candidates []*types.Is
 	if len(candidates) == 0 {
 		return nil, nil
 	}
+	matcher := workapi.NewCandidateIDMatcher(sweepCandidateIDs(candidates))
+	notDone, comments, err := sweepReferenceSourcesInTx(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	return findSweepReferences(&matcher, notDone, comments), nil
+}
+
+func sweepCandidateIDs(candidates []*types.Issue) map[string]bool {
 	candidateIDs := make(map[string]bool, len(candidates))
 	for _, issue := range candidates {
 		candidateIDs[issue.ID] = true
 	}
-	matcher := workapi.NewCandidateIDMatcher(candidateIDs)
+	return candidateIDs
+}
 
+func sweepReferenceSourcesInTx(ctx context.Context, tx *sql.Tx) ([]*types.Issue, map[string][]*types.Comment, error) {
 	custom, err := ResolveCustomStatusesDetailedInTx(ctx, tx)
 	if err != nil {
-		return nil, fmt.Errorf("reading custom statuses for reference scan: %w", err)
+		return nil, nil, fmt.Errorf("reading custom statuses for reference scan: %w", err)
 	}
 	notDone, err := SearchIssuesInTx(ctx, tx, "", workapi.BuildSweepReferenceScanFilter(custom))
 	if err != nil {
-		return nil, fmt.Errorf("scanning open beads for references: %w", err)
+		return nil, nil, fmt.Errorf("scanning open beads for references: %w", err)
 	}
 
-	notDoneIDs := make([]string, 0, len(notDone))
-	for _, issue := range notDone {
-		if issue != nil {
-			notDoneIDs = append(notDoneIDs, issue.ID)
-		}
-	}
+	notDoneIDs := sweepIssueIDs(notDone)
 	comments, err := GetCommentsForIssuesInTx(ctx, tx, notDoneIDs)
 	if err != nil {
-		return nil, fmt.Errorf("scanning open beads for references: %w", err)
+		return nil, nil, fmt.Errorf("scanning open beads for references: %w", err)
 	}
+	return notDone, comments, nil
+}
 
+func sweepIssueIDs(issues []*types.Issue) []string {
+	ids := make([]string, 0, len(issues))
+	for _, issue := range issues {
+		if issue != nil {
+			ids = append(ids, issue.ID)
+		}
+	}
+	return ids
+}
+
+func findSweepReferences(matcher *workapi.CandidateIDMatcher, notDone []*types.Issue, comments map[string][]*types.Comment) map[string]bool {
 	referenced := make(map[string]bool)
 	for _, issue := range notDone {
 		if issue == nil {
@@ -122,5 +141,5 @@ func sweepReferencedInTx(ctx context.Context, tx *sql.Tx, candidates []*types.Is
 			matcher.FindAll(c.Text, referenced)
 		}
 	}
-	return referenced, nil
+	return referenced
 }

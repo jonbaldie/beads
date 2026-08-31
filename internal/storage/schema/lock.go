@@ -100,41 +100,19 @@ func CaptureFreshBootstrapHealCapability(
 	endpoint string,
 	expectedDatabase string,
 ) (*FreshBootstrapHealCapability, error) {
-	if endpoint == "" {
-		return nil, errors.New("schema: capture fresh-bootstrap identity: empty endpoint")
-	}
-	if expectedDatabase == "" {
-		return nil, errors.New("schema: capture fresh-bootstrap identity: empty database name")
+	if err := validateFreshBootstrapInput(endpoint, expectedDatabase); err != nil {
+		return nil, err
 	}
 
-	var databaseName, serverUUID, initialHead string
-	if err := conn.QueryRowContext(ctx,
-		"SELECT DATABASE(), @@server_uuid, DOLT_HASHOF('HEAD')",
-	).Scan(&databaseName, &serverUUID, &initialHead); err != nil {
-		return nil, fmt.Errorf("schema: capture fresh-bootstrap identity: %w", err)
+	databaseName, serverUUID, initialHead, err := freshBootstrapIdentity(ctx, conn)
+	if err != nil {
+		return nil, err
 	}
-	if databaseName != expectedDatabase {
-		return nil, fmt.Errorf("schema: capture fresh-bootstrap identity: database is %q, want %q", databaseName, expectedDatabase)
+	if err := validateFreshBootstrapIdentity(databaseName, serverUUID, initialHead, expectedDatabase); err != nil {
+		return nil, err
 	}
-	if serverUUID == "" {
-		return nil, errors.New("schema: capture fresh-bootstrap identity: empty server UUID")
-	}
-	if initialHead == "" {
-		return nil, errors.New("schema: capture fresh-bootstrap identity: empty initial HEAD")
-	}
-
-	var commitCount, dirtyCount int
-	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM dolt_log").Scan(&commitCount); err != nil {
-		return nil, fmt.Errorf("schema: verify fresh-bootstrap history: %w", err)
-	}
-	if commitCount != 1 {
-		return nil, fmt.Errorf("schema: verify fresh-bootstrap history: got %d commits, want 1", commitCount)
-	}
-	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM dolt_status").Scan(&dirtyCount); err != nil {
-		return nil, fmt.Errorf("schema: verify fresh-bootstrap working set: %w", err)
-	}
-	if dirtyCount != 0 {
-		return nil, fmt.Errorf("schema: verify fresh-bootstrap working set: got %d dirty entries, want 0", dirtyCount)
+	if err := verifyFreshBootstrapState(ctx, conn); err != nil {
+		return nil, err
 	}
 
 	return &FreshBootstrapHealCapability{
@@ -143,6 +121,57 @@ func CaptureFreshBootstrapHealCapability(
 		databaseName: databaseName,
 		initialHead:  initialHead,
 	}, nil
+}
+
+func validateFreshBootstrapInput(endpoint, expectedDatabase string) error {
+	if endpoint == "" {
+		return errors.New("schema: capture fresh-bootstrap identity: empty endpoint")
+	}
+	if expectedDatabase == "" {
+		return errors.New("schema: capture fresh-bootstrap identity: empty database name")
+	}
+	return nil
+}
+
+func freshBootstrapIdentity(ctx context.Context, conn *sql.Conn) (string, string, string, error) {
+	var databaseName, serverUUID, initialHead string
+	if err := conn.QueryRowContext(ctx,
+		"SELECT DATABASE(), @@server_uuid, DOLT_HASHOF('HEAD')",
+	).Scan(&databaseName, &serverUUID, &initialHead); err != nil {
+		return "", "", "", fmt.Errorf("schema: capture fresh-bootstrap identity: %w", err)
+	}
+	return databaseName, serverUUID, initialHead, nil
+}
+
+func validateFreshBootstrapIdentity(databaseName, serverUUID, initialHead, expectedDatabase string) error {
+	if databaseName != expectedDatabase {
+		return fmt.Errorf("schema: capture fresh-bootstrap identity: database is %q, want %q", databaseName, expectedDatabase)
+	}
+	if serverUUID == "" {
+		return errors.New("schema: capture fresh-bootstrap identity: empty server UUID")
+	}
+	if initialHead == "" {
+		return errors.New("schema: capture fresh-bootstrap identity: empty initial HEAD")
+	}
+	return nil
+}
+
+func verifyFreshBootstrapState(ctx context.Context, conn *sql.Conn) error {
+	var commitCount int
+	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM dolt_log").Scan(&commitCount); err != nil {
+		return fmt.Errorf("schema: verify fresh-bootstrap history: %w", err)
+	}
+	if commitCount != 1 {
+		return fmt.Errorf("schema: verify fresh-bootstrap history: got %d commits, want 1", commitCount)
+	}
+	var dirtyCount int
+	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM dolt_status").Scan(&dirtyCount); err != nil {
+		return fmt.Errorf("schema: verify fresh-bootstrap working set: %w", err)
+	}
+	if dirtyCount != 0 {
+		return fmt.Errorf("schema: verify fresh-bootstrap working set: got %d dirty entries, want 0", dirtyCount)
+	}
+	return nil
 }
 
 // WithFreshBootstrapHeal enables the fresh-bootstrap self-heal for the #4566
@@ -190,46 +219,56 @@ func MigrateUpWithLock(ctx context.Context, conn *sql.Conn, databaseName string,
 			err = errors.Join(err, releaseErr)
 		}
 	}()
-	if o.lockedPreparation != nil && o.lockedPreparation.fn != nil {
-		capability, preparationErr := o.lockedPreparation.fn(ctx, conn)
-		if preparationErr != nil {
-			return 0, preparationErr
-		}
-		if capability != nil {
-			o.freshBootstrapHeal = &freshBootstrapHealRequest{
-				capability: capability,
-				endpoint:   o.lockedPreparation.endpoint,
-			}
-		}
+	if err := runLockedPreparation(ctx, conn, &o); err != nil {
+		return 0, err
 	}
 
 	applied, err = MigrateUp(ctx, conn)
-	var dirtyErr *DirtyTablesError
-	if err != nil && o.freshBootstrapHeal != nil && errors.As(err, &dirtyErr) {
-		// Authorization is checked after the dirty guard fires and while the
-		// database-scoped migration lock is still held. A mismatch, missing
-		// ancestor, probe error, or previously consumed capability returns the
-		// original DirtyTablesError without attempting a destructive reset.
-		if !o.freshBootstrapHeal.capability.consumeIfCurrentIncarnation(
-			ctx, conn, databaseName, o.freshBootstrapHeal.endpoint,
-		) {
-			return applied, err
-		}
+	return finishMigrationWithHeal(ctx, conn, databaseName, applied, err, o.freshBootstrapHeal)
+}
 
-		// Consume occurs before the reset call. Thus a reset error or a
-		// transient failure in the following migration pass cannot re-arm a
-		// second reset in the caller's outer retry loop.
-		fmt.Fprintf(stderr, "Discarding interrupted-bootstrap working set (%s) and re-running migrations…\n",
-			strings.Join(dirtyErr.Tables, ", "))
-		// Drained, not Exec'd: the very next thing this path does is re-run the
-		// whole MigrateUp pass on this same pinned connection, so an
-		// undrained proc result set here would poison every statement of it.
-		if resetErr := DrainCall(ctx, conn, "CALL DOLT_RESET('--hard')"); resetErr != nil {
-			return applied, errors.Join(err, fmt.Errorf("schema: fresh-bootstrap reset: %w", resetErr))
-		}
-		applied, err = MigrateUp(ctx, conn)
+func runLockedPreparation(ctx context.Context, conn *sql.Conn, o *migrateLockOptions) error {
+	if o.lockedPreparation == nil || o.lockedPreparation.fn == nil {
+		return nil
 	}
-	return applied, err
+	capability, err := o.lockedPreparation.fn(ctx, conn)
+	if err != nil {
+		return err
+	}
+	if capability != nil {
+		o.freshBootstrapHeal = &freshBootstrapHealRequest{
+			capability: capability,
+			endpoint:   o.lockedPreparation.endpoint,
+		}
+	}
+	return nil
+}
+
+func finishMigrationWithHeal(ctx context.Context, conn *sql.Conn, databaseName string, applied int, err error, heal *freshBootstrapHealRequest) (int, error) {
+	var dirtyErr *DirtyTablesError
+	if err == nil || heal == nil || !errors.As(err, &dirtyErr) {
+		return applied, err
+	}
+	// Authorization is checked after the dirty guard fires and while the
+	// database-scoped migration lock is still held. A mismatch, missing
+	// ancestor, probe error, or previously consumed capability returns the
+	// original DirtyTablesError without attempting a destructive reset.
+	if !heal.capability.consumeIfCurrentIncarnation(ctx, conn, databaseName, heal.endpoint) {
+		return applied, err
+	}
+
+	// Consume occurs before the reset call. Thus a reset error or a
+	// transient failure in the following migration pass cannot re-arm a
+	// second reset in the caller's outer retry loop.
+	fmt.Fprintf(stderr, "Discarding interrupted-bootstrap working set (%s) and re-running migrations…\n",
+		strings.Join(dirtyErr.Tables, ", "))
+	// Drained, not Exec'd: the very next thing this path does is re-run the
+	// whole MigrateUp pass on this same pinned connection, so an
+	// undrained proc result set here would poison every statement of it.
+	if resetErr := DrainCall(ctx, conn, "CALL DOLT_RESET('--hard')"); resetErr != nil {
+		return applied, errors.Join(err, fmt.Errorf("schema: fresh-bootstrap reset: %w", resetErr))
+	}
+	return MigrateUp(ctx, conn)
 }
 
 // consumeIfCurrentIncarnation validates and atomically consumes c. All probes
@@ -245,30 +284,40 @@ func (c *FreshBootstrapHealCapability) consumeIfCurrentIncarnation(
 	if c == nil || c.consumed.Load() {
 		return false
 	}
-	if endpoint == "" || endpoint != c.endpoint || databaseName != c.databaseName {
+	if !c.matchesEndpointAndDatabase(endpoint, databaseName) {
 		return false
 	}
 
+	if !c.matchesSession(ctx, conn, databaseName) {
+		return false
+	}
+	if !c.hasInitialHead(ctx, conn) {
+		return false
+	}
+	return c.consumed.CompareAndSwap(false, true)
+}
+
+func (c *FreshBootstrapHealCapability) matchesEndpointAndDatabase(endpoint, databaseName string) bool {
+	return endpoint != "" && endpoint == c.endpoint && databaseName == c.databaseName
+}
+
+func (c *FreshBootstrapHealCapability) matchesSession(ctx context.Context, conn *sql.Conn, databaseName string) bool {
 	var currentDatabase, currentServerUUID string
 	if err := conn.QueryRowContext(ctx, "SELECT DATABASE(), @@server_uuid").
 		Scan(&currentDatabase, &currentServerUUID); err != nil {
 		return false
 	}
-	if currentDatabase != databaseName || currentDatabase != c.databaseName || currentServerUUID != c.serverUUID {
-		return false
-	}
+	return currentDatabase == databaseName && currentDatabase == c.databaseName && currentServerUUID == c.serverUUID
+}
 
+func (c *FreshBootstrapHealCapability) hasInitialHead(ctx context.Context, conn *sql.Conn) bool {
 	var ancestorCount int
 	if err := conn.QueryRowContext(ctx,
 		"SELECT COUNT(*) FROM dolt_log WHERE commit_hash = ?", c.initialHead,
 	).Scan(&ancestorCount); err != nil {
 		return false
 	}
-	if ancestorCount != 1 {
-		return false
-	}
-
-	return c.consumed.CompareAndSwap(false, true)
+	return ancestorCount == 1
 }
 
 // AcquireMigrationLock acquires the named schema migration lock on the pinned

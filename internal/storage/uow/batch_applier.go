@@ -71,6 +71,11 @@ func announceBatchApply(ctx context.Context, uw UnitOfWork, result publicops.App
 	if n == nil {
 		return
 	}
+	created := announceBatchIssueItems(ctx, n, result)
+	announceBatchDependencyItems(ctx, n, result, created)
+}
+
+func announceBatchIssueItems(ctx context.Context, n *notifyingUOW, result publicops.ApplyBatchResult) map[string]struct{} {
 	created := make(map[string]struct{}, len(result.Items))
 	for _, item := range result.Items {
 		if !item.Changed {
@@ -86,6 +91,10 @@ func announceBatchApply(ctx context.Context, uw UnitOfWork, result publicops.App
 			n.recordClose(ctx, item.IssueID)
 		}
 	}
+	return created
+}
+
+func announceBatchDependencyItems(ctx context.Context, n *notifyingUOW, result publicops.ApplyBatchResult, created map[string]struct{}) {
 	fired := make(map[string]struct{})
 	for _, item := range result.Items {
 		if item.Kind != publicops.ItemDepAdd || !item.Changed {

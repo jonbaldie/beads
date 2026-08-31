@@ -1,6 +1,11 @@
 package journalscan
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"slices"
+	"testing"
+)
 
 // TestSQLWritesBeadTable pins the DML detector the completeness guards rest on.
 // A false negative here silently disarms every guard, so the templated forms —
@@ -42,4 +47,95 @@ func TestSQLWritesBeadTable(t *testing.T) {
 			t.Errorf("SQLWritesBeadTable(%q) = true, want false", lit)
 		}
 	}
+}
+
+func TestParsePackageCapturesFunctionShape(t *testing.T) {
+	dir := t.TempDir()
+	source := `package fixture
+
+type store struct{}
+
+func helper() {}
+func (s *store) Mutate() {
+	helper()
+	s.Exec("UPDATE issues SET status = ? WHERE id = ?")
+}
+func readOnly() { helper() }
+var ignored = 1
+`
+	if err := os.WriteFile(filepath.Join(dir, "fixture.go"), []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "fixture_test.go"), []byte("package fixture\nfunc testOnly() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	fns, err := ParsePackage(dir)
+	if err != nil {
+		t.Fatalf("ParsePackage: %v", err)
+	}
+	if len(fns) != 3 {
+		t.Fatalf("ParsePackage returned keys %v, want three production functions", mapKeys(fns))
+	}
+	mutate := fns["store.Mutate"]
+	if mutate == nil {
+		t.Fatalf("missing store.Mutate in %v", mapKeys(fns))
+	}
+	if mutate.Name != "Mutate" || mutate.Recv != "store" || !mutate.Exported || !mutate.OwnBeadDML {
+		t.Fatalf("store.Mutate = %+v", mutate)
+	}
+	if !slices.Equal(mutate.IdentCalls, []string{"helper"}) || !slices.Equal(mutate.SelCalls, []string{"Exec"}) {
+		t.Fatalf("store.Mutate calls = identifiers %v, selectors %v", mutate.IdentCalls, mutate.SelCalls)
+	}
+	if got := mutate.AllCallNames(); !slices.Equal(got, []string{"helper", "Exec"}) {
+		t.Fatalf("AllCallNames() = %v", got)
+	}
+	if !mutate.CallsAnyOf(map[string]bool{"Exec": true}) || mutate.CallsAnyOf(map[string]bool{"missing": true}) {
+		t.Fatalf("CallsAnyOf did not distinguish present and absent calls")
+	}
+	if fns["readOnly"].OwnBeadDML {
+		t.Fatal("readOnly incorrectly classified as writing bead state")
+	}
+	if _, ok := fns["testOnly"]; ok {
+		t.Fatal("ParsePackage included a _test.go function")
+	}
+}
+
+func TestFixpointPropagatesAcrossFreeFunctionsAndMethods(t *testing.T) {
+	fns := map[string]*FuncInfo{
+		"seed":         {Name: "seed", OwnBeadDML: true},
+		"middle":       {Name: "middle", IdentCalls: []string{"seed"}},
+		"store.Top":    {Recv: "store", Name: "Top", SelCalls: []string{"middle"}},
+		"other.Middle": {Recv: "other", Name: "Middle", IdentCalls: []string{"seed"}},
+		"byMethodName": {Name: "byMethodName", SelCalls: []string{"Middle"}},
+		"unrelated":    {Name: "unrelated", IdentCalls: []string{"missing"}},
+	}
+	got := Fixpoint(fns, func(f *FuncInfo) bool { return f.OwnBeadDML }, func(f *FuncInfo) []string { return f.AllCallNames() })
+	for _, key := range []string{"seed", "middle", "store.Top", "other.Middle", "byMethodName"} {
+		if !got[key] {
+			t.Errorf("Fixpoint omitted %q: %v", key, got)
+		}
+	}
+	if got["unrelated"] || len(got) != 5 {
+		t.Fatalf("Fixpoint result = %v, want five related functions", got)
+	}
+}
+
+func TestParsePackageRejectsInvalidGo(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "broken.go"), []byte("package broken\nfunc"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParsePackage(dir); err == nil {
+		t.Fatal("ParsePackage accepted invalid Go source")
+	}
+}
+
+func mapKeys[V any](values map[string]V) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	return keys
 }

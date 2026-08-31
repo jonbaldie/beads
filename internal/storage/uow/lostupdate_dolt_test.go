@@ -83,16 +83,13 @@ func TestUOW_ConcurrentMergeOps_NoLostUpdate(t *testing.T) {
 
 	provider, err := NewExternalDoltServerUOWProvider(
 		ctx,
-		storeRootDir,
-		"beads_lostupdate_test",
-		logPath,
-		configfile.ExternalDoltConfig{Host: "127.0.0.1", Port: portInt},
-		"root",
-		"",
-		0,
-		0,
-		false,
-		"",
+		ExternalDoltServerUOWOptions{
+			ServerRootDir:     storeRootDir,
+			Database:          "beads_lostupdate_test",
+			ServerLogFilePath: logPath,
+			External:          configfile.ExternalDoltConfig{Host: "127.0.0.1", Port: portInt},
+			RootUser:          "root",
+		},
 	)
 	require.NoError(t, err)
 	require.NotNil(t, provider)
@@ -105,13 +102,21 @@ func TestUOW_ConcurrentMergeOps_NoLostUpdate(t *testing.T) {
 		defer uw.Close(ctx)
 		_, err = uw.IssueUseCase().CreateIssue(ctx, domain.CreateIssueParams{
 			Issue: &types.Issue{
-				ID:        issueID,
-				Title:     "lost-update target",
-				Status:    types.StatusOpen,
-				Priority:  2,
-				IssueType: types.TypeTask,
-				Notes:     "seed line",
-				Metadata:  json.RawMessage(`{"seed":"yes"}`),
+				IssueID: types.IssueID{
+					ID: issueID,
+				},
+				IssueContent: types.IssueContent{
+					Title: "lost-update target",
+					Notes: "seed line",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  2,
+					IssueType: types.TypeTask,
+				},
+				IssueMeta: types.IssueMeta{
+					Metadata: json.RawMessage(`{"seed":"yes"}`),
+				},
 			},
 			ExplicitID: issueID,
 		}, "seeder")

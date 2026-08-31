@@ -57,14 +57,13 @@ func TestNewDoltServerUOWProvider_ValidationErrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			p, err := NewDoltServerUOWProvider(
 				context.Background(),
-				t.TempDir(),
-				tc.database,
-				"", "", tc.backend,
-				tc.rootUser, "", tc.doltBin,
-				0,
-				0,
-				false,
-				"",
+				DoltServerUOWOptions{
+					ServerRootDir: t.TempDir(),
+					Database:      tc.database,
+					Backend:       tc.backend,
+					RootUser:      tc.rootUser,
+					DoltBinExec:   tc.doltBin,
+				},
 			)
 			assert.Nil(t, p)
 			require.Error(t, err)
@@ -99,18 +98,15 @@ func TestNewDoltServerUOWProvider_HappyPath(t *testing.T) {
 
 	provider, err := NewDoltServerUOWProvider(
 		context.Background(),
-		storeRootDir,
-		"beads",
-		logPath,
-		cfgPath,
-		proxy.BackendLocalServer,
-		"root",
-		"",
-		bin,
-		0,
-		0,
-		false,
-		"",
+		DoltServerUOWOptions{
+			ServerRootDir:        storeRootDir,
+			Database:             "beads",
+			ServerLogFilePath:    logPath,
+			ServerConfigFilePath: cfgPath,
+			Backend:              proxy.BackendLocalServer,
+			RootUser:             "root",
+			DoltBinExec:          bin,
+		},
 	)
 
 	require.NoError(t, err)
@@ -157,18 +153,15 @@ func TestNewDoltServerUOWProvider_ConcurrentInstantiation(t *testing.T) {
 			defer wg.Done()
 			p, err := NewDoltServerUOWProvider(
 				context.Background(),
-				storeRootDir,
-				"beads",
-				logPath,
-				cfgPath,
-				proxy.BackendLocalServer,
-				"root",
-				"",
-				bin,
-				0,
-				0,
-				false,
-				"",
+				DoltServerUOWOptions{
+					ServerRootDir:        storeRootDir,
+					Database:             "beads",
+					ServerLogFilePath:    logPath,
+					ServerConfigFilePath: cfgPath,
+					Backend:              proxy.BackendLocalServer,
+					RootUser:             "root",
+					DoltBinExec:          bin,
+				},
 			)
 			results[i] = result{provider: p, err: err}
 		}()

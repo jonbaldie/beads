@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/jonbaldie/beads/internal/storage/dberrors"
 )
@@ -23,14 +24,16 @@ const AllowRemoteMigrateEnv = "BD_ALLOW_REMOTE_MIGRATE"
 // AllowRemoteMigrateEnv. Set by SetForceAllowRemoteMigrate before the store
 // opens; unlike os.Setenv(AllowRemoteMigrateEnv), it cannot leak into child
 // processes (git hooks, dolt subprocesses).
-var forceAllowRemoteMigrate bool
+type remoteMigrateOverride struct{ enabled atomic.Bool }
+
+var forceAllowRemoteMigrate = &remoteMigrateOverride{}
 
 // SetForceAllowRemoteMigrate sets (or clears) the programmatic override that
 // allows a pending schema migration on a remote-backed database. It is called
 // by `bd migrate --force` / `bd migrate schema --force` in the root
 // PersistentPreRunE, before both autoMigrateOnVersionBump and the main store
 // open. External test packages may reset it to false after each test case.
-func SetForceAllowRemoteMigrate(v bool) { forceAllowRemoteMigrate = v }
+func SetForceAllowRemoteMigrate(v bool) { forceAllowRemoteMigrate.enabled.Store(v) }
 
 // RemoteMigrateGateError is returned when bd is about to auto-apply pending
 // schema migrations to an existing database that has a remote configured.
@@ -397,27 +400,54 @@ func CheckRemoteMigrateGateForRemoteWithRemoteCheckAndAdopt(ctx context.Context,
 }
 
 func checkRemoteMigrateGate(ctx context.Context, db DBConn, remoteName string, extraHasRemote func() bool, adopt *FastForwardAdopter) error {
+	state, active, err := readRemoteMigrateState(ctx, db, extraHasRemote)
+	if err != nil {
+		return err
+	}
+	if !active {
+		return nil
+	}
+
+	unrecognizedEnv, allowed := remoteMigrateEscapeHatch(state.pending)
+	if allowed {
+		return nil
+	}
+
+	outcome := resolveSmartRemoteMigrateGate(ctx, db, state, remoteName, adopt, unrecognizedEnv)
+	if outcome.handled {
+		return outcome.err
+	}
+	return newRemoteMigrateGateError(state, unrecognizedEnv, outcome)
+}
+
+type remoteMigrateState struct {
+	current int
+	latest  int
+	pending int
+}
+
+func readRemoteMigrateState(ctx context.Context, db DBConn, extraHasRemote func() bool) (remoteMigrateState, bool, error) {
 	// CurrentVersion treats a missing schema_migrations table as version 0, so a
 	// brand-new database falls through the current==0 check below — nothing to fork.
 	current, err := CurrentVersion(ctx, db)
 	if err != nil {
-		return fmt.Errorf("remote-migrate gate: read current version: %w", err)
+		return remoteMigrateState{}, false, fmt.Errorf("remote-migrate gate: read current version: %w", err)
 	}
 	if current == 0 {
-		return nil // fresh database — nothing to fork
+		return remoteMigrateState{}, false, nil // fresh database — nothing to fork
 	}
 
 	pending, err := PendingVersions(ctx, db)
 	if err != nil {
-		return fmt.Errorf("remote-migrate gate: read pending versions: %w", err)
+		return remoteMigrateState{}, false, fmt.Errorf("remote-migrate gate: read pending versions: %w", err)
 	}
 	if len(pending) == 0 {
-		return nil // already current — nothing to migrate
+		return remoteMigrateState{}, false, nil // already current — nothing to migrate
 	}
 
 	hasRemote, err := anyDoltRemoteConfigured(ctx, db)
 	if err != nil {
-		return fmt.Errorf("remote-migrate gate: read remotes: %w", err)
+		return remoteMigrateState{}, false, fmt.Errorf("remote-migrate gate: read remotes: %w", err)
 	}
 	// dolt_remotes can read empty even when a remote is configured: a freshly
 	// (auto-)started server has not yet synced CLI remotes from .dolt/config
@@ -426,20 +456,23 @@ func checkRemoteMigrateGate(ctx context.Context, db DBConn, remoteName string, e
 		hasRemote = extraHasRemote()
 	}
 	if !hasRemote {
-		return nil // no remote — no cross-clone fork risk
+		return remoteMigrateState{}, false, nil // no remote — no cross-clone fork risk
 	}
+	return remoteMigrateState{current: current, latest: LatestVersion(), pending: len(pending)}, true, nil
+}
 
+func remoteMigrateEscapeHatch(pending int) (string, bool) {
 	// Programmatic override — set by `bd migrate --force` / `bd migrate schema
 	// --force` in the root PersistentPreRunE before both
 	// autoMigrateOnVersionBump and the main store open. Process-local by
 	// design: unlike os.Setenv(AllowRemoteMigrateEnv), it cannot leak into
 	// child processes (git hooks, dolt subprocesses). Consulted here — only
 	// once the gate would otherwise fire — so normal opens produce no noise.
-	if forceAllowRemoteMigrate {
+	if forceAllowRemoteMigrate.enabled.Load() {
 		fmt.Fprintf(os.Stderr,
 			"Warning: applying %d pending schema migration(s) to a remote-backed database (bd migrate --force); only one clone should migrate, then `bd dolt push`\n",
-			len(pending))
-		return nil
+			pending)
+		return "", true
 	}
 
 	// Escape hatch — consulted only once the gate would actually fire, so an
@@ -447,22 +480,29 @@ func checkRemoteMigrateGate(ctx context.Context, db DBConn, remoteName string, e
 	// open with nothing pending or no remote (bd-6dnrw.34). Any boolean true
 	// ("1", "true", "TRUE", ...) unlocks; a set-but-unparseable value is
 	// surfaced in the gate error instead of silently staying locked.
-	unrecognizedEnv := ""
 	if v := os.Getenv(AllowRemoteMigrateEnv); v != "" {
 		if allowed, perr := strconv.ParseBool(v); perr == nil {
 			if allowed {
 				fmt.Fprintf(os.Stderr,
 					"Warning: applying %d pending schema migration(s) to a remote-backed database (%s=%s); only one clone should migrate, then `bd dolt push`\n",
-					len(pending), AllowRemoteMigrateEnv, v)
-				return nil
+					pending, AllowRemoteMigrateEnv, v)
+				return "", true
 			}
 		} else {
-			unrecognizedEnv = v
+			return v, false
 		}
 	}
+	return "", false
+}
 
-	latest := LatestVersion()
+type smartRemoteMigrateOutcome struct {
+	handled                  bool
+	err                      error
+	fallbackReason           string
+	unrecognizedSmartGateEnv string
+}
 
+func resolveSmartRemoteMigrateGate(ctx context.Context, db DBConn, state remoteMigrateState, remoteName string, adopt *FastForwardAdopter, unrecognizedEnv string) smartRemoteMigrateOutcome {
 	// Smart gate (#4516): on by default, BD_SMART_GATE=0 opts out. Once the
 	// blunt gate would fire and the designated-migrator escape hatch is not
 	// set, consult the remote's cached schema state and auto-resolve the one
@@ -477,101 +517,78 @@ func checkRemoteMigrateGate(ctx context.Context, db DBConn, remoteName string, e
 	// from "opted out" apart from "unparseable BD_SMART_GATE value" — every
 	// path used to produce the byte-identical #4515 text (gastownhall/beads#4551
 	// follow-up).
-	fallbackReason := ""
-	unrecognizedSmartGateEnv := ""
 	if SmartGateEnabled() {
-		decision, skew, ref, atLatest := routeSmartGate(ctx, db, current, latest, remoteName, adopt)
-		switch decision {
-		case smartAutoMigrate:
-			smartGateAllowMigrate(len(pending), current)
-			return nil
-		case smartAdopt:
-			return &RemoteMigrateGateError{
-				CurrentVersion:  current,
-				LatestVersion:   latest,
-				Pending:         len(pending),
-				UnrecognizedEnv: unrecognizedEnv,
-				Decision:        gateDecisionAdopt,
-			}
-		case smartAdoptFastForward:
-			// mybd-ae1i piece 3 (+ follow-up fix): turn a detected
-			// smartAdoptFastForward verdict into action, but ONLY when the
-			// fast-forward would land exactly at this binary's latest
-			// migration (atLatest). Landing short of latest would leave
-			// MigrateUp to apply the remainder unconditionally in place
-			// right after, with no gate re-evaluation — reintroducing the
-			// #4259 fork risk this gate exists to prevent. Landing past
-			// latest would mean a newer binary already migrated the remote
-			// further than this one understands (#4135/#4137 class).
-			if atLatest && canAutoFastForward(adopt) {
-				// attemptFastForward re-verifies the ancestry/clean/
-				// remoteMax-at-latest preconditions in this SAME db session
-				// immediately before the write (TOCTOU guard) and performs
-				// CALL DOLT_MERGE('--ff-only', ref) — never forcing it.
-				if attemptFastForward(ctx, db, ref, adopt, latest) {
-					smartGateNotifyFastForward(current, latest)
-					return nil
-				}
-				// A re-check miss or the merge itself refused (a dirty
-				// working set raced in, non-fast-forward, concurrent
-				// writer): the loss-free guarantee no longer holds
-				// confidently — degrade to the plain destructive adopt,
-				// never adopt-ff.
-				return &RemoteMigrateGateError{
-					CurrentVersion:  current,
-					LatestVersion:   latest,
-					Pending:         len(pending),
-					UnrecognizedEnv: unrecognizedEnv,
-					Decision:        gateDecisionAdopt,
-				}
-			}
-			// Disqualified from auto-execution — read-only store, no
-			// FastForward callback wired, or the fast-forward would not
-			// land exactly at latest — but routeSmartGate already proved
-			// this clone a strict ancestor of ref with a clean working set,
-			// so adopting is still loss-free. Give the operator the
-			// accurate adopt-ff directive instead of the generic
-			// destructive-adopt text.
-			return &RemoteMigrateGateError{
-				CurrentVersion:  current,
-				LatestVersion:   latest,
-				Pending:         len(pending),
-				UnrecognizedEnv: unrecognizedEnv,
-				Decision:        gateDecisionAdoptFastForward,
-			}
-		case smartForkSkew:
-			return &RemoteMigrateGateError{
-				CurrentVersion:  current,
-				LatestVersion:   latest,
-				Pending:         len(pending),
-				UnrecognizedEnv: unrecognizedEnv,
-				Decision:        gateDecisionForkSkew,
-				SkewVersions:    skew,
-			}
-		case smartBelowFloor:
-			fallbackReason = fallbackReasonBelowFloor
-		case smartUndetermined:
-			fallbackReason = fallbackReasonUnreadableState
-		}
-		// An unparseable BD_SMART_GATE value defaults to enabled (same as
-		// unset), so routing above still ran — but it is a more actionable
-		// fact for the operator than the technical routing outcome, so it
-		// takes priority as the surfaced reason.
-		if envState, envValue := smartGateEnvValue(); envState == smartGateEnvUnparseable {
-			fallbackReason = fallbackReasonUnparseableEnv
-			unrecognizedSmartGateEnv = envValue
-		}
-	} else {
-		fallbackReason = fallbackReasonOptedOut
+		decision, skew, ref, atLatest := routeSmartGate(ctx, db, state.current, state.latest, remoteName, adopt)
+		return handleSmartRemoteMigrateDecision(ctx, db, state, adopt, unrecognizedEnv, decision, skew, ref, atLatest)
 	}
+	return smartRemoteMigrateOutcome{fallbackReason: fallbackReasonOptedOut}
+}
 
+func handleSmartRemoteMigrateDecision(ctx context.Context, db DBConn, state remoteMigrateState, adopt *FastForwardAdopter, unrecognizedEnv string, decision smartGateDecision, skew []int, ref string, atLatest bool) smartRemoteMigrateOutcome {
+	switch decision {
+	case smartAutoMigrate:
+		smartGateAllowMigrate(state.pending, state.current)
+		return smartRemoteMigrateOutcome{handled: true}
+	case smartAdopt:
+		return smartRemoteMigrateOutcome{handled: true, err: remoteMigrateDecisionError(state, unrecognizedEnv, gateDecisionAdopt, nil)}
+	case smartAdoptFastForward:
+		return handleSmartAdoptFastForward(ctx, db, state, adopt, unrecognizedEnv, ref, atLatest)
+	case smartForkSkew:
+		return smartRemoteMigrateOutcome{handled: true, err: remoteMigrateDecisionError(state, unrecognizedEnv, gateDecisionForkSkew, skew)}
+	case smartBelowFloor:
+		return addSmartGateEnvHint(smartRemoteMigrateOutcome{fallbackReason: fallbackReasonBelowFloor})
+	case smartUndetermined:
+		return addSmartGateEnvHint(smartRemoteMigrateOutcome{fallbackReason: fallbackReasonUnreadableState})
+	default:
+		return addSmartGateEnvHint(smartRemoteMigrateOutcome{fallbackReason: fallbackReasonUnreadableState})
+	}
+}
+
+func handleSmartAdoptFastForward(ctx context.Context, db DBConn, state remoteMigrateState, adopt *FastForwardAdopter, unrecognizedEnv, ref string, atLatest bool) smartRemoteMigrateOutcome {
+	// The automatic merge is allowed only when it lands exactly at this
+	// binary's latest migration. A short landing would leave MigrateUp to
+	// apply the remainder without re-evaluating this gate.
+	if atLatest && canAutoFastForward(adopt) && attemptFastForward(ctx, db, ref, adopt, state.latest) {
+		smartGateNotifyFastForward(state.current, state.latest)
+		return smartRemoteMigrateOutcome{handled: true}
+	}
+	decision := gateDecisionAdoptFastForward
+	if atLatest && canAutoFastForward(adopt) {
+		decision = gateDecisionAdopt
+	}
+	return smartRemoteMigrateOutcome{handled: true, err: remoteMigrateDecisionError(state, unrecognizedEnv, decision, nil)}
+}
+
+func addSmartGateEnvHint(outcome smartRemoteMigrateOutcome) smartRemoteMigrateOutcome {
+	// An unparseable BD_SMART_GATE value defaults to enabled (same as unset),
+	// so routing above still ran — but it is more actionable than the technical
+	// routing outcome and takes priority as the surfaced reason.
+	if envState, envValue := smartGateEnvValue(); envState == smartGateEnvUnparseable {
+		outcome.fallbackReason = fallbackReasonUnparseableEnv
+		outcome.unrecognizedSmartGateEnv = envValue
+	}
+	return outcome
+}
+
+func remoteMigrateDecisionError(state remoteMigrateState, unrecognizedEnv, decision string, skew []int) error {
 	return &RemoteMigrateGateError{
-		CurrentVersion:           current,
-		LatestVersion:            latest,
-		Pending:                  len(pending),
+		CurrentVersion:  state.current,
+		LatestVersion:   state.latest,
+		Pending:         state.pending,
+		UnrecognizedEnv: unrecognizedEnv,
+		Decision:        decision,
+		SkewVersions:    skew,
+	}
+}
+
+func newRemoteMigrateGateError(state remoteMigrateState, unrecognizedEnv string, outcome smartRemoteMigrateOutcome) error {
+	return &RemoteMigrateGateError{
+		CurrentVersion:           state.current,
+		LatestVersion:            state.latest,
+		Pending:                  state.pending,
 		UnrecognizedEnv:          unrecognizedEnv,
-		FallbackReason:           fallbackReason,
-		UnrecognizedSmartGateEnv: unrecognizedSmartGateEnv,
+		FallbackReason:           outcome.fallbackReason,
+		UnrecognizedSmartGateEnv: outcome.unrecognizedSmartGateEnv,
 	}
 }
 

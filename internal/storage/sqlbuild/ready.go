@@ -91,34 +91,62 @@ type ReadyWorkWhereInputs struct {
 // aliases are out of scope. See the SearchCountsSQL doc comment for why a
 // violation fails loud.
 func BuildReadyWorkWhere(filter types.WorkFilter, tables FilterTables, in ReadyWorkWhereInputs) (string, []any, error) {
-	var statusClause string
-	var args []any
+	st := newReadyWhereState(tables)
+	st.addStatus(filter)
+	st.addPinnedBlocked()
+	st.addEphemeral(filter)
+	st.addLeaves(filter)
+	st.addIdentity(filter)
+	st.addDefer(filter, in)
+	st.addLabels(filter)
+	st.addParent(filter, in)
+	st.addMolecule(filter)
+	return st.finish(filter)
+}
+
+type readyWhereState struct {
+	clauses []string
+	args    []any
+	tables  FilterTables
+}
+
+func newReadyWhereState(tables FilterTables) *readyWhereState {
+	return &readyWhereState{tables: tables}
+}
+
+func (st *readyWhereState) addStatus(filter types.WorkFilter) {
 	switch {
 	case filter.Status != "":
-		statusClause = "status = ?"
-		args = append(args, string(filter.Status))
+		st.clauses = append(st.clauses, "status = ?")
+		st.args = append(st.args, string(filter.Status))
 	case len(filter.Statuses) > 0:
 		ph, statusArgs := InPlaceholders(filter.Statuses)
-		statusClause = fmt.Sprintf("status IN (%s)", ph)
-		args = append(args, statusArgs...)
+		st.clauses = append(st.clauses, fmt.Sprintf("status IN (%s)", ph))
+		st.args = append(st.args, statusArgs...)
 	default:
-		statusClause = "status IN ('open', 'in_progress')"
+		st.clauses = append(st.clauses, "status IN ('open', 'in_progress')")
 	}
-	whereClauses := []string{
-		statusClause,
-		"(pinned = 0 OR pinned IS NULL)",
-		"is_blocked = 0",
-	}
-	if !filter.IncludeEphemeral {
-		whereClauses = append(whereClauses, "(ephemeral = 0 OR ephemeral IS NULL)")
-	}
+}
 
-	if filter.LeavesOnly {
-		// Prefer leaves: claim a child, not the parent epic, while children are open.
-		// Qualify the outer id. Dolt treats a bare id as ambiguous once _leaf_c
-		// and _leaf_d are in scope, and claim then fails with Error 1105.
-		outerID := tables.Main + ".id"
-		whereClauses = append(whereClauses, fmt.Sprintf(`NOT EXISTS (
+func (st *readyWhereState) addPinnedBlocked() {
+	st.clauses = append(st.clauses, "(pinned = 0 OR pinned IS NULL)", "is_blocked = 0")
+}
+
+func (st *readyWhereState) addEphemeral(filter types.WorkFilter) {
+	if !filter.IncludeEphemeral {
+		st.clauses = append(st.clauses, "(ephemeral = 0 OR ephemeral IS NULL)")
+	}
+}
+
+func (st *readyWhereState) addLeaves(filter types.WorkFilter) {
+	if !filter.LeavesOnly {
+		return
+	}
+	// Prefer leaves: claim a child, not the parent epic, while children are open.
+	// Qualify the outer id. Dolt treats a bare id as ambiguous once _leaf_c
+	// and _leaf_d are in scope, and claim then fails with Error 1105.
+	outerID := st.tables.Main + ".id"
+	st.clauses = append(st.clauses, fmt.Sprintf(`NOT EXISTS (
 			SELECT 1 FROM %s _leaf_d
 			INNER JOIN %s _leaf_c ON _leaf_c.id = _leaf_d.issue_id
 			WHERE _leaf_d.type = 'parent-child'
@@ -128,46 +156,51 @@ func BuildReadyWorkWhere(filter types.WorkFilter, tables FilterTables, in ReadyW
 			SELECT 1 FROM %s _leaf_dot
 			WHERE _leaf_dot.id LIKE CONCAT(%s, '.%%')
 			  AND _leaf_dot.status NOT IN ('closed', 'tombstone')
-		)`, tables.Dependencies, tables.Main, qualifiedDepTarget("_leaf_d"), outerID, tables.Main, outerID))
-	}
+		)`, st.tables.Dependencies, st.tables.Main, qualifiedDepTarget("_leaf_d"), outerID, st.tables.Main, outerID))
+}
 
+func (st *readyWhereState) addIdentity(filter types.WorkFilter) {
 	if filter.Priority != nil {
-		whereClauses = append(whereClauses, "priority = ?")
-		args = append(args, *filter.Priority)
+		st.clauses = append(st.clauses, "priority = ?")
+		st.args = append(st.args, *filter.Priority)
 	}
 	if filter.Type != "" {
-		whereClauses = append(whereClauses, "issue_type = ?")
-		args = append(args, filter.Type)
+		st.clauses = append(st.clauses, "issue_type = ?")
+		st.args = append(st.args, filter.Type)
 	} else {
 		ph, a := InPlaceholders(ReadyWorkExcludeTypes(filter.ExcludeTypes))
-		whereClauses = append(whereClauses, fmt.Sprintf("issue_type NOT IN (%s)", ph))
-		args = append(args, a...)
+		st.clauses = append(st.clauses, fmt.Sprintf("issue_type NOT IN (%s)", ph))
+		st.args = append(st.args, a...)
 	}
 	if filter.Unassigned {
-		whereClauses = append(whereClauses, "(assignee IS NULL OR assignee = '')")
+		st.clauses = append(st.clauses, "(assignee IS NULL OR assignee = '')")
 	} else if filter.Assignee != nil {
-		whereClauses = append(whereClauses, "assignee = ?")
-		args = append(args, *filter.Assignee)
+		st.clauses = append(st.clauses, "assignee = ?")
+		st.args = append(st.args, *filter.Assignee)
 	}
+}
 
-	if !filter.IncludeDeferred {
-		whereClauses = append(whereClauses, "(defer_until IS NULL OR defer_until <= UTC_TIMESTAMP())")
-		for start := 0; start < len(in.DeferredChildIDs); start += QueryBatchSize {
-			end := start + QueryBatchSize
-			if end > len(in.DeferredChildIDs) {
-				end = len(in.DeferredChildIDs)
-			}
-			placeholders, batchArgs := InPlaceholders(in.DeferredChildIDs[start:end])
-			args = append(args, batchArgs...)
-			whereClauses = append(whereClauses, fmt.Sprintf("id NOT IN (%s)", placeholders))
-		}
+func (st *readyWhereState) addDefer(filter types.WorkFilter, in ReadyWorkWhereInputs) {
+	if filter.IncludeDeferred {
+		return
 	}
-
-	if len(filter.Labels) > 0 {
-		for _, label := range filter.Labels {
-			whereClauses = append(whereClauses, fmt.Sprintf("id IN (SELECT issue_id FROM %s WHERE label = ?)", tables.Labels))
-			args = append(args, label)
+	st.clauses = append(st.clauses, "(defer_until IS NULL OR defer_until <= UTC_TIMESTAMP())")
+	nDeferred := len(in.DeferredChildIDs)
+	for start := 0; start < nDeferred; start += QueryBatchSize {
+		end := start + QueryBatchSize
+		if end > len(in.DeferredChildIDs) {
+			end = len(in.DeferredChildIDs)
 		}
+		placeholders, batchArgs := InPlaceholders(in.DeferredChildIDs[start:end])
+		st.args = append(st.args, batchArgs...)
+		st.clauses = append(st.clauses, fmt.Sprintf("id NOT IN (%s)", placeholders))
+	}
+}
+
+func (st *readyWhereState) addLabels(filter types.WorkFilter) {
+	for _, label := range filter.Labels {
+		st.clauses = append(st.clauses, fmt.Sprintf("id IN (SELECT issue_id FROM %s WHERE label = ?)", st.tables.Labels))
+		st.args = append(st.args, label)
 	}
 	// LabelsAny is an OR-set: an issue qualifies if it carries AT LEAST ONE of
 	// the labels. Previously this clause was absent entirely, so --label-any was
@@ -178,56 +211,63 @@ func BuildReadyWorkWhere(filter types.WorkFilter, tables FilterTables, in ReadyW
 		placeholders := make([]string, len(filter.LabelsAny))
 		for i, label := range filter.LabelsAny {
 			placeholders[i] = "?"
-			args = append(args, label)
+			st.args = append(st.args, label)
 		}
-		whereClauses = append(whereClauses, fmt.Sprintf("id IN (SELECT issue_id FROM %s WHERE label IN (%s))", tables.Labels, strings.Join(placeholders, ", ")))
+		st.clauses = append(st.clauses, fmt.Sprintf("id IN (SELECT issue_id FROM %s WHERE label IN (%s))", st.tables.Labels, strings.Join(placeholders, ", ")))
 	}
 	if len(filter.ExcludeLabels) > 0 {
 		placeholders := make([]string, len(filter.ExcludeLabels))
 		for i, label := range filter.ExcludeLabels {
 			placeholders[i] = "?"
-			args = append(args, label)
+			st.args = append(st.args, label)
 		}
-		whereClauses = append(whereClauses, fmt.Sprintf("id NOT IN (SELECT issue_id FROM %s WHERE label IN (%s))", tables.Labels, strings.Join(placeholders, ", ")))
+		st.clauses = append(st.clauses, fmt.Sprintf("id NOT IN (SELECT issue_id FROM %s WHERE label IN (%s))", st.tables.Labels, strings.Join(placeholders, ", ")))
 	}
 	if filter.LabelPattern != "" {
-		whereClauses = append(whereClauses, fmt.Sprintf("id IN (SELECT issue_id FROM %s WHERE label LIKE ? ESCAPE '|')", tables.Labels))
-		args = append(args, globToLikePattern(filter.LabelPattern))
+		st.clauses = append(st.clauses, fmt.Sprintf("id IN (SELECT issue_id FROM %s WHERE label LIKE ? ESCAPE '|')", st.tables.Labels))
+		st.args = append(st.args, globToLikePattern(filter.LabelPattern))
 	}
 	if filter.LabelRegex != "" {
-		whereClauses = append(whereClauses, fmt.Sprintf("id IN (SELECT issue_id FROM %s WHERE label REGEXP ?)", tables.Labels))
-		args = append(args, filter.LabelRegex)
+		st.clauses = append(st.clauses, fmt.Sprintf("id IN (SELECT issue_id FROM %s WHERE label REGEXP ?)", st.tables.Labels))
+		st.args = append(st.args, filter.LabelRegex)
 	}
+}
 
+func (st *readyWhereState) addParent(filter types.WorkFilter, in ReadyWorkWhereInputs) {
 	// Parent filtering: return all transitive descendants of parentID.
 	// GH#3396: a one-hop subquery silently dropped grandchildren despite the
 	// help text and WorkFilter.ParentID godoc both promising recursion.
-	if filter.ParentID != nil {
-		parentID := *filter.ParentID
-		parentClauses := []string{fmt.Sprintf("(id LIKE CONCAT(?, '.%%') AND id NOT IN (SELECT issue_id FROM %s WHERE type = 'parent-child'))", tables.Dependencies)}
-		args = append(args, parentID)
-		for start := 0; start < len(in.ParentDescendantIDs); start += QueryBatchSize {
-			end := start + QueryBatchSize
-			if end > len(in.ParentDescendantIDs) {
-				end = len(in.ParentDescendantIDs)
-			}
-			placeholders, batchArgs := InPlaceholders(in.ParentDescendantIDs[start:end])
-			parentClauses = append(parentClauses, fmt.Sprintf("id IN (%s)", placeholders))
-			args = append(args, batchArgs...)
+	if filter.ParentID == nil {
+		return
+	}
+	parentID := *filter.ParentID
+	parentClauses := []string{fmt.Sprintf("(id LIKE CONCAT(?, '.%%') AND id NOT IN (SELECT issue_id FROM %s WHERE type = 'parent-child'))", st.tables.Dependencies)}
+	st.args = append(st.args, parentID)
+	nDescendants := len(in.ParentDescendantIDs)
+	for start := 0; start < nDescendants; start += QueryBatchSize {
+		end := start + QueryBatchSize
+		if end > len(in.ParentDescendantIDs) {
+			end = len(in.ParentDescendantIDs)
 		}
-		whereClauses = append(whereClauses, "("+strings.Join(parentClauses, " OR ")+")")
+		placeholders, batchArgs := InPlaceholders(in.ParentDescendantIDs[start:end])
+		parentClauses = append(parentClauses, fmt.Sprintf("id IN (%s)", placeholders))
+		st.args = append(st.args, batchArgs...)
 	}
+	st.clauses = append(st.clauses, "("+strings.Join(parentClauses, " OR ")+")")
+}
 
-	if filter.MoleculeID != "" {
-		whereClauses = append(whereClauses, fmt.Sprintf("(id IN (SELECT issue_id FROM %s WHERE type = 'parent-child' AND %s = ?) OR (id LIKE CONCAT(?, '.%%') AND id NOT IN (SELECT issue_id FROM %s WHERE type = 'parent-child')))", tables.Dependencies, DepTargetExpr, tables.Dependencies))
-		args = append(args, filter.MoleculeID, filter.MoleculeID)
+func (st *readyWhereState) addMolecule(filter types.WorkFilter) {
+	if filter.MoleculeID == "" {
+		return
 	}
+	st.clauses = append(st.clauses, fmt.Sprintf("(id IN (SELECT issue_id FROM %s WHERE type = 'parent-child' AND %s = ?) OR (id LIKE CONCAT(?, '.%%') AND id NOT IN (SELECT issue_id FROM %s WHERE type = 'parent-child')))", st.tables.Dependencies, DepTargetExpr, st.tables.Dependencies))
+	st.args = append(st.args, filter.MoleculeID, filter.MoleculeID)
+}
 
-	var err error
-	whereClauses, args, err = AppendMetadataClauses(whereClauses, args, filter.HasMetadataKey, filter.MetadataFields)
+func (st *readyWhereState) finish(filter types.WorkFilter) (string, []any, error) {
+	whereClauses, args, err := AppendMetadataClauses(st.clauses, st.args, filter.HasMetadataKey, filter.MetadataFields)
 	if err != nil {
 		return "", nil, err
 	}
-
 	return "WHERE " + strings.Join(whereClauses, " AND "), args, nil
 }

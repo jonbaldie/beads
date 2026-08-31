@@ -176,42 +176,55 @@ func GetCommentCountsInTx(ctx context.Context, tx *sql.Tx, issueIDs []string) (m
 		if len(pair.ids) == 0 {
 			continue
 		}
-		for start := 0; start < len(pair.ids); start += queryBatchSize {
-			end := start + queryBatchSize
-			if end > len(pair.ids) {
-				end = len(pair.ids)
-			}
-			batch := pair.ids[start:end]
-			placeholders := make([]string, len(batch))
-			args := make([]any, len(batch))
-			for i, id := range batch {
-				placeholders[i] = "?"
-				args[i] = id
-			}
-			//nolint:gosec // G201: pair.table is hardcoded
-			rows, err := tx.QueryContext(ctx, fmt.Sprintf(
-				`SELECT issue_id, COUNT(*) as cnt FROM %s WHERE issue_id IN (%s) GROUP BY issue_id`,
-				pair.table, strings.Join(placeholders, ",")), args...)
-			if err != nil {
-				return nil, fmt.Errorf("get comment counts from %s: %w", pair.table, err)
-			}
-			for rows.Next() {
-				var issueID string
-				var count int
-				if err := rows.Scan(&issueID, &count); err != nil {
-					_ = rows.Close()
-					return nil, fmt.Errorf("get comment counts: scan: %w", err)
-				}
-				result[issueID] = count
-			}
-			_ = rows.Close()
-			if err := rows.Err(); err != nil {
-				return nil, fmt.Errorf("get comment counts: rows: %w", err)
-			}
+		tableCounts, err := commentCountsForTable(ctx, tx, pair.table, pair.ids)
+		if err != nil {
+			return nil, err
+		}
+		for issueID, count := range tableCounts {
+			result[issueID] = count
 		}
 	}
 
 	return result, nil
+}
+
+func commentCountsForTable(ctx context.Context, tx *sql.Tx, table string, issueIDs []string) (map[string]int, error) {
+	counts := make(map[string]int)
+	totalIssueIDs := len(issueIDs)
+	for start := 0; start < totalIssueIDs; start += queryBatchSize {
+		end := start + queryBatchSize
+		if end > totalIssueIDs {
+			end = totalIssueIDs
+		}
+		batch := issueIDs[start:end]
+		placeholders := make([]string, len(batch))
+		args := make([]any, len(batch))
+		for i, id := range batch {
+			placeholders[i] = "?"
+			args[i] = id
+		}
+		//nolint:gosec // G201: table is selected from hardcoded comment tables.
+		rows, err := tx.QueryContext(ctx, fmt.Sprintf(
+			`SELECT issue_id, COUNT(*) as cnt FROM %s WHERE issue_id IN (%s) GROUP BY issue_id`,
+			table, strings.Join(placeholders, ",")), args...)
+		if err != nil {
+			return nil, fmt.Errorf("get comment counts from %s: %w", table, err)
+		}
+		for rows.Next() {
+			var issueID string
+			var count int
+			if err := rows.Scan(&issueID, &count); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("get comment counts: scan: %w", err)
+			}
+			counts[issueID] = count
+		}
+		_ = rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("get comment counts: rows: %w", err)
+		}
+	}
+	return counts, nil
 }
 
 // AddIssueCommentInTx adds a structured comment to an issue within a transaction.

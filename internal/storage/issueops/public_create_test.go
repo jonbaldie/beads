@@ -16,10 +16,10 @@ import (
 
 func TestPreparePublicCreateRequestNormalizesAcceptedFieldsAndIgnoresDerivedFields(t *testing.T) {
 	createdAt := time.Date(2026, 7, 30, 12, 0, 0, 0, time.FixedZone("offset", -7*60*60))
-	request := publicops.CreateRequest{Actor: "actor", Issue: &publicops.Issue{
-		ID: "bd-public-create", Title: "title", Status: "custom", Priority: 2, IssueType: "custom-type",
-		Metadata: json.RawMessage(`{"key":true}`), ContentHash: "caller-hash", RowVersion: 42,
-		LeaseExpiresAt: &createdAt, CompactionLevel: 4, IDPrefix: "ignored", PrefixOverride: "ignored", IsLitePartial: true,
+	request := publicops.CreateRequest{Actor: "actor", Issue: &publicops.Issue{IssueID: types.IssueID{ID: "bd-public-create",
+		ContentHash: "caller-hash"}, IssueContent: types.IssueContent{Title: "title"}, IssueWorkflow: types.IssueWorkflow{Status: "custom", Priority: 2, IssueType: "custom-type"}, IssueMeta: types.IssueMeta{Metadata: json.RawMessage(`{"key":true}`),
+		CompactionLevel: 4}, IssueLease: types.IssueLease{RowVersion: 42,
+		LeaseExpiresAt: &createdAt}, IssueGraph: types.IssueGraph{IDPrefix: "ignored", PrefixOverride: "ignored"}, IssueEvent: types.IssueEvent{IsLitePartial: true},
 	}}
 
 	prepared, err := PreparePublicCreateRequest(request, PublicCreateContext{
@@ -34,10 +34,7 @@ func TestPreparePublicCreateRequestNormalizesAcceptedFieldsAndIgnoresDerivedFiel
 }
 
 func TestPreparePublicCreateRequestCarriesSourceRepo(t *testing.T) {
-	prepared, err := PreparePublicCreateRequest(publicops.CreateRequest{Actor: "actor", Issue: &publicops.Issue{
-		ID: "bd-source-repo", Title: "title", IssueType: types.TypeTask, Priority: 2,
-		SourceSystem: "github", SourceRepo: "other/repo",
-	}}, PublicCreateContext{IssuePrefix: "bd"})
+	prepared, err := PreparePublicCreateRequest(publicops.CreateRequest{Actor: "actor", Issue: &publicops.Issue{IssueID: types.IssueID{ID: "bd-source-repo"}, IssueContent: types.IssueContent{Title: "title"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}, IssueMeta: types.IssueMeta{SourceSystem: "github"}, IssueGraph: types.IssueGraph{SourceRepo: "other/repo"}}}, PublicCreateContext{IssuePrefix: "bd"})
 	if err != nil {
 		t.Fatalf("PreparePublicCreateRequest() error = %v", err)
 	}
@@ -71,8 +68,11 @@ func TestPublicCreateIssueFieldClassificationIsComplete(t *testing.T) {
 	}
 	rejected := map[string]bool{"Dependencies": true, "Comments": true}
 	issueType := reflect.TypeFor[types.Issue]()
-	for field := range issueType.NumField() {
-		name := issueType.Field(field).Name
+	for _, field := range reflect.VisibleFields(issueType) {
+		if field.Anonymous {
+			continue
+		}
+		name := field.Name
 		if accepted[name] || ignored[name] || rejected[name] {
 			continue
 		}
@@ -101,11 +101,11 @@ func TestPreparePublicCreateRequestRejectsDependencyDuplicatesAndSelfEdges(t *te
 		request  publicops.CreateRequest
 		conflict bool
 	}{
-		{"same type duplicate", publicops.CreateRequest{Actor: "a", Issue: &publicops.Issue{ID: "bd-new", Title: "x", IssueType: types.TypeTask, Priority: 2}, ParentID: "bd-parent", Dependencies: []publicops.CreateDependency{{TargetID: "bd-parent", Type: types.DepParentChild}}}, false},
-		{"different type duplicate", publicops.CreateRequest{Actor: "a", Issue: &publicops.Issue{ID: "bd-new", Title: "x", IssueType: types.TypeTask, Priority: 2}, ParentID: "bd-parent", Dependencies: []publicops.CreateDependency{{TargetID: "bd-parent", Type: types.DepBlocks}}}, true},
-		{"explicit self edge", publicops.CreateRequest{Actor: "a", Issue: &publicops.Issue{ID: "bd-new", Title: "x", IssueType: types.TypeTask, Priority: 2}, Dependencies: []publicops.CreateDependency{{TargetID: "bd-new", Type: types.DepBlocks}}}, false},
-		{"generated ID duplicate", publicops.CreateRequest{Actor: "a", Issue: &publicops.Issue{Title: "x", IssueType: types.TypeTask, Priority: 2}, ParentID: "bd-parent", Dependencies: []publicops.CreateDependency{{TargetID: "bd-parent", Type: types.DepParentChild}}}, false},
-		{"duplicate reverse edge", publicops.CreateRequest{Actor: "a", Issue: &publicops.Issue{ID: "bd-new", Title: "x", IssueType: types.TypeTask, Priority: 2}, Dependencies: []publicops.CreateDependency{{TargetID: "bd-target", Type: types.DepBlocks, Reverse: true}, {TargetID: "bd-target", Type: types.DepBlocks, Reverse: true}}}, false},
+		{"same type duplicate", publicops.CreateRequest{Actor: "a", Issue: &publicops.Issue{IssueID: types.IssueID{ID: "bd-new"}, IssueContent: types.IssueContent{Title: "x"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}}, ParentID: "bd-parent", Dependencies: []publicops.CreateDependency{{TargetID: "bd-parent", Type: types.DepParentChild}}}, false},
+		{"different type duplicate", publicops.CreateRequest{Actor: "a", Issue: &publicops.Issue{IssueID: types.IssueID{ID: "bd-new"}, IssueContent: types.IssueContent{Title: "x"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}}, ParentID: "bd-parent", Dependencies: []publicops.CreateDependency{{TargetID: "bd-parent", Type: types.DepBlocks}}}, true},
+		{"explicit self edge", publicops.CreateRequest{Actor: "a", Issue: &publicops.Issue{IssueID: types.IssueID{ID: "bd-new"}, IssueContent: types.IssueContent{Title: "x"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}}, Dependencies: []publicops.CreateDependency{{TargetID: "bd-new", Type: types.DepBlocks}}}, false},
+		{"generated ID duplicate", publicops.CreateRequest{Actor: "a", Issue: &publicops.Issue{IssueContent: types.IssueContent{Title: "x"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}}, ParentID: "bd-parent", Dependencies: []publicops.CreateDependency{{TargetID: "bd-parent", Type: types.DepParentChild}}}, false},
+		{"duplicate reverse edge", publicops.CreateRequest{Actor: "a", Issue: &publicops.Issue{IssueID: types.IssueID{ID: "bd-new"}, IssueContent: types.IssueContent{Title: "x"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}}, Dependencies: []publicops.CreateDependency{{TargetID: "bd-target", Type: types.DepBlocks, Reverse: true}, {TargetID: "bd-target", Type: types.DepBlocks, Reverse: true}}}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := PreparePublicCreateRequest(tc.request, PublicCreateContext{IssuePrefix: "bd"})
@@ -123,7 +123,7 @@ func TestPreparePublicCreateRequestRejectsDependencyDuplicatesAndSelfEdges(t *te
 func TestPreparePublicCreateRequestAllowsOppositeDependencyDirections(t *testing.T) {
 	request := publicops.CreateRequest{
 		Actor: "a",
-		Issue: &publicops.Issue{ID: "bd-new", Title: "x", IssueType: types.TypeTask, Priority: 2},
+		Issue: &publicops.Issue{IssueID: types.IssueID{ID: "bd-new"}, IssueContent: types.IssueContent{Title: "x"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Priority: 2}},
 		Dependencies: []publicops.CreateDependency{
 			{TargetID: "bd-target", Type: types.DepBlocks},
 			{TargetID: "bd-target", Type: types.DepBlocks, Reverse: true},
@@ -138,7 +138,7 @@ func TestPreparePublicCreateRequestAllowsOppositeDependencyDirections(t *testing
 func TestValidatePublicCreateRequestChecksDependenciesBeforeContextPreparation(t *testing.T) {
 	request := publicops.CreateRequest{
 		Actor:        "a",
-		Issue:        &publicops.Issue{Title: "x"},
+		Issue:        &publicops.Issue{IssueContent: types.IssueContent{Title: "x"}},
 		ParentID:     "bd-parent",
 		Dependencies: []publicops.CreateDependency{{TargetID: "bd-parent", Type: types.DepParentChild}},
 	}
@@ -152,7 +152,7 @@ func TestValidatePublicCreateRequestChecksDependenciesBeforeContextPreparation(t
 func TestValidatePublicCreateRequestAllowsEmptyWaitsForGate(t *testing.T) {
 	err := ValidatePublicCreateRequest(publicops.CreateRequest{
 		Actor:    "a",
-		Issue:    &publicops.Issue{Title: "x"},
+		Issue:    &publicops.Issue{IssueContent: types.IssueContent{Title: "x"}},
 		WaitsFor: &publicops.WaitsFor{SpawnerID: "bd-spawner"},
 	})
 	if err != nil {
@@ -175,7 +175,7 @@ func TestValidatePublicCreateRequestRejectsUnknownWaitsForGate(t *testing.T) {
 		t.Run(gate, func(t *testing.T) {
 			err := ValidatePublicCreateRequest(publicops.CreateRequest{
 				Actor:    "a",
-				Issue:    &publicops.Issue{Title: "x"},
+				Issue:    &publicops.Issue{IssueContent: types.IssueContent{Title: "x"}},
 				WaitsFor: &publicops.WaitsFor{SpawnerID: "bd-spawner", Gate: gate},
 			})
 			if !errors.Is(err, storage.ErrValidation) {
@@ -193,7 +193,7 @@ func TestValidatePublicCreateRequestAcceptsTheExportedWaitsForGates(t *testing.T
 		t.Run(gate, func(t *testing.T) {
 			err := ValidatePublicCreateRequest(publicops.CreateRequest{
 				Actor:    "a",
-				Issue:    &publicops.Issue{Title: "x"},
+				Issue:    &publicops.Issue{IssueContent: types.IssueContent{Title: "x"}},
 				WaitsFor: &publicops.WaitsFor{SpawnerID: "bd-spawner", Gate: gate},
 			})
 			if err != nil {
@@ -212,7 +212,7 @@ func TestValidatePublicCreateRequestRejectsInvalidImportedRelations(t *testing.T
 			name: "malformed dependency metadata",
 			request: publicops.CreateRequest{
 				Actor:        "actor",
-				Issue:        &publicops.Issue{Title: "title"},
+				Issue:        &publicops.Issue{IssueContent: types.IssueContent{Title: "title"}},
 				Dependencies: []publicops.CreateDependency{{TargetID: "bd-target", Type: types.DepRelated, Metadata: "{"}},
 			},
 		},
@@ -220,7 +220,7 @@ func TestValidatePublicCreateRequestRejectsInvalidImportedRelations(t *testing.T
 			name: "overlong dependency thread",
 			request: publicops.CreateRequest{
 				Actor:        "actor",
-				Issue:        &publicops.Issue{Title: "title"},
+				Issue:        &publicops.Issue{IssueContent: types.IssueContent{Title: "title"}},
 				Dependencies: []publicops.CreateDependency{{TargetID: "bd-target", Type: types.DepRelated, ThreadID: strings.Repeat("t", types.MaxFieldLen+1)}},
 			},
 		},
@@ -245,14 +245,14 @@ func TestValidatePublicCreateRequestRejectsOverlongRelationshipIDs(t *testing.T)
 	}{
 		{
 			name:    "parent ID",
-			request: publicops.CreateRequest{Actor: "actor", Issue: &publicops.Issue{Title: "title"}, ParentID: overlong},
+			request: publicops.CreateRequest{Actor: "actor", Issue: &publicops.Issue{IssueContent: types.IssueContent{Title: "title"}}, ParentID: overlong},
 			field:   "parent",
 		},
 		{
 			name: "dependency target ID",
 			request: publicops.CreateRequest{
 				Actor:        "actor",
-				Issue:        &publicops.Issue{Title: "title"},
+				Issue:        &publicops.Issue{IssueContent: types.IssueContent{Title: "title"}},
 				Dependencies: []publicops.CreateDependency{{TargetID: overlong, Type: types.DepRelated}},
 			},
 			field: "dependency target",
@@ -261,7 +261,7 @@ func TestValidatePublicCreateRequestRejectsOverlongRelationshipIDs(t *testing.T)
 			name: "waits-for spawner ID",
 			request: publicops.CreateRequest{
 				Actor:    "actor",
-				Issue:    &publicops.Issue{Title: "title"},
+				Issue:    &publicops.Issue{IssueContent: types.IssueContent{Title: "title"}},
 				WaitsFor: &publicops.WaitsFor{SpawnerID: overlong},
 			},
 			field: "waits-for spawner",
@@ -288,7 +288,7 @@ func (e sqlStateError) SQLState() string { return string(e) }
 func TestValidatePublicCreateRequestRejectsOverlongLabelsBeforeOpeningUOW(t *testing.T) {
 	err := ValidatePublicCreateRequest(publicops.CreateRequest{
 		Actor: "actor",
-		Issue: &publicops.Issue{Title: "title", Labels: []string{strings.Repeat("x", types.MaxFieldLen+1)}},
+		Issue: &publicops.Issue{IssueContent: types.IssueContent{Title: "title"}, IssueGraph: types.IssueGraph{Labels: []string{strings.Repeat("x", types.MaxFieldLen+1)}}},
 	})
 	if !errors.Is(err, storage.ErrValidation) || !errors.Is(err, types.ErrFieldTooLong) {
 		t.Fatalf("ValidatePublicCreateRequest() error = %v, want ErrValidation and ErrFieldTooLong", err)
@@ -296,9 +296,8 @@ func TestValidatePublicCreateRequestRejectsOverlongLabelsBeforeOpeningUOW(t *tes
 }
 
 func TestValidatePublicCreateRequestChecksAssigneeBeforeOwner(t *testing.T) {
-	err := ValidatePublicCreateRequest(publicops.CreateRequest{Actor: "actor", Issue: &publicops.Issue{
-		Assignee: strings.Repeat("a", types.MaxFieldLen+1),
-		Owner:    strings.Repeat("o", types.MaxFieldLen+1),
+	err := ValidatePublicCreateRequest(publicops.CreateRequest{Actor: "actor", Issue: &publicops.Issue{IssueWorkflow: types.IssueWorkflow{Assignee: strings.Repeat("a", types.MaxFieldLen+1),
+		Owner: strings.Repeat("o", types.MaxFieldLen+1)},
 	}})
 	if !errors.Is(err, types.ErrFieldTooLong) || !strings.Contains(err.Error(), "assignee") {
 		t.Fatalf("field-length error = %v, want assignee first", err)
@@ -332,7 +331,7 @@ func TestPreparePublicCreateRequestHonorsTheCallerSuppliedIDPrefix(t *testing.T)
 	newRequest := func(id, prefix string) publicops.CreateRequest {
 		return publicops.CreateRequest{
 			Actor:    "actor",
-			Issue:    &publicops.Issue{ID: id, Title: "title", Priority: 2, IssueType: "task"},
+			Issue:    &publicops.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: "title"}, IssueWorkflow: types.IssueWorkflow{Priority: 2, IssueType: "task"}},
 			IDPrefix: prefix,
 		}
 	}

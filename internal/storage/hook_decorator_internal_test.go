@@ -155,7 +155,7 @@ func cloneForFakeHookStore(issue *types.Issue, dropDependencies bool) *types.Iss
 }
 
 func TestCreateHookEventsIncludeSyntheticLabelUpdates(t *testing.T) {
-	issue := &types.Issue{ID: "hooked-issue", Labels: []string{"a", "b"}}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "hooked-issue"}, IssueGraph: types.IssueGraph{Labels: []string{"a", "b"}}}
 
 	got := createHookEvents(issue)
 	gotEvents := make([]string, len(got))
@@ -179,7 +179,7 @@ func TestCreateHookEventsIncludeSyntheticLabelUpdates(t *testing.T) {
 }
 
 func TestCreateHookEventsDedupesLabels(t *testing.T) {
-	issue := &types.Issue{ID: "hooked-issue", Labels: []string{"a", "a", "b"}}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "hooked-issue"}, IssueGraph: types.IssueGraph{Labels: []string{"a", "a", "b"}}}
 
 	got := createHookEvents(issue)
 	gotEvents := make([]string, len(got))
@@ -205,9 +205,15 @@ func TestCreateHookEventsDedupesLabels(t *testing.T) {
 func TestCreateHookEventsCloneNoLabelIssue(t *testing.T) {
 	closedAt := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
 	issue := &types.Issue{
-		ID:       "hooked-issue",
-		Metadata: []byte(`{"key":"value"}`),
-		ClosedAt: &closedAt,
+		IssueID: types.IssueID{
+			ID: "hooked-issue",
+		},
+		IssueTimes: types.IssueTimes{
+			ClosedAt: &closedAt,
+		},
+		IssueMeta: types.IssueMeta{
+			Metadata: []byte(`{"key":"value"}`),
+		},
 	}
 
 	got := createHookEvents(issue)
@@ -244,29 +250,43 @@ func TestCloneIssueForHookCopiesReferenceFields(t *testing.T) {
 	compactedAt := time.Date(2026, 5, 22, 10, 5, 0, 0, time.UTC)
 	compactedAtCommit := "abc123"
 	issue := &types.Issue{
-		ID:                "hooked-issue",
-		EstimatedMinutes:  &estimatedMinutes,
-		StartedAt:         &startedAt,
-		ClosedAt:          &closedAt,
-		DueAt:             &dueAt,
-		DeferUntil:        &deferUntil,
-		ExternalRef:       &externalRef,
-		Metadata:          []byte(`{"key":"value"}`),
-		CompactedAt:       &compactedAt,
-		CompactedAtCommit: &compactedAtCommit,
-		Labels:            []string{"alpha"},
-		Dependencies: []*types.Dependency{{
-			IssueID:     "hooked-issue",
-			DependsOnID: "target",
-			Type:        types.DepBlocks,
-		}},
-		Comments: []*types.Comment{{
-			ID:     "1",
-			Author: "tester",
-			Text:   "note",
-		}},
-		BondedFrom: []types.BondRef{{SourceID: "proto-1", BondType: "sequential"}},
-		Waiters:    []string{"agent@example.com"},
+		IssueID: types.IssueID{
+			ID: "hooked-issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			EstimatedMinutes: &estimatedMinutes,
+		},
+		IssueTimes: types.IssueTimes{
+			StartedAt: &startedAt,
+			ClosedAt:  &closedAt,
+		},
+		IssueLease: types.IssueLease{
+			DueAt:      &dueAt,
+			DeferUntil: &deferUntil,
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef:       &externalRef,
+			Metadata:          []byte(`{"key":"value"}`),
+			CompactedAt:       &compactedAt,
+			CompactedAtCommit: &compactedAtCommit,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"alpha"},
+			Dependencies: []*types.Dependency{{
+				IssueID:     "hooked-issue",
+				DependsOnID: "target",
+				Type:        types.DepBlocks,
+			}},
+			Comments: []*types.Comment{{
+				ID:     "1",
+				Author: "tester",
+				Text:   "note",
+			}},
+		},
+		IssueCoord: types.IssueCoord{
+			BondedFrom: []types.BondRef{{SourceID: "proto-1", BondType: "sequential"}},
+			Waiters:    []string{"agent@example.com"},
+		},
 	}
 
 	snapshot := cloneIssueForHook(issue)
@@ -333,7 +353,7 @@ func TestHookFiringStoreCreateIssueFiresInitialLabelUpdates(t *testing.T) {
 	runner := &recordingHookRunner{}
 	inner := fakeHookStore{}
 	store := &HookFiringStore{DoltStorage: inner, inner: inner, runner: runner}
-	issue := &types.Issue{ID: "hooked-issue", Labels: []string{"a", "b"}}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "hooked-issue"}, IssueGraph: types.IssueGraph{Labels: []string{"a", "b"}}}
 
 	if err := store.CreateIssue(context.Background(), issue, "tester"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -355,7 +375,7 @@ func TestHookFiringStoreTransactionCreateIssueFiresInitialLabelUpdates(t *testin
 	runner := &recordingHookRunner{}
 	inner := fakeHookStore{}
 	store := &HookFiringStore{DoltStorage: inner, inner: inner, runner: runner}
-	issue := &types.Issue{ID: "tx-hooked-issue", Labels: []string{"a", "b"}}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "tx-hooked-issue"}, IssueGraph: types.IssueGraph{Labels: []string{"a", "b"}}}
 
 	err := store.RunInTransaction(context.Background(), "test", func(tx Transaction) error {
 		return tx.CreateIssue(context.Background(), issue, "tester")
@@ -381,21 +401,27 @@ func TestHookFiringStoreCreateIssuesFiresDependencyUpdates(t *testing.T) {
 	inner := fakeHookStore{issues: map[string]*types.Issue{}}
 	store := &HookFiringStore{DoltStorage: inner, inner: inner, runner: runner}
 	source := &types.Issue{
-		ID:        "source",
-		IssueType: types.TypeTask,
-		Dependencies: []*types.Dependency{
-			{
-				DependsOnID: "target-a",
-				Type:        types.DepBlocks,
-			},
-			{
-				DependsOnID: "target-b",
-				Type:        types.DepBlocks,
+		IssueID: types.IssueID{
+			ID: "source",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Dependencies: []*types.Dependency{
+				{
+					DependsOnID: "target-a",
+					Type:        types.DepBlocks,
+				},
+				{
+					DependsOnID: "target-b",
+					Type:        types.DepBlocks,
+				},
 			},
 		},
 	}
-	targetA := &types.Issue{ID: "target-a", IssueType: types.TypeTask}
-	targetB := &types.Issue{ID: "target-b", IssueType: types.TypeTask}
+	targetA := &types.Issue{IssueID: types.IssueID{ID: "target-a"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask}}
+	targetB := &types.Issue{IssueID: types.IssueID{ID: "target-b"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask}}
 
 	if err := store.CreateIssues(context.Background(), []*types.Issue{source, targetA, targetB}, "tester"); err != nil {
 		t.Fatalf("CreateIssues: %v", err)
@@ -424,14 +450,20 @@ func TestHookFiringStoreTransactionCreateIssuesFiresDependencyUpdates(t *testing
 	inner := fakeHookStore{issues: map[string]*types.Issue{}}
 	store := &HookFiringStore{DoltStorage: inner, inner: inner, runner: runner}
 	source := &types.Issue{
-		ID:        "source",
-		IssueType: types.TypeTask,
-		Dependencies: []*types.Dependency{{
-			DependsOnID: "target",
-			Type:        types.DepBlocks,
-		}},
+		IssueID: types.IssueID{
+			ID: "source",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Dependencies: []*types.Dependency{{
+				DependsOnID: "target",
+				Type:        types.DepBlocks,
+			}},
+		},
 	}
-	target := &types.Issue{ID: "target", IssueType: types.TypeTask}
+	target := &types.Issue{IssueID: types.IssueID{ID: "target"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask}}
 
 	err := store.RunInTransaction(context.Background(), "test", func(tx Transaction) error {
 		return tx.CreateIssues(context.Background(), []*types.Issue{source, target}, "tester")
@@ -457,14 +489,20 @@ func TestHookFiringStoreCreateIssuesSkipsUnpersistedDependencies(t *testing.T) {
 	}
 	store := &HookFiringStore{DoltStorage: inner, inner: inner, runner: runner}
 	source := &types.Issue{
-		ID:        "source",
-		IssueType: types.TypeTask,
-		Dependencies: []*types.Dependency{{
-			DependsOnID: "missing-target",
-			Type:        types.DepBlocks,
-		}},
+		IssueID: types.IssueID{
+			ID: "source",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Dependencies: []*types.Dependency{{
+				DependsOnID: "missing-target",
+				Type:        types.DepBlocks,
+			}},
+		},
 	}
-	target := &types.Issue{ID: "target", IssueType: types.TypeTask}
+	target := &types.Issue{IssueID: types.IssueID{ID: "target"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask}}
 
 	if err := store.CreateIssues(context.Background(), []*types.Issue{source, target}, "tester"); err != nil {
 		t.Fatalf("CreateIssues: %v", err)
@@ -480,7 +518,7 @@ func TestNewHookFiringStoreNilRunnerSkipsCreateHooks(t *testing.T) {
 	var runner *hooks.Runner
 	inner := fakeHookStore{}
 	store := NewHookFiringStore(inner, runner)
-	issue := &types.Issue{ID: "nil-runner-issue", Labels: []string{"a"}}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "nil-runner-issue"}, IssueGraph: types.IssueGraph{Labels: []string{"a"}}}
 
 	if err := store.CreateIssue(context.Background(), issue, "tester"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -498,7 +536,7 @@ func TestHookFiringStoreUpdateIssueCheckedFiresOnSuccessOnly(t *testing.T) {
 	t.Run("success fires one on_update", func(t *testing.T) {
 		runner := &recordingHookRunner{}
 		inner := fakeHookStore{issues: map[string]*types.Issue{
-			"uc-hook": {ID: "uc-hook", Title: "updated"},
+			"uc-hook": {IssueID: types.IssueID{ID: "uc-hook"}, IssueContent: types.IssueContent{Title: "updated"}},
 		}}
 		store := &HookFiringStore{DoltStorage: inner, inner: inner, runner: runner}
 
@@ -515,7 +553,7 @@ func TestHookFiringStoreUpdateIssueCheckedFiresOnSuccessOnly(t *testing.T) {
 	t.Run("version-mismatch refusal fires no hook", func(t *testing.T) {
 		runner := &recordingHookRunner{}
 		inner := fakeHookStore{
-			issues:           map[string]*types.Issue{"uc-hook": {ID: "uc-hook"}},
+			issues:           map[string]*types.Issue{"uc-hook": {IssueID: types.IssueID{ID: "uc-hook"}}},
 			updateCheckedErr: ErrVersionMismatch,
 		}
 		store := &HookFiringStore{DoltStorage: inner, inner: inner, runner: runner}
@@ -536,7 +574,7 @@ func TestHookFiringStoreUpdateIssueCheckedFiresOnSuccessOnly(t *testing.T) {
 func TestHookFiringStoreIssueLifecycleTransactionReopenForwardsCommitOnly(t *testing.T) {
 	t.Run("commit forwards and fires update", func(t *testing.T) {
 		runner := &recordingHookRunner{}
-		inner := fakeHookStore{issues: map[string]*types.Issue{"reopen-hook": {ID: "reopen-hook"}}}
+		inner := fakeHookStore{issues: map[string]*types.Issue{"reopen-hook": {IssueID: types.IssueID{ID: "reopen-hook"}}}}
 		store := &HookFiringStore{DoltStorage: inner, inner: inner, runner: runner}
 		if err := store.RunInIssueLifecycleTransaction(context.Background(), "reopen", func(tx IssueLifecycleTransaction) error {
 			_, err := tx.ReopenIssueWithResult(context.Background(), "reopen-hook", "", "tester")
@@ -553,7 +591,7 @@ func TestHookFiringStoreIssueLifecycleTransactionReopenForwardsCommitOnly(t *tes
 		runner := &recordingHookRunner{}
 		labelErr := errors.New("label write failed")
 		inner := fakeHookStore{
-			issues:                 map[string]*types.Issue{"reopen-hook": {ID: "reopen-hook"}},
+			issues:                 map[string]*types.Issue{"reopen-hook": {IssueID: types.IssueID{ID: "reopen-hook"}}},
 			transactionAddLabelErr: labelErr,
 		}
 		store := &HookFiringStore{DoltStorage: inner, inner: inner, runner: runner}
@@ -572,7 +610,7 @@ func TestHookFiringStoreIssueLifecycleTransactionReopenForwardsCommitOnly(t *tes
 	})
 
 	t.Run("ordinary transaction does not expose lifecycle method", func(t *testing.T) {
-		inner := fakeHookStore{issues: map[string]*types.Issue{"reopen-hook": {ID: "reopen-hook"}}}
+		inner := fakeHookStore{issues: map[string]*types.Issue{"reopen-hook": {IssueID: types.IssueID{ID: "reopen-hook"}}}}
 		store := &HookFiringStore{DoltStorage: inner, inner: inner}
 		if err := store.RunInTransaction(context.Background(), "reopen", func(tx Transaction) error {
 			if _, ok := tx.(interface {

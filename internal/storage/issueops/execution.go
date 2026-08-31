@@ -34,50 +34,94 @@ func HistoryEntry(provenance, fallback string) string {
 
 // ExecuteCreate applies a guarded create in tx and reports durable tables changed.
 func ExecuteCreate(ctx context.Context, tx DBTX, request publicops.CreateRequest) (publicops.CreateResult, ChangedTables, error) {
+	attempt, batch, err := prepareCreateExecution(ctx, tx, request)
+	if err != nil {
+		return publicops.CreateResult{}, nil, err
+	}
+	issue, childCounterChanged, err := preparePublicCreateIssueExecution(ctx, tx, batch, attempt)
+	if err != nil {
+		return publicops.CreateResult{}, nil, err
+	}
+	created, err := insertPublicCreateIssue(ctx, tx, issue, attempt)
+	if err != nil {
+		return publicops.CreateResult{}, nil, err
+	}
+	return finishCreateExecution(ctx, tx, issue, childCounterChanged, created)
+}
+
+func prepareCreateExecution(ctx context.Context, tx DBTX, request publicops.CreateRequest) (publicops.CreateRequest, *BatchContext, error) {
 	attempt := CloneCreateRequest(request)
 	if err := ValidatePublicCreateRequest(attempt); err != nil {
-		return publicops.CreateResult{}, nil, err
+		return publicops.CreateRequest{}, nil, err
 	}
 	batch, err := NewBatchContext(ctx, tx, storage.BatchCreateOptions{CreateOnly: true, SkipPrefixValidation: attempt.ForceIDPrefix})
 	if err != nil {
-		return publicops.CreateResult{}, nil, err
+		return publicops.CreateRequest{}, nil, err
 	}
 	attempt, err = PreparePublicCreateRequest(attempt, PublicCreateContext{
 		IssuePrefix: batch.ConfigPrefix, AllowedPrefixes: batch.AllowedPrefixes,
 		CustomStatuses: batch.CustomStatuses, CustomTypes: batch.CustomTypes,
 	})
 	if err != nil {
-		return publicops.CreateResult{}, nil, err
+		return publicops.CreateRequest{}, nil, err
 	}
+	return attempt, batch, nil
+}
+
+func preparePublicCreateIssueExecution(ctx context.Context, tx DBTX, batch *BatchContext, attempt publicops.CreateRequest) (*types.Issue, bool, error) {
 	issue := attempt.Issue
 	// Configured infra types live in the wisp tables, the same routing the
 	// stores' own CreateIssue applies (internal/storage/dolt/issues.go). Mark
 	// the issue before its ID is assigned so ID generation, the create-only
 	// guard, and table routing all agree on the destination. A no-history
 	// create keeps its own retention mode.
+	applyCreateInfraRouting(ctx, tx, issue)
+	if err := inheritCreateLabels(ctx, tx, issue, attempt); err != nil {
+		return nil, false, err
+	}
+	childCounterChanged, err := assignCreateParentID(ctx, tx, issue, attempt.ParentID)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := assignCreateIssueIDInTx(ctx, tx, batch, issue, attempt.Actor); err != nil {
+		return nil, false, ClassifyPublicCreateError(err)
+	}
+	issue.Dependencies = storage.CreatePublicCreateDependencies(issue.ID, attempt)
+	return issue, childCounterChanged, nil
+}
+
+func applyCreateInfraRouting(ctx context.Context, tx DBTX, issue *types.Issue) {
 	if !issue.Ephemeral && !issue.NoHistory && ResolveInfraTypesInTx(ctx, tx)[string(issue.IssueType)] {
 		issue.Ephemeral = true
 	}
-	if attempt.InheritLabelsFromParent && attempt.ParentID != "" {
-		labels, err := GetLabelsInTx(ctx, tx, "", attempt.ParentID)
-		if err != nil {
-			return publicops.CreateResult{}, nil, err
-		}
-		issue.Labels = append(issue.Labels, labels...)
+}
+
+func inheritCreateLabels(ctx context.Context, tx DBTX, issue *types.Issue, attempt publicops.CreateRequest) error {
+	if !attempt.InheritLabelsFromParent || attempt.ParentID == "" {
+		return nil
 	}
-	childCounterChanged := false
-	if issue.ID == "" && attempt.ParentID != "" {
-		parentIsWisp := IsActiveWispInTx(ctx, tx, attempt.ParentID)
-		issue.ID, err = GetNextChildIDTx(ctx, tx, attempt.ParentID)
-		if err != nil {
-			return publicops.CreateResult{}, nil, ClassifyPublicCreateError(err)
-		}
-		childCounterChanged = !parentIsWisp
+	labels, err := GetLabelsInTx(ctx, tx, "", attempt.ParentID)
+	if err != nil {
+		return err
 	}
-	if err := assignCreateIssueIDInTx(ctx, tx, batch, issue, attempt.Actor); err != nil {
-		return publicops.CreateResult{}, nil, ClassifyPublicCreateError(err)
+	issue.Labels = append(issue.Labels, labels...)
+	return nil
+}
+
+func assignCreateParentID(ctx context.Context, tx DBTX, issue *types.Issue, parentID string) (bool, error) {
+	if issue.ID != "" || parentID == "" {
+		return false, nil
 	}
-	issue.Dependencies = storage.CreatePublicCreateDependencies(issue.ID, attempt)
+	parentIsWisp := IsActiveWispInTx(ctx, tx, parentID)
+	childID, err := GetNextChildIDTx(ctx, tx, parentID)
+	if err != nil {
+		return false, ClassifyPublicCreateError(err)
+	}
+	issue.ID = childID
+	return !parentIsWisp, nil
+}
+
+func insertPublicCreateIssue(ctx context.Context, tx DBTX, issue *types.Issue, attempt publicops.CreateRequest) (CreateIssuesResult, error) {
 	var skipped []skippedDependency
 	created, err := CreateIssuesInTxWithResult(ctx, tx, []*types.Issue{issue}, attempt.Actor, storage.BatchCreateOptions{
 		CreateOnly: true, SkipPrefixValidation: attempt.ForceIDPrefix,
@@ -86,11 +130,15 @@ func ExecuteCreate(ctx context.Context, tx DBTX, request publicops.CreateRequest
 		},
 	})
 	if err != nil {
-		return publicops.CreateResult{}, nil, ClassifyPublicCreateError(err)
+		return CreateIssuesResult{}, ClassifyPublicCreateError(err)
 	}
 	if len(skipped) > 0 {
-		return publicops.CreateResult{}, nil, publicCreateValidationError(skippedDependencyError(skipped))
+		return CreateIssuesResult{}, publicCreateValidationError(skippedDependencyError(skipped))
 	}
+	return created, nil
+}
+
+func finishCreateExecution(ctx context.Context, tx DBTX, issue *types.Issue, childCounterChanged bool, created CreateIssuesResult) (publicops.CreateResult, ChangedTables, error) {
 	tables := ChangedTables{}
 	tables.Merge(CreateIssuesDirtyTables(ctx, []*types.Issue{issue}, created))
 	if childCounterChanged {
@@ -122,63 +170,129 @@ func skippedDependencyError(skipped []skippedDependency) error {
 
 // ExecuteUpdate applies a guarded update in tx and reports durable tables changed.
 func ExecuteUpdate(ctx context.Context, tx DBTX, request publicops.UpdateRequest) (publicops.UpdateResult, ChangedTables, error) {
+	execution, err := prepareUpdateExecution(ctx, tx, request)
+	if err != nil {
+		return publicops.UpdateResult{}, nil, err
+	}
+	if err := applyUpdateClaim(ctx, tx, execution); err != nil {
+		return publicops.UpdateResult{}, nil, err
+	}
+	if err := applyUpdateFields(ctx, tx, execution); err != nil {
+		return publicops.UpdateResult{}, nil, err
+	}
+	if err := applyUpdateLabels(ctx, tx, execution); err != nil {
+		return publicops.UpdateResult{}, nil, err
+	}
+	if err := applyUpdateParent(ctx, tx, execution); err != nil {
+		return publicops.UpdateResult{}, nil, err
+	}
+	if err := applyUpdatePersistence(ctx, tx, execution); err != nil {
+		return publicops.UpdateResult{}, nil, err
+	}
+	hydrated, err := HydrateIssueOperationResult(ctx, tx, execution.attempt.IssueID, false)
+	if err != nil {
+		return publicops.UpdateResult{}, nil, err
+	}
+	return publicops.UpdateResult{Issue: hydrated, Changed: execution.changed}, execution.tables, nil
+}
+
+type updateExecution struct {
+	attempt publicops.UpdateRequest
+	current *types.Issue
+	tables  ChangedTables
+	changed bool
+}
+
+func prepareUpdateExecution(ctx context.Context, tx DBTX, request publicops.UpdateRequest) (*updateExecution, error) {
 	attempt := CloneUpdateRequest(request)
-	if attempt.Actor == "" || attempt.IssueID == "" {
-		return publicops.UpdateResult{}, nil, fmt.Errorf("%w: update requires actor and issue ID", storage.ErrValidation)
-	}
-	if err := ValidateUpdateRequest(attempt); err != nil {
-		return publicops.UpdateResult{}, nil, err
-	}
-	if err := ValidateMetadataPatch(attempt.Patch.Metadata); err != nil {
-		return publicops.UpdateResult{}, nil, err
+	if err := validateUpdateInput(attempt); err != nil {
+		return nil, err
 	}
 	// The plane restriction is resolved HERE, inside the update's own
 	// transaction, so a caller that serves durable issues only cannot be handed
 	// a wisp by a resolve that ran earlier.
 	if attempt.IssuePlaneOnly && IsActiveWispInTx(ctx, tx, attempt.IssueID) {
-		return publicops.UpdateResult{}, nil, fmt.Errorf("%w: issue %s", storage.ErrNotFound, attempt.IssueID)
+		return nil, fmt.Errorf("%w: issue %s", storage.ErrNotFound, attempt.IssueID)
 	}
-	tables := ChangedTables{}
 	before, err := GetIssueInTx(ctx, tx, attempt.IssueID)
 	if err != nil {
-		return publicops.UpdateResult{}, nil, err
+		return nil, err
 	}
 	if attempt.ExpectedVersion != nil {
 		if err := CheckVersionInTx(ctx, tx, attempt.IssueID, *attempt.ExpectedVersion); err != nil {
-			return publicops.UpdateResult{}, nil, err
+			return nil, err
 		}
 	}
+	if err := validateUpdateExpectations(ctx, tx, &attempt); err != nil {
+		return nil, err
+	}
+	if err := AuthorizeAssigneeTransfer(ctx, tx, before, attempt); err != nil {
+		return nil, err
+	}
+	return &updateExecution{attempt: attempt, current: before, tables: ChangedTables{}}, nil
+}
+
+func validateUpdateInput(attempt publicops.UpdateRequest) error {
+	if attempt.Actor == "" || attempt.IssueID == "" {
+		return fmt.Errorf("%w: update requires actor and issue ID", storage.ErrValidation)
+	}
+	if err := ValidateUpdateRequest(attempt); err != nil {
+		return err
+	}
+	return ValidateMetadataPatch(attempt.Patch.Metadata)
+}
+
+func validateUpdateExpectations(ctx context.Context, tx DBTX, attempt *publicops.UpdateRequest) error {
 	if attempt.ExpectedStatus != nil {
 		status := string(*attempt.ExpectedStatus)
 		attempt.ExpectedStatus = nil
-		if err := CheckExpectedFieldsInTx(ctx, tx, attempt.IssueID, attempt.ExpectedAssignee, &status); err != nil {
-			return publicops.UpdateResult{}, nil, err
-		}
-	} else if err := CheckExpectedFieldsInTx(ctx, tx, attempt.IssueID, attempt.ExpectedAssignee, nil); err != nil {
-		return publicops.UpdateResult{}, nil, err
+		return CheckExpectedFieldsInTx(ctx, tx, attempt.IssueID, attempt.ExpectedAssignee, &status)
 	}
-	if err := AuthorizeAssigneeTransfer(ctx, tx, before, attempt); err != nil {
-		return publicops.UpdateResult{}, nil, err
+	return CheckExpectedFieldsInTx(ctx, tx, attempt.IssueID, attempt.ExpectedAssignee, nil)
+}
+
+func applyUpdateClaim(ctx context.Context, tx DBTX, execution *updateExecution) error {
+	if !execution.attempt.Claim {
+		return nil
 	}
-	changedAny := false
-	if attempt.Claim {
-		claimed, err := ClaimIssueInTx(ctx, tx, attempt.IssueID, attempt.Actor)
-		if err != nil {
-			return publicops.UpdateResult{}, nil, err
-		}
-		if claimAdvancedTheRow(claimed, attempt.Actor) {
-			changedAny = true
-			issueTable, _, eventTable, _ := WispTableRouting(claimed.IsWisp)
-			tables.Add(issueTable, eventTable)
-		}
+	claimed, err := ClaimIssueInTx(ctx, tx, execution.attempt.IssueID, execution.attempt.Actor)
+	if err != nil {
+		return err
 	}
-	current := before
-	if attempt.Claim {
-		current, err = GetIssueInTx(ctx, tx, attempt.IssueID)
-		if err != nil {
-			return publicops.UpdateResult{}, nil, err
-		}
+	if claimAdvancedTheRow(claimed, execution.attempt.Actor) {
+		execution.changed = true
+		issueTable, _, eventTable, _ := WispTableRouting(claimed.IsWisp)
+		execution.tables.Add(issueTable, eventTable)
 	}
+	execution.current, err = GetIssueInTx(ctx, tx, execution.attempt.IssueID)
+	return err
+}
+
+func applyUpdateFields(ctx context.Context, tx DBTX, execution *updateExecution) error {
+	updates, err := prepareUpdateFields(execution.current, execution.attempt)
+	if err != nil {
+		return err
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+	updated, err := UpdateIssueInTx(ctx, tx, execution.attempt.IssueID, updates, execution.attempt.Actor)
+	if err != nil {
+		return err
+	}
+	if !updated.Changed {
+		return nil
+	}
+	execution.changed = true
+	issueTable, _, eventTable, _ := WispTableRouting(updated.IsWisp)
+	execution.tables.Add(issueTable, eventTable)
+	if updated.IssueRowsChanged {
+		execution.tables.Add("issues")
+	}
+	return nil
+}
+
+func prepareUpdateFields(current *types.Issue, attempt publicops.UpdateRequest) (map[string]interface{}, error) {
 	updates := UpdateFields(attempt.Patch)
 	// A metadata patch rides the same row write as the field edits. Writing it
 	// separately recorded a second event for one atomic mutation, fabricating
@@ -188,71 +302,66 @@ func ExecuteUpdate(ctx context.Context, tx DBTX, request publicops.UpdateRequest
 	// no-op elision is preserved by the changed flag.
 	metadata, metadataChanged, err := ApplyMetadataPatch(current.Metadata, attempt.Patch.Metadata)
 	if err != nil {
-		return publicops.UpdateResult{}, nil, err
+		return nil, err
 	}
 	if metadataChanged {
 		updates["metadata"] = metadata
 	}
 	// The override only means anything alongside a status change, so it is spelled
-	// only then: an update that carries it with no status would be handing the
-	// funnel a key it has no question to answer.
+	// only then: an update that carries it with no status would be handing
+	// the funnel a key it has no question to answer.
 	if attempt.ForceClosePolicy && attempt.Patch.Status.Set {
 		updates[OpForceClosePolicy] = true
 	}
-	if len(updates) > 0 {
-		updated, err := UpdateIssueInTx(ctx, tx, attempt.IssueID, updates, attempt.Actor)
-		if err != nil {
-			return publicops.UpdateResult{}, nil, err
-		}
-		if updated.Changed {
-			changedAny = true
-			issueTable, _, eventTable, _ := WispTableRouting(updated.IsWisp)
-			tables.Add(issueTable, eventTable)
-			if updated.IssueRowsChanged {
-				tables.Add("issues")
-			}
-		}
-	}
-	labelsChanged, err := ApplyLabelPatch(ctx, tx, current, attempt.Patch.Labels, attempt.Actor)
+	return updates, nil
+}
+
+func applyUpdateLabels(ctx context.Context, tx DBTX, execution *updateExecution) error {
+	labelsChanged, err := ApplyLabelPatch(ctx, tx, execution.current, execution.attempt.Patch.Labels, execution.attempt.Actor)
 	if err != nil {
-		return publicops.UpdateResult{}, nil, err
+		return err
 	}
 	if labelsChanged {
-		changedAny = true
-		_, labelTable, eventTable, _ := WispTableRouting(IsActiveWispInTx(ctx, tx, attempt.IssueID))
-		tables.Add(labelTable, eventTable)
+		execution.changed = true
+		_, labelTable, eventTable, _ := WispTableRouting(IsActiveWispInTx(ctx, tx, execution.attempt.IssueID))
+		execution.tables.Add(labelTable, eventTable)
 	}
-	parentResult, err := ApplyParentPatch(ctx, tx, current, attempt.Patch.ParentID, attempt.Actor)
+	return nil
+}
+
+func applyUpdateParent(ctx context.Context, tx DBTX, execution *updateExecution) error {
+	parentResult, err := ApplyParentPatch(ctx, tx, execution.current, execution.attempt.Patch.ParentID, execution.attempt.Actor)
 	if err != nil {
-		return publicops.UpdateResult{}, nil, err
+		return err
 	}
 	if parentResult.Changed {
-		changedAny = true
-		_, _, _, dependencyTable := WispTableRouting(IsActiveWispInTx(ctx, tx, attempt.IssueID))
-		tables.Add(dependencyTable)
+		execution.changed = true
+		_, _, _, dependencyTable := WispTableRouting(IsActiveWispInTx(ctx, tx, execution.attempt.IssueID))
+		execution.tables.Add(dependencyTable)
 		if parentResult.IssueRowsChanged {
-			tables.Add("issues")
+			execution.tables.Add("issues")
 		}
 	}
-	if attempt.Patch.Persistence.Set {
-		current, err := GetIssueInTx(ctx, tx, attempt.IssueID)
-		if err != nil {
-			return publicops.UpdateResult{}, nil, err
-		}
-		moved, err := MoveIssuePersistenceInTx(ctx, tx, current, attempt.Patch.Persistence.Value)
-		if err != nil {
-			return publicops.UpdateResult{}, nil, err
-		}
-		if moved.Changed {
-			changedAny = true
-			tables.Merge(moved.ChangedTables)
-		}
+	return nil
+}
+
+func applyUpdatePersistence(ctx context.Context, tx DBTX, execution *updateExecution) error {
+	if !execution.attempt.Patch.Persistence.Set {
+		return nil
 	}
-	hydrated, err := HydrateIssueOperationResult(ctx, tx, attempt.IssueID, false)
+	current, err := GetIssueInTx(ctx, tx, execution.attempt.IssueID)
 	if err != nil {
-		return publicops.UpdateResult{}, nil, err
+		return err
 	}
-	return publicops.UpdateResult{Issue: hydrated, Changed: changedAny}, tables, nil
+	moved, err := MoveIssuePersistenceInTx(ctx, tx, current, execution.attempt.Patch.Persistence.Value)
+	if err != nil {
+		return err
+	}
+	if moved.Changed {
+		execution.changed = true
+		execution.tables.Merge(moved.ChangedTables)
+	}
+	return nil
 }
 
 // claimAdvancedTheRow reports whether ClaimIssueInTx's CAS represents a real

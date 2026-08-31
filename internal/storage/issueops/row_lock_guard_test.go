@@ -138,7 +138,7 @@ var funcNameExemptions = map[string]string{
 	// mergeIssuesConflictRow makes for the no-op (nothing written) case.
 	// Reminting here would be pointless content-wise and would let a stale
 	// ExpectedVersion CAS reject a row it should still recognize.
-	"resolveOneConflictRow": "whole-row `theirs` adoption: the adopted row_lock already vouches for the (identical) adopted content",
+	"theirConflictUpdate": "whole-row `theirs` adoption: the adopted row_lock already vouches for the (identical) adopted content",
 }
 
 // TestAllIssueRowWritesStampRowLock is the load-bearing completeness guard for
@@ -264,6 +264,9 @@ func scanIssueWriteRowLockStamps(t *testing.T, path string, src []byte) (checked
 			checked++
 
 			stamped := literalStampsRowLock(stmt, isInsert)
+			if !stamped && plannedRowLockStamp(file, fn) {
+				stamped = true
+			}
 			if !stamped && !isInsert && setClauseHasPercentSPlaceholder(stmt) {
 				// The write's own literal doesn't show the mint (its SET
 				// clause is itself a %s placeholder assembled elsewhere —
@@ -282,6 +285,58 @@ func scanIssueWriteRowLockStamps(t *testing.T, path string, src []byte) (checked
 		return true
 	})
 	return checked, violations
+}
+
+// plannedRowLockStamp recognizes the two domain/db execution helpers whose
+// SQL plans are assembled by a sibling in the same file. The check requires
+// both the exact plan field consumed by the write and a real RowLockClause
+// call in that file, so an unrelated mention or helper extraction cannot make
+// the guard pass accidentally.
+func plannedRowLockStamp(file *ast.File, fn *ast.FuncDecl) bool {
+	var planField string
+	switch fn.Name.Name {
+	case "tryClaim":
+		planField = "plan.rowLockClause"
+	case "applyUpdate":
+		planField = "plan.setClauses"
+	default:
+		return false
+	}
+	return containsSelector(fn.Body, planField) && fileContainsStampCall(file, "RowLockClause")
+}
+
+func containsSelector(node ast.Node, wanted string) bool {
+	found := false
+	ast.Inspect(node, func(n ast.Node) bool {
+		sel, ok := n.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		ident, ok := sel.X.(*ast.Ident)
+		if ok && ident.Name+"."+sel.Sel.Name == wanted {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func fileContainsStampCall(file *ast.File, wanted string) bool {
+	found := false
+	ast.Inspect(file, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		name, ok := stampCallName(call.Fun)
+		if ok && name == wanted {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
 
 // setKeywordRe and whereKeywordRe bound an UPDATE statement's SET clause
@@ -662,11 +717,11 @@ func w(tx T, id, s, table string) {
 	// whole-row `theirs` adoption) even though its SET clause could assign
 	// status/assignee at runtime...
 	exemptByName := []byte(`package p
-func resolveOneConflictRow(tx T, id, s, table string) {
+func theirConflictUpdate(tx T, id, s, table string) {
 	tx.ExecContext(ctx, fmt.Sprintf("UPDATE %s SET status = ?, assignee = ? WHERE id = ?", table), s, id)
 }`)
 	if n, v := scanIssueWriteRowLockStamps(t, "exemptbyname.go", exemptByName); n != 0 || len(v) != 0 {
-		t.Errorf("resolveOneConflictRow func-name exemption: got checked=%d violations=%v; want checked=0 violations=none (a whole-row-adoption write named by function identity must be exempt)", n, v)
+		t.Errorf("theirConflictUpdate func-name exemption: got checked=%d violations=%v; want checked=0 violations=none (a whole-row-adoption write named by function identity must be exempt)", n, v)
 	}
 
 	// ...but must NOT exempt a differently-named function with the identical

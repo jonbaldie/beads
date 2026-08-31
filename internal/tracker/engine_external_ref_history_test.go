@@ -37,6 +37,13 @@ type historyQuerierStore struct {
 
 var _ storage.ExternalRefHistoryQuerier = (*historyQuerierStore)(nil)
 
+// externalRefChangedAfter remains a method for the focused regression tests;
+// production code calls the free helper directly so messgo does not count a
+// test-only compatibility wrapper as an unused private method.
+func (e *Engine) externalRefChangedAfter(ctx context.Context, local *types.Issue, currentRef string, lastSync time.Time) (bool, error) {
+	return externalRefChangedAfter(e, ctx, local, currentRef, lastSync)
+}
+
 func (h *historyQuerierStore) History(_ context.Context, _ string) ([]*storage.HistoryEntry, error) {
 	return nil, nil
 }
@@ -101,7 +108,7 @@ var _ storage.Unwrapper = (*fakeStoreDecorator)(nil)
 func (f *fakeStoreDecorator) Unwrap() storage.DoltStorage { return f.inner }
 
 func newTestIssue(id string, createdAt, updatedAt time.Time) *types.Issue {
-	return &types.Issue{ID: id, CreatedAt: createdAt, UpdatedAt: updatedAt}
+	return &types.Issue{IssueID: types.IssueID{ID: id}, IssueTimes: types.IssueTimes{CreatedAt: createdAt, UpdatedAt: updatedAt}}
 }
 
 // (a) Embedded-Dolt-shaped store: takes the history fast path even though it

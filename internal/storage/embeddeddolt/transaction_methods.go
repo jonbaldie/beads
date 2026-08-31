@@ -1,0 +1,255 @@
+//go:build cgo
+
+package embeddeddolt
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/jonbaldie/beads/internal/storage"
+	"github.com/jonbaldie/beads/internal/storage/issueops"
+	"github.com/jonbaldie/beads/internal/types"
+)
+
+func (t *embeddedTransaction) CreateIssue(ctx context.Context, issue *types.Issue, actor string) error {
+	bc, err := issueops.NewBatchContext(ctx, t.tx, storage.BatchCreateOptions{SkipPrefixValidation: true})
+	if err != nil {
+		return err
+	}
+	result, err := issueops.CreateIssueInTxWithResult(ctx, t.tx, bc, issue, actor)
+	if err != nil {
+		return err
+	}
+	for table := range issueops.CreateIssueDirtyTables(ctx, issue, result) {
+		t.dirty.MarkDirty(table)
+	}
+	return nil
+}
+func (t *embeddedTransaction) CreateIssues(ctx context.Context, issues []*types.Issue, actor string) error {
+	result, err := issueops.CreateIssuesInTxWithResult(ctx, t.tx, issues, actor, storage.BatchCreateOptions{
+		SkipPrefixValidation: true,
+	})
+	if err != nil {
+		return err
+	}
+	for table := range issueops.CreateIssuesDirtyTables(ctx, issues, result) {
+		t.dirty.MarkDirty(table)
+	}
+	return nil
+}
+func (t *embeddedTransaction) UpdateIssue(ctx context.Context, id string, updates map[string]interface{}, actor string) error {
+	issueTable, _, eventTable, _ := issueops.WispTableRouting(issueops.IsActiveWispInTx(ctx, t.tx, id))
+	result, err := issueops.UpdateIssueInTx(ctx, t.tx, id, updates, actor)
+	if err != nil {
+		return err
+	}
+	if !result.Changed {
+		return nil
+	}
+	t.dirty.MarkDirty(issueTable)
+	t.dirty.MarkDirty(eventTable)
+	return nil
+}
+func (t *embeddedTransaction) CloseIssue(ctx context.Context, id string, reason string, actor string, session string) error {
+	issueTable, _, eventTable, _ := issueops.WispTableRouting(issueops.IsActiveWispInTx(ctx, t.tx, id))
+	result, err := issueops.CloseIssueInTx(ctx, t.tx, id, reason, actor, session)
+	if err != nil || result.AlreadyClosed {
+		return err
+	}
+	t.dirty.MarkDirty(issueTable)
+	t.dirty.MarkDirty(eventTable)
+	if result.IssueRowsChanged {
+		t.dirty.MarkDirty("issues")
+	}
+	return nil
+}
+func (t *embeddedTransaction) ReopenIssueWithResult(ctx context.Context, id string, reason string, actor string) (bool, error) {
+	issueTable, _, eventTable, _ := issueops.WispTableRouting(issueops.IsActiveWispInTx(ctx, t.tx, id))
+	result, err := issueops.ReopenIssueInTx(ctx, t.tx, id, reason, actor)
+	if err != nil {
+		return false, err
+	}
+	if result.Changed {
+		t.dirty.MarkDirty(issueTable)
+		t.dirty.MarkDirty(eventTable)
+		if result.IssueRowsChanged {
+			t.dirty.MarkDirty("issues")
+		}
+	}
+	return result.Changed, nil
+}
+func (t *embeddedTransaction) DeleteIssue(ctx context.Context, id string) error {
+	// Shared with the dolt path so the two cannot drift again; the hand-listed
+	// set here previously omitted child_counters and the snapshot tables, which
+	// the cascade also empties.
+	for _, cascaded := range issueops.DeleteCascadeTables(issueops.IsActiveWispInTx(ctx, t.tx, id)) {
+		t.dirty.MarkDirty(cascaded)
+	}
+	return issueops.DeleteIssueInTx(ctx, t.tx, id)
+}
+func (t *embeddedTransaction) GetIssue(ctx context.Context, id string) (*types.Issue, error) {
+	return issueops.GetIssueInTx(ctx, t.tx, id)
+}
+func (t *embeddedTransaction) SearchIssues(ctx context.Context, query string, filter types.IssueFilter) ([]*types.Issue, error) {
+	return issueops.SearchIssuesInTx(ctx, t.tx, query, filter)
+}
+func (t *embeddedTransaction) SearchIssueIDs(ctx context.Context, query string, filter types.IssueFilter) ([]string, error) {
+	return issueops.SearchIssueIDsInTx(ctx, t.tx, query, filter)
+}
+func (t *embeddedTransaction) AddDependency(ctx context.Context, dep *types.Dependency, actor string) error {
+	return t.AddDependencyWithOptions(ctx, dep, actor, storage.DependencyAddOptions{})
+}
+func (t *embeddedTransaction) AddDependencyWithOptions(ctx context.Context, dep *types.Dependency, actor string, addOpts storage.DependencyAddOptions) error {
+	_, _, eventTable, depTable := issueops.WispTableRouting(issueops.IsActiveWispInTx(ctx, t.tx, dep.IssueID))
+	eventWritten, err := issueops.AddDependencyInTx(ctx, t.tx, dep, actor, issueops.AddDependencyOpts{
+		IsCrossPrefix:  types.ExtractPrefix(dep.IssueID) != types.ExtractPrefix(dep.DependsOnID),
+		SkipCycleCheck: addOpts.SkipCycleCheck,
+		EmitEvent:      addOpts.EmitEvent,
+	})
+	if err != nil {
+		return err
+	}
+	t.dirty.MarkDirty(depTable)
+	// AddDependencyInTx records a dependency_added event on the source's event
+	// table only for a genuine emit (explicit verb + new edge); stage it so the
+	// event commits with the edge. A structural or idempotent add writes no event.
+	if eventWritten {
+		t.dirty.MarkDirty(eventTable)
+	}
+	return nil
+}
+func (t *embeddedTransaction) CycleThroughEdges(ctx context.Context, edges [][2]string) (string, error) {
+	graph := make(map[string][]string)
+	if err := issueops.AppendSchedulingGraphInTx(ctx, t.tx, []string{"dependencies", "wisp_dependencies"}, graph); err != nil {
+		return "", err
+	}
+	return issueops.CycleThroughEdgesInGraph(graph, edges), nil
+}
+func (t *embeddedTransaction) RemoveDependency(ctx context.Context, issueID, dependsOnID string, actor string) error {
+	return t.RemoveDependencyWithOptions(ctx, issueID, dependsOnID, actor, storage.DependencyRemoveOptions{})
+}
+func (t *embeddedTransaction) RemoveDependencyWithOptions(ctx context.Context, issueID, dependsOnID string, actor string, rmOpts storage.DependencyRemoveOptions) error {
+	// Route dirty marking on the source's wisp status: a wisp-source remove
+	// stages wisp_dependencies/wisp_events, a permanent one dependencies/events.
+	_, _, eventTable, depTable := issueops.WispTableRouting(issueops.IsActiveWispInTx(ctx, t.tx, issueID))
+	eventWritten, err := issueops.RemoveDependencyInTx(ctx, t.tx, issueID, dependsOnID, actor, rmOpts.EmitEvent)
+	if err != nil {
+		return err
+	}
+	t.dirty.MarkDirty(depTable)
+	// RemoveDependencyInTx records a dependency_removed event on the source's
+	// event table only for a genuine emit (explicit verb + edge removal); stage
+	// it so it commits with the edge. A structural or missing-edge remove writes
+	// no event.
+	if eventWritten {
+		t.dirty.MarkDirty(eventTable)
+	}
+	return nil
+}
+func (t *embeddedTransaction) GetDependencyRecords(ctx context.Context, issueID string) ([]*types.Dependency, error) {
+	m, err := issueops.GetDependencyRecordsForIssuesInTx(ctx, t.tx, []string{issueID})
+	if err != nil {
+		return nil, err
+	}
+	return m[issueID], nil
+}
+func (t *embeddedTransaction) AddLabel(ctx context.Context, issueID, label, actor string) error {
+	_, labelTable, eventTable, _ := issueops.WispTableRouting(issueops.IsActiveWispInTx(ctx, t.tx, issueID))
+	if err := issueops.AddLabelInTx(ctx, t.tx, labelTable, eventTable, issueID, label, actor); err != nil {
+		return err
+	}
+	t.dirty.MarkDirty(labelTable)
+	t.dirty.MarkDirty(eventTable)
+	return nil
+}
+func (t *embeddedTransaction) RemoveLabel(ctx context.Context, issueID, label, actor string) error {
+	_, labelTable, eventTable, _ := issueops.WispTableRouting(issueops.IsActiveWispInTx(ctx, t.tx, issueID))
+	if err := issueops.RemoveLabelInTx(ctx, t.tx, labelTable, eventTable, issueID, label, actor); err != nil {
+		return err
+	}
+	t.dirty.MarkDirty(labelTable)
+	t.dirty.MarkDirty(eventTable)
+	return nil
+}
+func (t *embeddedTransaction) GetLabels(ctx context.Context, issueID string) ([]string, error) {
+	return issueops.GetLabelsInTx(ctx, t.tx, "", issueID)
+}
+func (t *embeddedTransaction) SetConfig(ctx context.Context, key, value string) error {
+	t.dirty.MarkDirty("config")
+	if err := issueops.SetConfigInTx(ctx, t.tx, key, value); err != nil {
+		return err
+	}
+	// Sync normalized tables when config keys change
+	table, err := issueops.SyncConfigTables(ctx, t.tx, key, value)
+	if err != nil {
+		return err
+	}
+	if table != "" {
+		t.dirty.MarkDirty(table)
+	}
+	return nil
+}
+func (t *embeddedTransaction) GetConfig(ctx context.Context, key string) (string, error) {
+	return issueops.GetConfigInTx(ctx, t.tx, key)
+}
+func (t *embeddedTransaction) SetMetadata(ctx context.Context, key, value string) error {
+	t.dirty.MarkDirty("metadata")
+	return issueops.SetMetadataInTx(ctx, t.tx, key, value)
+}
+func (t *embeddedTransaction) GetMetadata(ctx context.Context, key string) (string, error) {
+	return issueops.GetMetadataInTx(ctx, t.tx, key)
+}
+func (t *embeddedTransaction) SetLocalMetadata(ctx context.Context, key, value string) error {
+	return issueops.SetLocalMetadataInTx(ctx, t.tx, key, value)
+}
+func (t *embeddedTransaction) GetLocalMetadata(ctx context.Context, key string) (string, error) {
+	return issueops.GetLocalMetadataInTx(ctx, t.tx, key)
+}
+func (t *embeddedTransaction) AddComment(_ context.Context, _, _, _ string) error {
+	return fmt.Errorf("embeddedTransaction: AddComment not implemented")
+}
+func (t *embeddedTransaction) ImportIssueComment(_ context.Context, _, _, _ string, _ time.Time) (*types.Comment, error) {
+	return nil, fmt.Errorf("embeddedTransaction: ImportIssueComment not implemented")
+}
+func (t *embeddedTransaction) GetIssueComments(_ context.Context, _ string) ([]*types.Comment, error) {
+	return nil, fmt.Errorf("embeddedTransaction: GetIssueComments not implemented")
+}
+func (t *embeddedTransaction) CreateIssueImport(ctx context.Context, issue *types.Issue, actor string, skipPrefixValidation bool) error {
+	bc, err := issueops.NewBatchContext(ctx, t.tx, storage.BatchCreateOptions{SkipPrefixValidation: skipPrefixValidation})
+	if err != nil {
+		return err
+	}
+	result, err := issueops.CreateIssueInTxWithResult(ctx, t.tx, bc, issue, actor)
+	if err != nil {
+		return err
+	}
+	for table := range issueops.CreateIssueDirtyTables(ctx, issue, result) {
+		t.dirty.MarkDirty(table)
+	}
+	return nil
+}
+func (t *embeddedTransaction) GetIssueCommentsPage(ctx context.Context, issueID string, after storage.CommentPageCursor, limit int) ([]*types.Comment, error) {
+	return issueops.GetIssueCommentsPageInTx(ctx, t.tx, issueID, after, limit)
+}
+func (t *embeddedTransaction) CountIssuesByGroup(ctx context.Context, filter types.IssueFilter, groupBy string) (map[string]int, error) {
+	return issueops.CountIssuesByGroupInTx(ctx, t.tx, filter, groupBy)
+}
+func (t *embeddedTransaction) GetDependentRecords(ctx context.Context, targetID string, depType string, limit int, afterID string) ([]*types.Dependency, error) {
+	return issueops.GetDependentRecordsInTx(ctx, t.tx, targetID, depType, limit, afterID)
+}
+func (t *embeddedTransaction) GetDependentRecordsForIssues(ctx context.Context, targetIDs []string) (map[string][]*types.Dependency, error) {
+	return issueops.GetDependentRecordsForIssuesInTx(ctx, t.tx, targetIDs)
+}
+func (t *embeddedTransaction) CountDependentRecords(ctx context.Context, targetID string, depType string) (int, error) {
+	return issueops.CountDependentRecordsInTx(ctx, t.tx, targetID, depType)
+}
+func (t *embeddedTransaction) IsBlocked(ctx context.Context, issueID string) (bool, []string, error) {
+	return issueops.IsBlockedInTx(ctx, t.tx, issueID)
+}
+func (t *embeddedTransaction) IsBlockedBatch(ctx context.Context, ids []string) (map[string]bool, error) {
+	return issueops.IsBlockedBatchInTx(ctx, t.tx, ids)
+}
+func (t *embeddedTransaction) EventsSince(ctx context.Context, cursor storage.EventCursor, issueID string, limit int) ([]*types.Event, error) {
+	return issueops.EventsSinceInTx(ctx, t.tx, cursor.CreatedAt, cursor.ID, issueID, limit)
+}

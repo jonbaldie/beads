@@ -17,61 +17,83 @@ func DetectCyclesInTx(ctx context.Context, tx DBTX) ([][]*types.Issue, error) {
 	if err := AppendBlockingGraphInTx(ctx, tx, []string{"dependencies", "wisp_dependencies"}, graph); err != nil {
 		return nil, err
 	}
+	return findCyclesInGraph(ctx, tx, graph), nil
+}
 
-	// Find cycles using DFS.
-	var cycles [][]*types.Issue
-	visited := make(map[string]bool)
-	recStack := make(map[string]bool)
-	path := make([]string, 0)
+type cycleSearch struct {
+	ctx      context.Context
+	tx       DBTX
+	graph    map[string][]string
+	visited  map[string]bool
+	recStack map[string]bool
+	path     []string
+	cycles   [][]*types.Issue
+}
 
-	var dfs func(node string) bool
-	dfs = func(node string) bool {
-		visited[node] = true
-		recStack[node] = true
-		path = append(path, node)
-
-		for _, neighbor := range graph[node] {
-			if !visited[neighbor] {
-				if dfs(neighbor) {
-					return true
-				}
-			} else if recStack[neighbor] {
-				// Found cycle — extract it.
-				cycleStart := -1
-				for i, n := range path {
-					if n == neighbor {
-						cycleStart = i
-						break
-					}
-				}
-				if cycleStart >= 0 {
-					cyclePath := path[cycleStart:]
-					var cycleIssues []*types.Issue
-					for _, id := range cyclePath {
-						issue, _ := GetIssueInTx(ctx, tx, id)
-						if issue != nil {
-							cycleIssues = append(cycleIssues, issue)
-						}
-					}
-					if len(cycleIssues) > 0 {
-						cycles = append(cycles, cycleIssues)
-					}
-				}
-			}
-		}
-
-		path = path[:len(path)-1]
-		recStack[node] = false
-		return false
+func findCyclesInGraph(ctx context.Context, tx DBTX, graph map[string][]string) [][]*types.Issue {
+	search := cycleSearch{
+		ctx:      ctx,
+		tx:       tx,
+		graph:    graph,
+		visited:  make(map[string]bool),
+		recStack: make(map[string]bool),
 	}
-
 	for node := range graph {
-		if !visited[node] {
-			dfs(node)
+		if !search.visited[node] {
+			search.visit(node)
+		}
+	}
+	return search.cycles
+}
+
+func (search *cycleSearch) visit(node string) bool {
+	search.visited[node] = true
+	search.recStack[node] = true
+	search.path = append(search.path, node)
+
+	for _, neighbor := range search.graph[node] {
+		if !search.visited[neighbor] {
+			if search.visit(neighbor) {
+				return true
+			}
+			continue
+		}
+		if search.recStack[neighbor] {
+			search.recordCycle(neighbor)
 		}
 	}
 
-	return cycles, nil
+	search.path = search.path[:len(search.path)-1]
+	search.recStack[node] = false
+	return false
+}
+
+func (search *cycleSearch) recordCycle(neighbor string) {
+	cycleStart := -1
+	for i, node := range search.path {
+		if node == neighbor {
+			cycleStart = i
+			break
+		}
+	}
+	if cycleStart < 0 {
+		return
+	}
+	cycleIssues := search.loadCycleIssues(search.path[cycleStart:])
+	if len(cycleIssues) > 0 {
+		search.cycles = append(search.cycles, cycleIssues)
+	}
+}
+
+func (search *cycleSearch) loadCycleIssues(cyclePath []string) []*types.Issue {
+	var cycleIssues []*types.Issue
+	for _, id := range cyclePath {
+		issue, _ := GetIssueInTx(search.ctx, search.tx, id)
+		if issue != nil {
+			cycleIssues = append(cycleIssues, issue)
+		}
+	}
+	return cycleIssues
 }
 
 // AppendBlockingGraphInTx adds the blocking-type ("blocks",
@@ -94,30 +116,41 @@ func AppendSchedulingGraphInTx(ctx context.Context, tx DBTX, depTables []string,
 
 func appendDependencyGraphInTx(ctx context.Context, tx DBTX, depTables []string, graph map[string][]string, includeParentChild bool) error {
 	for _, depTable := range depTables {
-		rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
-			SELECT issue_id, %s AS depends_on_id, type
-			FROM %s
-		`, DepTargetExpr, depTable))
-		if err != nil {
-			return fmt.Errorf("dependency graph: query %s: %w", depTable, err)
-		}
-		for rows.Next() {
-			var issueID, dependsOnID, depType string
-			if err := rows.Scan(&issueID, &dependsOnID, &depType); err != nil {
-				_ = rows.Close()
-				return fmt.Errorf("dependency graph: scan %s: %w", depTable, err)
-			}
-			t := types.DependencyType(depType)
-			if t == types.DepBlocks || t == types.DepConditionalBlocks || (includeParentChild && t == types.DepParentChild) {
-				graph[issueID] = append(graph[issueID], dependsOnID)
-			}
-		}
-		_ = rows.Close()
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("dependency graph: rows %s: %w", depTable, err)
+		if err := appendDependencyGraphTable(ctx, tx, depTable, graph, includeParentChild); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func appendDependencyGraphTable(ctx context.Context, tx DBTX, depTable string, graph map[string][]string, includeParentChild bool) error {
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
+		SELECT issue_id, %s AS depends_on_id, type
+		FROM %s
+	`, DepTargetExpr, depTable))
+	if err != nil {
+		return fmt.Errorf("dependency graph: query %s: %w", depTable, err)
+	}
+	for rows.Next() {
+		var issueID, dependsOnID, depType string
+		if err := rows.Scan(&issueID, &dependsOnID, &depType); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("dependency graph: scan %s: %w", depTable, err)
+		}
+		if dependencyGraphEdgeAllowed(types.DependencyType(depType), includeParentChild) {
+			graph[issueID] = append(graph[issueID], dependsOnID)
+		}
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("dependency graph: rows %s: %w", depTable, err)
+	}
+	return nil
+}
+
+func dependencyGraphEdgeAllowed(depType types.DependencyType, includeParentChild bool) bool {
+	return depType == types.DepBlocks || depType == types.DepConditionalBlocks ||
+		(includeParentChild && depType == types.DepParentChild)
 }
 
 // CycleThroughEdgesInGraph reports a rendered cycle that traverses
@@ -155,7 +188,10 @@ func reachPath(graph map[string][]string, start, goal string) []string {
 	}
 	parent := map[string]string{start: ""}
 	queue := []string{start}
-	for len(queue) > 0 {
+	for {
+		if len(queue) == 0 {
+			break
+		}
 		node := queue[0]
 		queue = queue[1:]
 		for _, next := range graph[node] {

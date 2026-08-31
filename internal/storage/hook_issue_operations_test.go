@@ -116,7 +116,7 @@ func TestHookFiringStoreIssueLifecyclePropagatesInnerError(t *testing.T) {
 func TestHookFiringStoreCompleteIssueOperationsFireOncePerCall(t *testing.T) {
 	runner := &recordingHookRunner{}
 	store := &HookFiringStore{runner: runner}
-	issue := &types.Issue{ID: "hook-issue"}
+	issue := &types.Issue{IssueID: types.IssueID{ID: "hook-issue"}}
 
 	store.CompleteIssueOperationCreate(context.Background(), issue, nil)
 	store.CompleteIssueOperationUpdate(issue)
@@ -136,9 +136,16 @@ func TestHookFiringStoreCompleteIssueOperationsFireOncePerCall(t *testing.T) {
 func TestHookFiringStoreCompleteIssueOperationsSnapshotIssue(t *testing.T) {
 	runner := &recordingHookRunner{}
 	store := &HookFiringStore{runner: runner}
-	issue := &types.Issue{ID: "hook-issue", Dependencies: []*types.Dependency{
-		{IssueID: "hook-issue", DependsOnID: "dep", Type: types.DepBlocks},
-	}}
+	issue := &types.Issue{
+		IssueID: types.IssueID{
+			ID: "hook-issue",
+		},
+		IssueGraph: types.IssueGraph{
+			Dependencies: []*types.Dependency{
+				{IssueID: "hook-issue", DependsOnID: "dep", Type: types.DepBlocks},
+			},
+		},
+	}
 
 	store.CompleteIssueOperationUpdate(issue)
 	store.CompleteIssueOperationClose(issue)
@@ -161,11 +168,11 @@ func TestHookFiringStoreCompleteIssueOperationCreateFiresReverseDependencyUpdate
 	runner := &recordingHookRunner{}
 	reverse := &types.Dependency{IssueID: "existing-source", DependsOnID: "created", Type: types.DepRelatesTo, Metadata: `{"key":"value"}`, ThreadID: "thread"}
 	inner := fakeHookStore{issues: map[string]*types.Issue{
-		"created":         {ID: "created"},
-		"existing-source": {ID: "existing-source", Dependencies: []*types.Dependency{reverse}},
+		"created":         {IssueID: types.IssueID{ID: "created"}},
+		"existing-source": {IssueID: types.IssueID{ID: "existing-source"}, IssueGraph: types.IssueGraph{Dependencies: []*types.Dependency{reverse}}},
 	}}
 	store := &HookFiringStore{DoltStorage: inner, inner: inner, runner: runner}
-	created := &types.Issue{ID: "created"}
+	created := &types.Issue{IssueID: types.IssueID{ID: "created"}}
 
 	store.CompleteIssueOperationCreate(context.Background(), created, []*types.Dependency{{IssueID: "existing-source", DependsOnID: "created", Type: types.DepRelatesTo}})
 

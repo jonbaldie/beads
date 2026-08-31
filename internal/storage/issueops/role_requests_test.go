@@ -117,10 +117,10 @@ func TestValidateCloseBatchRequest(t *testing.T) {
 func TestCloseBatchCommitMessageNamesWhatLanded(t *testing.T) {
 	refused := publicops.CloseOutcome{IssueID: "bd-2", Err: errors.New("refused")}
 	landed := func(id string) publicops.CloseOutcome {
-		return publicops.CloseOutcome{IssueID: id, Changed: true, Issue: &types.Issue{ID: id}}
+		return publicops.CloseOutcome{IssueID: id, Changed: true, Issue: &types.Issue{IssueID: types.IssueID{ID: id}}}
 	}
 	landedWisp := func(id string) publicops.CloseOutcome {
-		return publicops.CloseOutcome{IssueID: id, Changed: true, Issue: &types.Issue{ID: id, Ephemeral: true}}
+		return publicops.CloseOutcome{IssueID: id, Changed: true, Issue: &types.Issue{IssueID: types.IssueID{ID: id}, IssueWisp: types.IssueWisp{Ephemeral: true}}}
 	}
 	for _, tc := range []struct {
 		name   string
@@ -178,7 +178,7 @@ func TestCloseBatchCommitMessageNamesWhatLanded(t *testing.T) {
 			name: "an ephemeral-only batch that claimed names the claim",
 			result: publicops.CloseBatchResult{
 				Outcomes:    []publicops.CloseOutcome{landedWisp("bd-wisp-1")},
-				ClaimedNext: &publicops.IssueWithCounts{Issue: &types.Issue{ID: "bd-9"}},
+				ClaimedNext: &publicops.IssueWithCounts{Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-9"}}},
 			},
 			want: "bd: close 1 ephemeral item; claim bd-9",
 		},

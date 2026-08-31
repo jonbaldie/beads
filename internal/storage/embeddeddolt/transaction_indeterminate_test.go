@@ -20,11 +20,17 @@ func TestRunInTransactionPostCommitStageFailureIsIndeterminate(t *testing.T) {
 	err := te.store.RunInTransaction(ctx, "test: indeterminate staged commit", func(tx storage.Transaction) error {
 		calls++
 		if err := tx.CreateIssue(ctx, &types.Issue{
-			ID:        "eci-post-commit",
-			Title:     "post-commit failure",
-			Status:    types.StatusOpen,
-			Priority:  2,
-			IssueType: types.TypeTask,
+			IssueID: types.IssueID{
+				ID: "eci-post-commit",
+			},
+			IssueContent: types.IssueContent{
+				Title: "post-commit failure",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
 		}, "tester"); err != nil {
 			return err
 		}

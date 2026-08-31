@@ -94,7 +94,8 @@ func GetLabelsForIssuesFromTableInTx(ctx context.Context, tx DBTX, labelTable st
 //
 //nolint:gosec // G201: labelTable is "labels" or "wisp_labels" (hardcoded by callers).
 func getLabelsIntoFromTable(ctx context.Context, tx DBTX, labelTable string, ids []string, result map[string][]string) error {
-	for start := 0; start < len(ids); start += queryBatchSize {
+	totalIDs := len(ids)
+	for start := 0; start < totalIDs; start += queryBatchSize {
 		end := start + queryBatchSize
 		if end > len(ids) {
 			end = len(ids)

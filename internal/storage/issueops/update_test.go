@@ -78,7 +78,7 @@ func TestManageLeaseOnUpdate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			oldIssue := &types.Issue{Status: tt.oldStatus, Assignee: tt.oldOwner}
+			oldIssue := &types.Issue{IssueWorkflow: types.IssueWorkflow{Status: tt.oldStatus, Assignee: tt.oldOwner}}
 
 			if cleared := ManageLeaseOnUpdate(oldIssue, tt.updates); cleared != tt.wantClear {
 				t.Errorf("clear = %v, want %v", cleared, tt.wantClear)

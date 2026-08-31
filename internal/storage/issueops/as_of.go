@@ -43,15 +43,7 @@ func AsOfInTx(ctx context.Context, tx DBTX, issueID string, ref string) (*types.
 	var closedAt sql.NullTime
 	var assignee, owner, contentHash sql.NullString
 	var estimatedMinutes sql.NullInt64
-
-	query := fmt.Sprintf(`
-		SELECT id, content_hash, title, description, status, priority, issue_type, assignee, estimated_minutes,
-		       created_at, created_by, owner, updated_at, closed_at
-		FROM issues AS OF '%s'
-		WHERE id = ?
-	`, ref)
-
-	err := tx.QueryRowContext(ctx, query, issueID).Scan(
+	err := tx.QueryRowContext(ctx, asOfIssueQuery(ref), issueID).Scan(
 		&issue.ID, &contentHash, &issue.Title, &issue.Description, &issue.Status, &issue.Priority, &issue.IssueType, &assignee, &estimatedMinutes,
 		&createdAtStr, &issue.CreatedBy, &owner, &updatedAtStr, &closedAt,
 	)
@@ -62,7 +54,20 @@ func AsOfInTx(ctx context.Context, tx DBTX, issueID string, ref string) (*types.
 	if err != nil {
 		return nil, fmt.Errorf("get issue as of %s: %w", ref, err)
 	}
+	applyAsOfIssueFields(&issue, createdAtStr, updatedAtStr, contentHash, assignee, owner, closedAt, estimatedMinutes)
+	return &issue, nil
+}
 
+func asOfIssueQuery(ref string) string {
+	return fmt.Sprintf(`
+		SELECT id, content_hash, title, description, status, priority, issue_type, assignee, estimated_minutes,
+		       created_at, created_by, owner, updated_at, closed_at
+		FROM issues AS OF '%s'
+		WHERE id = ?
+	`, ref)
+}
+
+func applyAsOfIssueFields(issue *types.Issue, createdAtStr, updatedAtStr, contentHash, assignee, owner sql.NullString, closedAt sql.NullTime, estimatedMinutes sql.NullInt64) {
 	if createdAtStr.Valid {
 		issue.CreatedAt = ParseTimeString(createdAtStr.String)
 	}
@@ -85,6 +90,4 @@ func AsOfInTx(ctx context.Context, tx DBTX, issueID string, ref string) (*types.
 		mins := int(estimatedMinutes.Int64)
 		issue.EstimatedMinutes = &mins
 	}
-
-	return &issue, nil
 }

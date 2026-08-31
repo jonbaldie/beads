@@ -32,8 +32,10 @@ func TestKeysetPredicateEmission(t *testing.T) {
 	// Keyset set: exactly one predicate clause equal to the single-sourced
 	// constant, with three args in bind order.
 	clauses, args, err = BuildIssueFilterClauses("", types.IssueFilter{
-		AfterCreatedAt: &cur,
-		AfterID:        "bd-42",
+		IssueFilterMatch: types.IssueFilterMatch{
+			AfterCreatedAt: &cur,
+			AfterID:        "bd-42",
+		},
 	}, IssuesFilterTables)
 	if err != nil {
 		t.Fatalf("BuildIssueFilterClauses (keyset): %v", err)
@@ -71,9 +73,11 @@ func TestKeysetComposesWithCreatedBefore(t *testing.T) {
 	before := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	clauses, args, err := BuildIssueFilterClauses("", types.IssueFilter{
-		CreatedBefore:  &before,
-		AfterCreatedAt: &cur,
-		AfterID:        "bd-7",
+		IssueFilterMatch: types.IssueFilterMatch{
+			CreatedBefore:  &before,
+			AfterCreatedAt: &cur,
+			AfterID:        "bd-7",
+		},
 	}, IssuesFilterTables)
 	if err != nil {
 		t.Fatalf("BuildIssueFilterClauses: %v", err)

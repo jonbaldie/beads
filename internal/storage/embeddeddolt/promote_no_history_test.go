@@ -23,9 +23,23 @@ func TestPromoteClearsNoHistory(t *testing.T) {
 	t.Run("no_history wisp", func(t *testing.T) {
 		te := newTestEnv(t, "pnh")
 		if err := te.store.CreateIssue(ctx, &types.Issue{
-			ID: "pnh-w", Title: "no-history wisp", Status: types.StatusOpen,
-			Priority: 2, IssueType: types.TypeTask, NoHistory: true,
-			Labels: []string{"keepme"},
+			IssueID: types.IssueID{
+				ID: "pnh-w",
+			},
+			IssueContent: types.IssueContent{
+				Title: "no-history wisp",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueGraph: types.IssueGraph{
+				Labels: []string{"keepme"},
+			},
+			IssueWisp: types.IssueWisp{
+				NoHistory: true,
+			},
 		}, "tester"); err != nil {
 			t.Fatalf("create no-history wisp: %v", err)
 		}
@@ -60,8 +74,20 @@ func TestPromoteClearsNoHistory(t *testing.T) {
 	t.Run("ephemeral wisp", func(t *testing.T) {
 		te := newTestEnv(t, "pnh")
 		if err := te.store.CreateIssue(ctx, &types.Issue{
-			ID: "pnh-e", Title: "ephemeral wisp", Status: types.StatusOpen,
-			Priority: 2, IssueType: types.TypeTask, Ephemeral: true,
+			IssueID: types.IssueID{
+				ID: "pnh-e",
+			},
+			IssueContent: types.IssueContent{
+				Title: "ephemeral wisp",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				Priority:  2,
+				IssueType: types.TypeTask,
+			},
+			IssueWisp: types.IssueWisp{
+				Ephemeral: true,
+			},
 		}, "tester"); err != nil {
 			t.Fatalf("create ephemeral wisp: %v", err)
 		}
@@ -89,9 +115,9 @@ func TestPartitionWispIDs(t *testing.T) {
 	ctx := t.Context()
 	te := newTestEnv(t, "pw")
 	seed := []*types.Issue{
-		{ID: "pw-dur", Title: "durable", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: "pw-eph", Title: "ephemeral wisp", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true},
-		{ID: "pw-noh", Title: "no-history wisp", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, NoHistory: true},
+		{IssueID: types.IssueID{ID: "pw-dur"}, IssueContent: types.IssueContent{Title: "durable"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: "pw-eph"}, IssueContent: types.IssueContent{Title: "ephemeral wisp"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}},
+		{IssueID: types.IssueID{ID: "pw-noh"}, IssueContent: types.IssueContent{Title: "no-history wisp"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{NoHistory: true}},
 	}
 	for _, issue := range seed {
 		if err := te.store.CreateIssue(ctx, issue, "tester"); err != nil {

@@ -195,49 +195,68 @@ func MaterializeLocalTableSchemasForBranchTests(ctx context.Context, db *sql.DB)
 	}
 	defer conn.Close()
 
+	if err := materializeBranchTables(ctx, conn); err != nil {
+		return err
+	}
+	return nil
+}
+
+func materializeBranchTables(ctx context.Context, conn *sql.Conn) error {
 	if _, err := conn.ExecContext(ctx, "CALL DOLT_CHECKOUT('main')"); err != nil {
 		return fmt.Errorf("checkout main: %w", err)
 	}
+	ignoreRows, tableNames, err := readIgnoredBranchState(ctx, conn)
+	if err != nil {
+		return err
+	}
+	if err := unignoreBranchTables(ctx, conn, ignoreRows); err != nil {
+		return err
+	}
+	if err := stageBranchTables(ctx, conn, tableNames); err != nil {
+		return err
+	}
+	return restoreBranchTables(ctx, conn, ignoreRows)
+}
 
+func readIgnoredBranchState(ctx context.Context, conn *sql.Conn) ([]doltIgnoreRow, []string, error) {
 	ignoreRows, err := doltIgnoreRows(ctx, conn)
 	if err != nil {
-		return fmt.Errorf("read dolt_ignore rows: %w", err)
+		return nil, nil, fmt.Errorf("read dolt_ignore rows: %w", err)
 	}
 	tableNames, err := ignoredTableNames(ctx, conn)
 	if err != nil {
-		return fmt.Errorf("read ignored table names: %w", err)
+		return nil, nil, fmt.Errorf("read ignored table names: %w", err)
 	}
+	return ignoreRows, tableNames, nil
+}
 
-	if err := removeDoltIgnoreRows(ctx, conn, ignoreRows); err != nil {
+func unignoreBranchTables(ctx context.Context, conn *sql.Conn, rows []doltIgnoreRow) error {
+	if err := removeDoltIgnoreRows(ctx, conn, rows); err != nil {
 		return err
 	}
 	if _, err := conn.ExecContext(ctx, "CALL DOLT_ADD('dolt_ignore')"); err != nil {
 		return fmt.Errorf("stage unignored local table patterns: %w", err)
 	}
-	if err := commitAllowEmpty(ctx, conn, "test: unignore local table schemas"); err != nil {
-		return err
-	}
+	return commitAllowEmpty(ctx, conn, "test: unignore local table schemas")
+}
 
+func stageBranchTables(ctx context.Context, conn *sql.Conn, tableNames []string) error {
 	for _, table := range tableNames {
 		if _, err := conn.ExecContext(ctx, "CALL DOLT_ADD(?)", table); err != nil {
 			return fmt.Errorf("stage local table %s: %w", table, err)
 		}
 	}
-	if err := commitAllowEmpty(ctx, conn, "test: materialize local table schemas"); err != nil {
-		return err
-	}
+	return commitAllowEmpty(ctx, conn, "test: materialize local table schemas")
+}
 
-	if err := restoreDoltIgnoreRows(ctx, conn, ignoreRows); err != nil {
+func restoreBranchTables(ctx context.Context, conn *sql.Conn, rows []doltIgnoreRow) error {
+	if err := restoreDoltIgnoreRows(ctx, conn, rows); err != nil {
 		return err
 	}
 	if _, err := conn.ExecContext(ctx, "CALL DOLT_ADD('dolt_ignore')"); err != nil {
 		return fmt.Errorf("stage restored local table patterns: %w", err)
 	}
-	if err := commitAllowEmpty(ctx, conn, "test: restore local table ignores"); err != nil {
-		return err
-	}
-
-	return nil
+	return commitAllowEmpty(ctx, conn, "test: restore local table ignores")
 }
 
 func doltIgnoreRows(ctx context.Context, db doltBranchSQL) ([]doltIgnoreRow, error) {

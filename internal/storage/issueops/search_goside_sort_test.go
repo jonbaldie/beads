@@ -70,10 +70,16 @@ func TestSearchIssueIDsInTx_GoSideSortScansUnboundedThenOrdersAndTrims(t *testin
 					AddRow("bd-003").AddRow("bd-000").AddRow("bd-007"))
 
 			got, err := SearchIssueIDsInTx(context.Background(), tx, "", types.IssueFilter{
-				SortBy:    "id",
-				SortDesc:  tc.sortDesc,
-				Limit:     3,
-				SkipWisps: true,
+				IssueFilterCore: types.IssueFilterCore{
+					Limit: 3,
+				},
+				IssueFilterHydrate: types.IssueFilterHydrate{
+					SkipWisps: true,
+				},
+				IssueFilterPage: types.IssueFilterPage{
+					SortBy:   "id",
+					SortDesc: tc.sortDesc,
+				},
 			})
 			if err != nil {
 				t.Fatalf("SearchIssueIDsInTx: %v", err)
@@ -123,7 +129,7 @@ func TestSearchIssuesWithCountsInTx_GoSideSortDropsTheLegBound(t *testing.T) {
 	if !ok {
 		t.Fatal("beginCapturingMockTx must hand back a *sql.Tx for the counts seam")
 	}
-	if _, err := SearchIssuesWithCountsInTx(context.Background(), txSQL, "", types.IssueFilter{SortBy: "id", SortDesc: true, Limit: 3}); err != nil {
+	if _, err := SearchIssuesWithCountsInTx(context.Background(), txSQL, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 3}, IssueFilterPage: types.IssueFilterPage{SortBy: "id", SortDesc: true}}); err != nil {
 		t.Fatalf("SearchIssuesWithCountsInTx: %v", err)
 	}
 
@@ -156,8 +162,12 @@ func TestSearchIssueIDsInTx_SQLSortStillPushesTheBound(t *testing.T) {
 			AddRow("bd-000").AddRow("bd-001").AddRow("bd-002"))
 
 	got, err := SearchIssueIDsInTx(context.Background(), tx, "", types.IssueFilter{
-		Limit:     3,
-		SkipWisps: true,
+		IssueFilterCore: types.IssueFilterCore{
+			Limit: 3,
+		},
+		IssueFilterHydrate: types.IssueFilterHydrate{
+			SkipWisps: true,
+		},
 	})
 	if err != nil {
 		t.Fatalf("SearchIssueIDsInTx: %v", err)

@@ -41,66 +41,79 @@ func HistoryInTx(ctx context.Context, tx DBTX, issueID string) ([]*storage.Histo
 
 	var entries []*storage.HistoryEntry
 	for rows.Next() {
-		var issue types.Issue
-		var createdAtStr, updatedAtStr sql.NullString
-		var closedAt sql.NullTime
-		var assignee, owner, createdBy, closeReason, molType sql.NullString
-		var estimatedMinutes sql.NullInt64
-		var pinned sql.NullInt64
-		var commitHash, committer string
-		var commitDate time.Time
-
-		if err := rows.Scan(
-			&issue.ID, &issue.Title, &issue.Description, &issue.Design, &issue.AcceptanceCriteria, &issue.Notes,
-			&issue.Status, &issue.Priority, &issue.IssueType, &assignee, &owner, &createdBy,
-			&estimatedMinutes, &createdAtStr, &updatedAtStr, &closedAt, &closeReason,
-			&pinned, &molType,
-			&commitHash, &committer, &commitDate,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan history: %w", err)
+		entry, err := scanHistoryEntry(rows)
+		if err != nil {
+			return nil, err
 		}
-
-		if createdAtStr.Valid {
-			issue.CreatedAt = ParseTimeString(createdAtStr.String)
-		}
-		if updatedAtStr.Valid {
-			issue.UpdatedAt = ParseTimeString(updatedAtStr.String)
-		}
-		if closedAt.Valid {
-			issue.ClosedAt = &closedAt.Time
-		}
-		if assignee.Valid {
-			issue.Assignee = assignee.String
-		}
-		if owner.Valid {
-			issue.Owner = owner.String
-		}
-		if createdBy.Valid {
-			issue.CreatedBy = createdBy.String
-		}
-		if estimatedMinutes.Valid {
-			mins := int(estimatedMinutes.Int64)
-			issue.EstimatedMinutes = &mins
-		}
-		if closeReason.Valid {
-			issue.CloseReason = closeReason.String
-		}
-		if pinned.Valid && pinned.Int64 != 0 {
-			issue.Pinned = true
-		}
-		if molType.Valid {
-			issue.MolType = types.MolType(molType.String)
-		}
-
-		entries = append(entries, &storage.HistoryEntry{
-			CommitHash: commitHash,
-			Committer:  committer,
-			CommitDate: commitDate,
-			Issue:      &issue,
-		})
+		entries = append(entries, entry)
 	}
 
 	return entries, rows.Err()
+}
+
+func scanHistoryEntry(rows *sql.Rows) (*storage.HistoryEntry, error) {
+	var issue types.Issue
+	var createdAtStr, updatedAtStr sql.NullString
+	var closedAt sql.NullTime
+	var assignee, owner, createdBy, closeReason, molType sql.NullString
+	var estimatedMinutes sql.NullInt64
+	var pinned sql.NullInt64
+	var commitHash, committer string
+	var commitDate time.Time
+	if err := rows.Scan(
+		&issue.ID, &issue.Title, &issue.Description, &issue.Design, &issue.AcceptanceCriteria, &issue.Notes,
+		&issue.Status, &issue.Priority, &issue.IssueType, &assignee, &owner, &createdBy,
+		&estimatedMinutes, &createdAtStr, &updatedAtStr, &closedAt, &closeReason,
+		&pinned, &molType, &commitHash, &committer, &commitDate,
+	); err != nil {
+		return nil, fmt.Errorf("failed to scan history: %w", err)
+	}
+	applyHistoryTimes(&issue, createdAtStr, updatedAtStr, closedAt)
+	applyHistoryIdentity(&issue, assignee, owner, createdBy)
+	applyHistoryDetails(&issue, estimatedMinutes, closeReason, pinned, molType)
+	return &storage.HistoryEntry{
+		CommitHash: commitHash, Committer: committer, CommitDate: commitDate, Issue: &issue,
+	}, nil
+}
+
+func applyHistoryTimes(issue *types.Issue, createdAtStr, updatedAtStr sql.NullString, closedAt sql.NullTime) {
+	if createdAtStr.Valid {
+		issue.CreatedAt = ParseTimeString(createdAtStr.String)
+	}
+	if updatedAtStr.Valid {
+		issue.UpdatedAt = ParseTimeString(updatedAtStr.String)
+	}
+	if closedAt.Valid {
+		issue.ClosedAt = &closedAt.Time
+	}
+}
+
+func applyHistoryIdentity(issue *types.Issue, assignee, owner, createdBy sql.NullString) {
+	if assignee.Valid {
+		issue.Assignee = assignee.String
+	}
+	if owner.Valid {
+		issue.Owner = owner.String
+	}
+	if createdBy.Valid {
+		issue.CreatedBy = createdBy.String
+	}
+}
+
+func applyHistoryDetails(issue *types.Issue, estimatedMinutes sql.NullInt64, closeReason sql.NullString, pinned sql.NullInt64, molType sql.NullString) {
+	if estimatedMinutes.Valid {
+		mins := int(estimatedMinutes.Int64)
+		issue.EstimatedMinutes = &mins
+	}
+	if closeReason.Valid {
+		issue.CloseReason = closeReason.String
+	}
+	if pinned.Valid && pinned.Int64 != 0 {
+		issue.Pinned = true
+	}
+	if molType.Valid {
+		issue.MolType = types.MolType(molType.String)
+	}
 }
 
 // PreviousExternalRefInTx returns the external_ref value recorded for

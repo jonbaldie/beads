@@ -295,7 +295,7 @@ func TestValidateRelatedRequestRefusesTheZeroDirection(t *testing.T) {
 func TestFinishRelatedPagePinsTheOrder(t *testing.T) {
 	related := func(id string, depType types.DependencyType) *types.IssueWithDependencyMetadata {
 		return &types.IssueWithDependencyMetadata{
-			Issue:          types.Issue{ID: id},
+			Issue:          types.Issue{IssueID: types.IssueID{ID: id}},
 			DependencyType: depType,
 		}
 	}

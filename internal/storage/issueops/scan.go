@@ -64,181 +64,188 @@ type IssueScanner interface {
 	Scan(dest ...any) error
 }
 
+type issueScanFields struct {
+	times    issueScanTimes
+	numbers  issueScanNumbers
+	identity issueScanIdentity
+	event    issueScanEvent
+	routing  issueScanRouting
+}
+
+type issueScanTimes struct {
+	createdAtStr, updatedAtStr                          sql.NullString
+	startedAt, closedAt, compactedAt, dueAt, deferUntil sql.NullTime
+	leaseExpiresAt, heartbeatAt                         sql.NullTime
+}
+
+type issueScanNumbers struct {
+	estimatedMinutes, originalSize, timeoutNs sql.NullInt64
+	ephemeral, noHistory, pinned, isTemplate  sql.NullInt64
+	rowLock                                   sql.NullInt64
+}
+
+type issueScanIdentity struct {
+	createdBy                                               sql.NullString
+	assignee, externalRef, specID, compactedAtCommit, owner sql.NullString
+	contentHash, sourceRepo, closeReason, closedBySession   sql.NullString
+}
+
+type issueScanEvent struct {
+	sender, wispType, molType, eventKind, actor, target, payload sql.NullString
+	awaitType, awaitID, waiters                                  sql.NullString
+}
+
+type issueScanRouting struct {
+	workType, sourceSystem sql.NullString
+	metadata, storageClass sql.NullString
+	leaseGrantedNode       sql.NullString
+}
+
+func (f *issueScanFields) destinations(issue *types.Issue, lite bool) []any {
+	if lite {
+		return f.liteDestinations(issue)
+	}
+	return f.fullDestinations(issue)
+}
+
+func (f *issueScanFields) fullDestinations(issue *types.Issue) []any {
+	return []any{
+		&issue.ID, &f.identity.contentHash, &issue.Title, &issue.Description, &issue.Design,
+		&issue.AcceptanceCriteria, &issue.Notes, &issue.Status,
+		&issue.Priority, &issue.IssueType, &f.identity.assignee, &f.numbers.estimatedMinutes,
+		&f.times.createdAtStr, &f.identity.createdBy, &f.identity.owner, &f.times.updatedAtStr, &f.times.startedAt, &f.times.closedAt, &f.identity.externalRef, &f.identity.specID,
+		&issue.CompactionLevel, &f.times.compactedAt, &f.identity.compactedAtCommit, &f.numbers.originalSize, &f.identity.sourceRepo, &f.identity.closeReason, &f.identity.closedBySession,
+		&f.event.sender, &f.numbers.ephemeral, &f.numbers.noHistory, &f.event.wispType, &f.numbers.pinned, &f.numbers.isTemplate,
+		&f.event.awaitType, &f.event.awaitID, &f.numbers.timeoutNs, &f.event.waiters,
+		&f.event.molType,
+		&f.event.eventKind, &f.event.actor, &f.event.target, &f.event.payload,
+		&f.times.dueAt, &f.times.deferUntil,
+		&f.routing.workType, &f.routing.sourceSystem, &f.routing.metadata, &f.numbers.rowLock, &f.routing.storageClass,
+		&f.times.leaseExpiresAt, &f.times.heartbeatAt, &f.routing.leaseGrantedNode,
+	}
+}
+
+func (f *issueScanFields) liteDestinations(issue *types.Issue) []any {
+	return []any{
+		&issue.ID, &f.identity.contentHash, &issue.Title,
+		&issue.Status,
+		&issue.Priority, &issue.IssueType, &f.identity.assignee, &f.numbers.estimatedMinutes,
+		&f.times.createdAtStr, &f.identity.createdBy, &f.identity.owner, &f.times.updatedAtStr, &f.times.startedAt, &f.times.closedAt, &f.identity.externalRef, &f.identity.specID,
+		&issue.CompactionLevel, &f.times.compactedAt, &f.identity.compactedAtCommit, &f.numbers.originalSize, &f.identity.sourceRepo, &f.identity.closeReason, &f.identity.closedBySession,
+		&f.event.sender, &f.numbers.ephemeral, &f.numbers.noHistory, &f.event.wispType, &f.numbers.pinned, &f.numbers.isTemplate,
+		&f.event.awaitType, &f.event.awaitID, &f.numbers.timeoutNs,
+		&f.event.molType,
+		&f.event.eventKind, &f.event.actor, &f.event.target,
+		&f.times.dueAt, &f.times.deferUntil,
+		&f.routing.workType, &f.routing.sourceSystem, &f.routing.metadata, &f.numbers.rowLock, &f.routing.storageClass,
+		&f.times.leaseExpiresAt, &f.times.heartbeatAt, &f.routing.leaseGrantedNode,
+	}
+}
+
+func applyIssueScanFields(issue *types.Issue, f *issueScanFields) {
+	issue.CreatedAt = parseIssueTime(f.times.createdAtStr)
+	issue.UpdatedAt = parseIssueTime(f.times.updatedAtStr)
+	issue.ContentHash = f.identity.contentHash.String
+	issue.StartedAt = issueTimePointer(f.times.startedAt)
+	issue.ClosedAt = issueTimePointer(f.times.closedAt)
+	issue.EstimatedMinutes = issueIntPointer(f.numbers.estimatedMinutes)
+	issue.Assignee = f.identity.assignee.String
+	issue.CreatedBy = f.identity.createdBy.String
+	issue.Owner = f.identity.owner.String
+	issue.ExternalRef = issueStringPointer(f.identity.externalRef)
+	issue.SpecID = f.identity.specID.String
+	issue.CompactedAt = issueTimePointer(f.times.compactedAt)
+	issue.CompactedAtCommit = issueStringPointer(f.identity.compactedAtCommit)
+	issue.OriginalSize = int(f.numbers.originalSize.Int64)
+	issue.SourceRepo = f.identity.sourceRepo.String
+	issue.CloseReason = f.identity.closeReason.String
+	issue.ClosedBySession = f.identity.closedBySession.String
+	issue.Sender = f.event.sender.String
+	issue.Ephemeral = issueFlag(f.numbers.ephemeral)
+	issue.NoHistory = issueFlag(f.numbers.noHistory)
+	issue.WispType = types.WispType(f.event.wispType.String)
+	issue.Pinned = issueFlag(f.numbers.pinned)
+	issue.IsTemplate = issueFlag(f.numbers.isTemplate)
+	issue.AwaitType = f.event.awaitType.String
+	issue.AwaitID = f.event.awaitID.String
+	issue.Timeout = time.Duration(f.numbers.timeoutNs.Int64)
+	issue.Waiters = issueStringArray(f.event.waiters)
+	issue.MolType = types.MolType(f.event.molType.String)
+	issue.EventKind = f.event.eventKind.String
+	issue.Actor = f.event.actor.String
+	issue.Target = f.event.target.String
+	issue.Payload = f.event.payload.String
+	issue.DueAt = issueTimePointer(f.times.dueAt)
+	issue.DeferUntil = issueTimePointer(f.times.deferUntil)
+	issue.WorkType = types.WorkType(f.routing.workType.String)
+	issue.SourceSystem = f.routing.sourceSystem.String
+	issue.Metadata = issueMetadataBytes(f.routing.metadata)
+	issue.RowVersion = f.numbers.rowLock.Int64
+	issue.StorageClass = types.StorageClass(f.routing.storageClass.String)
+	issue.LeaseExpiresAt = issueTimePointer(f.times.leaseExpiresAt)
+	issue.HeartbeatAt = issueTimePointer(f.times.heartbeatAt)
+	issue.LeaseGrantedNode = f.routing.leaseGrantedNode.String
+}
+
+func parseIssueTime(value sql.NullString) time.Time {
+	if !value.Valid {
+		return time.Time{}
+	}
+	return ParseTimeString(value.String)
+}
+
+func issueTimePointer(value sql.NullTime) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	return &value.Time
+}
+
+func issueStringPointer(value sql.NullString) *string {
+	if !value.Valid {
+		return nil
+	}
+	return &value.String
+}
+
+func issueIntPointer(value sql.NullInt64) *int {
+	if !value.Valid {
+		return nil
+	}
+	result := int(value.Int64)
+	return &result
+}
+
+func issueFlag(value sql.NullInt64) bool {
+	return value.Valid && value.Int64 != 0
+}
+
+func issueStringArray(value sql.NullString) []string {
+	if !value.Valid {
+		return nil
+	}
+	return ParseJSONStringArray(value.String)
+}
+
+func issueMetadataBytes(value sql.NullString) []byte {
+	if !value.Valid || value.String == "" || value.String == "{}" {
+		return nil
+	}
+	return []byte(value.String)
+}
+
 // ScanIssueFrom scans a full issue from any source implementing IssueScanner.
 // The caller must ensure the query selected exactly IssueSelectColumns in
 // order; any extra dests are appended for trailing columns beyond that list.
 func ScanIssueFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 	var issue types.Issue
-	var createdAtStr, updatedAtStr sql.NullString // scanned as strings, parsed with format fallbacks
-	var startedAt, closedAt, compactedAt, dueAt, deferUntil sql.NullTime
-	var leaseExpiresAt, heartbeatAt sql.NullTime // lease columns (migration 0054); NULL when no active lease
-	var leaseGrantedNode sql.NullString          // granting replica (ignored migration 0016); NULL when no active lease
-	var estimatedMinutes, originalSize, timeoutNs sql.NullInt64
-	var createdBy sql.NullString
-	var assignee, externalRef, specID, compactedAtCommit, owner sql.NullString
-	var contentHash, sourceRepo, closeReason, closedBySession sql.NullString
-	var workType, sourceSystem sql.NullString
-	var sender, wispType, molType, eventKind, actor, target, payload sql.NullString
-	var awaitType, awaitID, waiters sql.NullString
-	var ephemeral, noHistory, pinned, isTemplate sql.NullInt64
-	var metadata sql.NullString
-	var rowLock sql.NullInt64       // row_lock column (NOT NULL DEFAULT 0); scanned defensively so NULL maps to 0
-	var storageClass sql.NullString // storage_class column (migration 0060); NULL = unset, resolves per EffectiveStorageClass
-
-	dests := []any{
-		&issue.ID, &contentHash, &issue.Title, &issue.Description, &issue.Design,
-		&issue.AcceptanceCriteria, &issue.Notes, &issue.Status,
-		&issue.Priority, &issue.IssueType, &assignee, &estimatedMinutes,
-		&createdAtStr, &createdBy, &owner, &updatedAtStr, &startedAt, &closedAt, &externalRef, &specID,
-		&issue.CompactionLevel, &compactedAt, &compactedAtCommit, &originalSize, &sourceRepo, &closeReason, &closedBySession,
-		&sender, &ephemeral, &noHistory, &wispType, &pinned, &isTemplate,
-		&awaitType, &awaitID, &timeoutNs, &waiters,
-		&molType,
-		&eventKind, &actor, &target, &payload,
-		&dueAt, &deferUntil,
-		&workType, &sourceSystem, &metadata, &rowLock, &storageClass,
-		&leaseExpiresAt, &heartbeatAt, &leaseGrantedNode,
-	}
+	fields := issueScanFields{}
+	dests := fields.destinations(&issue, false)
 	dests = append(dests, extra...)
 	if err := s.Scan(dests...); err != nil {
 		return nil, err
 	}
-
-	// Parse timestamp strings (TEXT columns require manual parsing)
-	if createdAtStr.Valid {
-		issue.CreatedAt = ParseTimeString(createdAtStr.String)
-	}
-	if updatedAtStr.Valid {
-		issue.UpdatedAt = ParseTimeString(updatedAtStr.String)
-	}
-
-	// Map nullable fields
-	if contentHash.Valid {
-		issue.ContentHash = contentHash.String
-	}
-	if startedAt.Valid {
-		issue.StartedAt = &startedAt.Time
-	}
-	if closedAt.Valid {
-		issue.ClosedAt = &closedAt.Time
-	}
-	if estimatedMinutes.Valid {
-		mins := int(estimatedMinutes.Int64)
-		issue.EstimatedMinutes = &mins
-	}
-	if assignee.Valid {
-		issue.Assignee = assignee.String
-	}
-	if createdBy.Valid {
-		issue.CreatedBy = createdBy.String
-	}
-	if owner.Valid {
-		issue.Owner = owner.String
-	}
-	if externalRef.Valid {
-		issue.ExternalRef = &externalRef.String
-	}
-	if specID.Valid {
-		issue.SpecID = specID.String
-	}
-	if compactedAt.Valid {
-		issue.CompactedAt = &compactedAt.Time
-	}
-	if compactedAtCommit.Valid {
-		issue.CompactedAtCommit = &compactedAtCommit.String
-	}
-	if originalSize.Valid {
-		issue.OriginalSize = int(originalSize.Int64)
-	}
-	if sourceRepo.Valid {
-		issue.SourceRepo = sourceRepo.String
-	}
-	if closeReason.Valid {
-		issue.CloseReason = closeReason.String
-	}
-	if closedBySession.Valid {
-		issue.ClosedBySession = closedBySession.String
-	}
-	if sender.Valid {
-		issue.Sender = sender.String
-	}
-	if ephemeral.Valid && ephemeral.Int64 != 0 {
-		issue.Ephemeral = true
-	}
-	if noHistory.Valid && noHistory.Int64 != 0 {
-		issue.NoHistory = true
-	}
-	if wispType.Valid {
-		issue.WispType = types.WispType(wispType.String)
-	}
-	if pinned.Valid && pinned.Int64 != 0 {
-		issue.Pinned = true
-	}
-	if isTemplate.Valid && isTemplate.Int64 != 0 {
-		issue.IsTemplate = true
-	}
-	if awaitType.Valid {
-		issue.AwaitType = awaitType.String
-	}
-	if awaitID.Valid {
-		issue.AwaitID = awaitID.String
-	}
-	if timeoutNs.Valid {
-		issue.Timeout = time.Duration(timeoutNs.Int64)
-	}
-	if waiters.Valid && waiters.String != "" {
-		issue.Waiters = ParseJSONStringArray(waiters.String)
-	}
-	if molType.Valid {
-		issue.MolType = types.MolType(molType.String)
-	}
-	if eventKind.Valid {
-		issue.EventKind = eventKind.String
-	}
-	if actor.Valid {
-		issue.Actor = actor.String
-	}
-	if target.Valid {
-		issue.Target = target.String
-	}
-	if payload.Valid {
-		issue.Payload = payload.String
-	}
-	if dueAt.Valid {
-		issue.DueAt = &dueAt.Time
-	}
-	if deferUntil.Valid {
-		issue.DeferUntil = &deferUntil.Time
-	}
-	if workType.Valid {
-		issue.WorkType = types.WorkType(workType.String)
-	}
-	if sourceSystem.Valid {
-		issue.SourceSystem = sourceSystem.String
-	}
-	// Custom metadata field (GH#1406)
-	if metadata.Valid && metadata.String != "" && metadata.String != "{}" {
-		issue.Metadata = []byte(metadata.String)
-	}
-	// row_lock surfaced as the opaque RowVersion token. NOT NULL DEFAULT 0, so
-	// this is normally valid; a NULL (defensive) maps to 0.
-	issue.RowVersion = rowLock.Int64
-	// storage_class (migration 0060); NULL = unset (EffectiveStorageClass
-	// resolves the default per Protocol v0.1 C1.2).
-	if storageClass.Valid {
-		issue.StorageClass = types.StorageClass(storageClass.String)
-	}
-	// Lease columns (migration 0054); NULL when no active lease.
-	if leaseExpiresAt.Valid {
-		issue.LeaseExpiresAt = &leaseExpiresAt.Time
-	}
-	if heartbeatAt.Valid {
-		issue.HeartbeatAt = &heartbeatAt.Time
-	}
-	// Granting replica (ignored migration 0016); "" when the lease predates
-	// the column or the deployment cannot name its replicas.
-	issue.LeaseGrantedNode = leaseGrantedNode.String
-
+	applyIssueScanFields(&issue, &fields)
 	return &issue, nil
 }
 
@@ -250,167 +257,13 @@ func ScanIssueFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 // can detect the partial hydration.
 func ScanIssueLiteFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 	var issue types.Issue
-	var createdAtStr, updatedAtStr sql.NullString // TEXT columns - must parse manually
-	var startedAt, closedAt, compactedAt, dueAt, deferUntil sql.NullTime
-	var leaseExpiresAt, heartbeatAt sql.NullTime // lease columns (migration 0054); NULL when no active lease
-	var leaseGrantedNode sql.NullString          // granting replica (migration 0016); NULL when no active lease
-	var estimatedMinutes, originalSize, timeoutNs sql.NullInt64
-	var createdBy sql.NullString
-	var assignee, externalRef, specID, compactedAtCommit, owner sql.NullString
-	var contentHash, sourceRepo, closeReason, closedBySession sql.NullString
-	var workType, sourceSystem sql.NullString
-	var sender, wispType, molType, eventKind, actor, target sql.NullString
-	var awaitType, awaitID sql.NullString
-	var ephemeral, noHistory, pinned, isTemplate sql.NullInt64
-	var metadata sql.NullString
-	var rowLock sql.NullInt64       // row_lock column (NOT NULL DEFAULT 0); scanned defensively so NULL maps to 0
-	var storageClass sql.NullString // storage_class column (migration 0060); NULL = unset, resolves per EffectiveStorageClass
-
-	dests := []any{
-		&issue.ID, &contentHash, &issue.Title,
-		&issue.Status,
-		&issue.Priority, &issue.IssueType, &assignee, &estimatedMinutes,
-		&createdAtStr, &createdBy, &owner, &updatedAtStr, &startedAt, &closedAt, &externalRef, &specID,
-		&issue.CompactionLevel, &compactedAt, &compactedAtCommit, &originalSize, &sourceRepo, &closeReason, &closedBySession,
-		&sender, &ephemeral, &noHistory, &wispType, &pinned, &isTemplate,
-		&awaitType, &awaitID, &timeoutNs,
-		&molType,
-		&eventKind, &actor, &target,
-		&dueAt, &deferUntil,
-		&workType, &sourceSystem, &metadata, &rowLock, &storageClass,
-		&leaseExpiresAt, &heartbeatAt, &leaseGrantedNode,
-	}
+	fields := issueScanFields{}
+	dests := fields.destinations(&issue, true)
 	dests = append(dests, extra...)
 	if err := s.Scan(dests...); err != nil {
 		return nil, err
 	}
-
-	if createdAtStr.Valid {
-		issue.CreatedAt = ParseTimeString(createdAtStr.String)
-	}
-	if updatedAtStr.Valid {
-		issue.UpdatedAt = ParseTimeString(updatedAtStr.String)
-	}
-
-	if contentHash.Valid {
-		issue.ContentHash = contentHash.String
-	}
-	if startedAt.Valid {
-		issue.StartedAt = &startedAt.Time
-	}
-	if closedAt.Valid {
-		issue.ClosedAt = &closedAt.Time
-	}
-	if estimatedMinutes.Valid {
-		mins := int(estimatedMinutes.Int64)
-		issue.EstimatedMinutes = &mins
-	}
-	if assignee.Valid {
-		issue.Assignee = assignee.String
-	}
-	if createdBy.Valid {
-		issue.CreatedBy = createdBy.String
-	}
-	if owner.Valid {
-		issue.Owner = owner.String
-	}
-	if externalRef.Valid {
-		issue.ExternalRef = &externalRef.String
-	}
-	if specID.Valid {
-		issue.SpecID = specID.String
-	}
-	if compactedAt.Valid {
-		issue.CompactedAt = &compactedAt.Time
-	}
-	if compactedAtCommit.Valid {
-		issue.CompactedAtCommit = &compactedAtCommit.String
-	}
-	if originalSize.Valid {
-		issue.OriginalSize = int(originalSize.Int64)
-	}
-	if sourceRepo.Valid {
-		issue.SourceRepo = sourceRepo.String
-	}
-	if closeReason.Valid {
-		issue.CloseReason = closeReason.String
-	}
-	if closedBySession.Valid {
-		issue.ClosedBySession = closedBySession.String
-	}
-	if sender.Valid {
-		issue.Sender = sender.String
-	}
-	if ephemeral.Valid && ephemeral.Int64 != 0 {
-		issue.Ephemeral = true
-	}
-	if noHistory.Valid && noHistory.Int64 != 0 {
-		issue.NoHistory = true
-	}
-	if wispType.Valid {
-		issue.WispType = types.WispType(wispType.String)
-	}
-	if pinned.Valid && pinned.Int64 != 0 {
-		issue.Pinned = true
-	}
-	if isTemplate.Valid && isTemplate.Int64 != 0 {
-		issue.IsTemplate = true
-	}
-	if awaitType.Valid {
-		issue.AwaitType = awaitType.String
-	}
-	if awaitID.Valid {
-		issue.AwaitID = awaitID.String
-	}
-	if timeoutNs.Valid {
-		issue.Timeout = time.Duration(timeoutNs.Int64)
-	}
-	if molType.Valid {
-		issue.MolType = types.MolType(molType.String)
-	}
-	if eventKind.Valid {
-		issue.EventKind = eventKind.String
-	}
-	if actor.Valid {
-		issue.Actor = actor.String
-	}
-	if target.Valid {
-		issue.Target = target.String
-	}
-	if dueAt.Valid {
-		issue.DueAt = &dueAt.Time
-	}
-	if deferUntil.Valid {
-		issue.DeferUntil = &deferUntil.Time
-	}
-	if workType.Valid {
-		issue.WorkType = types.WorkType(workType.String)
-	}
-	if sourceSystem.Valid {
-		issue.SourceSystem = sourceSystem.String
-	}
-	if metadata.Valid && metadata.String != "" && metadata.String != "{}" {
-		issue.Metadata = []byte(metadata.String)
-	}
-	// row_lock surfaced as the opaque RowVersion token. NOT NULL DEFAULT 0, so
-	// this is normally valid; a NULL (defensive) maps to 0.
-	issue.RowVersion = rowLock.Int64
-	// storage_class (migration 0060); NULL = unset (EffectiveStorageClass
-	// resolves the default per Protocol v0.1 C1.2).
-	if storageClass.Valid {
-		issue.StorageClass = types.StorageClass(storageClass.String)
-	}
-	// Lease columns (migration 0054); NULL when no active lease.
-	if leaseExpiresAt.Valid {
-		issue.LeaseExpiresAt = &leaseExpiresAt.Time
-	}
-	if heartbeatAt.Valid {
-		issue.HeartbeatAt = &heartbeatAt.Time
-	}
-	// Granting replica (migration 0016); "" when the lease predates the
-	// column or the deployment cannot name its replicas.
-	issue.LeaseGrantedNode = leaseGrantedNode.String
-
+	applyIssueScanFields(&issue, &fields)
 	issue.IsLitePartial = true
 	return &issue, nil
 }

@@ -13,12 +13,16 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/dolt"
 )
 
+type containerProviderInfo struct{ port int }
+
+type containerProviderLifecycle struct{ container *dolt.DoltContainer }
+
 // ContainerProvider manages a testcontainers Dolt SQL server for integration
 // tests. Use NewContainerProvider to start the container, Port() to get the
 // mapped host port, and Stop() to tear it down.
 type ContainerProvider struct {
-	container *dolt.DoltContainer
-	port      int
+	*containerProviderInfo
+	*containerProviderLifecycle
 }
 
 // NewContainerProvider starts a Dolt container and returns a provider.
@@ -51,25 +55,25 @@ func NewContainerProvider() (*ContainerProvider, error) {
 	}
 
 	return &ContainerProvider{
-		container: ctr,
-		port:      port,
+		containerProviderInfo:      &containerProviderInfo{port: port},
+		containerProviderLifecycle: &containerProviderLifecycle{container: ctr},
 	}, nil
 }
 
 // Port returns the host-mapped port the container is listening on.
-func (p *ContainerProvider) Port() int {
+func (p *containerProviderInfo) Port() int {
 	return p.port
 }
 
 // WritePortFile writes the container port to the given shared server directory
 // so that bd subprocesses can discover it via DefaultConfig / readPortFile.
-func (p *ContainerProvider) WritePortFile(serverDir string) error {
+func (p *containerProviderInfo) WritePortFile(serverDir string) error {
 	portPath := filepath.Join(serverDir, "dolt-server.port")
 	return os.WriteFile(portPath, []byte(strconv.Itoa(p.port)), 0600)
 }
 
 // Stop terminates the container.
-func (p *ContainerProvider) Stop() error {
+func (p *containerProviderLifecycle) Stop() error {
 	if p.container == nil {
 		return nil
 	}

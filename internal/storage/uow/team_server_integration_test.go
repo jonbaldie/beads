@@ -55,16 +55,15 @@ func newTeamServerHarness(t *testing.T) *teamServerHarness {
 func (h *teamServerHarness) openProvider(ctx context.Context, database string, teamServer bool, expectedProjectID string) (UnitOfWorkProvider, error) {
 	return NewExternalDoltServerUOWProvider(
 		ctx,
-		h.storeRootDir,
-		database,
-		h.logPath,
-		configfile.ExternalDoltConfig{Host: "127.0.0.1", Port: h.port},
-		"root",
-		"",
-		0,
-		0,
-		teamServer,
-		expectedProjectID,
+		ExternalDoltServerUOWOptions{
+			ServerRootDir:     h.storeRootDir,
+			Database:          database,
+			ServerLogFilePath: h.logPath,
+			External:          configfile.ExternalDoltConfig{Host: "127.0.0.1", Port: h.port},
+			RootUser:          "root",
+			TeamServer:        teamServer,
+			ExpectedProjectID: expectedProjectID,
+		},
 	)
 }
 

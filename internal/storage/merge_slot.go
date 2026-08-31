@@ -43,12 +43,18 @@ func MergeSlotCreateImpl(ctx context.Context, s Storage, actor string) (*types.I
 	}
 
 	issue := &types.Issue{
-		ID:          slotID,
-		Title:       "Merge Slot",
-		Description: "Exclusive access slot for serialized conflict resolution in the merge queue.",
-		IssueType:   types.TypeTask,
-		Status:      types.StatusOpen,
-		Priority:    0,
+		IssueID: types.IssueID{
+			ID: slotID,
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Merge Slot",
+			Description: "Exclusive access slot for serialized conflict resolution in the merge queue.",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+			Status:    types.StatusOpen,
+			Priority:  0,
+		},
 	}
 	if err := s.CreateIssue(ctx, issue, actor); err != nil {
 		return nil, fmt.Errorf("merge-slot create: %w", err)
@@ -91,62 +97,66 @@ func MergeSlotAcquireImpl(ctx context.Context, s Storage, holder, actor string, 
 
 	err := s.RunInTransaction(ctx,
 		fmt.Sprintf("bd: acquire merge slot %s for %s", slotID, holder),
-		func(tx Transaction) error {
-			slot, err := tx.GetIssue(ctx, slotID)
-			if err != nil || slot == nil {
-				return fmt.Errorf("merge slot not found: %s (run 'bd merge-slot create' first)", slotID)
-			}
-
-			meta := parseSlotMeta(slot)
-			result.Holder = meta.Holder
-
-			if slot.Status != types.StatusOpen {
-				// Slot is held.
-				if wait {
-					alreadyWaiting := false
-					for _, w := range meta.Waiters {
-						if w == holder {
-							alreadyWaiting = true
-							break
-						}
-					}
-					if !alreadyWaiting {
-						meta.Waiters = append(meta.Waiters, holder)
-					}
-					metaStr, err := encodeSlotMeta(meta)
-					if err != nil {
-						return fmt.Errorf("failed to encode slot metadata: %w", err)
-					}
-					if err := tx.UpdateIssue(ctx, slot.ID, map[string]interface{}{"metadata": metaStr}, actor); err != nil {
-						return fmt.Errorf("failed to add to waiters: %w", err)
-					}
-					result.Waiting = true
-					result.Position = len(meta.Waiters)
-				}
-				return nil
-			}
-
-			// Slot is available — acquire it atomically.
-			newMeta := slotMeta{Holder: holder, Waiters: meta.Waiters}
-			metaStr, err := encodeSlotMeta(newMeta)
-			if err != nil {
-				return fmt.Errorf("failed to encode slot metadata: %w", err)
-			}
-			if err := tx.UpdateIssue(ctx, slot.ID, map[string]interface{}{
-				"status":   types.StatusInProgress,
-				"metadata": metaStr,
-			}, actor); err != nil {
-				return fmt.Errorf("failed to acquire slot: %w", err)
-			}
-			result.Acquired = true
-			result.Holder = holder
-			return nil
-		},
+		func(tx Transaction) error { return mergeSlotAcquireInTx(ctx, tx, holder, actor, wait, slotID, &result) },
 	)
 	if err != nil {
 		return nil, err
 	}
 	return &result, nil
+}
+
+func mergeSlotAcquireInTx(ctx context.Context, tx Transaction, holder, actor string, wait bool, slotID string, result *MergeSlotResult) error {
+	slot, err := tx.GetIssue(ctx, slotID)
+	if err != nil || slot == nil {
+		return fmt.Errorf("merge slot not found: %s (run 'bd merge-slot create' first)", slotID)
+	}
+	meta := parseSlotMeta(slot)
+	result.Holder = meta.Holder
+	if slot.Status != types.StatusOpen {
+		if !wait {
+			return nil
+		}
+		return waitForMergeSlot(ctx, tx, slot, meta, holder, actor, result)
+	}
+	return acquireMergeSlot(ctx, tx, slot, meta, holder, actor, result)
+}
+
+func waitForMergeSlot(ctx context.Context, tx Transaction, slot *types.Issue, meta slotMeta, holder, actor string, result *MergeSlotResult) error {
+	if !containsMergeSlotWaiter(meta.Waiters, holder) {
+		meta.Waiters = append(meta.Waiters, holder)
+	}
+	metaStr, err := encodeSlotMeta(meta)
+	if err != nil {
+		return fmt.Errorf("failed to encode slot metadata: %w", err)
+	}
+	if err := tx.UpdateIssue(ctx, slot.ID, map[string]interface{}{"metadata": metaStr}, actor); err != nil {
+		return fmt.Errorf("failed to add to waiters: %w", err)
+	}
+	result.Waiting = true
+	result.Position = len(meta.Waiters)
+	return nil
+}
+
+func containsMergeSlotWaiter(waiters []string, holder string) bool {
+	for _, waiter := range waiters {
+		if waiter == holder {
+			return true
+		}
+	}
+	return false
+}
+
+func acquireMergeSlot(ctx context.Context, tx Transaction, slot *types.Issue, meta slotMeta, holder, actor string, result *MergeSlotResult) error {
+	metaStr, err := encodeSlotMeta(slotMeta{Holder: holder, Waiters: meta.Waiters})
+	if err != nil {
+		return fmt.Errorf("failed to encode slot metadata: %w", err)
+	}
+	if err := tx.UpdateIssue(ctx, slot.ID, map[string]interface{}{"status": types.StatusInProgress, "metadata": metaStr}, actor); err != nil {
+		return fmt.Errorf("failed to acquire slot: %w", err)
+	}
+	result.Acquired = true
+	result.Holder = holder
+	return nil
 }
 
 // MergeSlotReleaseImpl is the shared implementation of Storage.MergeSlotRelease.

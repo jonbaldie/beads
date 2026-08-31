@@ -16,7 +16,7 @@ import (
 // the config read.
 func TestAuthorizeAssigneeTransferWithPools(t *testing.T) {
 	held := func() *types.Issue {
-		return &types.Issue{ID: "bd-1", Status: types.StatusInProgress, Assignee: "holder"}
+		return &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress, Assignee: "holder"}}
 	}
 	transfer := func(mutate func(*publicops.UpdateRequest)) publicops.UpdateRequest {
 		request := publicops.UpdateRequest{
@@ -60,12 +60,12 @@ func TestAuthorizeAssigneeTransferWithPools(t *testing.T) {
 		},
 		{
 			name:    "holder is not in progress",
-			before:  &types.Issue{ID: "bd-1", Status: types.StatusOpen, Assignee: "holder"},
+			before:  &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Assignee: "holder"}},
 			request: transfer(nil),
 		},
 		{
 			name:    "unassigned",
-			before:  &types.Issue{ID: "bd-1", Status: types.StatusInProgress},
+			before:  &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress}},
 			request: transfer(nil),
 		},
 		{
@@ -78,7 +78,7 @@ func TestAuthorizeAssigneeTransferWithPools(t *testing.T) {
 			// ways (dot vs underscore separator) must still count as
 			// "actor already holds it", not a foreign transfer.
 			name:    "actor already holds it under a different spelling",
-			before:  &types.Issue{ID: "bd-1", Status: types.StatusInProgress, Assignee: "gastown.mayor"},
+			before:  &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress, Assignee: "gastown.mayor"}},
 			request: transfer(func(r *publicops.UpdateRequest) { r.Actor = "gastown_mayor" }),
 		},
 		{
@@ -86,7 +86,7 @@ func TestAuthorizeAssigneeTransferWithPools(t *testing.T) {
 			// (and doubled-separator) spelling is still the same
 			// idempotent no-op as reasserting it verbatim.
 			name:    "reasserts the current assignee under a different spelling",
-			before:  &types.Issue{ID: "bd-1", Status: types.StatusInProgress, Assignee: "gastown.mayor"},
+			before:  &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress, Assignee: "gastown.mayor"}},
 			request: transfer(func(r *publicops.UpdateRequest) { r.Patch.Assignee.Value = "gastown__mayor" }),
 		},
 		{
@@ -94,13 +94,13 @@ func TestAuthorizeAssigneeTransferWithPools(t *testing.T) {
 			// whose identity genuinely differs from the holder (not just
 			// a respelling of it) stays refused.
 			name:    "foreign actor with an unrelated identity is still refused",
-			before:  &types.Issue{ID: "bd-1", Status: types.StatusInProgress, Assignee: "gastown.mayor"},
+			before:  &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress, Assignee: "gastown.mayor"}},
 			request: transfer(func(r *publicops.UpdateRequest) { r.Actor = "gastown_dog-1" }),
 			refuse:  true,
 		},
 		{
 			name:    "holder is a configured pool alias",
-			before:  &types.Issue{ID: "bd-1", Status: types.StatusInProgress, Assignee: "crew"},
+			before:  &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress, Assignee: "crew"}},
 			request: transfer(nil),
 			pools:   []string{"other", "crew"},
 		},

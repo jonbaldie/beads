@@ -154,15 +154,7 @@ func sortKeyCompare(a, b *types.Issue, sortBy string) int {
 	case "updated":
 		return compareTimesAsc(a.UpdatedAt, b.UpdatedAt)
 	case "closed":
-		switch {
-		case a.ClosedAt == nil && b.ClosedAt == nil:
-			return 0
-		case a.ClosedAt == nil:
-			return -1
-		case b.ClosedAt == nil:
-			return 1
-		}
-		return compareTimesAsc(*a.ClosedAt, *b.ClosedAt)
+		return compareClosedTimes(a, b)
 	case "status":
 		return strings.Compare(string(a.Status), string(b.Status))
 	case "type":
@@ -173,6 +165,19 @@ func sortKeyCompare(a, b *types.Issue, sortBy string) int {
 		return strings.Compare(strings.ToLower(a.Title), strings.ToLower(b.Title))
 	}
 	return a.Priority - b.Priority
+}
+
+func compareClosedTimes(a, b *types.Issue) int {
+	switch {
+	case a.ClosedAt == nil && b.ClosedAt == nil:
+		return 0
+	case a.ClosedAt == nil:
+		return -1
+	case b.ClosedAt == nil:
+		return 1
+	default:
+		return compareTimesAsc(*a.ClosedAt, *b.ClosedAt)
+	}
 }
 
 func compareTimesAsc(a, b time.Time) int {

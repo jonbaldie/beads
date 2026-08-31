@@ -72,6 +72,15 @@ func CompareAndSetMetadataKeyInTx(
 		return publicops.CompareAndSetKeyResult{Swapped: true, Current: current}, MetadataCASWrite{}, nil
 	}
 
+	return writeMetadataCASKey(ctx, tx, plan, metadata)
+}
+
+func writeMetadataCASKey(
+	ctx context.Context,
+	tx DBTX,
+	plan storage.CompareAndSetKeyPlan,
+	metadata map[string]json.RawMessage,
+) (publicops.CompareAndSetKeyResult, MetadataCASWrite, error) {
 	if plan.Value == nil {
 		delete(metadata, plan.Key)
 	} else {
@@ -80,24 +89,9 @@ func CompareAndSetMetadataKeyInTx(
 	if err := writeMergedMetadataInTx(ctx, tx, plan.IssueID, metadata, plan.Actor); err != nil {
 		return publicops.CompareAndSetKeyResult{}, MetadataCASWrite{}, err
 	}
-
-	// The write goes through UpdateIssueInTx, which also records the update
-	// event, so both tables changed. ChangedTables.Add drops the ephemeral
-	// members, which is what leaves an ephemeral swap with nothing to VERSION
-	// while still having written a row.
 	issueTable, _, eventTable, _ := WispTableRouting(IsActiveWispInTx(ctx, tx, plan.IssueID))
 	write := MetadataCASWrite{Wrote: true, Tables: ChangedTables{}}
 	write.Tables.Add(issueTable, eventTable)
-
-	// CURRENT IS RE-READ FROM THE ROW, never handed back from the plan, and the
-	// extra SELECT is the price of the promise. The metadata column decodes JSON
-	// through float64 and re-emits it, so the bytes that land are not always the
-	// bytes that were sent: 1.0 arrives as 1, an integer past 2^53 is rounded to
-	// the nearest double, 1e300 arrives as three hundred and one digits.
-	// Answering with plan.Value would make Current a statement about the request
-	// rather than about the row, and a caller that fed it straight back as its
-	// next Expected — the loop this role is shaped for — would compare its own
-	// spelling against the substrate's and never converge.
 	stored, err := readMetadataMapInTx(ctx, tx, plan.IssueID)
 	if err != nil {
 		return publicops.CompareAndSetKeyResult{}, MetadataCASWrite{}, err

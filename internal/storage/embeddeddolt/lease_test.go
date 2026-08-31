@@ -23,11 +23,17 @@ func TestLeaseLifecycleEmbedded(t *testing.T) {
 	ctx := t.Context()
 
 	issue := &types.Issue{
-		ID:        "lease-1",
-		Title:     "lease lifecycle",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "lease-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "lease lifecycle",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := te.store.CreateIssue(ctx, issue, "seeder"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -104,11 +110,17 @@ func TestReclaimExpiredLeaseSurvivesRestartEmbedded(t *testing.T) {
 	}
 
 	issue := &types.Issue{
-		ID:        "lease-restart-1",
-		Title:     "lease across restart",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "lease-restart-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "lease across restart",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "seeder"); err != nil {
 		store.Close()
@@ -199,11 +211,17 @@ func TestHeartbeatMatchesActorAcrossSpellingEmbedded(t *testing.T) {
 	ctx := t.Context()
 
 	issue := &types.Issue{
-		ID:        "lease-spelling-1",
-		Title:     "heartbeat across spelling",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "lease-spelling-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "heartbeat across spelling",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}
 	if err := te.store.CreateIssue(ctx, issue, "seeder"); err != nil {
 		t.Fatalf("CreateIssue: %v", err)
@@ -243,12 +261,20 @@ func TestHeartbeatRejectsWispEmbedded(t *testing.T) {
 	ctx := t.Context()
 
 	wisp := &types.Issue{
-		ID:        "lease-wisp-1",
-		Title:     "ephemeral work",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: "lease-wisp-1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "ephemeral work",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := te.store.CreateIssue(ctx, wisp, "seeder"); err != nil {
 		t.Fatalf("CreateIssue wisp: %v", err)

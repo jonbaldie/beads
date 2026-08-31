@@ -227,7 +227,8 @@ func ComputeEventsTruncation(since int64, rows []storage.EventsJournalRow, readH
 // its predecessor, or 0 when the batch is internally contiguous. Rows arrive in
 // ascending seq order, so one linear pass over memory settles it.
 func firstEventsSeqGap(rows []storage.EventsJournalRow) int {
-	for i := 1; i < len(rows); i++ {
+	totalRows := len(rows)
+	for i := 1; i < totalRows; i++ {
 		if rows[i].Seq != rows[i-1].Seq+1 {
 			return i
 		}
@@ -332,37 +333,66 @@ func ComputeEventsPruneWhere(
 ) (where string, args []any, skip bool, err error) {
 	bound := before
 	if retainRows > 0 {
-		ceil, found, cerr := readRowsCeil()
-		if cerr != nil {
-			return "", nil, false, cerr
+		var floorSkip bool
+		bound, floorSkip, err = applyEventsRetainRowsFloor(bound, readRowsCeil)
+		if err != nil {
+			return "", nil, false, err
 		}
-		if !found {
-			// Fewer rows than the floor retains: the whole journal is inside the
-			// retained window.
+		if floorSkip {
 			return "", nil, true, nil
-		}
-		// ceil is the highest seq the floor allows deleting, so the exclusive
-		// bound is one past it.
-		if ceil+1 < bound {
-			bound = ceil + 1
 		}
 	}
 	if retainDays > 0 {
-		floorSeq, found, derr := readDaysFloor(EventsPruneCutoff(retainDays, now))
-		if derr != nil {
-			return "", nil, false, derr
-		}
-		// found == false means no row is young enough, so the age floor protects
-		// nothing and the bound is unchanged.
-		if found && floorSeq < bound {
-			bound = floorSeq
+		bound, err = applyEventsRetainDaysFloor(bound, retainDays, now, readDaysFloor)
+		if err != nil {
+			return "", nil, false, err
 		}
 	}
+	return finalizeEventsPruneBound(bound)
+}
+
+func applyEventsRetainRowsFloor(bound int64, readRowsCeil func() (int64, bool, error)) (int64, bool, error) {
+	ceil, found, err := readRowsCeil()
+	if err != nil {
+		return 0, false, err
+	}
+	if !found {
+		// Fewer rows than the floor retains: the whole journal is inside the
+		// retained window.
+		return bound, true, nil
+	}
+	// ceil is the highest seq the floor allows deleting, so the exclusive
+	// bound is one past it.
+	if ceil+1 < bound {
+		bound = ceil + 1
+	}
+	return bound, false, nil
+}
+
+func applyEventsRetainDaysFloor(
+	bound int64,
+	retainDays int,
+	now time.Time,
+	readDaysFloor func(cutoff time.Time) (int64, bool, error),
+) (int64, error) {
+	floorSeq, found, err := readDaysFloor(EventsPruneCutoff(retainDays, now))
+	if err != nil {
+		return 0, err
+	}
+	// found == false means no row is young enough, so the age floor protects
+	// nothing and the bound is unchanged.
+	if found && floorSeq < bound {
+		bound = floorSeq
+	}
+	return bound, nil
+}
+
+func finalizeEventsPruneBound(bound int64) (string, []any, bool, error) {
 	if bound <= 1 {
 		// seq starts at 1, so nothing sits below the bound.
 		return "", nil, true, nil
 	}
-	where, args = BuildEventsPruneWhere(bound)
+	where, args := BuildEventsPruneWhere(bound)
 	return where, args, false, nil
 }
 

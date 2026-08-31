@@ -131,7 +131,7 @@ func (p *doltSQLProvider) NewUOW(ctx context.Context) (UnitOfWork, error) {
 	return NewUOW(ctx, p)
 }
 
-func (p *doltSQLProvider) Close(ctx context.Context) error {
+func (p *doltSQLProvider) Close(_ context.Context) error {
 	if p.db == nil {
 		return nil
 	}
@@ -170,133 +170,119 @@ func (p *doltSQLProvider) initSchema(ctx context.Context, database string) error
 	// full cold-start migration pass (every migration + a Dolt commit each),
 	// not just a transient blip — it grows as migrations accumulate.
 	bo.MaxElapsedTime = 60 * time.Second
-	// Fresh-bootstrap ownership proof for the #4566 guard self-heal
-	// (gastownhall/beads#5012): the first attempt issues a bare CREATE
-	// DATABASE (no IF NOT EXISTS), so the server arbitrates creation
-	// atomically — success proves THIS init created the database, and an
-	// already-exists refusal (1007) proves it did not. Only the proven
-	// creator captures and passes a one-shot FreshBootstrapHealCapability: on
-	// a database this init
-	// created, a retry attempt that finds dirty tables can only be seeing a
-	// previous attempt's own half-applied migration step (a session that
-	// died between a step's SQL and its per-step Dolt commit — the "busy
-	// buffer" shape on a loaded shared server), never pre-existing user
-	// data, so the migrate call may discard that debris and converge instead
-	// of failing the init permanently. The capability also binds that proof to
-	// the endpoint, server UUID, database, and initial HEAD, preventing a stale
-	// creator from resetting a drop/recreated name. A concurrent initializer
-	// that loses the create race keeps the guard's refusal unchanged. `created`
-	// is sticky across retry attempts for availability re-creation; reset
-	// authority is captured only in the exact CREATE-winning attempt and is
-	// never inferred again from probing or CREATE IF NOT EXISTS.
-	created := false
-	var bootstrapHeal *schema.FreshBootstrapHealCapability
-	prepareBootstrap := func(ctx context.Context, conn *sql.Conn) (*schema.FreshBootstrapHealCapability, error) {
-		ddl := db.NewDDLSQLRepository(conn)
-		justCreated := false
-		if created {
-			// Re-assert on retries so a database dropped between attempts
-			// (e.g. a concurrent clean-databases) is recreated rather than
-			// failing the USE below.
-			if err := ddl.CreateDatabaseIfNotExists(ctx, database); err != nil {
-				return nil, &bootstrapPreparationError{err: fmt.Errorf("uow: creating database: %w", err)}
-			}
-		} else {
-			switch err := ddl.CreateDatabase(ctx, database); {
-			case err == nil:
-				created = true
-				justCreated = true
-			case isDatabaseExistsError(err):
-				// Pre-existing (or a concurrent initializer won the create
-				// race): not ours, heal stays off.
-			case isSerializationError(err):
-				// Only the initial bare CREATE preserves its historical
-				// serialization retry classification. The later sticky CREATE,
-				// USE, and identity capture remain permanent regardless of
-				// their nested driver error.
-				return nil, &bootstrapPreparationError{
-					err:       fmt.Errorf("uow: creating database: %w", err),
-					retryable: true,
-				}
-			default:
-				return nil, &bootstrapPreparationError{err: fmt.Errorf("uow: creating database: %w", err)}
-			}
+	bootstrap := &schemaBootstrap{provider: p, database: database}
+	return backoff.Retry(func() error {
+		return p.initSchemaAttempt(ctx, bootstrap)
+	}, backoff.WithContext(bo, ctx))
+}
+
+type schemaBootstrap struct {
+	provider      *doltSQLProvider
+	database      string
+	created       bool
+	bootstrapHeal *schema.FreshBootstrapHealCapability
+}
+
+func (p *doltSQLProvider) initSchemaAttempt(ctx context.Context, bootstrap *schemaBootstrap) error {
+	conn, err := p.db.Conn(ctx)
+	if err != nil {
+		if isSerializationError(err) {
+			return fmt.Errorf("uow: pin connection: %w", err)
 		}
-		if err := ddl.UseDatabase(ctx, database); err != nil {
+		return backoff.Permanent(fmt.Errorf("uow: pin connection: %w", err))
+	}
+	defer conn.Close()
+	ddl := db.NewDDLSQLRepository(conn)
+	if p.teamServer {
+		return p.initTeamServerSchema(ctx, conn, ddl, bootstrap.database)
+	}
+	if p.preview {
+		return p.initPreviewSchema(ctx, ddl, bootstrap.database)
+	}
+	if _, err := schema.MigrateUpWithLock(ctx, conn, bootstrap.database,
+		schema.WithLockedPreparation(p.serverEndpoint, bootstrap.prepare)); err != nil {
+		return classifyInitSchemaError(err)
+	}
+	return nil
+}
+
+func (p *doltSQLProvider) initTeamServerSchema(ctx context.Context, conn *sql.Conn, ddl db.DDLSQLRepository, database string) error {
+	if err := ddl.UseDatabase(ctx, database); err != nil {
+		if isSerializationError(err) {
+			return fmt.Errorf("uow: switching to database: %w", err)
+		}
+		return backoff.Permanent(fmt.Errorf(
+			"uow: database %q not found — the schema is managed by beads-team-server; ask your operator to run 'bts init' first: %w",
+			database, err))
+	}
+	if err := checkTeamServerSchema(ctx, conn, database); err != nil {
+		if isSerializationError(err) {
+			return fmt.Errorf("uow: team-server schema check: %w", err)
+		}
+		return backoff.Permanent(err)
+	}
+	if err := checkTeamServerIdentity(ctx, conn, database, p.expectedProjectID); err != nil {
+		if isSerializationError(err) {
+			return fmt.Errorf("uow: team-server identity check: %w", err)
+		}
+		return backoff.Permanent(err)
+	}
+	return nil
+}
+
+func (p *doltSQLProvider) initPreviewSchema(ctx context.Context, ddl db.DDLSQLRepository, database string) error {
+	if err := ddl.UseDatabase(ctx, database); err != nil {
+		if isSerializationError(err) {
+			return fmt.Errorf("uow: switching to database: %w", err)
+		}
+		return backoff.Permanent(fmt.Errorf(
+			"uow: database %q not found — preview commands (--dry-run, --inspect) never create or migrate a database; run the command without the preview flag first: %w",
+			database, err))
+	}
+	return nil
+}
+
+func (b *schemaBootstrap) prepare(ctx context.Context, conn *sql.Conn) (*schema.FreshBootstrapHealCapability, error) {
+	ddl := db.NewDDLSQLRepository(conn)
+	if b.created {
+		if err := ddl.CreateDatabaseIfNotExists(ctx, b.database); err != nil {
+			return nil, &bootstrapPreparationError{err: fmt.Errorf("uow: creating database: %w", err)}
+		}
+		if err := ddl.UseDatabase(ctx, b.database); err != nil {
 			return nil, &bootstrapPreparationError{err: fmt.Errorf("uow: switching to database: %w", err)}
 		}
-		if justCreated {
-			// Capture authority only in the same attempt that won the exact bare
-			// CREATE. A later retry may re-create a missing database for
-			// availability, but it must never infer ownership of a replacement
-			// incarnation from CREATE IF NOT EXISTS.
-			var err error
-			bootstrapHeal, err = schema.CaptureFreshBootstrapHealCapability(
-				ctx, conn, p.serverEndpoint, database,
-			)
-			if err != nil {
-				return nil, &bootstrapPreparationError{err: fmt.Errorf("uow: capture fresh database identity: %w", err)}
-			}
-		}
-		return bootstrapHeal, nil
+		return b.bootstrapHeal, nil
 	}
-	return backoff.Retry(func() error {
-		conn, err := p.db.Conn(ctx)
-		if err != nil {
-			if isSerializationError(err) {
-				return fmt.Errorf("uow: pin connection: %w", err)
-			}
-			return backoff.Permanent(fmt.Errorf("uow: pin connection: %w", err))
-		}
-		defer conn.Close()
+	createdNow, err := b.createInitialDatabase(ctx, ddl)
+	if err != nil {
+		return nil, err
+	}
+	if err := ddl.UseDatabase(ctx, b.database); err != nil {
+		return nil, &bootstrapPreparationError{err: fmt.Errorf("uow: switching to database: %w", err)}
+	}
+	if !createdNow {
+		return b.bootstrapHeal, nil
+	}
+	b.created = true
+	b.bootstrapHeal, err = schema.CaptureFreshBootstrapHealCapability(ctx, conn, b.provider.serverEndpoint, b.database)
+	if err != nil {
+		return nil, &bootstrapPreparationError{err: fmt.Errorf("uow: capture fresh database identity: %w", err)}
+	}
+	return b.bootstrapHeal, nil
+}
 
-		ddl := db.NewDDLSQLRepository(conn)
-		if p.teamServer {
-			if err := ddl.UseDatabase(ctx, database); err != nil {
-				if isSerializationError(err) {
-					return fmt.Errorf("uow: switching to database: %w", err)
-				}
-				return backoff.Permanent(fmt.Errorf(
-					"uow: database %q not found — the schema is managed by beads-team-server; ask your operator to run 'bts init' first: %w",
-					database, err))
-			}
-			if err := checkTeamServerSchema(ctx, conn, database); err != nil {
-				if isSerializationError(err) {
-					return fmt.Errorf("uow: team-server schema check: %w", err)
-				}
-				return backoff.Permanent(err)
-			}
-			// Identity is checked only after the schema check proves the
-			// metadata table exists at this binary's version.
-			if err := checkTeamServerIdentity(ctx, conn, database, p.expectedProjectID); err != nil {
-				if isSerializationError(err) {
-					return fmt.Errorf("uow: team-server identity check: %w", err)
-				}
-				return backoff.Permanent(err)
-			}
-			return nil
-		}
-		if p.preview {
-			// Preview open: attach to the database that is already there and
-			// stop. No CreateDatabase, no MigrateUpWithLock — a --dry-run or
-			// --inspect that migrated the workspace before rendering its plan
-			// would be the exact side effect the flag exists to prevent.
-			if err := ddl.UseDatabase(ctx, database); err != nil {
-				if isSerializationError(err) {
-					return fmt.Errorf("uow: switching to database: %w", err)
-				}
-				return backoff.Permanent(fmt.Errorf(
-					"uow: database %q not found — preview commands (--dry-run, --inspect) never create or migrate a database; run the command without the preview flag first: %w",
-					database, err))
-			}
-			return nil
-		}
-		if _, err := schema.MigrateUpWithLock(ctx, conn, database,
-			schema.WithLockedPreparation(p.serverEndpoint, prepareBootstrap)); err != nil {
-			return classifyInitSchemaError(err)
-		}
-		return nil
-	}, backoff.WithContext(bo, ctx))
+func (b *schemaBootstrap) createInitialDatabase(ctx context.Context, ddl db.DDLSQLRepository) (bool, error) {
+	err := ddl.CreateDatabase(ctx, b.database)
+	switch {
+	case err == nil:
+		return true, nil
+	case isDatabaseExistsError(err):
+		return false, nil
+	case isSerializationError(err):
+		return false, &bootstrapPreparationError{err: fmt.Errorf("uow: creating database: %w", err), retryable: true}
+	default:
+		return false, &bootstrapPreparationError{err: fmt.Errorf("uow: creating database: %w", err)}
+	}
 }
 
 func buildDSN(ep proxy.Endpoint, database, user, password, tlsConfigName string) string {

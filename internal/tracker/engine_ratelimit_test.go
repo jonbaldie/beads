@@ -44,11 +44,17 @@ func TestEnginePushAbortsLoopOnRateLimit(t *testing.T) {
 	issues := make([]*types.Issue, 0, numIssues)
 	for i := 0; i < numIssues; i++ {
 		issues = append(issues, &types.Issue{
-			ID:        fmt.Sprintf("bd-rl%d", i),
-			Title:     fmt.Sprintf("Rate-limit issue %d", i),
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
-			Priority:  2,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("bd-rl%d", i),
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Rate-limit issue %d", i),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+				Priority:  2,
+			},
 		})
 	}
 	store := newPureTestStore(issues...)

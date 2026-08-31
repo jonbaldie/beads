@@ -51,6 +51,19 @@ func rekeyDependencyTable(ctx context.Context, db DBConn, table string) (bool, e
 		return false, nil
 	}
 
+	todo, err := scanDependencyRekeys(ctx, db, table)
+	if err != nil {
+		return false, err
+	}
+	if err := applyDependencyRekeys(ctx, db, table, todo); err != nil {
+		return true, err
+	}
+	return len(todo) > 0, nil
+}
+
+type dependencyRekey struct{ oldID, newID string }
+
+func scanDependencyRekeys(ctx context.Context, db DBConn, table string) ([]dependencyRekey, error) {
 	// The natural target is the single non-null of the three typed columns —
 	// exactly what depid keys on and what the uk_dep_* unique keys enforce.
 	//nolint:gosec // G201: table is a hardcoded constant, never user input.
@@ -58,16 +71,16 @@ func rekeyDependencyTable(ctx context.Context, db DBConn, table string) (bool, e
 		`SELECT id, issue_id, COALESCE(depends_on_issue_id, depends_on_wisp_id, depends_on_external) FROM %s`,
 		table))
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	type rekey struct{ oldID, newID string }
-	var todo []rekey
+	defer rows.Close()
+
+	var todo []dependencyRekey
 	for rows.Next() {
 		var id, issueID string
 		var target sql.NullString
 		if err := rows.Scan(&id, &issueID, &target); err != nil {
-			_ = rows.Close()
-			return false, err
+			return nil, err
 		}
 		if !target.Valid {
 			// Malformed row with no target (ck_dep_one_target should prevent this);
@@ -75,22 +88,24 @@ func rekeyDependencyTable(ctx context.Context, db DBConn, table string) (bool, e
 			continue
 		}
 		if want := depid.New(issueID, target.String); want != id {
-			todo = append(todo, rekey{oldID: id, newID: want})
+			todo = append(todo, dependencyRekey{oldID: id, newID: want})
 		}
 	}
-	_ = rows.Close()
 	if err := rows.Err(); err != nil {
-		return false, err
+		return nil, err
 	}
+	return todo, nil
+}
 
+func applyDependencyRekeys(ctx context.Context, db DBConn, table string, todo []dependencyRekey) error {
 	for _, r := range todo {
 		//nolint:gosec // G201: table is a hardcoded constant, never user input.
 		if _, err := db.ExecContext(ctx, fmt.Sprintf(`UPDATE %s SET id = ? WHERE id = ?`, table),
 			r.newID, r.oldID); err != nil {
-			return true, fmt.Errorf("re-key id %s -> %s: %w", r.oldID, r.newID, err)
+			return fmt.Errorf("re-key id %s -> %s: %w", r.oldID, r.newID, err)
 		}
 	}
-	return len(todo) > 0, nil
+	return nil
 }
 
 // columnExists reports whether table.column is present in the current schema.

@@ -9,12 +9,18 @@ import "github.com/jonbaldie/beads/internal/types"
 func WispFilterToIssueFilter(f types.WispFilter) types.IssueFilter {
 	ephemeral := true
 	filter := types.IssueFilter{
-		Ephemeral:     &ephemeral,
-		IssueType:     f.Type,
-		Status:        f.Status,
-		UpdatedAfter:  f.UpdatedAfter,
-		UpdatedBefore: f.UpdatedBefore,
-		Limit:         f.Limit,
+		IssueFilterCore: types.IssueFilterCore{
+			IssueType: f.Type,
+			Status:    f.Status,
+			Limit:     f.Limit,
+		},
+		IssueFilterMatch: types.IssueFilterMatch{
+			UpdatedAfter:  f.UpdatedAfter,
+			UpdatedBefore: f.UpdatedBefore,
+		},
+		IssueFilterFlags: types.IssueFilterFlags{
+			Ephemeral: &ephemeral,
+		},
 	}
 	// When no explicit status filter is set and IncludeClosed is false,
 	// exclude closed wisps. This matches the default behavior of

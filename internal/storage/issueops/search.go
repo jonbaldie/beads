@@ -125,31 +125,50 @@ var idProjection = searchProjection[string]{
 // GetLabelsForIssuesFromTableInTx and skip the per-batch wisp-partition
 // round-trip the generic GetLabelsForIssuesInTx performs (GH#3414).
 func hydrateIssueLabelsAndDeps(ctx context.Context, tx DBTX, tables FilterTables, issues []*types.Issue, filter types.IssueFilter) error {
-	ids := make([]string, len(issues))
-	for i, issue := range issues {
-		ids[i] = issue.ID
-	}
+	ids := issueIDsForHydration(issues)
 	if !filter.SkipLabels {
-		labelMap, err := GetLabelsForIssuesFromTableInTx(ctx, tx, tables.Labels, ids)
-		if err != nil {
-			return fmt.Errorf("hydrate labels: %w", err)
-		}
-		for _, issue := range issues {
-			if labels, ok := labelMap[issue.ID]; ok {
-				issue.Labels = labels
-			}
+		if err := hydrateIssueLabels(ctx, tx, tables, issues, ids); err != nil {
+			return err
 		}
 	}
 
 	if filter.IncludeDependencies {
-		depMap, err := GetDependencyRecordsForIssuesFromTableInTx(ctx, tx, tables.Dependencies, ids)
-		if err != nil {
-			return fmt.Errorf("hydrate dependencies: %w", err)
+		if err := hydrateIssueDependencies(ctx, tx, tables, issues, ids); err != nil {
+			return err
 		}
-		for _, issue := range issues {
-			if deps, ok := depMap[issue.ID]; ok {
-				issue.Dependencies = deps
-			}
+	}
+	return nil
+}
+
+func issueIDsForHydration(issues []*types.Issue) []string {
+	ids := make([]string, len(issues))
+	for i, issue := range issues {
+		ids[i] = issue.ID
+	}
+	return ids
+}
+
+func hydrateIssueLabels(ctx context.Context, tx DBTX, tables FilterTables, issues []*types.Issue, ids []string) error {
+	labelMap, err := GetLabelsForIssuesFromTableInTx(ctx, tx, tables.Labels, ids)
+	if err != nil {
+		return fmt.Errorf("hydrate labels: %w", err)
+	}
+	for _, issue := range issues {
+		if labels, ok := labelMap[issue.ID]; ok {
+			issue.Labels = labels
+		}
+	}
+	return nil
+}
+
+func hydrateIssueDependencies(ctx context.Context, tx DBTX, tables FilterTables, issues []*types.Issue, ids []string) error {
+	depMap, err := GetDependencyRecordsForIssuesFromTableInTx(ctx, tx, tables.Dependencies, ids)
+	if err != nil {
+		return fmt.Errorf("hydrate dependencies: %w", err)
+	}
+	for _, issue := range issues {
+		if deps, ok := depMap[issue.ID]; ok {
+			issue.Dependencies = deps
 		}
 	}
 	return nil
@@ -162,15 +181,11 @@ func hydrateIssueLabelsAndDeps(ctx context.Context, tx DBTX, tables FilterTables
 func searchInTx[T any](ctx context.Context, tx DBTX, query string, filter types.IssueFilter, proj searchProjection[T]) ([]T, error) {
 	// Route ephemeral-only queries to wisps table.
 	if filter.Ephemeral != nil && *filter.Ephemeral {
-		results, err := searchTableInTxT(ctx, tx, query, filter, WispsFilterTables, proj)
-		if err != nil && !isTableNotExistError(err) {
-			return nil, fmt.Errorf("search wisps (ephemeral filter): %w", err)
+		results, handled, err := searchEphemeralOnlyInTx(ctx, tx, query, filter, proj)
+		if err != nil {
+			return nil, err
 		}
-		if len(results) > 0 {
-			results = trimToSearchLimit(results, filter.Limit)
-			if capErr := EnforceMaxRowsCap(len(results), filter.MaxRows, filter.MaxRowsSource); capErr != nil {
-				return nil, capErr
-			}
+		if handled {
 			return results, nil
 		}
 		// Fall through: wisps table doesn't exist or returned no results
@@ -187,11 +202,7 @@ func searchInTx[T any](ctx context.Context, tx DBTX, query string, filter types.
 	// must enforce the cap itself; skipping it here would let SkipWisps
 	// callers (e.g. bd list's default filter) silently bypass MaxRows.
 	if filter.SkipWisps {
-		results = trimToSearchLimit(results, filter.Limit)
-		if err := EnforceMaxRowsCap(len(results), filter.MaxRows, filter.MaxRowsSource); err != nil {
-			return nil, err
-		}
-		return results, nil
+		return finishSearchResults(results, filter)
 	}
 
 	// When filter.Ephemeral is nil (search everything) or false (non-ephemeral
@@ -201,51 +212,9 @@ func searchInTx[T any](ctx context.Context, tx DBTX, query string, filter types.
 	// BuildIssueFilterClauses handles the per-row ephemeral column check, so
 	// querying wisps here with Ephemeral=&false returns only NoHistory beads
 	// while correctly excluding true ephemeral wisps. (GH#3659)
-	if filter.Ephemeral == nil || !*filter.Ephemeral {
-		empty, probeErr := wispsTableEmptyOrMissingInTx(ctx, tx)
-		if probeErr != nil {
-			return nil, fmt.Errorf("search wisps (merge): probe: %w", probeErr)
-		}
-		if empty {
-			// No wisps to merge, but the issues-only result set can still
-			// exceed the cap (the merge path below enforces it at line ~74;
-			// this early return must enforce it too, or the cap is silently
-			// skipped whenever the wisps table is empty).
-			results = trimToSearchLimit(results, filter.Limit)
-			if err := EnforceMaxRowsCap(len(results), filter.MaxRows, filter.MaxRowsSource); err != nil {
-				return nil, err
-			}
-			return results, nil
-		}
-		wispResults, wispErr := searchTableInTxT(ctx, tx, query, filter, WispsFilterTables, proj)
-		if wispErr != nil && !isTableNotExistError(wispErr) {
-			return nil, fmt.Errorf("search wisps (merge): %w", wispErr)
-		}
-		if len(wispResults) > 0 {
-			// Prefer the canonical wisp record when an ID exists in both tables.
-			// Cross-table dups are a transient data-integrity issue (be-iabdi);
-			// hard-erroring breaks every lookup city-wide.
-			wispByID := make(map[string]struct{}, len(wispResults))
-			for _, w := range wispResults {
-				wispByID[proj.id(w)] = struct{}{}
-			}
-			var filtered []T
-			for _, r := range results {
-				if _, dup := wispByID[proj.id(r)]; !dup {
-					filtered = append(filtered, r)
-				}
-			}
-			results = append(filtered, wispResults...)
-			// The concatenation above is two independently ORDER BY'd legs,
-			// not a globally ordered set: re-sort by the same key before
-			// the merge's trimToSearchLimit call below, or trimming just
-			// keeps "however many durable rows fit" and can silently drop
-			// a higher-ranked wisp in favor of a lower-ranked durable row
-			// (be-x42v.4 round-5 follow-up). Mirrors
-			// finishSearchIssuesWithCounts's sortSearchIssuesWithCounts,
-			// which already sorts before its own trim.
-			sortMergedResults(results, proj.less, filter.SortBy, filter.SortDesc)
-		}
+	results, err = mergeSearchResultsIfNeeded(ctx, tx, query, filter, proj, results)
+	if err != nil {
+		return nil, err
 	}
 
 	// Apply the defensive cap on the merged, delivered result set. Each leg
@@ -260,11 +229,75 @@ func searchInTx[T any](ctx context.Context, tx DBTX, query string, filter types.
 	// exceeds Limit when Limit>0 in the first place, so this trim is a
 	// no-op there and a genuine overage still fires (Limit=0, or
 	// Limit>MaxRows overage that survives the trim).
+	return finishSearchResults(results, filter)
+}
+
+func mergeSearchResultsIfNeeded[T any](ctx context.Context, tx DBTX, query string, filter types.IssueFilter, proj searchProjection[T], results []T) ([]T, error) {
+	if filter.Ephemeral != nil && *filter.Ephemeral {
+		return results, nil
+	}
+	return mergeSearchWispsInTx(ctx, tx, query, filter, proj, results)
+}
+
+func searchEphemeralOnlyInTx[T any](ctx context.Context, tx DBTX, query string, filter types.IssueFilter, proj searchProjection[T]) ([]T, bool, error) {
+	results, err := searchTableInTxT(ctx, tx, query, filter, WispsFilterTables, proj)
+	if err != nil && !isTableNotExistError(err) {
+		return nil, false, fmt.Errorf("search wisps (ephemeral filter): %w", err)
+	}
+	if len(results) == 0 {
+		return nil, false, nil
+	}
+	results, err = finishSearchResults(results, filter)
+	if err != nil {
+		return nil, false, err
+	}
+	return results, true, nil
+}
+
+func mergeSearchWispsInTx[T any](ctx context.Context, tx DBTX, query string, filter types.IssueFilter, proj searchProjection[T], results []T) ([]T, error) {
+	empty, err := wispsTableEmptyOrMissingInTx(ctx, tx)
+	if err != nil {
+		return nil, fmt.Errorf("search wisps (merge): probe: %w", err)
+	}
+	if empty {
+		return results, nil
+	}
+	wispResults, err := searchTableInTxT(ctx, tx, query, filter, WispsFilterTables, proj)
+	if err != nil && !isTableNotExistError(err) {
+		return nil, fmt.Errorf("search wisps (merge): %w", err)
+	}
+	if len(wispResults) == 0 {
+		return results, nil
+	}
+	return mergeSearchResults(results, wispResults, proj, filter), nil
+}
+
+func mergeSearchResults[T any](results, wispResults []T, proj searchProjection[T], filter types.IssueFilter) []T {
+	// Prefer the canonical wisp record when an ID exists in both tables.
+	// Cross-table dups are a transient data-integrity issue (be-iabdi);
+	// hard-erroring breaks every lookup city-wide.
+	wispByID := make(map[string]struct{}, len(wispResults))
+	for _, w := range wispResults {
+		wispByID[proj.id(w)] = struct{}{}
+	}
+	var filtered []T
+	for _, r := range results {
+		if _, dup := wispByID[proj.id(r)]; !dup {
+			filtered = append(filtered, r)
+		}
+	}
+	results = append(filtered, wispResults...)
+	// The two legs were ordered independently; restore the shared ordering
+	// before the caller trims the merged page.
+	sortMergedResults(results, proj.less, filter.SortBy, filter.SortDesc)
+	return results
+}
+
+func finishSearchResults[T any](results []T, filter types.IssueFilter) ([]T, error) {
 	results = trimToSearchLimit(results, filter.Limit)
 	if err := EnforceMaxRowsCap(len(results), filter.MaxRows, filter.MaxRowsSource); err != nil {
 		return nil, err
 	}
-
 	return results, nil
 }
 
@@ -337,10 +370,38 @@ func searchTableInTxT[T any](ctx context.Context, tx DBTX, query string, filter 
 		return searchTablePatternBT(ctx, tx, query, filter, tables, proj)
 	}
 
+	querySQL, args, goSideSort, err := buildSearchTableQuery(query, filter, tables, proj)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, querySQL, args...)
+	if err != nil {
+		return nil, fmt.Errorf("search %s: %w", tables.Main, err)
+	}
+	results, err := scanSearchTableRows(rows, tables.Main, proj)
+	if err != nil {
+		return nil, err
+	}
+	return finishSearchTableResults(ctx, tx, tables, filter, proj, results, goSideSort)
+}
+
+func finishSearchTableResults[T any](ctx context.Context, tx DBTX, tables FilterTables, filter types.IssueFilter, proj searchProjection[T], results []T, goSideSort bool) ([]T, error) {
+	if goSideSort {
+		results = goSideSortAndTrim(results, proj.id, filter.SortDesc, EffectiveSearchLimit(filter.Limit, filter.MaxRows))
+	}
+	if proj.hydrate != nil && len(results) > 0 {
+		if err := proj.hydrate(ctx, tx, tables, results, filter); err != nil {
+			return nil, fmt.Errorf("search %s: %w", tables.Main, err)
+		}
+	}
+	return results, nil
+}
+
+func buildSearchTableQuery[T any](query string, filter types.IssueFilter, tables FilterTables, proj searchProjection[T]) (string, []interface{}, bool, error) {
 	plan := sqlbuild.BuildLabelDrivenSearch(filter, tables)
 	whereClauses, args, err := BuildIssueFilterClauses(query, plan.Filter, tables)
 	if err != nil {
-		return nil, err
+		return "", nil, false, err
 	}
 	whereClauses, args = plan.MergeInto(whereClauses, args)
 
@@ -374,19 +435,17 @@ func searchTableInTxT[T any](ctx context.Context, tx DBTX, query string, filter 
 	//nolint:gosec // G201: SQL fragments are built from fixed table/column names and parameterized filters.
 	querySQL := fmt.Sprintf(`%s%s FROM %s %s %s %s`,
 		selectKeyword, proj.columns(tables), fromSQL, whereSQL, sqlbuild.OrderBy(filter.SortBy, filter.SortDesc, ""), limitSQL)
+	return querySQL, args, goSideSort, nil
+}
 
-	rows, err := tx.QueryContext(ctx, querySQL, args...)
-	if err != nil {
-		return nil, fmt.Errorf("search %s: %w", tables.Main, err)
-	}
-
+func scanSearchTableRows[T any](rows *sql.Rows, table string, proj searchProjection[T]) ([]T, error) {
 	var results []T
 	seen := make(map[string]struct{})
 	for rows.Next() {
 		item, scanErr := proj.scan(rows)
 		if scanErr != nil {
 			_ = rows.Close()
-			return nil, fmt.Errorf("search %s: scan: %w", tables.Main, scanErr)
+			return nil, fmt.Errorf("search %s: scan: %w", table, scanErr)
 		}
 		id := proj.id(item)
 		if _, dup := seen[id]; dup {
@@ -397,19 +456,8 @@ func searchTableInTxT[T any](ctx context.Context, tx DBTX, query string, filter 
 	}
 	_ = rows.Close()
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("search %s: rows: %w", tables.Main, err)
+		return nil, fmt.Errorf("search %s: rows: %w", table, err)
 	}
-
-	if goSideSort {
-		results = goSideSortAndTrim(results, proj.id, filter.SortDesc, eff)
-	}
-
-	if proj.hydrate != nil && len(results) > 0 {
-		if err := proj.hydrate(ctx, tx, tables, results, filter); err != nil {
-			return nil, fmt.Errorf("search %s: %w", tables.Main, err)
-		}
-	}
-
 	return results, nil
 }
 
@@ -428,7 +476,21 @@ func searchTablePatternBT[T any](ctx context.Context, tx DBTX, query string, fil
 	if len(ids) == 0 {
 		return nil, nil
 	}
+	results, err := fetchPatternBResults(ctx, tx, tables, proj, ids)
+	if err != nil {
+		return nil, err
+	}
 
+	if proj.hydrate != nil && len(results) > 0 {
+		if err := proj.hydrate(ctx, tx, tables, results, filter); err != nil {
+			return nil, fmt.Errorf("search %s (pattern B): %w", tables.Main, err)
+		}
+	}
+
+	return results, nil
+}
+
+func fetchPatternBResults[T any](ctx context.Context, tx DBTX, tables FilterTables, proj searchProjection[T], ids []string) ([]T, error) {
 	// Batch-fetch full rows from the known table (no wispSet partition needed).
 	placeholders := make([]string, len(ids))
 	fetchArgs := make([]interface{}, len(ids))
@@ -470,13 +532,6 @@ func searchTablePatternBT[T any](ctx context.Context, tx DBTX, query string, fil
 			results = append(results, item)
 		}
 	}
-
-	if proj.hydrate != nil && len(results) > 0 {
-		if err := proj.hydrate(ctx, tx, tables, results, filter); err != nil {
-			return nil, fmt.Errorf("search %s (pattern B): %w", tables.Main, err)
-		}
-	}
-
 	return results, nil
 }
 

@@ -33,124 +33,57 @@ func DeleteInTx(ctx context.Context, tx *sql.Tx, req publicops.DeleteRequest) (p
 
 	// The existence probe comes FIRST, so `bd delete typo real` reports the
 	// typo rather than whatever the graph says about the id that resolved.
-	wispSet, err := WispIDSetInTx(ctx, tx, ids)
-	if err != nil {
-		return publicops.DeleteResult{}, fmt.Errorf("delete: classify planes: %w", err)
-	}
-	found, err := GetIssuesByIDsInTx(ctx, tx, ids, wispSet)
-	if err != nil {
-		return publicops.DeleteResult{}, fmt.Errorf("delete: resolve ids: %w", err)
-	}
-	present := make(map[string]bool, len(found))
-	for _, issue := range found {
-		if issue != nil {
-			present[issue.ID] = true
-		}
-	}
-	var missing []string
-	for _, id := range ids {
-		if !present[id] {
-			missing = append(missing, id)
-		}
-	}
-	if len(missing) > 0 {
-		return publicops.DeleteResult{}, &publicops.NotFoundError{IDs: missing}
+	if err := validateDeletePresenceInTx(ctx, tx, ids); err != nil {
+		return publicops.DeleteResult{}, err
 	}
 
-	// The version precondition sits between the existence probe and the
-	// dependents guard, where issueops.Deleter.Delete puts it: a version is a
-	// fact about a row, so a request naming a typo reports the typo; and a
-	// caller holding a stale token is not yet in a position to choose --cascade
-	// or --force, so the mismatch outranks that refusal.
-	//
-	// It reads ids[0] because ValidateDeleteRequest has already refused a
-	// multi-id request carrying one and NormalizeDeleteIDs has already
-	// collapsed duplicates, so exactly one distinct id is here. The read shares
-	// this transaction with the deletion below, which is what makes the pair a
-	// compare-and-delete; CheckVersionInTx is the same guard the update and
-	// close paths use, over the same row_lock token and with the same
-	// plane routing.
-	//
-	// IT RE-READS A ROW THE PROBE ABOVE ALREADY RETURNED, and that is a real
-	// trade rather than an oversight: `found` carries this row's RowVersion, so
-	// the comparison could be made here without a second SELECT. What the second
-	// SELECT buys is ONE definition of the guard — the same function the update
-	// and close paths call, so a change to how a version is read or how a
-	// mismatch is worded reaches all three together — at the cost of one indexed
-	// single-row read inside a transaction that is about to delete rows and
-	// rewrite their neighbors.
-	//
-	// THE UNIT-OF-WORK LEG ANSWERS THAT TRADE THE OTHER WAY, comparing the row
-	// its own probe loaded, and the two are not in disagreement: that leg
-	// reaches the domain use cases rather than a transaction, so this function
-	// is not available to it and there is no shared guard for it to prefer. The
-	// conformance contract is where the two are held equal.
-	if req.ExpectedVersion != nil {
-		if err := CheckVersionInTx(ctx, tx, ids[0], *req.ExpectedVersion); err != nil {
-			return publicops.DeleteResult{}, err
-		}
+	if err := validateDeleteVersionInTx(ctx, tx, ids, req.ExpectedVersion); err != nil {
+		return publicops.DeleteResult{}, err
 	}
 
-	idSet := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		idSet[id] = true
-	}
+	idSet := deleteIDSet(ids)
 
-	// The guard runs only when the request did not already say what to do
-	// about dependents. Under Cascade there is nothing outside the set by
-	// construction, which is why the expansion below is not asked about it.
-	//
-	// IT ASKS ABOUT EVERY NAMED ID, IN BOTH PLANES: the leaf says "a NAMED ROW
-	// that some row OUTSIDE the request depends on is refused" with no wisp
-	// exemption, and the unit-of-work body has always read it that way.
 	if !req.Cascade {
-		external, err := ExternalDependentsBySourceInTx(ctx, tx, ids, idSet)
+		orphaned, err := deleteExternalDependentsInTx(ctx, tx, ids, idSet, req.Force)
 		if err != nil {
 			return publicops.DeleteResult{}, fmt.Errorf("delete: check dependents: %w", err)
 		}
-		if !req.Force {
-			// Request order, so the id a caller is told about is stable
-			// across runs and across backends.
-			for _, id := range ids {
-				if deps := external[id]; len(deps) > 0 {
-					return publicops.DeleteResult{}, &publicops.DependentsOutsideRequestError{
-						IssueID:    id,
-						Dependents: deps,
-					}
-				}
-			}
-		} else {
-			orphaned := make(map[string]bool)
-			for _, deps := range external {
-				for _, id := range deps {
-					orphaned[id] = true
-				}
-			}
-			result.Orphaned = workapi.SortedDeleteIDs(orphaned)
-		}
+		result.Orphaned = orphaned
 	}
 
-	// THE DELETION SET IS RESOLVED ONCE, HERE, and the same value reaches the
-	// neighborhood read, the deletion and the citation rewrite. Resolving it
-	// twice drifts: a cascade rooted at a wisp landed in the rewrite set and not
-	// in the delete, so those rows survived and their neighbors' descriptions
-	// were rewritten to call them deleted. See DeletionSet.
 	set, err := ResolveDeletionSetInTx(ctx, tx, ids, req.Cascade)
 	if err != nil {
 		return publicops.DeleteResult{}, fmt.Errorf("delete: %w", err)
 	}
 
-	// The neighborhood is read BEFORE the deletion, because after it the
-	// edges that identify a neighbor are gone. It is read against the whole
-	// deletion set — the cascade closure, not just the named ids — so a row
-	// citing a cascade-deleted id is rewritten too.
 	neighbors, err := deleteNeighborsInTx(ctx, tx, set.All)
 	if err != nil {
 		return publicops.DeleteResult{}, err
 	}
 
-	// No guard argument to pass: this body has ALREADY answered the guard
-	// question above, and DeleteResolvedSetInTx deletes what it is handed.
+	result, err = executeDeleteInTx(ctx, tx, result, set, neighbors, req)
+	if err != nil {
+		return publicops.DeleteResult{}, err
+	}
+	return result, nil
+}
+
+func validateDeleteVersionInTx(ctx context.Context, tx DBTX, ids []string, expected *int64) error {
+	if expected == nil {
+		return nil
+	}
+	return CheckVersionInTx(ctx, tx, ids[0], *expected)
+}
+
+func deleteIDSet(ids []string) map[string]bool {
+	idSet := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		idSet[id] = true
+	}
+	return idSet
+}
+
+func executeDeleteInTx(ctx context.Context, tx *sql.Tx, result publicops.DeleteResult, set DeletionSet, neighbors []*types.Issue, req publicops.DeleteRequest) (publicops.DeleteResult, error) {
 	deleted, err := DeleteResolvedSetInTx(ctx, tx, set, req.DryRun)
 	if err != nil {
 		return publicops.DeleteResult{}, err
@@ -159,20 +92,69 @@ func DeleteInTx(ctx context.Context, tx *sql.Tx, req publicops.DeleteRequest) (p
 	result.Dependencies = deleted.DependenciesCount
 	result.Labels = deleted.LabelsCount
 	result.Events = deleted.EventsCount
-
 	if req.DryRun {
 		return result, nil
 	}
-
-	// set.All, not a set recomputed here: a `[deleted:<id>]` marker is a claim
-	// that the row is gone, and the only set that can honestly back that claim
-	// is the one DeleteResolvedSetInTx was handed.
 	rewritten, err := RewriteDeletedReferencesInTx(ctx, tx, set.All, neighbors, req.Actor)
 	if err != nil {
 		return publicops.DeleteResult{}, err
 	}
 	result.ReferencesUpdated = rewritten
 	return result, nil
+}
+
+func validateDeletePresenceInTx(ctx context.Context, tx DBTX, ids []string) error {
+	wispSet, err := WispIDSetInTx(ctx, tx, ids)
+	if err != nil {
+		return fmt.Errorf("delete: classify planes: %w", err)
+	}
+	found, err := GetIssuesByIDsInTx(ctx, tx, ids, wispSet)
+	if err != nil {
+		return fmt.Errorf("delete: resolve ids: %w", err)
+	}
+	present := make(map[string]bool, len(found))
+	for _, issue := range found {
+		if issue != nil {
+			present[issue.ID] = true
+		}
+	}
+	missing := missingDeleteIDs(ids, present)
+	if len(missing) > 0 {
+		return &publicops.NotFoundError{IDs: missing}
+	}
+	return nil
+}
+
+func missingDeleteIDs(ids []string, present map[string]bool) []string {
+	var missing []string
+	for _, id := range ids {
+		if !present[id] {
+			missing = append(missing, id)
+		}
+	}
+	return missing
+}
+
+func deleteExternalDependentsInTx(ctx context.Context, tx DBTX, ids []string, idSet map[string]bool, force bool) ([]string, error) {
+	external, err := ExternalDependentsBySourceInTx(ctx, tx, ids, idSet)
+	if err != nil {
+		return nil, err
+	}
+	if !force {
+		for _, id := range ids {
+			if deps := external[id]; len(deps) > 0 {
+				return nil, &publicops.DependentsOutsideRequestError{IssueID: id, Dependents: deps}
+			}
+		}
+		return nil, nil
+	}
+	orphaned := make(map[string]bool)
+	for _, deps := range external {
+		for _, id := range deps {
+			orphaned[id] = true
+		}
+	}
+	return workapi.SortedDeleteIDs(orphaned), nil
 }
 
 // ExternalDependentsBySourceInTx reports, for each of ids, the DIRECT
@@ -188,41 +170,17 @@ func ExternalDependentsBySourceInTx(ctx context.Context, tx DBTX, ids []string, 
 		return nil, nil
 	}
 	bySource := make(map[string]map[string]bool)
-	for i := 0; i < len(ids); i += deleteBatchSize {
+	total := len(ids)
+	for i := 0; i < total; i += deleteBatchSize {
 		end := i + deleteBatchSize
-		if end > len(ids) {
-			end = len(ids)
+		if end > total {
+			end = total
 		}
 		inClause, args := buildSQLInClause(ids[i:end])
 
 		for _, depTable := range []string{"dependencies", "wisp_dependencies"} {
-			rows, err := tx.QueryContext(ctx,
-				fmt.Sprintf(`SELECT %s AS depends_on_id, issue_id FROM %s WHERE %s`,
-					DepTargetExpr, depTable, depTargetIn("", inClause)),
-				args...)
-			if err != nil {
-				if optionalBlockedTable(depTable) && isTableNotExistError(err) {
-					continue
-				}
-				return nil, fmt.Errorf("query dependents from %s: %w", depTable, err)
-			}
-			for rows.Next() {
-				var target, dependent string
-				if err := rows.Scan(&target, &dependent); err != nil {
-					_ = rows.Close()
-					return nil, fmt.Errorf("scan dependent: %w", err)
-				}
-				if idSet[dependent] {
-					continue
-				}
-				if bySource[target] == nil {
-					bySource[target] = make(map[string]bool)
-				}
-				bySource[target][dependent] = true
-			}
-			_ = rows.Close()
-			if err := rows.Err(); err != nil {
-				return nil, fmt.Errorf("iterate dependents from %s: %w", depTable, err)
+			if err := readExternalDependentsFromTable(ctx, tx, depTable, inClause, args, idSet, bySource); err != nil {
+				return nil, err
 			}
 		}
 	}
@@ -232,6 +190,39 @@ func ExternalDependentsBySourceInTx(ctx context.Context, tx DBTX, ids []string, 
 		out[target] = workapi.SortedDeleteIDs(dependents)
 	}
 	return out, nil
+}
+
+//nolint:gosec // G201: inClause contains only ? placeholders
+func readExternalDependentsFromTable(ctx context.Context, tx DBTX, depTable, inClause string, args []interface{}, idSet map[string]bool, bySource map[string]map[string]bool) error {
+	rows, err := tx.QueryContext(ctx,
+		fmt.Sprintf(`SELECT %s AS depends_on_id, issue_id FROM %s WHERE %s`,
+			DepTargetExpr, depTable, depTargetIn("", inClause)),
+		args...)
+	if err != nil {
+		if optionalBlockedTable(depTable) && isTableNotExistError(err) {
+			return nil
+		}
+		return fmt.Errorf("query dependents from %s: %w", depTable, err)
+	}
+	for rows.Next() {
+		var target, dependent string
+		if err := rows.Scan(&target, &dependent); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan dependent: %w", err)
+		}
+		if idSet[dependent] {
+			continue
+		}
+		if bySource[target] == nil {
+			bySource[target] = make(map[string]bool)
+		}
+		bySource[target][dependent] = true
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate dependents from %s: %w", depTable, err)
+	}
+	return nil
 }
 
 // deleteNeighborsInTx hydrates the SURVIVING rows joined to the deletion set
@@ -251,44 +242,9 @@ func deleteNeighborsInTx(ctx context.Context, tx DBTX, ids []string) ([]*types.I
 		deleting[id] = true
 	}
 
-	neighborIDs := make(map[string]bool)
-	for i := 0; i < len(ids); i += deleteBatchSize {
-		end := i + deleteBatchSize
-		if end > len(ids) {
-			end = len(ids)
-		}
-		inClause, args := buildSQLInClause(ids[i:end])
-		doubled := append(append([]interface{}{}, args...), args...)
-
-		for _, depTable := range []string{"dependencies", "wisp_dependencies"} {
-			rows, err := tx.QueryContext(ctx,
-				fmt.Sprintf(`SELECT issue_id, %s AS depends_on_id FROM %s WHERE issue_id IN (%s) OR %s`,
-					DepTargetExpr, depTable, inClause, depTargetIn("", inClause)),
-				doubled...)
-			if err != nil {
-				if optionalBlockedTable(depTable) && isTableNotExistError(err) {
-					continue
-				}
-				return nil, fmt.Errorf("query neighbors from %s: %w", depTable, err)
-			}
-			for rows.Next() {
-				var source, target string
-				if err := rows.Scan(&source, &target); err != nil {
-					_ = rows.Close()
-					return nil, fmt.Errorf("scan neighbor: %w", err)
-				}
-				for _, candidate := range [2]string{source, target} {
-					if candidate == "" || deleting[candidate] {
-						continue
-					}
-					neighborIDs[candidate] = true
-				}
-			}
-			_ = rows.Close()
-			if err := rows.Err(); err != nil {
-				return nil, fmt.Errorf("iterate neighbors from %s: %w", depTable, err)
-			}
-		}
+	neighborIDs, err := loadDeleteNeighborIDs(ctx, tx, ids, deleting)
+	if err != nil {
+		return nil, err
 	}
 	if len(neighborIDs) == 0 {
 		return nil, nil
@@ -306,6 +262,63 @@ func deleteNeighborsInTx(ctx context.Context, tx DBTX, ids []string) ([]*types.I
 	return issues, nil
 }
 
+//nolint:gosec // G201: inClause contains only ? placeholders
+func loadDeleteNeighborIDs(ctx context.Context, tx DBTX, ids []string, deleting map[string]bool) (map[string]bool, error) {
+	neighborIDs := make(map[string]bool)
+	total := len(ids)
+	for i := 0; i < total; i += deleteBatchSize {
+		end := i + deleteBatchSize
+		if end > total {
+			end = total
+		}
+		inClause, args := buildSQLInClause(ids[i:end])
+		doubled := append(append([]interface{}{}, args...), args...)
+
+		for _, depTable := range []string{"dependencies", "wisp_dependencies"} {
+			if err := readDeleteNeighborsFromTable(ctx, tx, depTable, inClause, doubled, deleting, neighborIDs); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return neighborIDs, nil
+}
+
+//nolint:gosec // G201: inClause contains only ? placeholders
+func readDeleteNeighborsFromTable(ctx context.Context, tx DBTX, depTable, inClause string, args []interface{}, deleting, neighborIDs map[string]bool) error {
+	rows, err := tx.QueryContext(ctx,
+		fmt.Sprintf(`SELECT issue_id, %s AS depends_on_id FROM %s WHERE issue_id IN (%s) OR %s`,
+			DepTargetExpr, depTable, inClause, depTargetIn("", inClause)),
+		args...)
+	if err != nil {
+		if optionalBlockedTable(depTable) && isTableNotExistError(err) {
+			return nil
+		}
+		return fmt.Errorf("query neighbors from %s: %w", depTable, err)
+	}
+	for rows.Next() {
+		var source, target string
+		if err := rows.Scan(&source, &target); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan neighbor: %w", err)
+		}
+		appendDeleteNeighborCandidates(source, target, deleting, neighborIDs)
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate neighbors from %s: %w", depTable, err)
+	}
+	return nil
+}
+
+func appendDeleteNeighborCandidates(source, target string, deleting, neighborIDs map[string]bool) {
+	for _, candidate := range [2]string{source, target} {
+		if candidate == "" || deleting[candidate] {
+			continue
+		}
+		neighborIDs[candidate] = true
+	}
+}
+
 // RewriteDeletedReferencesInTx replaces every word-boundary occurrence of a
 // deleted id with `[deleted:<id>]` in each neighbor's description, notes,
 // design and acceptance criteria, and reports how many ROWS it changed.
@@ -319,42 +332,54 @@ func RewriteDeletedReferencesInTx(ctx context.Context, tx DBTX, deletedIDs []str
 	}
 	touched := make(map[string]bool)
 	for _, id := range deletedIDs {
-		re := DeletedReferencePattern(id)
-		replacement := `$1[deleted:` + id + `]$3`
-		for _, neighbor := range neighbors {
-			if neighbor == nil {
-				continue
-			}
-			updates := make(map[string]interface{})
-			for _, field := range []struct {
-				column string
-				value  *string
-			}{
-				{"description", &neighbor.Description},
-				{"notes", &neighbor.Notes},
-				{"design", &neighbor.Design},
-				{"acceptance_criteria", &neighbor.AcceptanceCriteria},
-			} {
-				if *field.value == "" || !re.MatchString(*field.value) {
-					continue
-				}
-				rewritten := re.ReplaceAllString(*field.value, replacement)
-				updates[field.column] = rewritten
-				// Write the rewrite back onto the in-memory row so a second
-				// deleted id in the same field sees the first one's result
-				// rather than re-reading the original.
-				*field.value = rewritten
-			}
-			if len(updates) == 0 {
-				continue
-			}
-			if _, err := UpdateIssueInTx(ctx, tx, neighbor.ID, updates, actor); err != nil {
-				return 0, fmt.Errorf("rewrite references in %s: %w", neighbor.ID, err)
-			}
-			touched[neighbor.ID] = true
+		if err := rewriteDeletedReferenceForID(ctx, tx, id, neighbors, actor, touched); err != nil {
+			return 0, err
 		}
 	}
 	return len(touched), nil
+}
+
+func rewriteDeletedReferenceForID(ctx context.Context, tx DBTX, deletedID string, neighbors []*types.Issue, actor string, touched map[string]bool) error {
+	re := DeletedReferencePattern(deletedID)
+	replacement := `$1[deleted:` + deletedID + `]$3`
+	for _, neighbor := range neighbors {
+		if neighbor == nil {
+			continue
+		}
+		updates := rewriteNeighborFields(neighbor, re, replacement)
+		if len(updates) == 0 {
+			continue
+		}
+		if _, err := UpdateIssueInTx(ctx, tx, neighbor.ID, updates, actor); err != nil {
+			return fmt.Errorf("rewrite references in %s: %w", neighbor.ID, err)
+		}
+		touched[neighbor.ID] = true
+	}
+	return nil
+}
+
+func rewriteNeighborFields(neighbor *types.Issue, re *regexp.Regexp, replacement string) map[string]interface{} {
+	updates := make(map[string]interface{})
+	for _, field := range []struct {
+		column string
+		value  *string
+	}{
+		{"description", &neighbor.Description},
+		{"notes", &neighbor.Notes},
+		{"design", &neighbor.Design},
+		{"acceptance_criteria", &neighbor.AcceptanceCriteria},
+	} {
+		if *field.value == "" || !re.MatchString(*field.value) {
+			continue
+		}
+		rewritten := re.ReplaceAllString(*field.value, replacement)
+		updates[field.column] = rewritten
+		// Write the rewrite back onto the in-memory row so a second deleted id in
+		// the same field sees the first one's result rather than re-reading the
+		// original.
+		*field.value = rewritten
+	}
+	return updates
 }
 
 // DeletedReferencePattern is the citation rule, in one place: a literal id at

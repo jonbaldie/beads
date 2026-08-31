@@ -2,6 +2,7 @@ package issueops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -16,7 +17,21 @@ import (
 // nolint:gosec // G201: statusClause contains only literal SQL or a single ? placeholder
 func GetStaleIssuesInTx(ctx context.Context, tx DBTX, filter types.StaleFilter) ([]*types.Issue, error) {
 	cutoff := time.Now().UTC().AddDate(0, 0, -filter.Days)
+	ids, err := staleIssueIDs(ctx, tx, filter, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	issues, err := GetIssuesByIDsInTx(ctx, tx, ids, nil)
+	if err != nil {
+		return nil, err
+	}
+	return orderStaleIssues(ids, issues), nil
+}
 
+func staleIssueIDs(ctx context.Context, tx DBTX, filter types.StaleFilter, cutoff time.Time) ([]string, error) {
 	statusClause := "status IN ('open', 'in_progress')"
 	if filter.Status != "" {
 		statusClause = "status = ?"
@@ -49,36 +64,24 @@ func GetStaleIssuesInTx(ctx context.Context, tx DBTX, filter types.StaleFilter) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get stale issues: %w", err)
 	}
-
-	// Collect IDs first, then batch-fetch full issues.
-	// Close rows explicitly before the nested fetch — MySQL/Dolt drivers
-	// can't handle multiple active result sets on one connection.
 	var ids []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return nil, fmt.Errorf("failed to scan stale issue id: %w", err)
+			return nil, errors.Join(fmt.Errorf("failed to scan stale issue id: %w", err), rows.Close())
 		}
 		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, fmt.Errorf("stale issues rows: %w", err)
+		return nil, errors.Join(fmt.Errorf("stale issues rows: %w", err), rows.Close())
 	}
-	rows.Close()
-
-	if len(ids) == 0 {
-		return nil, nil
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close stale issues rows: %w", err)
 	}
+	return ids, nil
+}
 
-	// GetIssuesByIDsInTx returns issues in arbitrary order (WHERE IN),
-	// so re-order to preserve the updated_at ASC ordering from the query.
-	issues, err := GetIssuesByIDsInTx(ctx, tx, ids, nil)
-	if err != nil {
-		return nil, err
-	}
-
+func orderStaleIssues(ids []string, issues []*types.Issue) []*types.Issue {
 	issueByID := make(map[string]*types.Issue, len(issues))
 	for _, iss := range issues {
 		if iss != nil {
@@ -93,5 +96,5 @@ func GetStaleIssuesInTx(ctx context.Context, tx DBTX, filter types.StaleFilter) 
 		}
 	}
 
-	return ordered, nil
+	return ordered
 }

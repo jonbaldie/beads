@@ -48,6 +48,19 @@ var gitSHARE = regexp.MustCompile(`^[0-9a-f]{40}$`)
 // and the reserved source. It never interprets the opaque actor/ref values. It
 // is exported so the CLI can fail early with the same rules the store enforces.
 func ValidateProvenanceEvent(ev types.ProvenanceEvent) error {
+	if err := validateProvenanceIdentity(ev); err != nil {
+		return err
+	}
+	if err := validateProvenanceReference(ev); err != nil {
+		return err
+	}
+	if (ev.Ref == nil || *ev.Ref == "") && ev.OccurredAt == nil {
+		return fmt.Errorf("provenance: event with no ref requires occurred_at (--at) for a stable id")
+	}
+	return nil
+}
+
+func validateProvenanceIdentity(ev types.ProvenanceEvent) error {
 	if strings.TrimSpace(ev.IssueID) == "" {
 		return fmt.Errorf("provenance: issue id is required")
 	}
@@ -60,6 +73,10 @@ func ValidateProvenanceEvent(ev types.ProvenanceEvent) error {
 	if strings.EqualFold(strings.TrimSpace(ev.Source), ReservedProvSource) {
 		return fmt.Errorf("provenance: source %q is reserved for ingest backfill and cannot be recorded directly", ReservedProvSource)
 	}
+	return nil
+}
+
+func validateProvenanceReference(ev types.ProvenanceEvent) error {
 	if ev.RefKind != nil {
 		if _, ok := knownProvRefKinds[*ev.RefKind]; !ok {
 			return fmt.Errorf("provenance: unknown ref-kind %q", *ev.RefKind)
@@ -72,12 +89,6 @@ func ValidateProvenanceEvent(ev types.ProvenanceEvent) error {
 				return fmt.Errorf("provenance: ref-kind git-sha requires a 40-character lowercase hex ref")
 			}
 		}
-	}
-	// A ref-less event is keyed by occurred_at for its stable id; without either,
-	// two distinct events would collapse to the same content-addressed id. Guard
-	// at the store boundary so every caller (CLI or library) is covered.
-	if (ev.Ref == nil || *ev.Ref == "") && ev.OccurredAt == nil {
-		return fmt.Errorf("provenance: event with no ref requires occurred_at (--at) for a stable id")
 	}
 	return nil
 }

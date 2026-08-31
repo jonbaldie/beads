@@ -60,6 +60,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -78,7 +79,28 @@ import (
 
 const instrumentationScope = "github.com/jonbaldie/beads"
 
-var shutdownFns []func(context.Context) error
+type shutdownRegistry struct {
+	mu  sync.Mutex
+	fns []func(context.Context) error
+}
+
+var shutdownFns = &shutdownRegistry{}
+
+func (r *shutdownRegistry) add(fn func(context.Context) error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.fns = append(r.fns, fn)
+}
+
+func (r *shutdownRegistry) run(ctx context.Context) {
+	r.mu.Lock()
+	fns := r.fns
+	r.fns = nil
+	r.mu.Unlock()
+	for _, fn := range fns {
+		_ = fn(ctx)
+	}
+}
 
 // Enabled reports whether telemetry is active.
 //
@@ -178,7 +200,7 @@ func Init(ctx context.Context, serviceName, version string) error {
 			return fmt.Errorf("telemetry: trace provider: %w", err)
 		}
 		otel.SetTracerProvider(tp)
-		shutdownFns = append(shutdownFns, tp.Shutdown)
+		shutdownFns.add(tp.Shutdown)
 	} else {
 		otel.SetTracerProvider(tracenoop.NewTracerProvider())
 	}
@@ -188,7 +210,7 @@ func Init(ctx context.Context, serviceName, version string) error {
 		return fmt.Errorf("telemetry: metric provider: %w", err)
 	}
 	otel.SetMeterProvider(mp)
-	shutdownFns = append(shutdownFns, mp.Shutdown)
+	shutdownFns.add(mp.Shutdown)
 
 	return nil
 }
@@ -281,8 +303,5 @@ func Meter(name string) metric.Meter {
 // Shutdown flushes all spans/metrics and shuts down OTel providers.
 // Should be deferred in PersistentPostRun with a short-lived context.
 func Shutdown(ctx context.Context) {
-	for _, fn := range shutdownFns {
-		_ = fn(ctx)
-	}
-	shutdownFns = nil
+	shutdownFns.run(ctx)
 }

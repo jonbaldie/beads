@@ -118,28 +118,12 @@ func recomputeIsBlockedAfterMergeScoped(ctx context.Context, tx *sql.Tx, fromCom
 		// rather than skip the hook.
 		return recomputeIsBlockedForAll(ctx, tx)
 	}
-	if !doltCommitHashRE.MatchString(fromCommit) {
-		return fmt.Errorf("recompute is_blocked after merge: invalid from-commit %q", fromCommit)
+	needsRecompute, err := mergeNeedsBlockedRecompute(ctx, tx, fromCommit)
+	if err != nil {
+		return err
 	}
-	var head string
-	if err := tx.QueryRowContext(ctx, "SELECT DOLT_HASHOF('HEAD')").Scan(&head); err != nil {
-		// Older engines (and embedded Dolt) expose only the HASHOF alias.
-		if err := tx.QueryRowContext(ctx, "SELECT HASHOF('HEAD')").Scan(&head); err != nil {
-			return fmt.Errorf("recompute is_blocked after merge: read HEAD: %w", err)
-		}
-	}
-	if head == fromCommit {
-		// HEAD did not advance — but a merge whose conflicts or constraint
-		// violations bd auto-resolved lands in the WORKING SET without a merge
-		// commit (bd-6dnrw.39), so an unchanged HEAD alone does not mean
-		// nothing merged. Skip only when issues/dependencies are clean too;
-		// on a status read error fall through to the diff, which answers the
-		// same question row-by-row.
-		var dirty int
-		if err := tx.QueryRowContext(ctx,
-			"SELECT COUNT(*) FROM dolt_status WHERE table_name IN ('issues', 'dependencies')").Scan(&dirty); err == nil && dirty == 0 {
-			return nil // nothing was merged
-		}
+	if !needsRecompute {
+		return nil
 	}
 
 	issueIDs, wispIDs, ok, err := mergeAffectedSets(ctx, tx, fromCommit)
@@ -152,65 +136,141 @@ func recomputeIsBlockedAfterMergeScoped(ctx context.Context, tx *sql.Tx, fromCom
 	return RecomputeIsBlockedInTx(ctx, tx, issueIDs, wispIDs)
 }
 
+func mergeNeedsBlockedRecompute(ctx context.Context, tx *sql.Tx, fromCommit string) (bool, error) {
+	if !doltCommitHashRE.MatchString(fromCommit) {
+		return false, fmt.Errorf("recompute is_blocked after merge: invalid from-commit %q", fromCommit)
+	}
+	head, err := readMergeHead(ctx, tx)
+	if err != nil {
+		return false, err
+	}
+	if head != fromCommit {
+		return true, nil
+	}
+	// HEAD did not advance — but a merge whose conflicts or constraint
+	// violations bd auto-resolved lands in the WORKING SET without a merge
+	// commit (bd-6dnrw.39), so an unchanged HEAD alone does not mean
+	// nothing merged. Skip only when issues/dependencies are clean too;
+	// on a status read error fall through to the diff, which answers the
+	// same question row-by-row.
+	var dirty int
+	if err := tx.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM dolt_status WHERE table_name IN ('issues', 'dependencies')").Scan(&dirty); err == nil && dirty == 0 {
+		return false, nil
+	}
+	return true, nil
+}
+
+func readMergeHead(ctx context.Context, tx *sql.Tx) (string, error) {
+	var head string
+	if err := tx.QueryRowContext(ctx, "SELECT DOLT_HASHOF('HEAD')").Scan(&head); err == nil {
+		return head, nil
+	}
+	// Older engines (and embedded Dolt) expose only the HASHOF alias.
+	if err := tx.QueryRowContext(ctx, "SELECT HASHOF('HEAD')").Scan(&head); err != nil {
+		return "", fmt.Errorf("recompute is_blocked after merge: read HEAD: %w", err)
+	}
+	return head, nil
+}
+
 // mergeAffectedSets expands the issues/dependencies rows changed since
 // fromCommit into the closed affected set, exactly as the local write paths
 // would have done for each change. ok=false means the caller should fall back
 // to a full recompute (diff unavailable or seed volume above the cap).
 func mergeAffectedSets(ctx context.Context, tx *sql.Tx, fromCommit string) (issueIDs, wispIDs []string, ok bool, err error) {
+	changedIssues, changedDeps, ok, err := mergeChangedSeeds(ctx, tx, fromCommit)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if !ok {
+		return nil, nil, false, nil
+	}
+
+	acc := newMergeAffectedAccumulator()
+	if err := acc.expandIssues(ctx, tx, changedIssues); err != nil {
+		return nil, nil, false, err
+	}
+	if err := acc.expandDependencies(ctx, tx, changedDeps); err != nil {
+		return nil, nil, false, err
+	}
+	return acc.issueIDs, acc.wispIDs, true, nil
+}
+
+func mergeChangedSeeds(ctx context.Context, tx *sql.Tx, fromCommit string) ([]string, []changedDepEdge, bool, error) {
 	changedIssues, err := changedIssueIDs(ctx, tx, fromCommit)
 	if err != nil {
-		// dolt_diff fails when the merge also reshaped the table (schema change
-		// between the refs); the safe answer is the full pass. A canceled or
-		// timed-out context is not a diff failure, though — falling back would
-		// only run a doomed full recompute on a dead context.
-		if ctx.Err() != nil {
-			return nil, nil, false, ctx.Err()
-		}
-		return nil, nil, false, nil
+		return mergeDiffFailure(ctx)
 	}
 	changedDeps, err := changedDependencyEdges(ctx, tx, fromCommit)
 	if err != nil {
-		if ctx.Err() != nil {
-			return nil, nil, false, ctx.Err()
-		}
-		return nil, nil, false, nil
+		return mergeDiffFailure(ctx)
 	}
 	if len(changedIssues)+len(changedDeps) > mergeRecomputeSeedCap {
 		return nil, nil, false, nil
 	}
+	return changedIssues, changedDeps, true, nil
+}
 
-	issueSet := make(map[string]bool)
-	wispSet := make(map[string]bool)
-	add := func(issues, wisps []string) {
-		for _, id := range issues {
-			if !issueSet[id] {
-				issueSet[id] = true
-				issueIDs = append(issueIDs, id)
-			}
-		}
-		for _, id := range wisps {
-			if !wispSet[id] {
-				wispSet[id] = true
-				wispIDs = append(wispIDs, id)
-			}
-		}
+func mergeDiffFailure(ctx context.Context) ([]string, []changedDepEdge, bool, error) {
+	// dolt_diff fails when the merge also reshaped the table (schema change
+	// between the refs); the safe answer is the full pass. A canceled or
+	// timed-out context is not a diff failure, though — falling back would
+	// only run a doomed full recompute on a dead context.
+	if ctx.Err() != nil {
+		return nil, nil, false, ctx.Err()
 	}
+	return nil, nil, false, nil
+}
 
-	for _, id := range changedIssues {
+type mergeAffectedAccumulator struct {
+	issueIDs []string
+	wispIDs  []string
+	issueSet map[string]bool
+	wispSet  map[string]bool
+}
+
+func newMergeAffectedAccumulator() *mergeAffectedAccumulator {
+	return &mergeAffectedAccumulator{
+		issueSet: make(map[string]bool),
+		wispSet:  make(map[string]bool),
+	}
+}
+
+func (acc *mergeAffectedAccumulator) expandIssues(ctx context.Context, tx *sql.Tx, ids []string) error {
+	for _, id := range ids {
 		issues, wisps, err := AffectedByStatusChangeInTx(ctx, tx, id)
 		if err != nil {
-			return nil, nil, false, fmt.Errorf("expand merged issue %s: %w", id, err)
+			return fmt.Errorf("expand merged issue %s: %w", id, err)
 		}
-		add(issues, wisps)
+		acc.add(issues, wisps)
 	}
-	for _, e := range changedDeps {
+	return nil
+}
+
+func (acc *mergeAffectedAccumulator) expandDependencies(ctx context.Context, tx *sql.Tx, edges []changedDepEdge) error {
+	for _, e := range edges {
 		issues, wisps, err := AffectedByDepChangeInTx(ctx, tx, e.issueID, e.target, e.depType)
 		if err != nil {
-			return nil, nil, false, fmt.Errorf("expand merged edge %s: %w", e.issueID, err)
+			return fmt.Errorf("expand merged edge %s: %w", e.issueID, err)
 		}
-		add(issues, wisps)
+		acc.add(issues, wisps)
 	}
-	return issueIDs, wispIDs, true, nil
+	return nil
+}
+
+func (acc *mergeAffectedAccumulator) add(issues, wisps []string) {
+	for _, id := range issues {
+		if !acc.issueSet[id] {
+			acc.issueSet[id] = true
+			acc.issueIDs = append(acc.issueIDs, id)
+		}
+	}
+	for _, id := range wisps {
+		if !acc.wispSet[id] {
+			acc.wispSet[id] = true
+			acc.wispIDs = append(acc.wispIDs, id)
+		}
+	}
 }
 
 // changedIssueIDs returns the id of every issues row added, removed, or

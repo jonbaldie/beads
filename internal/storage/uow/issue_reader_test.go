@@ -32,9 +32,9 @@ import (
 // implementation that skips the sort is visible rather than lucky.
 func readerRows() []*types.IssueWithCounts {
 	return []*types.IssueWithCounts{
-		{Issue: &types.Issue{ID: "bd-10", Title: "ten"}},
-		{Issue: &types.Issue{ID: "bd-2", Title: "two"}},
-		{Issue: &types.Issue{ID: "bd-1", Title: "one"}},
+		{Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-10"}, IssueContent: types.IssueContent{Title: "ten"}}},
+		{Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-2"}, IssueContent: types.IssueContent{Title: "two"}}},
+		{Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-1"}, IssueContent: types.IssueContent{Title: "one"}}},
 	}
 }
 
@@ -116,7 +116,7 @@ func TestBothReaderImplementationsAgreeOnTheListEpilogue(t *testing.T) {
 			name = "ready"
 		}
 		t.Run(name, func(t *testing.T) {
-			req := publicops.ListRequest{ReadyFlag: ready, SortBy: "id", Limit: &limit}
+			req := publicops.ListRequest{ListModeOptions: publicops.ListModeOptions{ReadyFlag: ready}, ListPageOptions: publicops.ListPageOptions{SortBy: "id", Limit: &limit}}
 
 			uw := &mockUnitOfWork{
 				issueUseCase:  readerIssues{rows: readerRows()},

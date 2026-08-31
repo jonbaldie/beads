@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"sync"
 	"time"
@@ -216,39 +217,64 @@ func captureBlockedJournalSnapshot(
 		{table: "issues", ids: issueIDs},
 		{table: "wisps", ids: wispIDs},
 	} {
-		for start := 0; start < len(target.ids); start += queryBatchSize {
-			end := start + queryBatchSize
-			if end > len(target.ids) {
-				end = len(target.ids)
-			}
-			inClause, args := buildSQLInClause(target.ids[start:end])
-			//nolint:gosec // table is one of the two hardcoded values above.
-			rows, err := tx.QueryContext(ctx,
-				fmt.Sprintf("SELECT id, is_blocked FROM %s WHERE id IN (%s)", target.table, inClause),
-				args...)
-			if err != nil {
-				if optionalBlockedTable(target.table) && isTableNotExistError(err) {
-					break
-				}
-				return nil, fmt.Errorf("journal: snapshot derived is_blocked from %s: %w", target.table, err)
-			}
-			for rows.Next() {
-				var id string
-				var blocked int
-				if err := rows.Scan(&id, &blocked); err != nil {
-					_ = rows.Close()
-					return nil, fmt.Errorf("journal: scan derived is_blocked from %s: %w", target.table, err)
-				}
-				snapshot[blockedJournalKey{table: target.table, id: id}] = blocked != 0
-			}
-			if err := rows.Err(); err != nil {
-				_ = rows.Close()
-				return nil, fmt.Errorf("journal: iterate derived is_blocked from %s: %w", target.table, err)
-			}
-			if err := rows.Close(); err != nil {
-				return nil, fmt.Errorf("journal: close derived is_blocked from %s: %w", target.table, err)
-			}
+		targetSnapshot, err := captureBlockedJournalTable(ctx, tx, target.table, target.ids)
+		if err != nil {
+			return nil, err
 		}
+		for key, blocked := range targetSnapshot {
+			snapshot[key] = blocked
+		}
+	}
+	return snapshot, nil
+}
+
+func captureBlockedJournalTable(ctx context.Context, tx DBTX, table string, ids []string) (blockedJournalSnapshot, error) {
+	snapshot := make(blockedJournalSnapshot, len(ids))
+	totalIDs := len(ids)
+	for start := 0; start < totalIDs; start += queryBatchSize {
+		end := start + queryBatchSize
+		if end > totalIDs {
+			end = totalIDs
+		}
+		inClause, args := buildSQLInClause(ids[start:end])
+		//nolint:gosec // table is one of the two hardcoded values above.
+		rows, err := tx.QueryContext(ctx,
+			fmt.Sprintf("SELECT id, is_blocked FROM %s WHERE id IN (%s)", table, inClause),
+			args...)
+		if err != nil {
+			if optionalBlockedTable(table) && isTableNotExistError(err) {
+				return snapshot, nil
+			}
+			return nil, fmt.Errorf("journal: snapshot derived is_blocked from %s: %w", table, err)
+		}
+		batchSnapshot, err := scanBlockedJournalRows(rows, table)
+		if err != nil {
+			return nil, err
+		}
+		for key, blocked := range batchSnapshot {
+			snapshot[key] = blocked
+		}
+	}
+	return snapshot, nil
+}
+
+func scanBlockedJournalRows(rows *sql.Rows, table string) (blockedJournalSnapshot, error) {
+	snapshot := make(blockedJournalSnapshot)
+	for rows.Next() {
+		var id string
+		var blocked int
+		if err := rows.Scan(&id, &blocked); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("journal: scan derived is_blocked from %s: %w", table, err)
+		}
+		snapshot[blockedJournalKey{table: table, id: id}] = blocked != 0
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, fmt.Errorf("journal: iterate derived is_blocked from %s: %w", table, err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("journal: close derived is_blocked from %s: %w", table, err)
 	}
 	return snapshot, nil
 }
@@ -404,43 +430,62 @@ func getJournalIssueInTx(ctx context.Context, tx DBTX, issueID string) (*types.I
 // (non-dependency ops). ts is the insert time, stamped inside the committing
 // transaction.
 func insertEventRow(ctx context.Context, tx DBTX, op EventOp, issueID string, issue *types.Issue, dep *EventDep, comment *EventComment) error {
-	var issueJSON any
-	if issue != nil {
-		b, err := json.Marshal(issue)
-		if err != nil {
-			return fmt.Errorf("journal: marshal issue %s: %w", issueID, err)
-		}
-		issueJSON = string(b)
-	}
-	var depJSON any
-	if dep != nil {
-		b, err := json.Marshal(dep)
-		if err != nil {
-			return fmt.Errorf("journal: marshal dep for %s: %w", issueID, err)
-		}
-		depJSON = string(b)
-	}
-	var commentJSON any
-	if comment != nil {
-		b, err := json.Marshal(comment)
-		if err != nil {
-			return fmt.Errorf("journal: marshal comment for %s: %w", issueID, err)
-		}
-		commentJSON = string(b)
-	}
-	insert := func(seq int64) error {
-		_, err := tx.ExecContext(ctx, `
-			INSERT INTO bd_events_journal (seq, ts, op, issue_id, issue_json, dep_json, comment_json)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
-		`, seq, time.Now().UTC(), string(op), issueID, issueJSON, depJSON, commentJSON)
+	payloads, err := encodeJournalPayloads(issueID, issue, dep, comment)
+	if err != nil {
 		return err
 	}
+	return insertJournalEventWithSeq(ctx, tx, op, issueID, payloads)
+}
+
+type journalPayloads struct {
+	issue   any
+	dep     any
+	comment any
+}
+
+func encodeJournalPayloads(issueID string, issue *types.Issue, dep *EventDep, comment *EventComment) (journalPayloads, error) {
+	issueJSON, err := marshalJournalPayload(issue, "issue", issueID, false)
+	if err != nil {
+		return journalPayloads{}, err
+	}
+	depJSON, err := marshalJournalPayload(dep, "dep", issueID, true)
+	if err != nil {
+		return journalPayloads{}, err
+	}
+	commentJSON, err := marshalJournalPayload(comment, "comment", issueID, true)
+	if err != nil {
+		return journalPayloads{}, err
+	}
+	return journalPayloads{issue: issueJSON, dep: depJSON, comment: commentJSON}, nil
+}
+
+func marshalJournalPayload(value any, name, issueID string, includeFor bool) (any, error) {
+	if value == nil || isNilJournalPayload(value) {
+		return nil, nil
+	}
+	b, err := json.Marshal(value)
+	if err != nil {
+		prefix := "journal: marshal " + name
+		if includeFor {
+			prefix += " for"
+		}
+		return nil, fmt.Errorf("%s %s: %w", prefix, issueID, err)
+	}
+	return string(b), nil
+}
+
+func isNilJournalPayload(value any) bool {
+	reflected := reflect.ValueOf(value)
+	return reflected.Kind() == reflect.Ptr && reflected.IsNil()
+}
+
+func insertJournalEventWithSeq(ctx context.Context, tx DBTX, op EventOp, issueID string, payloads journalPayloads) error {
 
 	seq, err := nextEventSeq(ctx, tx)
 	if err != nil {
 		return err
 	}
-	if err := insert(seq); err != nil {
+	if err := insertJournalEventRow(ctx, tx, op, issueID, payloads, seq); err != nil {
 		// A duplicate seq means the counter is BEHIND the journal — it was
 		// restored, hand-edited, or copied from another workspace. Left alone
 		// that wedges the instance permanently: every later mutation re-mints
@@ -458,11 +503,19 @@ func insertEventRow(ctx context.Context, tx DBTX, op EventOp, issueID string, is
 		if err != nil {
 			return err
 		}
-		if err := insert(seq); err != nil {
+		if err := insertJournalEventRow(ctx, tx, op, issueID, payloads, seq); err != nil {
 			return fmt.Errorf("journal: record %s for %s after seq counter heal: %w", op, issueID, err)
 		}
 	}
 	return nil
+}
+
+func insertJournalEventRow(ctx context.Context, tx DBTX, op EventOp, issueID string, payloads journalPayloads, seq int64) error {
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO bd_events_journal (seq, ts, op, issue_id, issue_json, dep_json, comment_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, seq, time.Now().UTC(), string(op), issueID, payloads.issue, payloads.dep, payloads.comment)
+	return err
 }
 
 // healEventSeqCounter seeds the counter row if it is missing and raises it to

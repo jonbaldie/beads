@@ -55,7 +55,7 @@ func TestClaimAdvancedTheRow(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			claimed := &ClaimResult{OldIssue: &types.Issue{Status: tt.oldStatus, Assignee: tt.oldAssignee}}
+			claimed := &ClaimResult{OldIssue: &types.Issue{IssueWorkflow: types.IssueWorkflow{Status: tt.oldStatus, Assignee: tt.oldAssignee}}}
 			if got := claimAdvancedTheRow(claimed, tt.actor); got != tt.want {
 				t.Errorf("claimAdvancedTheRow() = %v, want %v", got, tt.want)
 			}

@@ -18,7 +18,7 @@ type fakeIssueClaimer struct {
 
 func (f *fakeIssueClaimer) Claim(context.Context, issueops.ClaimRequest) (issueops.ClaimResult, error) {
 	f.calls++
-	return issueops.ClaimResult{Issue: &types.Issue{ID: "bd-1"}, Changed: f.changed}, f.err
+	return issueops.ClaimResult{Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-1"}}, Changed: f.changed}, f.err
 }
 
 // claimerStore is a DoltStorage whose only real method is IssueClaimer.

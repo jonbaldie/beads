@@ -94,115 +94,93 @@ func ValidateMetadataSchema(metadata json.RawMessage, schema MetadataSchemaConfi
 
 	for fieldName, fieldSchema := range schema.Fields {
 		val, exists := parsed[fieldName]
-
-		// Check required
-		if fieldSchema.Required && !exists {
-			errs = append(errs, MetadataValidationError{
-				Field:   fieldName,
-				Message: "required field is missing",
-			})
-			continue
-		}
-
-		if !exists {
-			continue
-		}
-
-		// Type-check the value
-		switch fieldSchema.Type {
-		case MetadataFieldString:
-			if _, ok := val.(string); !ok {
-				errs = append(errs, MetadataValidationError{
-					Field:   fieldName,
-					Message: fmt.Sprintf("expected string, got %T", val),
-				})
-			}
-
-		case MetadataFieldInt:
-			num, ok := val.(float64)
-			if !ok {
-				errs = append(errs, MetadataValidationError{
-					Field:   fieldName,
-					Message: fmt.Sprintf("expected int, got %T", val),
-				})
-			} else {
-				if num != float64(int64(num)) {
-					errs = append(errs, MetadataValidationError{
-						Field:   fieldName,
-						Message: fmt.Sprintf("expected int, got float %v", num),
-					})
-				} else {
-					if fieldSchema.Min != nil && num < *fieldSchema.Min {
-						errs = append(errs, MetadataValidationError{
-							Field:   fieldName,
-							Message: fmt.Sprintf("value %v is below minimum %v", num, *fieldSchema.Min),
-						})
-					}
-					if fieldSchema.Max != nil && num > *fieldSchema.Max {
-						errs = append(errs, MetadataValidationError{
-							Field:   fieldName,
-							Message: fmt.Sprintf("value %v exceeds maximum %v", num, *fieldSchema.Max),
-						})
-					}
-				}
-			}
-
-		case MetadataFieldFloat:
-			num, ok := val.(float64)
-			if !ok {
-				errs = append(errs, MetadataValidationError{
-					Field:   fieldName,
-					Message: fmt.Sprintf("expected float, got %T", val),
-				})
-			} else {
-				if fieldSchema.Min != nil && num < *fieldSchema.Min {
-					errs = append(errs, MetadataValidationError{
-						Field:   fieldName,
-						Message: fmt.Sprintf("value %v is below minimum %v", num, *fieldSchema.Min),
-					})
-				}
-				if fieldSchema.Max != nil && num > *fieldSchema.Max {
-					errs = append(errs, MetadataValidationError{
-						Field:   fieldName,
-						Message: fmt.Sprintf("value %v exceeds maximum %v", num, *fieldSchema.Max),
-					})
-				}
-			}
-
-		case MetadataFieldBool:
-			if _, ok := val.(bool); !ok {
-				errs = append(errs, MetadataValidationError{
-					Field:   fieldName,
-					Message: fmt.Sprintf("expected bool, got %T", val),
-				})
-			}
-
-		case MetadataFieldEnum:
-			str, ok := val.(string)
-			if !ok {
-				errs = append(errs, MetadataValidationError{
-					Field:   fieldName,
-					Message: fmt.Sprintf("expected string (enum), got %T", val),
-				})
-			} else {
-				found := false
-				for _, allowed := range fieldSchema.Values {
-					if str == allowed {
-						found = true
-						break
-					}
-				}
-				if !found {
-					errs = append(errs, MetadataValidationError{
-						Field:   fieldName,
-						Message: fmt.Sprintf("value %q is not one of: %v", str, fieldSchema.Values),
-					})
-				}
-			}
-		}
+		errs = append(errs, validateMetadataField(fieldName, fieldSchema, val, exists)...)
 	}
 
 	return errs
+}
+
+func validateMetadataField(fieldName string, fieldSchema MetadataFieldSchema, val interface{}, exists bool) []MetadataValidationError {
+	if fieldSchema.Required && !exists {
+		return []MetadataValidationError{{Field: fieldName, Message: "required field is missing"}}
+	}
+	if !exists {
+		return nil
+	}
+	return validateMetadataFieldValue(fieldName, fieldSchema, val)
+}
+
+func validateMetadataFieldValue(fieldName string, schema MetadataFieldSchema, val interface{}) []MetadataValidationError {
+	switch schema.Type {
+	case MetadataFieldString:
+		return validateMetadataType(fieldName, val, "string", func() bool {
+			_, ok := val.(string)
+			return ok
+		})
+	case MetadataFieldInt:
+		return validateMetadataInt(fieldName, schema, val)
+	case MetadataFieldFloat:
+		return validateMetadataFloat(fieldName, schema, val)
+	case MetadataFieldBool:
+		return validateMetadataType(fieldName, val, "bool", func() bool {
+			_, ok := val.(bool)
+			return ok
+		})
+	case MetadataFieldEnum:
+		return validateMetadataEnum(fieldName, schema, val)
+	default:
+		return nil
+	}
+}
+
+func validateMetadataType(fieldName string, val interface{}, expected string, valid func() bool) []MetadataValidationError {
+	if valid() {
+		return nil
+	}
+	return []MetadataValidationError{{Field: fieldName, Message: fmt.Sprintf("expected %s, got %T", expected, val)}}
+}
+
+func validateMetadataInt(fieldName string, schema MetadataFieldSchema, val interface{}) []MetadataValidationError {
+	num, ok := val.(float64)
+	if !ok {
+		return []MetadataValidationError{{Field: fieldName, Message: fmt.Sprintf("expected int, got %T", val)}}
+	}
+	if num != float64(int64(num)) {
+		return []MetadataValidationError{{Field: fieldName, Message: fmt.Sprintf("expected int, got float %v", num)}}
+	}
+	return validateMetadataBounds(fieldName, schema, num)
+}
+
+func validateMetadataFloat(fieldName string, schema MetadataFieldSchema, val interface{}) []MetadataValidationError {
+	num, ok := val.(float64)
+	if !ok {
+		return []MetadataValidationError{{Field: fieldName, Message: fmt.Sprintf("expected float, got %T", val)}}
+	}
+	return validateMetadataBounds(fieldName, schema, num)
+}
+
+func validateMetadataBounds(fieldName string, schema MetadataFieldSchema, num float64) []MetadataValidationError {
+	var errs []MetadataValidationError
+	if schema.Min != nil && num < *schema.Min {
+		errs = append(errs, MetadataValidationError{Field: fieldName, Message: fmt.Sprintf("value %v is below minimum %v", num, *schema.Min)})
+	}
+	if schema.Max != nil && num > *schema.Max {
+		errs = append(errs, MetadataValidationError{Field: fieldName, Message: fmt.Sprintf("value %v exceeds maximum %v", num, *schema.Max)})
+	}
+	return errs
+}
+
+func validateMetadataEnum(fieldName string, schema MetadataFieldSchema, val interface{}) []MetadataValidationError {
+	str, ok := val.(string)
+	if !ok {
+		return []MetadataValidationError{{Field: fieldName, Message: fmt.Sprintf("expected string (enum), got %T", val)}}
+	}
+	for _, allowed := range schema.Values {
+		if str == allowed {
+			return nil
+		}
+	}
+	return []MetadataValidationError{{Field: fieldName, Message: fmt.Sprintf("value %q is not one of: %v", str, schema.Values)}}
 }
 
 // validMetadataKeyRe validates metadata key names for use in JSON path expressions.
@@ -277,32 +255,16 @@ func MergeMetadataJSON(existing, incoming json.RawMessage) (json.RawMessage, err
 // to existing metadata and returns the merged JSON. Set values are typed via
 // MetadataEditValue; keys are validated with ValidateMetadataKey.
 func ApplyMetadataEdits(existing json.RawMessage, setFlags, unsetFlags []string) (json.RawMessage, error) {
-	data := make(map[string]json.RawMessage)
-	if len(existing) > 0 {
-		trimmed := strings.TrimSpace(string(existing))
-		if trimmed != "" && trimmed != "null" {
-			if err := json.Unmarshal(existing, &data); err != nil {
-				return nil, fmt.Errorf("existing metadata is not a JSON object: %w", err)
-			}
-		}
+	data, err := decodeMetadataObject(existing)
+	if err != nil {
+		return nil, err
 	}
 
-	for _, kv := range setFlags {
-		k, v, ok := strings.Cut(kv, "=")
-		if !ok || k == "" {
-			return nil, fmt.Errorf("invalid --set-metadata: expected key=value, got %q", kv)
-		}
-		if err := ValidateMetadataKey(k); err != nil {
-			return nil, err
-		}
-		data[k] = MetadataEditValue(v)
+	if err := applyMetadataSetFlags(data, setFlags); err != nil {
+		return nil, err
 	}
-
-	for _, k := range unsetFlags {
-		if err := ValidateMetadataKey(k); err != nil {
-			return nil, err
-		}
-		delete(data, k)
+	if err := applyMetadataUnsetFlags(data, unsetFlags); err != nil {
+		return nil, err
 	}
 
 	result, err := json.Marshal(data)
@@ -310,6 +272,45 @@ func ApplyMetadataEdits(existing json.RawMessage, setFlags, unsetFlags []string)
 		return nil, fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 	return json.RawMessage(result), nil
+}
+
+func decodeMetadataObject(existing json.RawMessage) (map[string]json.RawMessage, error) {
+	data := make(map[string]json.RawMessage)
+	if len(existing) == 0 {
+		return data, nil
+	}
+	trimmed := strings.TrimSpace(string(existing))
+	if trimmed == "" || trimmed == "null" {
+		return data, nil
+	}
+	if err := json.Unmarshal(existing, &data); err != nil {
+		return nil, fmt.Errorf("existing metadata is not a JSON object: %w", err)
+	}
+	return data, nil
+}
+
+func applyMetadataSetFlags(data map[string]json.RawMessage, setFlags []string) error {
+	for _, kv := range setFlags {
+		k, v, ok := strings.Cut(kv, "=")
+		if !ok || k == "" {
+			return fmt.Errorf("invalid --set-metadata: expected key=value, got %q", kv)
+		}
+		if err := ValidateMetadataKey(k); err != nil {
+			return err
+		}
+		data[k] = MetadataEditValue(v)
+	}
+	return nil
+}
+
+func applyMetadataUnsetFlags(data map[string]json.RawMessage, unsetFlags []string) error {
+	for _, k := range unsetFlags {
+		if err := ValidateMetadataKey(k); err != nil {
+			return err
+		}
+		delete(data, k)
+	}
+	return nil
 }
 
 // MetadataEditValue converts a --set-metadata string value to JSON. Per the CLI

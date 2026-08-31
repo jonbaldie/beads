@@ -58,16 +58,16 @@ func TestLessMirrorsOrderBy(t *testing.T) {
 
 	now := time.Now().UTC()
 	older := now.Add(-time.Hour)
-	a := &types.Issue{ID: "a", Priority: 1, CreatedAt: now}
-	b := &types.Issue{ID: "b", Priority: 2, CreatedAt: now}
+	a := &types.Issue{IssueID: types.IssueID{ID: "a"}, IssueWorkflow: types.IssueWorkflow{Priority: 1}, IssueTimes: types.IssueTimes{CreatedAt: now}}
+	b := &types.Issue{IssueID: types.IssueID{ID: "b"}, IssueWorkflow: types.IssueWorkflow{Priority: 2}, IssueTimes: types.IssueTimes{CreatedAt: now}}
 	if !Less(a, b, "", false) || Less(b, a, "", false) {
 		t.Error("default sort must order priority 1 before priority 2")
 	}
-	c := &types.Issue{ID: "c", Priority: 1, CreatedAt: older}
+	c := &types.Issue{IssueID: types.IssueID{ID: "c"}, IssueWorkflow: types.IssueWorkflow{Priority: 1}, IssueTimes: types.IssueTimes{CreatedAt: older}}
 	if !Less(a, c, "", false) {
 		t.Error("equal priority must order newer created_at first (created_at DESC)")
 	}
-	d := &types.Issue{ID: "d", Priority: 1, CreatedAt: now}
+	d := &types.Issue{IssueID: types.IssueID{ID: "d"}, IssueWorkflow: types.IssueWorkflow{Priority: 1}, IssueTimes: types.IssueTimes{CreatedAt: now}}
 	if !Less(a, d, "", false) || Less(d, a, "", false) {
 		t.Error("full tie must break by id ASC")
 	}
@@ -77,8 +77,8 @@ func TestLessMirrorsOrderBy(t *testing.T) {
 // Less ignored sortDesc for "id" (the one Go-side sort key), so every merge
 // sort that fed a reversed id page kept the byte-FIRST rows.
 func TestLessIDHonorsSortDesc(t *testing.T) {
-	a := &types.Issue{ID: "bd-001"}
-	b := &types.Issue{ID: "bd-002"}
+	a := &types.Issue{IssueID: types.IssueID{ID: "bd-001"}}
+	b := &types.Issue{IssueID: types.IssueID{ID: "bd-002"}}
 
 	if !Less(a, b, "id", false) || Less(b, a, "id", false) {
 		t.Error("id ascending must be byte order")
@@ -171,9 +171,11 @@ func TestBuildReadyWorkWhereLabelsAny(t *testing.T) {
 
 	parent := "wy-jpd3"
 	filter := types.WorkFilter{
-		Labels:    []string{"tier:opus"},
-		LabelsAny: []string{"lane-a", "lane-c"},
-		ParentID:  &parent,
+		WorkFilterCore: types.WorkFilterCore{
+			Labels:    []string{"tier:opus"},
+			LabelsAny: []string{"lane-a", "lane-c"},
+			ParentID:  &parent,
+		},
 	}
 	where, args, err := BuildReadyWorkWhere(filter, IssuesFilterTables, ReadyWorkWhereInputs{})
 	if err != nil {
@@ -218,7 +220,7 @@ func TestBuildReadyWorkWhereLabelsAny(t *testing.T) {
 func TestBuildReadyWorkWhereLabelPattern(t *testing.T) {
 	t.Parallel()
 
-	where, args, err := BuildReadyWorkWhere(types.WorkFilter{LabelPattern: "tech-*"}, IssuesFilterTables, ReadyWorkWhereInputs{})
+	where, args, err := BuildReadyWorkWhere(types.WorkFilter{WorkFilterCore: types.WorkFilterCore{LabelPattern: "tech-*"}}, IssuesFilterTables, ReadyWorkWhereInputs{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -237,7 +239,7 @@ func TestBuildReadyWorkWhereLabelPattern(t *testing.T) {
 func TestBuildReadyWorkWhereLabelRegex(t *testing.T) {
 	t.Parallel()
 
-	where, args, err := BuildReadyWorkWhere(types.WorkFilter{LabelRegex: "^tech-"}, IssuesFilterTables, ReadyWorkWhereInputs{})
+	where, args, err := BuildReadyWorkWhere(types.WorkFilter{WorkFilterCore: types.WorkFilterCore{LabelRegex: "^tech-"}}, IssuesFilterTables, ReadyWorkWhereInputs{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -388,7 +390,7 @@ func TestBuildReadyWorkWhereLeavesOnly(t *testing.T) {
 		t.Fatalf("listing ready work must not exclude parents; where = %s", plain)
 	}
 
-	leaves, _, err := BuildReadyWorkWhere(types.WorkFilter{LeavesOnly: true}, IssuesFilterTables, ReadyWorkWhereInputs{})
+	leaves, _, err := BuildReadyWorkWhere(types.WorkFilter{WorkFilterExtra: types.WorkFilterExtra{LeavesOnly: true}}, IssuesFilterTables, ReadyWorkWhereInputs{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -418,13 +420,13 @@ func TestBuildReadyWorkWhereStatusFilter(t *testing.T) {
 	}{
 		{
 			name:            "StatusesInClause",
-			filter:          types.WorkFilter{Statuses: []types.Status{"open", "blocked", "pinned"}},
+			filter:          types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Statuses: []types.Status{"open", "blocked", "pinned"}}},
 			wantClause:      "status IN (?,?,?)",
 			wantLeadingArgs: []any{"open", "blocked", "pinned"},
 		},
 		{
 			name:            "SingularStatusWinsOverStatuses",
-			filter:          types.WorkFilter{Status: "open", Statuses: []types.Status{"blocked", "pinned"}},
+			filter:          types.WorkFilter{WorkFilterCore: types.WorkFilterCore{Status: "open", Statuses: []types.Status{"blocked", "pinned"}}},
 			wantClause:      "status = ?",
 			rejectClause:    "status IN (?",
 			wantLeadingArgs: []any{"open"},

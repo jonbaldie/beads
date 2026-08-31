@@ -22,7 +22,7 @@ func TestSearchIssuesWithCountsAppliesLimitToEachSourceQuery(t *testing.T) {
 	mock.ExpectQuery(`(?s)FROM wisps i.*ORDER BY i\.priority ASC, i\.created_at DESC, i\.id ASC\s+LIMIT 3`).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 
-	got, err := SearchIssuesWithCountsInTx(context.Background(), tx, "", types.IssueFilter{Limit: 3})
+	got, err := SearchIssuesWithCountsInTx(context.Background(), tx, "", types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 3}})
 	if err != nil {
 		t.Fatalf("SearchIssuesWithCountsInTx: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestSearchIssuesWithCountsHonorsSkipWisps(t *testing.T) {
 	mock.ExpectQuery(`(?s)FROM issues i.*ORDER BY i\.priority ASC, i\.created_at DESC, i\.id ASC`).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 
-	got, err := SearchIssuesWithCountsInTx(context.Background(), tx, "", types.IssueFilter{SkipWisps: true})
+	got, err := SearchIssuesWithCountsInTx(context.Background(), tx, "", types.IssueFilter{IssueFilterHydrate: types.IssueFilterHydrate{SkipWisps: true}})
 	if err != nil {
 		t.Fatalf("SearchIssuesWithCountsInTx: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestSearchIssuesWithCountsPushesSortIntoSQL(t *testing.T) {
 	mock.ExpectQuery(`(?s)FROM wisps i.*ORDER BY i\.created_at DESC, i\.id ASC\s+LIMIT 2`).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}))
 
-	filter := types.IssueFilter{SortBy: "created", Limit: 2}
+	filter := types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 2}, IssueFilterPage: types.IssueFilterPage{SortBy: "created"}}
 	if _, err := SearchIssuesWithCountsInTx(context.Background(), tx, "", filter); err != nil {
 		t.Fatalf("SearchIssuesWithCountsInTx: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestFinishSearchIssuesWithCountsTruncatesByRequestedSort(t *testing.T) {
 		return time.Date(2026, 6, day, 0, 0, 0, 0, time.UTC)
 	}
 	iwc := func(id string, priority int, created time.Time) *types.IssueWithCounts {
-		return &types.IssueWithCounts{Issue: &types.Issue{ID: id, Priority: priority, CreatedAt: created}}
+		return &types.IssueWithCounts{Issue: &types.Issue{IssueID: types.IssueID{ID: id}, IssueWorkflow: types.IssueWorkflow{Priority: priority}, IssueTimes: types.IssueTimes{CreatedAt: created}}}
 	}
 	// P0 but oldest; the two newest are low priority.
 	items := []*types.IssueWithCounts{
@@ -104,7 +104,7 @@ func TestFinishSearchIssuesWithCountsTruncatesByRequestedSort(t *testing.T) {
 		iwc("bd-newest-p4", 4, at(10)),
 	}
 
-	got, err := finishSearchIssuesWithCounts(items, types.IssueFilter{SortBy: "created", Limit: 2})
+	got, err := finishSearchIssuesWithCounts(items, types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 2}, IssueFilterPage: types.IssueFilterPage{SortBy: "created"}})
 	if err != nil {
 		t.Fatalf("sort=created limit=2: unexpected error: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestFinishSearchIssuesWithCountsTruncatesByRequestedSort(t *testing.T) {
 	}
 
 	// SortDesc flips the per-key default direction: created becomes ASC.
-	got, err = finishSearchIssuesWithCounts(items, types.IssueFilter{SortBy: "created", SortDesc: true, Limit: 2})
+	got, err = finishSearchIssuesWithCounts(items, types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 2}, IssueFilterPage: types.IssueFilterPage{SortBy: "created", SortDesc: true}})
 	if err != nil {
 		t.Fatalf("sort=created desc limit=2: unexpected error: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestFinishSearchIssuesWithCountsTruncatesByRequestedSort(t *testing.T) {
 	}
 
 	// Default (no SortBy) keeps the historical priority/created/id order.
-	got, err = finishSearchIssuesWithCounts(items, types.IssueFilter{Limit: 2})
+	got, err = finishSearchIssuesWithCounts(items, types.IssueFilter{IssueFilterCore: types.IssueFilterCore{Limit: 2}})
 	if err != nil {
 		t.Fatalf("default sort limit=2: unexpected error: %v", err)
 	}

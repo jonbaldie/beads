@@ -72,6 +72,29 @@ func WakeExpiredDefersInTx(ctx context.Context, tx DBTX) (WakeDefersResult, erro
 }
 
 func wakeExpiredDefersInTable(ctx context.Context, tx DBTX, table, eventsTable string) ([]string, error) {
+	expired, err := expiredDefersInTable(ctx, tx, table)
+	if err != nil {
+		return nil, err
+	}
+	if len(expired) == 0 {
+		return nil, nil
+	}
+
+	var woken []string
+	now := time.Now().UTC()
+	for _, id := range expired {
+		woke, err := wakeExpiredDefer(ctx, tx, table, eventsTable, id, now)
+		if err != nil {
+			return woken, err
+		}
+		if woke {
+			woken = append(woken, id)
+		}
+	}
+	return woken, nil
+}
+
+func expiredDefersInTable(ctx context.Context, tx DBTX, table string) ([]string, error) {
 	// Snapshot first so each genuinely-woken row gets its own event. The
 	// UPDATE below repeats the whole predicate, so a row rescued between the
 	// SELECT and its UPDATE (re-deferred further out, claimed, closed) matches
@@ -101,44 +124,39 @@ func wakeExpiredDefersInTable(ctx context.Context, tx DBTX, table, eventsTable s
 	if err := rows.Close(); err != nil {
 		return nil, fmt.Errorf("wake expired defers: close %s rows: %w", table, err)
 	}
-	if len(expired) == 0 {
-		return nil, nil
-	}
+	return expired, nil
+}
 
-	var woken []string
-	now := time.Now().UTC()
-	for _, id := range expired {
-		// row_lock is rewritten so a concurrent claim/update conflicts at
-		// commit time instead of cell-merging with this write — the same
-		// invariant the lease scheme depends on.
-		//nolint:gosec // G201: table is a hardcoded constant from the caller above.
-		res, err := tx.ExecContext(ctx, fmt.Sprintf(`
+func wakeExpiredDefer(ctx context.Context, tx DBTX, table, eventsTable, id string, now time.Time) (bool, error) {
+	// row_lock is rewritten so a concurrent claim/update conflicts at
+	// commit time instead of cell-merging with this write — the same
+	// invariant the lease scheme depends on.
+	//nolint:gosec // G201: table is a hardcoded constant from the caller above.
+	res, err := tx.ExecContext(ctx, fmt.Sprintf(`
 			UPDATE %s
 			SET status = 'open', defer_until = NULL, updated_at = ?, row_lock = ?
 			WHERE id = ? AND status = 'deferred' AND defer_until IS NOT NULL
 			  AND defer_until <= UTC_TIMESTAMP()
 		`, table), now, freshRowLock(), id)
-		if err != nil {
-			return woken, fmt.Errorf("wake expired defer %s: %w", id, err)
-		}
-		n, err := res.RowsAffected()
-		if err != nil {
-			return woken, fmt.Errorf("wake expired defer %s rows affected: %w", id, err)
-		}
-		if n == 0 {
-			continue // rescued concurrently — leave it be
-		}
-		if err := RecordFullEventInTable(ctx, tx, eventsTable, id, types.EventStatusChanged,
-			DeferWakeActor, string(types.StatusDeferred), string(types.StatusOpen)); err != nil {
-			return woken, fmt.Errorf("record wake event for %s: %w", id, err)
-		}
-		// A wake is a status change, so it journals as an update. Emitted past
-		// the rows-affected re-check, so a concurrently-rescued bead records
-		// nothing.
-		if err := RecordEventInTx(ctx, tx, EventUpdate, id); err != nil {
-			return woken, err
-		}
-		woken = append(woken, id)
+	if err != nil {
+		return false, fmt.Errorf("wake expired defer %s: %w", id, err)
 	}
-	return woken, nil
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("wake expired defer %s rows affected: %w", id, err)
+	}
+	if n == 0 {
+		return false, nil // rescued concurrently — leave it be
+	}
+	if err := RecordFullEventInTable(ctx, tx, eventsTable, id, types.EventStatusChanged,
+		DeferWakeActor, string(types.StatusDeferred), string(types.StatusOpen)); err != nil {
+		return false, fmt.Errorf("record wake event for %s: %w", id, err)
+	}
+	// A wake is a status change, so it journals as an update. Emitted past
+	// the rows-affected re-check, so a concurrently-rescued bead records
+	// nothing.
+	if err := RecordEventInTx(ctx, tx, EventUpdate, id); err != nil {
+		return false, err
+	}
+	return true, nil
 }

@@ -67,40 +67,60 @@ func ParsePackage(dir string) (map[string]*FuncInfo, error) {
 	out := map[string]*FuncInfo{}
 	for _, pkg := range pkgs {
 		for _, file := range pkg.Files {
-			for _, decl := range file.Decls {
-				fn, ok := decl.(*ast.FuncDecl)
-				if !ok {
-					continue
-				}
-				f := &FuncInfo{Name: fn.Name.Name, Exported: fn.Name.IsExported()}
-				if fn.Recv != nil && len(fn.Recv.List) > 0 {
-					f.Recv = ReceiverTypeName(fn.Recv.List[0].Type)
-				}
-				ast.Inspect(fn, func(n ast.Node) bool {
-					switch node := n.(type) {
-					case *ast.CallExpr:
-						switch fun := node.Fun.(type) {
-						case *ast.Ident:
-							f.IdentCalls = append(f.IdentCalls, fun.Name)
-						case *ast.SelectorExpr:
-							f.SelCalls = append(f.SelCalls, fun.Sel.Name)
-						}
-					case *ast.BasicLit:
-						if node.Kind == token.STRING && SQLWritesBeadTable(node.Value) {
-							f.OwnBeadDML = true
-						}
-					}
-					return true
-				})
-				key := f.Name
-				if f.Recv != "" {
-					key = f.Recv + "." + f.Name
-				}
-				out[key] = f
-			}
+			parseFileFunctions(out, file)
 		}
 	}
 	return out, nil
+}
+
+func parseFileFunctions(out map[string]*FuncInfo, file *ast.File) {
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		info := parseFuncDecl(fn)
+		out[funcKey(info)] = info
+	}
+}
+
+func parseFuncDecl(fn *ast.FuncDecl) *FuncInfo {
+	info := &FuncInfo{Name: fn.Name.Name, Exported: fn.Name.IsExported()}
+	if fn.Recv != nil && len(fn.Recv.List) > 0 {
+		info.Recv = ReceiverTypeName(fn.Recv.List[0].Type)
+	}
+	ast.Inspect(fn, func(node ast.Node) bool {
+		recordFuncShape(info, node)
+		return true
+	})
+	return info
+}
+
+func recordFuncShape(info *FuncInfo, node ast.Node) {
+	switch node := node.(type) {
+	case *ast.CallExpr:
+		recordCall(info, node)
+	case *ast.BasicLit:
+		if node.Kind == token.STRING && SQLWritesBeadTable(node.Value) {
+			info.OwnBeadDML = true
+		}
+	}
+}
+
+func recordCall(info *FuncInfo, call *ast.CallExpr) {
+	switch fun := call.Fun.(type) {
+	case *ast.Ident:
+		info.IdentCalls = append(info.IdentCalls, fun.Name)
+	case *ast.SelectorExpr:
+		info.SelCalls = append(info.SelCalls, fun.Sel.Name)
+	}
+}
+
+func funcKey(info *FuncInfo) string {
+	if info.Recv == "" {
+		return info.Name
+	}
+	return info.Recv + "." + info.Name
 }
 
 // Fixpoint returns the set of function keys for which seed is true or which
@@ -108,7 +128,15 @@ func ParsePackage(dir string) (map[string]*FuncInfo, error) {
 // called bare name resolves to a free function of that name and to any method
 // with that name (name-based resolution, sufficient for a guard).
 func Fixpoint(fns map[string]*FuncInfo, seed func(*FuncInfo) bool, edges func(*FuncInfo) []string) map[string]bool {
-	resolve := func(name string) []string {
+	resolve := buildResolver(fns)
+	got := seedFunctions(fns, seed)
+	for propagateFixpoint(fns, got, edges, resolve) {
+	}
+	return got
+}
+
+func buildResolver(fns map[string]*FuncInfo) func(string) []string {
+	return func(name string) []string {
 		var keys []string
 		if _, ok := fns[name]; ok {
 			keys = append(keys, name)
@@ -120,33 +148,39 @@ func Fixpoint(fns map[string]*FuncInfo, seed func(*FuncInfo) bool, edges func(*F
 		}
 		return keys
 	}
+}
+
+func seedFunctions(fns map[string]*FuncInfo, seed func(*FuncInfo) bool) map[string]bool {
 	got := map[string]bool{}
 	for key, f := range fns {
 		if seed(f) {
 			got[key] = true
 		}
 	}
-	for changed := true; changed; {
-		changed = false
-		for key, f := range fns {
+	return got
+}
+
+func propagateFixpoint(fns map[string]*FuncInfo, got map[string]bool, edges func(*FuncInfo) []string, resolve func(string) []string) bool {
+	changed := false
+	for key, f := range fns {
+		if got[key] || !callsKnownFunction(f, got, edges, resolve) {
+			continue
+		}
+		got[key] = true
+		changed = true
+	}
+	return changed
+}
+
+func callsKnownFunction(f *FuncInfo, got map[string]bool, edges func(*FuncInfo) []string, resolve func(string) []string) bool {
+	for _, callee := range edges(f) {
+		for _, key := range resolve(callee) {
 			if got[key] {
-				continue
-			}
-			for _, callee := range edges(f) {
-				for _, ck := range resolve(callee) {
-					if got[ck] {
-						got[key] = true
-						changed = true
-						break
-					}
-				}
-				if got[key] {
-					break
-				}
+				return true
 			}
 		}
 	}
-	return got
+	return false
 }
 
 // BeadTables are the work-bead tables a mutation must be journaled for.

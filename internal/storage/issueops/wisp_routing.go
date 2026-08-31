@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 )
 
 // IsActiveWispInTx checks whether the given ID exists in the wisps table
@@ -74,35 +73,9 @@ func WispIDSetInTx(ctx context.Context, tx DBTX, ids []string) (map[string]struc
 	} else if empty {
 		return set, nil
 	}
-	for start := 0; start < len(ids); start += queryBatchSize {
-		end := start + queryBatchSize
-		if end > len(ids) {
-			end = len(ids)
-		}
-		batch := ids[start:end]
-		placeholders := make([]string, len(batch))
-		args := make([]any, len(batch))
-		for i, id := range batch {
-			placeholders[i] = "?"
-			args[i] = id
-		}
-		q := fmt.Sprintf("SELECT id FROM wisps WHERE id IN (%s)", strings.Join(placeholders, ","))
-		rows, err := tx.QueryContext(ctx, q, args...)
-		if err != nil {
-			return nil, fmt.Errorf("wisp id set: %w", err)
-		}
-		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
-				_ = rows.Close()
-				return nil, fmt.Errorf("wisp id set: scan: %w", err)
-			}
-			set[id] = struct{}{}
-		}
-		_ = rows.Close()
-		if err := rows.Err(); err != nil {
-			return nil, fmt.Errorf("wisp id set: rows: %w", err)
-		}
+	set, err := queryWispIDsInBatches(ctx, tx, ids, "wisp id set")
+	if err != nil {
+		return nil, err
 	}
 	return set, nil
 }
@@ -139,52 +112,48 @@ func PartitionWispIDsInTx(ctx context.Context, tx DBTX, ids []string) (wispIDs, 
 		return nil, append([]string(nil), ids...), nil
 	}
 
-	wispSet := make(map[string]struct{}, len(ids))
-	for start := 0; start < len(ids); start += queryBatchSize {
+	wispSet, err := queryWispIDsInBatches(ctx, tx, ids, "partition wisp ids")
+	if err != nil {
+		// Wisps table may not exist yet on older schemas — treat as "no wisps".
+		if isTableNotExistError(err) {
+			return nil, append([]string(nil), ids...), nil
+		}
+		return nil, nil, err
+	}
+	wispIDs, permIDs = partitionByWispSet(ids, wispSet)
+	return wispIDs, permIDs, nil
+}
+
+func queryWispIDsInBatches(ctx context.Context, tx DBTX, ids []string, errorPrefix string) (map[string]struct{}, error) {
+	set := make(map[string]struct{}, len(ids))
+	totalIDs := len(ids)
+	for start := 0; start < totalIDs; start += queryBatchSize {
 		end := start + queryBatchSize
-		if end > len(ids) {
-			end = len(ids)
+		if end > totalIDs {
+			end = totalIDs
 		}
-		batch := ids[start:end]
-		placeholders := make([]string, len(batch))
-		args := make([]any, len(batch))
-		for i, id := range batch {
-			placeholders[i] = "?"
-			args[i] = id
-		}
+		placeholders, args := buildSQLInClause(ids[start:end])
 		//nolint:gosec // G201: only ? placeholders in the IN clause.
-		rows, qErr := tx.QueryContext(ctx,
-			fmt.Sprintf("SELECT id FROM wisps WHERE id IN (%s)", strings.Join(placeholders, ",")),
+		rows, err := tx.QueryContext(ctx,
+			fmt.Sprintf("SELECT id FROM wisps WHERE id IN (%s)", placeholders),
 			args...)
-		if qErr != nil {
-			// Wisps table may not exist yet on older schemas — treat as "no wisps".
-			if isTableNotExistError(qErr) {
-				return nil, append([]string(nil), ids...), nil
-			}
-			return nil, nil, fmt.Errorf("partition wisp ids: %w", qErr)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", errorPrefix, err)
 		}
 		for rows.Next() {
 			var id string
-			if scanErr := rows.Scan(&id); scanErr != nil {
+			if err := rows.Scan(&id); err != nil {
 				_ = rows.Close()
-				return nil, nil, fmt.Errorf("partition wisp ids: scan: %w", scanErr)
+				return nil, fmt.Errorf("%s: scan: %w", errorPrefix, err)
 			}
-			wispSet[id] = struct{}{}
+			set[id] = struct{}{}
 		}
 		_ = rows.Close()
-		if rowsErr := rows.Err(); rowsErr != nil {
-			return nil, nil, fmt.Errorf("partition wisp ids: rows: %w", rowsErr)
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("%s: rows: %w", errorPrefix, err)
 		}
 	}
-
-	for _, id := range ids {
-		if _, ok := wispSet[id]; ok {
-			wispIDs = append(wispIDs, id)
-		} else {
-			permIDs = append(permIDs, id)
-		}
-	}
-	return wispIDs, permIDs, nil
+	return set, nil
 }
 
 // WispTableRouting returns the appropriate issue, label, event, and dependency

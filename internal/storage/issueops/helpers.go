@@ -7,17 +7,11 @@ package issueops
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
-	"math"
-	"os"
 	"strconv"
 	"strings"
 
-	"github.com/jonbaldie/beads/internal/config"
-	"github.com/jonbaldie/beads/internal/debug"
 	"github.com/jonbaldie/beads/internal/idgen"
-	"github.com/jonbaldie/beads/internal/storage"
 	"github.com/jonbaldie/beads/internal/types"
 )
 
@@ -175,18 +169,32 @@ func RecordEventInTable(ctx context.Context, tx DBTX, table, issueID string, eve
 //
 //nolint:gosec // G201: table is a hardcoded constant
 func GenerateIssueIDInTable(ctx context.Context, tx DBTX, table, prefix string, issue *types.Issue, actor string) (string, error) {
-	// Counter mode only applies to the issues table (not wisps).
-	if table == "issues" {
-		counterMode, err := IsCounterModeTx(ctx, tx)
-		if err != nil {
-			return "", err
-		}
-		if counterMode {
-			return NextCounterIDTx(ctx, tx, prefix)
-		}
+	if counterID, ok, err := counterIssueID(ctx, tx, table, prefix); err != nil {
+		return "", err
+	} else if ok {
+		return counterID, nil
 	}
+	return hashIssueID(ctx, tx, table, prefix, issue, actor)
+}
 
-	// Default hash-based ID generation
+func counterIssueID(ctx context.Context, tx DBTX, table, prefix string) (string, bool, error) {
+	// Counter mode only applies to the issues table (not wisps).
+	if table != "issues" {
+		return "", false, nil
+	}
+	counterMode, err := IsCounterModeTx(ctx, tx)
+	if err != nil {
+		return "", false, err
+	}
+	if !counterMode {
+		return "", false, nil
+	}
+	id, err := NextCounterIDTx(ctx, tx, prefix)
+	return id, true, err
+}
+
+//nolint:gosec // G201: table is a hardcoded constant
+func hashIssueID(ctx context.Context, tx DBTX, table, prefix string, issue *types.Issue, actor string) (string, error) {
 	baseLength, err := GetAdaptiveIDLengthTx(ctx, tx, table, prefix)
 	if err != nil {
 		baseLength = 6
@@ -239,22 +247,8 @@ func NextCounterIDTx(ctx context.Context, tx DBTX, prefix string) (string, error
 	}
 
 	if rowsAffected == 0 {
-		if seedErr := SeedCounterFromExistingIssuesTx(ctx, tx, prefix); seedErr != nil {
-			return "", fmt.Errorf("failed to seed issue counter for prefix %q: %w", prefix, seedErr)
-		}
-		res, err = tx.ExecContext(ctx, "UPDATE issue_counter SET last_id = last_id + 1 WHERE prefix = ?", prefix)
-		if err != nil {
-			return "", fmt.Errorf("failed to increment issue counter after seeding for prefix %q: %w", prefix, err)
-		}
-		rowsAffected, err = res.RowsAffected()
-		if err != nil {
-			return "", fmt.Errorf("failed to check rows affected after seeding for prefix %q: %w", prefix, err)
-		}
-		if rowsAffected == 0 {
-			_, err = tx.ExecContext(ctx, "INSERT INTO issue_counter (prefix, last_id) VALUES (?, 1)", prefix)
-			if err != nil {
-				return "", fmt.Errorf("failed to insert initial issue counter for prefix %q: %w", prefix, err)
-			}
+		if err := initializeMissingCounter(ctx, tx, prefix); err != nil {
+			return "", err
 		}
 	}
 
@@ -264,6 +258,27 @@ func NextCounterIDTx(ctx context.Context, tx DBTX, prefix string) (string, error
 		return "", fmt.Errorf("failed to read issue counter after increment for prefix %q: %w", prefix, err)
 	}
 	return fmt.Sprintf("%s-%d", prefix, nextID), nil
+}
+
+func initializeMissingCounter(ctx context.Context, tx DBTX, prefix string) error {
+	if seedErr := SeedCounterFromExistingIssuesTx(ctx, tx, prefix); seedErr != nil {
+		return fmt.Errorf("failed to seed issue counter for prefix %q: %w", prefix, seedErr)
+	}
+	res, err := tx.ExecContext(ctx, "UPDATE issue_counter SET last_id = last_id + 1 WHERE prefix = ?", prefix)
+	if err != nil {
+		return fmt.Errorf("failed to increment issue counter after seeding for prefix %q: %w", prefix, err)
+	}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to check rows affected after seeding for prefix %q: %w", prefix, err)
+	}
+	if rowsAffected != 0 {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO issue_counter (prefix, last_id) VALUES (?, 1)", prefix); err != nil {
+		return fmt.Errorf("failed to insert initial issue counter for prefix %q: %w", prefix, err)
+	}
+	return nil
 }
 
 // SeedCounterFromExistingIssuesTx scans existing issues to find the highest numeric suffix
@@ -278,10 +293,24 @@ func SeedCounterFromExistingIssuesTx(ctx context.Context, tx DBTX, prefix string
 		return fmt.Errorf("failed to check existing counter for prefix %q: %w", prefix, err)
 	}
 
-	// Find max numeric suffix among existing issues
+	maxNum, err := maxExistingIssueNumber(ctx, tx, prefix)
+	if err != nil {
+		return err
+	}
+
+	if maxNum > 0 {
+		_, err = tx.ExecContext(ctx, "INSERT INTO issue_counter (prefix, last_id) VALUES (?, ?)", prefix, maxNum)
+		if err != nil {
+			return fmt.Errorf("failed to seed issue counter for prefix %q at %d: %w", prefix, maxNum, err)
+		}
+	}
+	return nil
+}
+
+func maxExistingIssueNumber(ctx context.Context, tx DBTX, prefix string) (int, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT id FROM issues WHERE id LIKE CONCAT(?, '-%')`, prefix)
 	if err != nil {
-		return fmt.Errorf("failed to scan existing issues for prefix %q: %w", prefix, err)
+		return 0, fmt.Errorf("failed to scan existing issues for prefix %q: %w", prefix, err)
 	}
 	defer rows.Close()
 
@@ -301,292 +330,7 @@ func SeedCounterFromExistingIssuesTx(ctx context.Context, tx DBTX, prefix string
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("failed to iterate issues for prefix %q: %w", prefix, err)
+		return 0, fmt.Errorf("failed to iterate issues for prefix %q: %w", prefix, err)
 	}
-
-	if maxNum > 0 {
-		_, err = tx.ExecContext(ctx, "INSERT INTO issue_counter (prefix, last_id) VALUES (?, ?)", prefix, maxNum)
-		if err != nil {
-			return fmt.Errorf("failed to seed issue counter for prefix %q at %d: %w", prefix, maxNum, err)
-		}
-	}
-	return nil
-}
-
-// GetAdaptiveIDLengthTx returns the appropriate hash length based on database size.
-//
-//nolint:gosec // G201: table is a hardcoded constant
-func GetAdaptiveIDLengthTx(ctx context.Context, tx DBTX, table, prefix string) (int, error) {
-	var count int
-	err := tx.QueryRowContext(ctx, fmt.Sprintf(`
-		SELECT COUNT(*)
-		FROM %s
-		WHERE id LIKE CONCAT(?, '-%%')
-		  AND INSTR(SUBSTRING(id, LENGTH(?) + 2), '.') = 0
-	`, table), prefix, prefix).Scan(&count)
-	if err != nil {
-		return 6, err
-	}
-
-	cfg := GetAdaptiveConfigTx(ctx, tx)
-	return ComputeAdaptiveLength(count, cfg), nil
-}
-
-// AdaptiveIDConfig holds configuration for adaptive ID length computation.
-type AdaptiveIDConfig struct {
-	MaxCollisionProbability float64
-	MinLength               int
-	MaxLength               int
-}
-
-// DefaultAdaptiveConfig returns the default adaptive ID configuration.
-func DefaultAdaptiveConfig() AdaptiveIDConfig {
-	return AdaptiveIDConfig{
-		MaxCollisionProbability: 0.25,
-		MinLength:               3,
-		MaxLength:               8,
-	}
-}
-
-// GetAdaptiveConfigTx reads adaptive ID config from the database.
-func GetAdaptiveConfigTx(ctx context.Context, tx DBTX) AdaptiveIDConfig {
-	cfg := DefaultAdaptiveConfig()
-
-	var probStr string
-	err := tx.QueryRowContext(ctx, "SELECT value FROM config WHERE `key` = ?", "max_collision_prob").Scan(&probStr)
-	if err == nil && probStr != "" {
-		if prob, err := strconv.ParseFloat(probStr, 64); err == nil {
-			cfg.MaxCollisionProbability = prob
-		}
-	}
-
-	var minLenStr string
-	err = tx.QueryRowContext(ctx, "SELECT value FROM config WHERE `key` = ?", "min_hash_length").Scan(&minLenStr)
-	if err == nil && minLenStr != "" {
-		if minLen, err := strconv.Atoi(minLenStr); err == nil {
-			cfg.MinLength = minLen
-		}
-	}
-
-	var maxLenStr string
-	err = tx.QueryRowContext(ctx, "SELECT value FROM config WHERE `key` = ?", "max_hash_length").Scan(&maxLenStr)
-	if err == nil && maxLenStr != "" {
-		if maxLen, err := strconv.Atoi(maxLenStr); err == nil {
-			cfg.MaxLength = maxLen
-		}
-	}
-
-	return cfg
-}
-
-// ComputeAdaptiveLength uses the birthday paradox to pick a hash length
-// that keeps collision probability below the configured threshold.
-func ComputeAdaptiveLength(numIssues int, cfg AdaptiveIDConfig) int {
-	const base = 36.0
-	for length := cfg.MinLength; length <= cfg.MaxLength; length++ {
-		totalPossibilities := math.Pow(base, float64(length))
-		exponent := -float64(numIssues*numIssues) / (2.0 * totalPossibilities)
-		prob := 1.0 - math.Exp(exponent)
-		if prob <= cfg.MaxCollisionProbability {
-			return length
-		}
-	}
-	return cfg.MaxLength
-}
-
-// GetCustomStatusesTx reads custom statuses from config within a transaction.
-func GetCustomStatusesTx(ctx context.Context, tx DBTX) ([]string, error) {
-	detailed, err := ResolveCustomStatusesDetailedInTx(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	return types.CustomStatusNames(detailed), nil
-}
-
-// ValidateMetadataIfConfigured checks metadata against the schema from config.
-func ValidateMetadataIfConfigured(metadata json.RawMessage) error {
-	mode := config.MetadataValidationMode()
-	if mode == "none" || mode == "" {
-		return nil
-	}
-
-	rawFields := config.MetadataSchemaFields()
-	if rawFields == nil {
-		return nil
-	}
-
-	fields := make(map[string]storage.MetadataFieldSchema)
-	for name, raw := range rawFields {
-		fieldMap, ok := raw.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		schema := ParseFieldSchema(fieldMap)
-		fields[name] = schema
-	}
-
-	if len(fields) == 0 {
-		return nil
-	}
-
-	schemaCfg := storage.MetadataSchemaConfig{
-		Mode:   mode,
-		Fields: fields,
-	}
-
-	errs := storage.ValidateMetadataSchema(metadata, schemaCfg)
-	if len(errs) == 0 {
-		return nil
-	}
-
-	if mode == "warn" {
-		for _, e := range errs {
-			fmt.Fprintf(os.Stderr, "warning: %s\n", e.Error())
-		}
-		return nil
-	}
-
-	return fmt.Errorf("metadata schema violation: %s", errs[0].Error())
-}
-
-// ParseFieldSchema converts a raw config map into a MetadataFieldSchema.
-func ParseFieldSchema(m map[string]interface{}) storage.MetadataFieldSchema {
-	schema := storage.MetadataFieldSchema{}
-
-	if t, ok := m["type"].(string); ok {
-		schema.Type = storage.MetadataFieldType(t)
-	}
-	if req, ok := m["required"].(bool); ok {
-		schema.Required = req
-	}
-
-	if vals, ok := m["values"]; ok {
-		switch v := vals.(type) {
-		case []interface{}:
-			for _, item := range v {
-				if s, ok := item.(string); ok {
-					schema.Values = append(schema.Values, s)
-				}
-			}
-		case string:
-			for _, s := range strings.Split(v, ",") {
-				s = strings.TrimSpace(s)
-				if s != "" {
-					schema.Values = append(schema.Values, s)
-				}
-			}
-		}
-	}
-
-	if min, ok := toFloat64(m["min"]); ok {
-		schema.Min = &min
-	}
-	if max, ok := toFloat64(m["max"]); ok {
-		schema.Max = &max
-	}
-
-	return schema
-}
-
-func toFloat64(v interface{}) (float64, bool) {
-	if v == nil {
-		return 0, false
-	}
-	switch n := v.(type) {
-	case float64:
-		return n, true
-	case int:
-		return float64(n), true
-	case int64:
-		return float64(n), true
-	default:
-		return 0, false
-	}
-}
-
-// IsDoltNothingToCommit returns true if the error is the benign
-// "nothing to commit" Dolt message.
-func IsDoltNothingToCommit(err error) bool {
-	if err == nil {
-		return false
-	}
-	s := strings.ToLower(err.Error())
-	return strings.Contains(s, "nothing to commit") ||
-		(strings.Contains(s, "no changes") && strings.Contains(s, "commit"))
-}
-
-// ReadConfigPrefix reads and normalizes issue_prefix from the config table.
-func ReadConfigPrefix(ctx context.Context, tx DBTX) (string, error) {
-	var configPrefix string
-	err := tx.QueryRowContext(ctx, "SELECT value FROM config WHERE `key` = ?", "issue_prefix").Scan(&configPrefix)
-	if err == sql.ErrNoRows || configPrefix == "" {
-		yamlPrefix := strings.TrimSpace(config.GetString("issue-prefix"))
-		underscoreYamlPrefix := strings.TrimSpace(config.GetString("issue_prefix"))
-		debug.Logf("Debug: missing config.issue_prefix in database (err=%v, db value=%q, yaml issue-prefix=%q, yaml issue_prefix=%q)\n",
-			err, configPrefix, yamlPrefix, underscoreYamlPrefix)
-		return "", fmt.Errorf("%w: issue_prefix config is missing (run 'bd init --prefix <prefix>' for a new project, or 'bd bootstrap' to clone an existing remote; if using config.yaml, use key 'issue-prefix', not 'issue_prefix')", storage.ErrNotInitialized)
-	} else if err != nil {
-		return "", fmt.Errorf("failed to get config: %w", err)
-	}
-	return strings.TrimSuffix(configPrefix, "-"), nil
-}
-
-// ---------------------------------------------------------------------------
-// Nullable value helpers
-// ---------------------------------------------------------------------------
-
-// NullString returns nil for empty strings, otherwise the string value.
-func NullString(s string) interface{} {
-	if s == "" {
-		return nil
-	}
-	return s
-}
-
-// NullStringPtr returns nil for nil pointers, otherwise the pointed-to string.
-func NullStringPtr(s *string) interface{} {
-	if s == nil {
-		return nil
-	}
-	return *s
-}
-
-// NullInt returns nil for nil pointers, otherwise the pointed-to int.
-func NullInt(i *int) interface{} {
-	if i == nil {
-		return nil
-	}
-	return *i
-}
-
-// NullIntVal returns nil for zero values, otherwise the int.
-func NullIntVal(i int) interface{} {
-	if i == 0 {
-		return nil
-	}
-	return i
-}
-
-// JSONMetadata returns the metadata as a JSON string, defaulting to "{}".
-func JSONMetadata(m []byte) string {
-	if len(m) == 0 {
-		return "{}"
-	}
-	if !json.Valid(m) {
-		fmt.Fprintf(os.Stderr, "Warning: invalid JSON metadata, using empty object\n")
-		return "{}"
-	}
-	return string(m)
-}
-
-// FormatJSONStringArray marshals a string slice to JSON, returning "" for empty/nil.
-func FormatJSONStringArray(arr []string) string {
-	if len(arr) == 0 {
-		return ""
-	}
-	data, err := json.Marshal(arr)
-	if err != nil {
-		return ""
-	}
-	return string(data)
+	return maxNum, nil
 }

@@ -61,8 +61,12 @@ func BuildBatchCommitMessage(ctx context.Context, db SQLQuerier, actor string) s
 	if actor == "" {
 		actor = "bd"
 	}
+	added, modified, removed := batchIssueDiffCounts(ctx, db)
+	otherTables := batchOtherTables(ctx, db)
+	return formatBatchCommitMessage(actor, added, modified, removed, otherTables)
+}
 
-	var added, modified, removed int
+func batchIssueDiffCounts(ctx context.Context, db SQLQuerier) (added, modified, removed int) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT diff_type, COUNT(*) as cnt
 		FROM dolt_diff('HEAD', 'WORKING', 'issues')
@@ -86,7 +90,10 @@ func BuildBatchCommitMessage(ctx context.Context, db SQLQuerier, actor string) s
 		}
 		_ = rows.Err()
 	}
+	return added, modified, removed
+}
 
+func batchOtherTables(ctx context.Context, db SQLQuerier) []string {
 	var otherTables []string
 	statusRows, statusErr := db.QueryContext(ctx, `
 		SELECT table_name FROM dolt_status s
@@ -106,7 +113,10 @@ func BuildBatchCommitMessage(ctx context.Context, db SQLQuerier, actor string) s
 		}
 		_ = statusRows.Err()
 	}
+	return otherTables
+}
 
+func formatBatchCommitMessage(actor string, added, modified, removed int, otherTables []string) string {
 	msg := fmt.Sprintf("bd: batch commit by %s", actor)
 	var parts []string
 	if added > 0 {

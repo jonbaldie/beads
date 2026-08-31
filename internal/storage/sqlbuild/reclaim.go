@@ -42,31 +42,14 @@ func BuildReclaimScopeClauses(filter types.ReclaimFilter, tables FilterTables, a
 		return alias + "." + name
 	}
 
-	// degenerate reports a field that was populated but has no usable values.
-	degenerate := func(raw, compacted []string) bool { return len(raw) > 0 && len(compacted) == 0 }
-
 	ids := CompactNonEmptyStrings(filter.IDs)
-	switch {
-	case degenerate(filter.IDs, ids):
-		clauses = append(clauses, "1=0")
-	case len(ids) > 0:
-		ph, idArgs := InPlaceholders(ids)
-		clauses = append(clauses, fmt.Sprintf("%s IN (%s)", col("id"), ph))
-		args = append(args, idArgs...)
-	}
+	appendValueFilter(&clauses, &args, col("id"), filter.IDs, ids)
 
 	assignees := CompactNonEmptyStrings(filter.Assignees)
-	switch {
-	case degenerate(filter.Assignees, assignees):
-		clauses = append(clauses, "1=0")
-	case len(assignees) > 0:
-		ph, aArgs := InPlaceholders(assignees)
-		clauses = append(clauses, fmt.Sprintf("%s IN (%s)", col("assignee"), ph))
-		args = append(args, aArgs...)
-	}
+	appendValueFilter(&clauses, &args, col("assignee"), filter.Assignees, assignees)
 
 	labels := CompactNonEmptyStrings(filter.Labels)
-	if degenerate(filter.Labels, labels) {
+	if len(filter.Labels) > 0 && len(labels) == 0 {
 		clauses = append(clauses, "1=0")
 	}
 	for _, label := range labels {
@@ -75,28 +58,47 @@ func BuildReclaimScopeClauses(filter types.ReclaimFilter, tables FilterTables, a
 	}
 
 	any := CompactNonEmptyStrings(filter.LabelsAny)
-	switch {
-	case degenerate(filter.LabelsAny, any):
-		clauses = append(clauses, "1=0")
-	case len(any) > 0:
-		ph, lArgs := InPlaceholders(any)
-		clauses = append(clauses, fmt.Sprintf("%s IN (SELECT issue_id FROM %s WHERE label IN (%s))", col("id"), tables.Labels, ph))
-		args = append(args, lArgs...)
-	}
+	appendLabelAnyFilter(&clauses, &args, col("id"), tables.Labels, filter.LabelsAny, any)
 
 	// An all-empty exclusion set excludes nothing, which cannot widen the set
 	// beyond what the other clauses allow — but a degenerate ExcludeLabels ALONE
 	// would otherwise leave the sweep global, so it fails closed too.
 	excl := CompactNonEmptyStrings(filter.ExcludeLabels)
-	switch {
-	case degenerate(filter.ExcludeLabels, excl):
-		clauses = append(clauses, "1=0")
-	case len(excl) > 0:
-		ph, lArgs := InPlaceholders(excl)
-		clauses = append(clauses, fmt.Sprintf("%s NOT IN (SELECT issue_id FROM %s WHERE label IN (%s))", col("id"), tables.Labels, ph))
-		args = append(args, lArgs...)
-	}
+	appendLabelExcludeFilter(&clauses, &args, col("id"), tables.Labels, filter.ExcludeLabels, excl)
 	return clauses, args
+}
+
+func appendValueFilter(clauses *[]string, args *[]any, column string, raw, values []string) {
+	switch {
+	case len(raw) > 0 && len(values) == 0:
+		*clauses = append(*clauses, "1=0")
+	case len(values) > 0:
+		ph, filterArgs := InPlaceholders(values)
+		*clauses = append(*clauses, fmt.Sprintf("%s IN (%s)", column, ph))
+		*args = append(*args, filterArgs...)
+	}
+}
+
+func appendLabelAnyFilter(clauses *[]string, args *[]any, column, labelsTable string, raw, values []string) {
+	switch {
+	case len(raw) > 0 && len(values) == 0:
+		*clauses = append(*clauses, "1=0")
+	case len(values) > 0:
+		ph, filterArgs := InPlaceholders(values)
+		*clauses = append(*clauses, fmt.Sprintf("%s IN (SELECT issue_id FROM %s WHERE label IN (%s))", column, labelsTable, ph))
+		*args = append(*args, filterArgs...)
+	}
+}
+
+func appendLabelExcludeFilter(clauses *[]string, args *[]any, column, labelsTable string, raw, values []string) {
+	switch {
+	case len(raw) > 0 && len(values) == 0:
+		*clauses = append(*clauses, "1=0")
+	case len(values) > 0:
+		ph, filterArgs := InPlaceholders(values)
+		*clauses = append(*clauses, fmt.Sprintf("%s NOT IN (SELECT issue_id FROM %s WHERE label IN (%s))", column, labelsTable, ph))
+		*args = append(*args, filterArgs...)
+	}
 }
 
 // ReclaimScopeSQL is BuildReclaimScopeClauses rendered as a suffix ready to be

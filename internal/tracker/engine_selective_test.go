@@ -16,9 +16,9 @@ func TestEnginePushWithIssueIDsFilter(t *testing.T) {
 	defer store.Close()
 
 	issues := []*types.Issue{
-		{ID: "bd-sel-1", Title: "Push me", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
-		{ID: "bd-sel-2", Title: "Also push me", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
-		{ID: "bd-sel-3", Title: "Skip me", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
+		{IssueID: types.IssueID{ID: "bd-sel-1"}, IssueContent: types.IssueContent{Title: "Push me"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
+		{IssueID: types.IssueID{ID: "bd-sel-2"}, IssueContent: types.IssueContent{Title: "Also push me"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
+		{IssueID: types.IssueID{ID: "bd-sel-3"}, IssueContent: types.IssueContent{Title: "Skip me"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
 	}
 	for _, issue := range issues {
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
@@ -98,13 +98,21 @@ func TestEnginePullWithIssueIDsSelectiveByBeadID(t *testing.T) {
 	// Create a local issue with an external ref
 	extRef := "https://test.test/EXT-1"
 	issue := &types.Issue{
-		ID:          "bd-pullsel",
-		Title:       "Old title",
-		Description: "Old description",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeTask,
-		Priority:    2,
-		ExternalRef: &extRef,
+		IssueID: types.IssueID{
+			ID: "bd-pullsel",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Old title",
+			Description: "Old description",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: &extRef,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue error: %v", err)
@@ -149,8 +157,8 @@ func TestEngineSyncEmptyIssueIDsBehavesAsNormal(t *testing.T) {
 	defer store.Close()
 
 	issues := []*types.Issue{
-		{ID: "bd-all-1", Title: "Issue 1", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
-		{ID: "bd-all-2", Title: "Issue 2", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
+		{IssueID: types.IssueID{ID: "bd-all-1"}, IssueContent: types.IssueContent{Title: "Issue 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
+		{IssueID: types.IssueID{ID: "bd-all-2"}, IssueContent: types.IssueContent{Title: "Issue 2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
 	}
 	for _, issue := range issues {
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
@@ -180,11 +188,17 @@ func TestEnginePushWithInvalidIssueIDs(t *testing.T) {
 	defer store.Close()
 
 	issue := &types.Issue{
-		ID:        "bd-valid",
-		Title:     "Valid issue",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
-		Priority:  2,
+		IssueID: types.IssueID{
+			ID: "bd-valid",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Valid issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue error: %v", err)
@@ -246,11 +260,17 @@ func TestEnginePullWithBeadIDNoExternalRef(t *testing.T) {
 
 	// Create a local issue WITHOUT external ref
 	issue := &types.Issue{
-		ID:        "bd-noref",
-		Title:     "No external ref",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
-		Priority:  2,
+		IssueID: types.IssueID{
+			ID: "bd-noref",
+		},
+		IssueContent: types.IssueContent{
+			Title: "No external ref",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue error: %v", err)

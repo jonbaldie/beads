@@ -42,17 +42,33 @@ func GetReadyWorkWithCountsInTx(ctx context.Context, tx *sql.Tx, filter types.Wo
 		return nil, err
 	}
 
-	empty, probeErr := wispsTableEmptyOrMissingInTx(ctx, tx)
-	if probeErr != nil {
-		return nil, fmt.Errorf("get ready work with counts: wisp probe: %w", probeErr)
+	unavailable, err := readyWispCountsUnavailableInTx(ctx, tx, wispDepsExist)
+	if err != nil {
+		return nil, err
 	}
-	if empty {
-		return finishReadyWorkWithCounts(out, filter)
-	}
-	if !wispDepsExist {
+	if unavailable {
 		return finishReadyWorkWithCounts(out, filter)
 	}
 
+	wisps, err := readyWispCountsInTx(ctx, tx, filter)
+	if err != nil {
+		return nil, err
+	}
+	if len(wisps) == 0 {
+		return finishReadyWorkWithCounts(out, filter)
+	}
+	return mergeReadyWorkWithCounts(out, wisps, filter)
+}
+
+func readyWispCountsUnavailableInTx(ctx context.Context, tx *sql.Tx, wispDepsExist bool) (bool, error) {
+	empty, err := wispsTableEmptyOrMissingInTx(ctx, tx)
+	if err != nil {
+		return false, fmt.Errorf("get ready work with counts: wisp probe: %w", err)
+	}
+	return empty || !wispDepsExist, nil
+}
+
+func readyWispCountsInTx(ctx context.Context, tx *sql.Tx, filter types.WorkFilter) ([]*types.IssueWithCounts, error) {
 	wispPreds, err := buildReadyWorkPredicates(ctx, tx, filter, WispsFilterTables)
 	if err != nil {
 		return nil, err
@@ -60,13 +76,14 @@ func GetReadyWorkWithCountsInTx(ctx context.Context, tx *sql.Tx, filter types.Wo
 	wisps, err := runReadyCountsInTx(ctx, tx, WispsFilterTables, filter.Limit, wispPreds, true, readyHydrationFor(filter))
 	if err != nil {
 		if isTableNotExistError(err) {
-			return finishReadyWorkWithCounts(out, filter)
+			return nil, nil
 		}
 		return nil, err
 	}
-	if len(wisps) == 0 {
-		return finishReadyWorkWithCounts(out, filter)
-	}
+	return wisps, nil
+}
+
+func mergeReadyWorkWithCounts(out, wisps []*types.IssueWithCounts, filter types.WorkFilter) ([]*types.IssueWithCounts, error) {
 
 	// Prefer the canonical wisp record when an ID exists in both tables (be-iabdi).
 	wispByID := make(map[string]struct{}, len(wisps))
@@ -164,36 +181,48 @@ func runReadyCountsInTx(ctx context.Context, tx *sql.Tx, tables FilterTables, li
 	if len(pageIDs) == 0 {
 		return nil, nil
 	}
+	return hydrateReadyCountsPageInTx(ctx, tx, tables, pageIDs, includeWispReverseDeps, hyd)
+}
 
+func hydrateReadyCountsPageInTx(ctx context.Context, tx *sql.Tx, tables FilterTables, pageIDs []string, includeWispReverseDeps bool, hyd sqlbuild.CountsHydration) ([]*types.IssueWithCounts, error) {
 	// Hydrate the counts for the resolved page, chunking the IN-list. The page
 	// IDs are already distinct, so a per-chunk scan needs no cross-chunk dedup.
 	byID := make(map[string]*types.IssueWithCounts, len(pageIDs))
-	for start := 0; start < len(pageIDs); start += sqlbuild.QueryBatchSize {
+	totalPageIDs := len(pageIDs)
+	for start := 0; start < totalPageIDs; start += sqlbuild.QueryBatchSize {
 		end := start + sqlbuild.QueryBatchSize
-		if end > len(pageIDs) {
-			end = len(pageIDs)
+		if end > totalPageIDs {
+			end = totalPageIDs
 		}
 		countsSQL, idArgs := sqlbuild.SearchCountsSQL(tables, pageIDs[start:end], "", "", "", includeWispReverseDeps, hyd)
 		rows, scanErr := scanCountsRowsInTx(ctx, tx, tables.Main, countsSQL, idArgs, hyd)
 		if scanErr != nil {
 			return nil, scanErr
 		}
-		for _, r := range rows {
-			if r != nil && r.Issue != nil {
-				byID[r.Issue.ID] = r
-			}
-		}
+		addReadyCountsByID(byID, rows)
 	}
 
 	// Restore the ready order the ID query already computed so the result stays
 	// identical to the unbounded mega-query's ORDER BY … LIMIT.
+	return orderReadyCounts(pageIDs, byID), nil
+}
+
+func addReadyCountsByID(byID map[string]*types.IssueWithCounts, rows []*types.IssueWithCounts) {
+	for _, r := range rows {
+		if r != nil && r.Issue != nil {
+			byID[r.Issue.ID] = r
+		}
+	}
+}
+
+func orderReadyCounts(pageIDs []string, byID map[string]*types.IssueWithCounts) []*types.IssueWithCounts {
 	ordered := make([]*types.IssueWithCounts, 0, len(pageIDs))
 	for _, id := range pageIDs {
 		if r, ok := byID[id]; ok {
 			ordered = append(ordered, r)
 		}
 	}
-	return ordered, nil
+	return ordered
 }
 
 // CountReadyWorkInTx returns the number of ready-work items — identical to
@@ -223,6 +252,10 @@ func CountReadyWorkInTx(ctx context.Context, tx *sql.Tx, filter types.WorkFilter
 		return 0, fmt.Errorf("count ready work: issues: %w", err)
 	}
 
+	return countReadyWispWorkInTx(ctx, tx, countFilter, issuePreds, issueCount, wispDepsExist)
+}
+
+func countReadyWispWorkInTx(ctx context.Context, tx *sql.Tx, filter types.WorkFilter, issuePreds *readyWorkPredicates, issueCount int, wispDepsExist bool) (int, error) {
 	// Mirror GetReadyWorkWithCountsInTx's wisp gating: an empty/missing wisps
 	// table or absent wisp_dependencies means the ready set is issues-only.
 	empty, err := wispsTableEmptyOrMissingInTx(ctx, tx)
@@ -233,7 +266,7 @@ func CountReadyWorkInTx(ctx context.Context, tx *sql.Tx, filter types.WorkFilter
 		return issueCount, nil
 	}
 
-	wispPreds, err := buildReadyWorkPredicates(ctx, tx, countFilter, WispsFilterTables)
+	wispPreds, err := buildReadyWorkPredicates(ctx, tx, filter, WispsFilterTables)
 	if err != nil {
 		return 0, err
 	}
@@ -321,6 +354,28 @@ func sortIssuesWithCountsByPolicy(items []*types.IssueWithCounts, policy types.S
 // the two in agreement, where a separately-passed flag could disagree with the
 // query it is scanning.
 func ScanReadyWorkRowWithCounts(rows *sql.Rows, hyd sqlbuild.CountsHydration) (*types.IssueWithCounts, error) {
+	issue, labelsJSON, depsJSON, depCount, rdepCount, commentCount, parentID, err := scanReadyWorkIssue(rows, hyd)
+	if err != nil {
+		return nil, err
+	}
+	if err := hydrateReadyWorkIssue(issue, labelsJSON, depsJSON); err != nil {
+		return nil, err
+	}
+
+	iwc := &types.IssueWithCounts{
+		Issue:           issue,
+		DependencyCount: int(depCount.Int64),
+		DependentCount:  int(rdepCount.Int64),
+		CommentCount:    int(commentCount.Int64),
+	}
+	if parentID.Valid {
+		s := parentID.String
+		iwc.Parent = &s
+	}
+	return iwc, nil
+}
+
+func scanReadyWorkIssue(rows *sql.Rows, hyd sqlbuild.CountsHydration) (*types.Issue, sql.NullString, sql.NullString, sql.NullInt64, sql.NullInt64, sql.NullInt64, sql.NullString, error) {
 	var labelsJSON, depsJSON sql.NullString
 	var parentID sql.NullString
 	var depCount, rdepCount, commentCount sql.NullInt64
@@ -342,13 +397,16 @@ func ScanReadyWorkRowWithCounts(rows *sql.Rows, hyd sqlbuild.CountsHydration) (*
 	}
 	issue, err := scan(composite)
 	if err != nil {
-		return nil, fmt.Errorf("scan issue with counts: %w", err)
+		return nil, labelsJSON, depsJSON, depCount, rdepCount, commentCount, parentID, fmt.Errorf("scan issue with counts: %w", err)
 	}
+	return issue, labelsJSON, depsJSON, depCount, rdepCount, commentCount, parentID, nil
+}
 
+func hydrateReadyWorkIssue(issue *types.Issue, labelsJSON, depsJSON sql.NullString) error {
 	if labelsJSON.Valid && labelsJSON.String != "" {
 		var labels []string
 		if err := json.Unmarshal([]byte(labelsJSON.String), &labels); err != nil {
-			return nil, fmt.Errorf("scan issue with counts: parse labels_json: %w", err)
+			return fmt.Errorf("scan issue with counts: parse labels_json: %w", err)
 		}
 		sort.Strings(labels)
 		issue.Labels = labels
@@ -357,22 +415,11 @@ func ScanReadyWorkRowWithCounts(rows *sql.Rows, hyd sqlbuild.CountsHydration) (*
 	if depsJSON.Valid && depsJSON.String != "" {
 		var deps []*types.Dependency
 		if err := json.Unmarshal([]byte(depsJSON.String), &deps); err != nil {
-			return nil, fmt.Errorf("scan issue with counts: parse deps_json: %w", err)
+			return fmt.Errorf("scan issue with counts: parse deps_json: %w", err)
 		}
 		issue.Dependencies = deps
 	}
-
-	iwc := &types.IssueWithCounts{
-		Issue:           issue,
-		DependencyCount: int(depCount.Int64),
-		DependentCount:  int(rdepCount.Int64),
-		CommentCount:    int(commentCount.Int64),
-	}
-	if parentID.Valid {
-		s := parentID.String
-		iwc.Parent = &s
-	}
-	return iwc, nil
+	return nil
 }
 
 type compositeReadyRow struct {

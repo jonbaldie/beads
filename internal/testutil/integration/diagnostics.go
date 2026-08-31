@@ -59,6 +59,18 @@ func (d *Diagnostics) dumpProcessList() {
 		d.t.Log("  /proc: not available")
 		return
 	}
+	doltProcs := findDoltProcesses(entries)
+	if len(doltProcs) == 0 {
+		d.t.Log("  dolt processes: none found")
+		return
+	}
+	d.t.Logf("  dolt processes (%d):", len(doltProcs))
+	for _, p := range doltProcs {
+		d.t.Logf("    %s", p)
+	}
+}
+
+func findDoltProcesses(entries []os.DirEntry) []string {
 	var doltProcs []string
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -77,12 +89,5 @@ func (d *Diagnostics) dumpProcessList() {
 			doltProcs = append(doltProcs, fmt.Sprintf("PID %s: %s", pid, strings.ReplaceAll(string(cmdline), "\x00", " ")))
 		}
 	}
-	if len(doltProcs) == 0 {
-		d.t.Log("  dolt processes: none found")
-	} else {
-		d.t.Logf("  dolt processes (%d):", len(doltProcs))
-		for _, p := range doltProcs {
-			d.t.Logf("    %s", p)
-		}
-	}
+	return doltProcs
 }

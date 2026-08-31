@@ -14,10 +14,10 @@ import (
 )
 
 func TestValidateCreateIssuesMixedBucketDependenciesRejectsCrossBucketEdges(t *testing.T) {
-	regularA := &types.Issue{ID: "test-regular-a", IssueType: types.TypeTask}
-	regularB := &types.Issue{ID: "test-regular-b", IssueType: types.TypeTask}
-	wispA := &types.Issue{ID: "test-wisp-a", IssueType: types.TypeTask, Ephemeral: true}
-	wispB := &types.Issue{ID: "test-wisp-b", IssueType: types.TypeTask, Ephemeral: true}
+	regularA := &types.Issue{IssueID: types.IssueID{ID: "test-regular-a"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask}}
+	regularB := &types.Issue{IssueID: types.IssueID{ID: "test-regular-b"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask}}
+	wispA := &types.Issue{IssueID: types.IssueID{ID: "test-wisp-a"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}
+	wispB := &types.Issue{IssueID: types.IssueID{ID: "test-wisp-b"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}
 
 	tests := []struct {
 		name      string
@@ -28,12 +28,18 @@ func TestValidateCreateIssuesMixedBucketDependenciesRejectsCrossBucketEdges(t *t
 			name: "regular to wisp",
 			issues: []*types.Issue{
 				{
-					ID:        regularA.ID,
-					IssueType: types.TypeTask,
-					Dependencies: []*types.Dependency{{
-						DependsOnID: wispA.ID,
-						Type:        types.DepBlocks,
-					}},
+					IssueID: types.IssueID{
+						ID: regularA.ID,
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						IssueType: types.TypeTask,
+					},
+					IssueGraph: types.IssueGraph{
+						Dependencies: []*types.Dependency{{
+							DependsOnID: wispA.ID,
+							Type:        types.DepBlocks,
+						}},
+					},
 				},
 				wispA,
 			},
@@ -44,13 +50,21 @@ func TestValidateCreateIssuesMixedBucketDependenciesRejectsCrossBucketEdges(t *t
 			issues: []*types.Issue{
 				regularA,
 				{
-					ID:        wispA.ID,
-					IssueType: types.TypeTask,
-					Ephemeral: true,
-					Dependencies: []*types.Dependency{{
-						DependsOnID: regularA.ID,
-						Type:        types.DepBlocks,
-					}},
+					IssueID: types.IssueID{
+						ID: wispA.ID,
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						IssueType: types.TypeTask,
+					},
+					IssueGraph: types.IssueGraph{
+						Dependencies: []*types.Dependency{{
+							DependsOnID: regularA.ID,
+							Type:        types.DepBlocks,
+						}},
+					},
+					IssueWisp: types.IssueWisp{
+						Ephemeral: true,
+					},
 				},
 			},
 			wantError: true,
@@ -60,22 +74,36 @@ func TestValidateCreateIssuesMixedBucketDependenciesRejectsCrossBucketEdges(t *t
 			issues: []*types.Issue{
 				regularB,
 				{
-					ID:        regularA.ID,
-					IssueType: types.TypeTask,
-					Dependencies: []*types.Dependency{{
-						DependsOnID: regularB.ID,
-						Type:        types.DepBlocks,
-					}},
+					IssueID: types.IssueID{
+						ID: regularA.ID,
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						IssueType: types.TypeTask,
+					},
+					IssueGraph: types.IssueGraph{
+						Dependencies: []*types.Dependency{{
+							DependsOnID: regularB.ID,
+							Type:        types.DepBlocks,
+						}},
+					},
 				},
 				wispB,
 				{
-					ID:        wispA.ID,
-					IssueType: types.TypeTask,
-					Ephemeral: true,
-					Dependencies: []*types.Dependency{{
-						DependsOnID: wispB.ID,
-						Type:        types.DepBlocks,
-					}},
+					IssueID: types.IssueID{
+						ID: wispA.ID,
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						IssueType: types.TypeTask,
+					},
+					IssueGraph: types.IssueGraph{
+						Dependencies: []*types.Dependency{{
+							DependsOnID: wispB.ID,
+							Type:        types.DepBlocks,
+						}},
+					},
+					IssueWisp: types.IssueWisp{
+						Ephemeral: true,
+					},
 				},
 			},
 		},
@@ -83,12 +111,18 @@ func TestValidateCreateIssuesMixedBucketDependenciesRejectsCrossBucketEdges(t *t
 			name: "out of batch target",
 			issues: []*types.Issue{
 				{
-					ID:        regularA.ID,
-					IssueType: types.TypeTask,
-					Dependencies: []*types.Dependency{{
-						DependsOnID: "test-external-wisp",
-						Type:        types.DepBlocks,
-					}},
+					IssueID: types.IssueID{
+						ID: regularA.ID,
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						IssueType: types.TypeTask,
+					},
+					IssueGraph: types.IssueGraph{
+						Dependencies: []*types.Dependency{{
+							DependsOnID: "test-external-wisp",
+							Type:        types.DepBlocks,
+						}},
+					},
 				},
 				wispA,
 			},
@@ -113,17 +147,29 @@ func TestValidateCreateIssuesMixedBucketDependenciesRejectsCrossBucketEdges(t *t
 
 func TestFilterCreateIssuesMixedBucketDependenciesSkipsWhenConfigured(t *testing.T) {
 	regular := &types.Issue{
-		ID:        "test-regular-source",
-		IssueType: types.TypeTask,
-		Dependencies: []*types.Dependency{{
-			DependsOnID: "test-wisp-target",
-			Type:        types.DepBlocks,
-		}},
+		IssueID: types.IssueID{
+			ID: "test-regular-source",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Dependencies: []*types.Dependency{{
+				DependsOnID: "test-wisp-target",
+				Type:        types.DepBlocks,
+			}},
+		},
 	}
 	wisp := &types.Issue{
-		ID:        "test-wisp-target",
-		IssueType: types.TypeTask,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: "test-wisp-target",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	var skipped []string
 
@@ -156,15 +202,21 @@ func TestPersistDependenciesHonorsImportedCreatedBy(t *testing.T) {
 	db, mock, tx := beginMockTx(t)
 	defer db.Close()
 
-	target := &types.Issue{ID: "target", IssueType: types.TypeTask}
+	target := &types.Issue{IssueID: types.IssueID{ID: "target"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask}}
 	source := &types.Issue{
-		ID:        "source",
-		IssueType: types.TypeTask,
-		Dependencies: []*types.Dependency{{
-			DependsOnID: "target",
-			Type:        types.DepRelated,
-			CreatedBy:   "someone.else",
-		}},
+		IssueID: types.IssueID{
+			ID: "source",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Dependencies: []*types.Dependency{{
+				DependsOnID: "target",
+				Type:        types.DepRelated,
+				CreatedBy:   "someone.else",
+			}},
+		},
 	}
 
 	mock.ExpectQuery("SELECT 1 FROM wisps WHERE id = \\? LIMIT 1").
@@ -199,14 +251,20 @@ func TestPersistDependenciesDefaultsCreatedByToActor(t *testing.T) {
 	db, mock, tx := beginMockTx(t)
 	defer db.Close()
 
-	target := &types.Issue{ID: "target", IssueType: types.TypeTask}
+	target := &types.Issue{IssueID: types.IssueID{ID: "target"}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask}}
 	source := &types.Issue{
-		ID:        "source",
-		IssueType: types.TypeTask,
-		Dependencies: []*types.Dependency{{
-			DependsOnID: "target",
-			Type:        types.DepRelated,
-		}},
+		IssueID: types.IssueID{
+			ID: "source",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Dependencies: []*types.Dependency{{
+				DependsOnID: "target",
+				Type:        types.DepRelated,
+			}},
+		},
 	}
 
 	mock.ExpectQuery("SELECT 1 FROM wisps WHERE id = \\? LIMIT 1").
@@ -239,12 +297,18 @@ func TestPersistDependenciesClassifiesBareCrossPrefixTargetAsExternal(t *testing
 	defer db.Close()
 
 	source := &types.Issue{
-		ID:        "sym-3su",
-		IssueType: types.TypeTask,
-		Dependencies: []*types.Dependency{{
-			DependsOnID: "mkt-456",
-			Type:        types.DepRelated,
-		}},
+		IssueID: types.IssueID{
+			ID: "sym-3su",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Dependencies: []*types.Dependency{{
+				DependsOnID: "mkt-456",
+				Type:        types.DepRelated,
+			}},
+		},
 	}
 	var skipped []string
 
@@ -284,12 +348,18 @@ func TestPersistDependenciesReturnsTargetLookupErrors(t *testing.T) {
 	defer db.Close()
 	targetErr := errors.New("target lookup failed")
 	issue := &types.Issue{
-		ID:        "source",
-		IssueType: types.TypeTask,
-		Dependencies: []*types.Dependency{{
-			DependsOnID: "target",
-			Type:        types.DepBlocks,
-		}},
+		IssueID: types.IssueID{
+			ID: "source",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Dependencies: []*types.Dependency{{
+				DependsOnID: "target",
+				Type:        types.DepBlocks,
+			}},
+		},
 	}
 
 	mock.ExpectQuery("SELECT 1 FROM wisps WHERE id = \\? LIMIT 1").
@@ -318,12 +388,18 @@ func TestPersistDependenciesSkipsValidationErrorsWhenConfigured(t *testing.T) {
 	db, mock, tx := beginMockTx(t)
 	defer db.Close()
 	issue := &types.Issue{
-		ID:        "source",
-		IssueType: types.TypeTask,
-		Dependencies: []*types.Dependency{{
-			DependsOnID: "source",
-			Type:        types.DepBlocks,
-		}},
+		IssueID: types.IssueID{
+			ID: "source",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Dependencies: []*types.Dependency{{
+				DependsOnID: "source",
+				Type:        types.DepBlocks,
+			}},
+		},
 	}
 	var skipped []string
 
@@ -365,12 +441,18 @@ func TestPersistDependenciesRejectsHierarchyBlocking(t *testing.T) {
 	db, mock, tx := beginMockTx(t)
 	defer db.Close()
 	issue := &types.Issue{
-		ID:        "child",
-		IssueType: types.TypeTask,
-		Dependencies: []*types.Dependency{{
-			DependsOnID: "parent",
-			Type:        types.DepConditionalBlocks,
-		}},
+		IssueID: types.IssueID{
+			ID: "child",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Dependencies: []*types.Dependency{{
+				DependsOnID: "parent",
+				Type:        types.DepConditionalBlocks,
+			}},
+		},
 	}
 
 	mock.ExpectQuery("SELECT 1 FROM wisps WHERE id = \\? LIMIT 1").
@@ -402,20 +484,32 @@ func TestPersistDependenciesValidatesPlannedHierarchyBeforeBlocking(t *testing.T
 	db, mock, tx := beginMockTx(t)
 	defer db.Close()
 	child := &types.Issue{
-		ID:        "bd-child",
-		IssueType: types.TypeTask,
-		Dependencies: []*types.Dependency{
-			{DependsOnID: "bd-grand", Type: types.DepBlocks}, // Deliberately first.
-			{DependsOnID: "bd-parent", Type: types.DepParentChild},
+		IssueID: types.IssueID{
+			ID: "bd-child",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Dependencies: []*types.Dependency{
+				{DependsOnID: "bd-grand", Type: types.DepBlocks}, // Deliberately first.
+				{DependsOnID: "bd-parent", Type: types.DepParentChild},
+			},
 		},
 	}
 	parent := &types.Issue{
-		ID:        "bd-parent",
-		IssueType: types.TypeTask,
-		Dependencies: []*types.Dependency{{
-			DependsOnID: "bd-grand",
-			Type:        types.DepParentChild,
-		}},
+		IssueID: types.IssueID{
+			ID: "bd-parent",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Dependencies: []*types.Dependency{{
+				DependsOnID: "bd-grand",
+				Type:        types.DepParentChild,
+			}},
+		},
 	}
 
 	for _, pair := range [][2]string{{"bd-child", "bd-parent"}, {"bd-parent", "bd-grand"}} {
@@ -464,12 +558,18 @@ func TestPersistDependenciesSkipsHierarchyValidationAcrossPrefixes(t *testing.T)
 	db, mock, tx := beginMockTx(t)
 	defer db.Close()
 	issue := &types.Issue{
-		ID:        "aa-source",
-		IssueType: types.TypeTask,
-		Dependencies: []*types.Dependency{{
-			DependsOnID: "bb-target",
-			Type:        types.DepBlocks,
-		}},
+		IssueID: types.IssueID{
+			ID: "aa-source",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Dependencies: []*types.Dependency{{
+				DependsOnID: "bb-target",
+				Type:        types.DepBlocks,
+			}},
+		},
 	}
 
 	// No target or ancestors query: target existence and hierarchy cannot be
@@ -511,8 +611,12 @@ func TestReconcileChildCountersSkipsMissingParent(t *testing.T) {
 		WillReturnError(sql.ErrNoRows)
 
 	changed, err := ReconcileChildCounters(ctx, tx, []*types.Issue{{
-		ID:        "test-deleted-parent.7",
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-deleted-parent.7",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+		},
 	}})
 	if err != nil {
 		t.Fatalf("ReconcileChildCounters error = %v, want nil", err)
@@ -544,8 +648,12 @@ func TestReconcileChildCountersReturnsParentLookupError(t *testing.T) {
 		WillReturnError(lookupErr)
 
 	_, err := ReconcileChildCounters(ctx, tx, []*types.Issue{{
-		ID:        "test-parent.1",
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-parent.1",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+		},
 	}})
 	if err == nil || !strings.Contains(err.Error(), "failed to check child counter parent test-parent") || !errors.Is(err, lookupErr) {
 		t.Fatalf("error = %v, want contextual parent lookup error", err)
@@ -575,8 +683,12 @@ func TestReconcileChildCountersReturnsWispLookupError(t *testing.T) {
 		WillReturnError(lookupErr)
 
 	_, err := ReconcileChildCounters(ctx, tx, []*types.Issue{{
-		ID:        "test-parent.1",
-		IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: "test-parent.1",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			IssueType: types.TypeTask,
+		},
 	}})
 	if err == nil || !strings.Contains(err.Error(), "failed to route child counter parents") || !errors.Is(err, lookupErr) {
 		t.Fatalf("error = %v, want contextual wisp lookup error", err)

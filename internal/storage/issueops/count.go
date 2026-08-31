@@ -15,29 +15,36 @@ import (
 // wisps count is merged in (GH#4387).
 func CountIssuesInTx(ctx context.Context, tx DBTX, query string, filter types.IssueFilter) (int, error) {
 	if filter.Ephemeral != nil && *filter.Ephemeral {
-		wispCount, err := countTableInTx(ctx, tx, query, filter, WispsFilterTables)
-		if err != nil && !isTableNotExistError(err) {
-			return 0, fmt.Errorf("count wisps (ephemeral filter): %w", err)
-		}
-		if wispCount > 0 {
-			return wispCount, nil
-		}
-		// Fall through: the wisps table is missing or has no matching rows.
-		// SearchIssuesInTx does the same — it searches the durable issues table
-		// in this case (search.go "Fall through: wisps table doesn't exist or
-		// returned no results"). Mirroring it keeps the GH#4387 count/list parity
-		// contract for an infra-type filter that matches only a durable
-		// issues-table row flagged ephemeral=1 — a defensive parity state that
-		// normal creation never produces (ephemeral/infra beads route to the
-		// wisps table on insert), but which would otherwise be reported as 0 by
-		// count while list returns it.
-		count, err := countTableInTx(ctx, tx, query, filter, IssuesFilterTables)
-		if err != nil {
-			return 0, fmt.Errorf("count issues (ephemeral fall-through): %w", err)
-		}
-		return count, nil
+		return countEphemeralIssuesInTx(ctx, tx, query, filter)
 	}
+	return countStandardIssuesInTx(ctx, tx, query, filter)
+}
 
+func countEphemeralIssuesInTx(ctx context.Context, tx DBTX, query string, filter types.IssueFilter) (int, error) {
+	wispCount, err := countTableInTx(ctx, tx, query, filter, WispsFilterTables)
+	if err != nil && !isTableNotExistError(err) {
+		return 0, fmt.Errorf("count wisps (ephemeral filter): %w", err)
+	}
+	if wispCount > 0 {
+		return wispCount, nil
+	}
+	// Fall through: the wisps table is missing or has no matching rows.
+	// SearchIssuesInTx does the same — it searches the durable issues table
+	// in this case (search.go "Fall through: wisps table doesn't exist or
+	// returned no results"). Mirroring it keeps the GH#4387 count/list parity
+	// contract for an infra-type filter that matches only a durable
+	// issues-table row flagged ephemeral=1 — a defensive parity state that
+	// normal creation never produces (ephemeral/infra beads route to the
+	// wisps table on insert), but which would otherwise be reported as 0 by
+	// count while list returns it.
+	count, err := countTableInTx(ctx, tx, query, filter, IssuesFilterTables)
+	if err != nil {
+		return 0, fmt.Errorf("count issues (ephemeral fall-through): %w", err)
+	}
+	return count, nil
+}
+
+func countStandardIssuesInTx(ctx context.Context, tx DBTX, query string, filter types.IssueFilter) (int, error) {
 	count, err := countTableInTx(ctx, tx, query, filter, IssuesFilterTables)
 	if err != nil {
 		return 0, fmt.Errorf("count issues: %w", err)
@@ -76,31 +83,37 @@ func CountIssuesInTx(ctx context.Context, tx DBTX, query string, filter types.Is
 // only, and otherwise the wisps tier is merged into each group (GH#4387).
 func CountIssuesByGroupInTx(ctx context.Context, tx DBTX, filter types.IssueFilter, groupBy string) (map[string]int, error) {
 	if filter.Ephemeral != nil && *filter.Ephemeral {
-		wispCounts, err := countGroupForTablesInTx(ctx, tx, filter, groupBy, WispsFilterTables)
-		if err != nil && !isTableNotExistError(err) {
-			return nil, fmt.Errorf("count wisps by %s (ephemeral filter): %w", groupBy, err)
-		}
-		total := 0
-		for _, v := range wispCounts {
-			total += v
-		}
-		if total > 0 {
-			return wispCounts, nil
-		}
-		// Fall through: the wisps table is missing or matched no rows. Mirror
-		// CountIssuesInTx's scalar ephemeral fall-through (and SearchIssuesInTx)
-		// so grouped counts also report a durable issues-table row flagged
-		// ephemeral=1. Without this the scalar Total (which falls through) would
-		// disagree with the sum of the grouped buckets (wisps-only), breaking
-		// the GH#4387 count/list cardinality parity for `bd count
-		// --include-infra --by-*`.
-		counts, err := countGroupForTablesInTx(ctx, tx, filter, groupBy, IssuesFilterTables)
-		if err != nil {
-			return nil, fmt.Errorf("count issues by %s (ephemeral fall-through): %w", groupBy, err)
-		}
-		return counts, nil
+		return countEphemeralGroupsInTx(ctx, tx, filter, groupBy)
 	}
+	return countStandardGroupsInTx(ctx, tx, filter, groupBy)
+}
 
+func countEphemeralGroupsInTx(ctx context.Context, tx DBTX, filter types.IssueFilter, groupBy string) (map[string]int, error) {
+	wispCounts, err := countGroupForTablesInTx(ctx, tx, filter, groupBy, WispsFilterTables)
+	if err != nil && !isTableNotExistError(err) {
+		return nil, fmt.Errorf("count wisps by %s (ephemeral filter): %w", groupBy, err)
+	}
+	total := 0
+	for _, v := range wispCounts {
+		total += v
+	}
+	if total > 0 {
+		return wispCounts, nil
+	}
+	// Fall through: the wisps table is missing or matched no rows. Mirror
+	// CountIssuesInTx's scalar ephemeral fall-through (and SearchIssuesInTx)
+	// so grouped counts also report a durable issues-table row flagged
+	// ephemeral=1. Without this the scalar Total (which falls through) would
+	// disagree with the sum of the grouped buckets (wisps-only), breaking
+	// the GH#4387 count/list cardinality parity for `bd count --include-infra --by-*`.
+	counts, err := countGroupForTablesInTx(ctx, tx, filter, groupBy, IssuesFilterTables)
+	if err != nil {
+		return nil, fmt.Errorf("count issues by %s (ephemeral fall-through): %w", groupBy, err)
+	}
+	return counts, nil
+}
+
+func countStandardGroupsInTx(ctx context.Context, tx DBTX, filter types.IssueFilter, groupBy string) (map[string]int, error) {
 	counts, err := countGroupForTablesInTx(ctx, tx, filter, groupBy, IssuesFilterTables)
 	if err != nil {
 		return nil, err
@@ -227,7 +240,26 @@ func countByLabelInTx(ctx context.Context, tx DBTX, filter types.IssueFilter, ta
 	}
 
 	counts := make(map[string]int)
+	labelCounts, err := countLabeledIssuesInTx(ctx, tx, whereSQL, args, tables)
+	if err != nil {
+		return nil, err
+	}
+	for label, count := range labelCounts {
+		counts[label] += count
+	}
 
+	noLabelCount, err := countUnlabeledIssuesInTx(ctx, tx, whereSQL, args, tables)
+	if err != nil {
+		return nil, err
+	}
+	if noLabelCount > 0 {
+		counts["(no labels)"] = noLabelCount
+	}
+	return counts, nil
+}
+
+func countLabeledIssuesInTx(ctx context.Context, tx DBTX, whereSQL string, args []interface{}, tables FilterTables) (map[string]int, error) {
+	counts := make(map[string]int)
 	// Label counts: subquery avoids JOIN-based joinIter panic.
 	//nolint:gosec // G201: tables.Main/Labels hardcoded
 	labelQuery := fmt.Sprintf(
@@ -250,8 +282,10 @@ func countByLabelInTx(ctx context.Context, tx DBTX, filter types.IssueFilter, ta
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	return counts, nil
+}
 
-	// "(no labels)" count: issues matching filter with no label row.
+func countUnlabeledIssuesInTx(ctx context.Context, tx DBTX, whereSQL string, args []interface{}, tables FilterTables) (int, error) {
 	noLabelWhere := whereSQL
 	if noLabelWhere == "" {
 		noLabelWhere = fmt.Sprintf(" WHERE id NOT IN (SELECT DISTINCT issue_id FROM %s)", tables.Labels)
@@ -262,11 +296,7 @@ func countByLabelInTx(ctx context.Context, tx DBTX, filter types.IssueFilter, ta
 	noLabelQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s%s", tables.Main, noLabelWhere)
 	var noLabelCount int
 	if err := tx.QueryRowContext(ctx, noLabelQuery, args...).Scan(&noLabelCount); err != nil {
-		return nil, fmt.Errorf("count no-label issues: %w", err)
+		return 0, fmt.Errorf("count no-label issues: %w", err)
 	}
-	if noLabelCount > 0 {
-		counts["(no labels)"] = noLabelCount
-	}
-
-	return counts, nil
+	return noLabelCount, nil
 }

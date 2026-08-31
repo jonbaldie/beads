@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-
-	"github.com/jonbaldie/beads/internal/types"
 )
 
 // DBTX is the minimal statement-execution surface the blocked-state
@@ -112,35 +110,49 @@ func RecomputeIsBlockedInTx(ctx context.Context, tx DBTX, issueIDs, wispIDs []st
 func RecomputeIsBlockedInTxWithResult(
 	ctx context.Context, tx DBTX, issueIDs, wispIDs []string,
 ) (RecomputeIsBlockedResult, error) {
-	var result RecomputeIsBlockedResult
 	if len(issueIDs) == 0 && len(wispIDs) == 0 {
-		return result, nil
+		return RecomputeIsBlockedResult{}, nil
 	}
 	before, err := captureBlockedJournalSnapshot(ctx, tx, issueIDs, wispIDs)
 	if err != nil {
+		return RecomputeIsBlockedResult{}, err
+	}
+	result, err := recomputeBlockedUntilFixpoint(ctx, tx, issueIDs, wispIDs)
+	if err != nil {
 		return result, err
 	}
+	return result, recordBlockedJournalChanges(ctx, tx, before, issueIDs, wispIDs)
+}
+
+func recomputeBlockedUntilFixpoint(ctx context.Context, tx DBTX, issueIDs, wispIDs []string) (RecomputeIsBlockedResult, error) {
+	var result RecomputeIsBlockedResult
 	for {
-		var changed int64
-
-		n, err := recomputeIsBlockedPassForIssuesInTx(ctx, tx, issueIDs)
+		changed, issueChanged, wispChanged, err := recomputeBlockedPassInTx(ctx, tx, issueIDs, wispIDs)
 		if err != nil {
 			return result, err
 		}
-		changed += n
-		result.IssueRowsChanged = result.IssueRowsChanged || n > 0
-
-		n, err = recomputeIsBlockedPassForWispsInTx(ctx, tx, wispIDs)
-		if err != nil {
-			return result, err
-		}
-		changed += n
-		result.WispRowsChanged = result.WispRowsChanged || n > 0
-
+		result.IssueRowsChanged = result.IssueRowsChanged || issueChanged
+		result.WispRowsChanged = result.WispRowsChanged || wispChanged
 		if changed == 0 {
-			return result, recordBlockedJournalChanges(ctx, tx, before, issueIDs, wispIDs)
+			return result, nil
 		}
 	}
+}
+
+func recomputeBlockedPassInTx(ctx context.Context, tx DBTX, issueIDs, wispIDs []string) (changed int64, issueChanged, wispChanged bool, err error) {
+	n, err := recomputeIsBlockedPassForIssuesInTx(ctx, tx, issueIDs)
+	if err != nil {
+		return 0, false, false, err
+	}
+	changed += n
+	issueChanged = n > 0
+
+	n, err = recomputeIsBlockedPassForWispsInTx(ctx, tx, wispIDs)
+	if err != nil {
+		return changed, issueChanged, false, err
+	}
+	changed += n
+	return changed, issueChanged, n > 0, nil
 }
 
 func MarkIsBlockedInTx(ctx context.Context, tx DBTX, issueIDs, wispIDs []string) error {
@@ -402,10 +414,11 @@ func unmarkBlockedTemplateForWisps() string {
 //nolint:gosec // G201: callers pass constant templates; only IN-clause placeholders are formatted in.
 func runMarkUnmarkBatchedInTx(ctx context.Context, tx DBTX, markTmpl, unmarkTmpl string, ids []string) (int64, error) {
 	var changed int64
-	for start := 0; start < len(ids); start += queryBatchSize {
+	total := len(ids)
+	for start := 0; start < total; start += queryBatchSize {
 		end := start + queryBatchSize
-		if end > len(ids) {
-			end = len(ids)
+		if end > total {
+			end = total
 		}
 		placeholders, args := buildSQLInClause(ids[start:end])
 
@@ -435,10 +448,11 @@ func runMarkUnmarkBatchedInTx(ctx context.Context, tx DBTX, markTmpl, unmarkTmpl
 //nolint:gosec // G201: callers pass constant templates; only IN-clause placeholders are formatted in.
 func runMarkBatchedInTx(ctx context.Context, tx DBTX, markTmpl string, ids []string) (int64, error) {
 	var changed int64
-	for start := 0; start < len(ids); start += queryBatchSize {
+	total := len(ids)
+	for start := 0; start < total; start += queryBatchSize {
 		end := start + queryBatchSize
-		if end > len(ids) {
-			end = len(ids)
+		if end > total {
+			end = total
 		}
 		placeholders, args := buildSQLInClause(ids[start:end])
 
@@ -450,402 +464,4 @@ func runMarkBatchedInTx(ctx context.Context, tx DBTX, markTmpl string, ids []str
 		changed += n
 	}
 	return changed, nil
-}
-
-func AffectedByStatusChangeInTx(ctx context.Context, tx DBTX, id string) ([]string, []string, error) {
-	issueSeed := []string{id}
-	issueSeen := map[string]bool{id: true}
-	var wispSeed []string
-	wispSeen := make(map[string]bool)
-
-	if err := loadBlockingDependersInTx(ctx, tx, "depends_on_issue_id", id, &issueSeed, issueSeen, &wispSeed, wispSeen); err != nil {
-		return nil, nil, err
-	}
-	if err := loadWaitersWhoseSpawnerIsParentOfInTx(ctx, tx, id, false, &issueSeed, issueSeen, &wispSeed, wispSeen); err != nil {
-		return nil, nil, err
-	}
-	// id's own status just changed, and an also_blocks waits-for edge blocks
-	// while the spawner itself is open (pre-fanout window, GH#3783/GH#3875).
-	// A waiter with only a DepWaitsFor edge on id (no DepBlocks edge — the
-	// blocking semantics were collapsed into also_blocks) would otherwise
-	// never get recomputed when its spawner closes.
-	if err := loadWaitersOnSpawnerIDsInTx(ctx, tx, []string{id}, &issueSeed, issueSeen, &wispSeed, wispSeen); err != nil {
-		return nil, nil, err
-	}
-	return expandByParentChildDescendantsInTx(ctx, tx, issueSeed, wispSeed, issueSeen, wispSeen)
-}
-
-func AffectedByStatusChangeForWispInTx(ctx context.Context, tx DBTX, id string) ([]string, []string, error) {
-	var issueSeed []string
-	issueSeen := make(map[string]bool)
-	wispSeed := []string{id}
-	wispSeen := map[string]bool{id: true}
-
-	if err := loadBlockingDependersInTx(ctx, tx, "depends_on_wisp_id", id, &issueSeed, issueSeen, &wispSeed, wispSeen); err != nil {
-		return nil, nil, err
-	}
-	if err := loadWaitersWhoseSpawnerIsParentOfInTx(ctx, tx, id, true, &issueSeed, issueSeen, &wispSeed, wispSeen); err != nil {
-		return nil, nil, err
-	}
-	// See the issue-id sibling above: id's own status just changed, and a
-	// waiter that waits directly on this wisp id as spawner needs to be
-	// recomputed too.
-	if err := loadWaitersOnSpawnerIDsInTx(ctx, tx, []string{id}, &issueSeed, issueSeen, &wispSeed, wispSeen); err != nil {
-		return nil, nil, err
-	}
-	return expandByParentChildDescendantsInTx(ctx, tx, issueSeed, wispSeed, issueSeen, wispSeen)
-}
-
-func AffectedByDepChangeInTx(ctx context.Context, tx DBTX, source, target string, depType types.DependencyType) ([]string, []string, error) {
-	switch depType {
-	case types.DepBlocks, types.DepConditionalBlocks, types.DepWaitsFor, types.DepParentChild:
-		issueSeed := []string{source}
-		issueSeen := map[string]bool{source: true}
-		var wispSeed []string
-		wispSeen := map[string]bool{}
-		if depType == types.DepParentChild && target != "" {
-			if err := loadWaitersOnSpawnerIDsInTx(ctx, tx, []string{target}, &issueSeed, issueSeen, &wispSeed, wispSeen); err != nil {
-				return nil, nil, err
-			}
-		}
-		return expandByParentChildDescendantsInTx(ctx, tx, issueSeed, wispSeed, issueSeen, wispSeen)
-	default:
-		return nil, nil, nil
-	}
-}
-
-func AffectedByDepChangeForWispInTx(ctx context.Context, tx DBTX, source, target string, depType types.DependencyType) ([]string, []string, error) {
-	switch depType {
-	case types.DepBlocks, types.DepConditionalBlocks, types.DepWaitsFor, types.DepParentChild:
-		var issueSeed []string
-		issueSeen := map[string]bool{}
-		wispSeed := []string{source}
-		wispSeen := map[string]bool{source: true}
-		if depType == types.DepParentChild && target != "" {
-			if err := loadWaitersOnSpawnerIDsInTx(ctx, tx, []string{target}, &issueSeed, issueSeen, &wispSeed, wispSeen); err != nil {
-				return nil, nil, err
-			}
-		}
-		return expandByParentChildDescendantsInTx(ctx, tx, issueSeed, wispSeed, issueSeen, wispSeen)
-	default:
-		return nil, nil, nil
-	}
-}
-
-func loadBlockingDependersInTx(
-	ctx context.Context, tx DBTX,
-	targetCol, id string,
-	issueSeed *[]string, issueSeen map[string]bool,
-	wispSeed *[]string, wispSeen map[string]bool,
-) error {
-	return loadBlockingDependersForIDsInTx(ctx, tx, targetCol, []string{id}, issueSeed, issueSeen, wispSeed, wispSeen)
-}
-
-//nolint:gosec // G201: targetCol is one of two constant column names.
-func loadBlockingDependersForIDsInTx(
-	ctx context.Context, tx DBTX,
-	targetCol string, ids []string,
-	issueSeed *[]string, issueSeen map[string]bool,
-	wispSeed *[]string, wispSeen map[string]bool,
-) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	tables := []struct {
-		table  string
-		seed   *[]string
-		seen   map[string]bool
-		errCtx string
-	}{
-		{"dependencies", issueSeed, issueSeen, "load issue dependers"},
-		{"wisp_dependencies", wispSeed, wispSeen, "load wisp dependers"},
-	}
-	for _, id := range ids {
-		for _, t := range tables {
-			query := fmt.Sprintf(`
-				SELECT issue_id FROM %s
-				WHERE %s = ?
-				  AND (type = 'blocks' OR type = 'conditional-blocks')
-			`, t.table, targetCol)
-			rows, err := tx.QueryContext(ctx, query, id)
-			if err != nil {
-				return fmt.Errorf("%s: query: %w", t.errCtx, err)
-			}
-			for rows.Next() {
-				var dependerID string
-				if err := rows.Scan(&dependerID); err != nil {
-					_ = rows.Close()
-					return fmt.Errorf("%s: scan: %w", t.errCtx, err)
-				}
-				if !t.seen[dependerID] {
-					t.seen[dependerID] = true
-					*t.seed = append(*t.seed, dependerID)
-				}
-			}
-			_ = rows.Close()
-			if err := rows.Err(); err != nil {
-				return fmt.Errorf("%s: rows: %w", t.errCtx, err)
-			}
-		}
-	}
-	return nil
-}
-
-func AffectedByDeletionInTx(
-	ctx context.Context, tx DBTX,
-	deletedIssues, deletedWisps []string,
-) ([]string, []string, error) {
-	if len(deletedIssues) == 0 && len(deletedWisps) == 0 {
-		return nil, nil, nil
-	}
-
-	issueSeen := make(map[string]bool, len(deletedIssues))
-	wispSeen := make(map[string]bool, len(deletedWisps))
-	for _, id := range deletedIssues {
-		issueSeen[id] = true
-	}
-	for _, id := range deletedWisps {
-		wispSeen[id] = true
-	}
-	var issueSeed, wispSeed []string
-
-	if err := loadBlockingDependersForIDsInTx(ctx, tx, "depends_on_issue_id", deletedIssues, &issueSeed, issueSeen, &wispSeed, wispSeen); err != nil {
-		return nil, nil, err
-	}
-	if err := loadBlockingDependersForIDsInTx(ctx, tx, "depends_on_wisp_id", deletedWisps, &issueSeed, issueSeen, &wispSeed, wispSeen); err != nil {
-		return nil, nil, err
-	}
-
-	if err := loadWaitersOnSpawnerIDsByColInTx(ctx, tx, "depends_on_issue_id", deletedIssues, &issueSeed, issueSeen, &wispSeed, wispSeen); err != nil {
-		return nil, nil, err
-	}
-	if err := loadWaitersOnSpawnerIDsByColInTx(ctx, tx, "depends_on_wisp_id", deletedWisps, &issueSeed, issueSeen, &wispSeed, wispSeen); err != nil {
-		return nil, nil, err
-	}
-	for _, id := range deletedIssues {
-		if err := loadWaitersWhoseSpawnerIsParentOfInTx(ctx, tx, id, false, &issueSeed, issueSeen, &wispSeed, wispSeen); err != nil {
-			return nil, nil, err
-		}
-	}
-	for _, id := range deletedWisps {
-		if err := loadWaitersWhoseSpawnerIsParentOfInTx(ctx, tx, id, true, &issueSeed, issueSeen, &wispSeed, wispSeen); err != nil {
-			return nil, nil, err
-		}
-	}
-
-	for _, w := range []struct {
-		depTable, parentCol string
-		parentIDs           []string
-		seed                *[]string
-		seen                map[string]bool
-	}{
-		{"dependencies", "depends_on_issue_id", deletedIssues, &issueSeed, issueSeen},
-		{"wisp_dependencies", "depends_on_issue_id", deletedIssues, &wispSeed, wispSeen},
-		{"dependencies", "depends_on_wisp_id", deletedWisps, &issueSeed, issueSeen},
-		{"wisp_dependencies", "depends_on_wisp_id", deletedWisps, &wispSeed, wispSeen},
-	} {
-		if err := appendChildrenInTx(ctx, tx, w.depTable, w.parentCol, w.parentIDs, w.seen, w.seed); err != nil {
-			return nil, nil, err
-		}
-	}
-
-	return expandByParentChildDescendantsInTx(ctx, tx, issueSeed, wispSeed, issueSeen, wispSeen)
-}
-
-func expandByParentChildDescendantsInTx(
-	ctx context.Context, tx DBTX,
-	issueSeed, wispSeed []string,
-	issueSeen, wispSeen map[string]bool,
-) ([]string, []string, error) {
-	issueQueue := issueSeed
-	wispQueue := wispSeed
-	issueHead, wispHead := 0, 0
-
-	for issueHead < len(issueQueue) || wispHead < len(wispQueue) {
-		if issueHead < len(issueQueue) {
-			end := issueHead + queryBatchSize
-			if end > len(issueQueue) {
-				end = len(issueQueue)
-			}
-			batch := issueQueue[issueHead:end]
-			issueHead = end
-
-			if err := appendChildrenInTx(ctx, tx, "dependencies", "depends_on_issue_id", batch, issueSeen, &issueQueue); err != nil {
-				return nil, nil, err
-			}
-			if err := appendChildrenInTx(ctx, tx, "wisp_dependencies", "depends_on_issue_id", batch, wispSeen, &wispQueue); err != nil {
-				return nil, nil, err
-			}
-		}
-		if wispHead < len(wispQueue) {
-			end := wispHead + queryBatchSize
-			if end > len(wispQueue) {
-				end = len(wispQueue)
-			}
-			batch := wispQueue[wispHead:end]
-			wispHead = end
-
-			if err := appendChildrenInTx(ctx, tx, "dependencies", "depends_on_wisp_id", batch, issueSeen, &issueQueue); err != nil {
-				return nil, nil, err
-			}
-			if err := appendChildrenInTx(ctx, tx, "wisp_dependencies", "depends_on_wisp_id", batch, wispSeen, &wispQueue); err != nil {
-				return nil, nil, err
-			}
-		}
-	}
-	return issueQueue, wispQueue, nil
-}
-
-//nolint:gosec // G201: depTable and parentCol come from constant call sites.
-func appendChildrenInTx(
-	ctx context.Context, tx DBTX,
-	depTable, parentCol string,
-	parentIDs []string,
-	seen map[string]bool, queue *[]string,
-) error {
-	if len(parentIDs) == 0 {
-		return nil
-	}
-	query := fmt.Sprintf(`
-		SELECT issue_id FROM %s
-		WHERE type = 'parent-child'
-		  AND %s = ?
-	`, depTable, parentCol)
-	for _, parentID := range parentIDs {
-		rows, err := tx.QueryContext(ctx, query, parentID)
-		if err != nil {
-			return fmt.Errorf("expand children from %s on %s: %w", depTable, parentCol, err)
-		}
-		for rows.Next() {
-			var childID string
-			if err := rows.Scan(&childID); err != nil {
-				_ = rows.Close()
-				return fmt.Errorf("expand children: scan: %w", err)
-			}
-			if !seen[childID] {
-				seen[childID] = true
-				*queue = append(*queue, childID)
-			}
-		}
-		_ = rows.Close()
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("expand children: rows: %w", err)
-		}
-	}
-	return nil
-}
-
-func loadWaitersWhoseSpawnerIsParentOfInTx(
-	ctx context.Context, tx DBTX,
-	childID string, childIsWisp bool,
-	issueSeed *[]string, issueSeen map[string]bool,
-	wispSeed *[]string, wispSeen map[string]bool,
-) error {
-	depTable := "dependencies"
-	if childIsWisp {
-		depTable = "wisp_dependencies"
-	}
-	//nolint:gosec // G201: depTable is one of two constant values.
-	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
-		SELECT depends_on_issue_id, depends_on_wisp_id
-		FROM %s
-		WHERE issue_id = ? AND type = 'parent-child'
-	`, depTable), childID)
-	if err != nil {
-		return fmt.Errorf("waiters on parent of %s: load parents: %w", childID, err)
-	}
-	var issueParentIDs, wispParentIDs []string
-	for rows.Next() {
-		var ip, wp sql.NullString
-		if err := rows.Scan(&ip, &wp); err != nil {
-			_ = rows.Close()
-			return fmt.Errorf("waiters on parent of %s: scan: %w", childID, err)
-		}
-		if ip.Valid {
-			issueParentIDs = append(issueParentIDs, ip.String)
-		}
-		if wp.Valid {
-			wispParentIDs = append(wispParentIDs, wp.String)
-		}
-	}
-	_ = rows.Close()
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("waiters on parent of %s: rows: %w", childID, err)
-	}
-
-	if len(issueParentIDs) > 0 {
-		if err := loadWaitersOnSpawnerIDsByColInTx(ctx, tx, "depends_on_issue_id", issueParentIDs, issueSeed, issueSeen, wispSeed, wispSeen); err != nil {
-			return err
-		}
-	}
-	if len(wispParentIDs) > 0 {
-		if err := loadWaitersOnSpawnerIDsByColInTx(ctx, tx, "depends_on_wisp_id", wispParentIDs, issueSeed, issueSeen, wispSeed, wispSeen); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func loadWaitersOnSpawnerIDsInTx(
-	ctx context.Context, tx DBTX,
-	spawnerIDs []string,
-	issueSeed *[]string, issueSeen map[string]bool,
-	wispSeed *[]string, wispSeen map[string]bool,
-) error {
-	if err := loadWaitersOnSpawnerIDsByColInTx(ctx, tx, "depends_on_issue_id", spawnerIDs, issueSeed, issueSeen, wispSeed, wispSeen); err != nil {
-		return err
-	}
-	return loadWaitersOnSpawnerIDsByColInTx(ctx, tx, "depends_on_wisp_id", spawnerIDs, issueSeed, issueSeen, wispSeed, wispSeen)
-}
-
-//nolint:gosec // G201: targetCol is one of two constant column names.
-func loadWaitersOnSpawnerIDsByColInTx(
-	ctx context.Context, tx DBTX,
-	targetCol string, spawnerIDs []string,
-	issueSeed *[]string, issueSeen map[string]bool,
-	wispSeed *[]string, wispSeen map[string]bool,
-) error {
-	if len(spawnerIDs) == 0 {
-		return nil
-	}
-	tables := []struct {
-		table  string
-		seed   *[]string
-		seen   map[string]bool
-		errCtx string
-	}{
-		{"dependencies", issueSeed, issueSeen, "load issue waiters"},
-		{"wisp_dependencies", wispSeed, wispSeen, "load wisp waiters"},
-	}
-	for _, spawnerID := range spawnerIDs {
-		for _, t := range tables {
-			query := fmt.Sprintf(`
-				SELECT issue_id FROM %s
-				WHERE type = 'waits-for' AND %s = ?
-			`, t.table, targetCol)
-			rows, err := tx.QueryContext(ctx, query, spawnerID)
-			if err != nil {
-				if optionalBlockedTable(t.table) && isTableNotExistError(err) {
-					continue
-				}
-				return fmt.Errorf("%s: query: %w", t.errCtx, err)
-			}
-			for rows.Next() {
-				var waiterID string
-				if err := rows.Scan(&waiterID); err != nil {
-					_ = rows.Close()
-					return fmt.Errorf("%s: scan: %w", t.errCtx, err)
-				}
-				if !t.seen[waiterID] {
-					t.seen[waiterID] = true
-					*t.seed = append(*t.seed, waiterID)
-				}
-			}
-			_ = rows.Close()
-			if err := rows.Err(); err != nil {
-				return fmt.Errorf("%s: rows: %w", t.errCtx, err)
-			}
-		}
-	}
-	return nil
 }

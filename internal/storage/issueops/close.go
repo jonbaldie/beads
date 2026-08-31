@@ -27,6 +27,16 @@ type CloseResult struct {
 	IssueRowsChanged bool
 }
 
+type closeCompletion struct {
+	reason         string
+	actor          string
+	eventTable     string
+	isWisp         bool
+	recordEvent    bool
+	affectedIssues []string
+	affectedWisps  []string
+}
+
 // CloseIssueInTx closes an issue within a transaction, setting status to closed
 // and recording the close event. Routes to the correct table (issues/wisps)
 // automatically. The caller is responsible for Dolt versioning if needed.
@@ -85,6 +95,10 @@ func CloseIssueCheckedInTx(ctx context.Context, tx DBTX, id, reason, actor, sess
 	if !closeCheckedSavepointEligible(tx) {
 		return closeIssueCheckedAfterSavepoint(ctx, tx, id, reason, actor, session, force, closed, targetColumn)
 	}
+	return closeIssueCheckedWithSavepoint(ctx, tx, id, reason, actor, session, force, closed, targetColumn)
+}
+
+func closeIssueCheckedWithSavepoint(ctx context.Context, tx DBTX, id, reason, actor, session string, force, closed bool, targetColumn string) (*CloseResult, error) {
 	savepoint, err := createCloseCheckedSavepoint(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -150,16 +164,24 @@ func enforceClosePolicyForTargetInTx(ctx context.Context, tx DBTX, id, targetCol
 	if !force && openChildren > 0 {
 		return 0, &storage.CloseOpenChildrenError{IssueID: id, OpenChildren: openChildren}
 	}
-	if !force && !closed {
-		blocked, blockers, err := IsBlockedInTx(ctx, tx, id)
-		if err != nil {
-			return 0, err
-		}
-		if blocked && len(blockers) > 0 {
-			return 0, fmt.Errorf("%w: %s is blocked by %v", storage.ErrCloseBlocked, id, blockers)
-		}
+	if err := enforceCloseBlockerPolicyInTx(ctx, tx, id, force, closed); err != nil {
+		return 0, err
 	}
 	return openChildren, nil
+}
+
+func enforceCloseBlockerPolicyInTx(ctx context.Context, tx DBTX, id string, force, closed bool) error {
+	if force || closed {
+		return nil
+	}
+	blocked, blockers, err := IsBlockedInTx(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+	if blocked && len(blockers) > 0 {
+		return fmt.Errorf("%w: %s is blocked by %v", storage.ErrCloseBlocked, id, blockers)
+	}
+	return nil
 }
 
 // EnforceClosePolicyInTx applies the close policy to id without closing it, for
@@ -319,17 +341,44 @@ func closeIssueInTx(ctx context.Context, tx DBTX, id string, reason, actor, sess
 	isWisp := IsActiveWispInTx(ctx, tx, id)
 	issueTable, _, eventTable, _ := WispTableRouting(isWisp)
 
-	var affectedIssues, affectedWisps []string
-	var aerr error
-	if isWisp {
-		affectedIssues, affectedWisps, aerr = AffectedByStatusChangeForWispInTx(ctx, tx, id)
-	} else {
-		affectedIssues, affectedWisps, aerr = AffectedByStatusChangeInTx(ctx, tx, id)
+	affectedIssues, affectedWisps, err := affectedByCloseInTx(ctx, tx, id, isWisp)
+	if err != nil {
+		return nil, err
 	}
-	if aerr != nil {
-		return nil, fmt.Errorf("affected by close for %s: %w", id, aerr)
+	closeResult, err := updateClosedRowInTx(ctx, tx, issueTable, id, reason, session, isWisp)
+	if err != nil {
+		return nil, err
 	}
+	if closeResult != nil {
+		return closeResult, nil
+	}
+	return completeCloseInTx(ctx, tx, id, closeCompletion{
+		reason:         reason,
+		actor:          actor,
+		eventTable:     eventTable,
+		isWisp:         isWisp,
+		recordEvent:    recordEvent,
+		affectedIssues: affectedIssues,
+		affectedWisps:  affectedWisps,
+	})
+}
 
+func affectedByCloseInTx(ctx context.Context, tx DBTX, id string, isWisp bool) ([]string, []string, error) {
+	var affectedIssues, affectedWisps []string
+	var err error
+	if isWisp {
+		affectedIssues, affectedWisps, err = AffectedByStatusChangeForWispInTx(ctx, tx, id)
+	} else {
+		affectedIssues, affectedWisps, err = AffectedByStatusChangeInTx(ctx, tx, id)
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("affected by close for %s: %w", id, err)
+	}
+	return affectedIssues, affectedWisps, nil
+}
+
+//nolint:gosec // G201: table names come from WispTableRouting (hardcoded constants)
+func updateClosedRowInTx(ctx context.Context, tx DBTX, issueTable, id, reason, session string, isWisp bool) (*CloseResult, error) {
 	now := time.Now().UTC()
 
 	// row_lock is rewritten on close so a concurrent reclaim (which also rewrites
@@ -365,19 +414,22 @@ func closeIssueInTx(ctx context.Context, tx DBTX, id string, reason, actor, sess
 		}
 		return nil, fmt.Errorf("failed to close issue: %s", id)
 	}
+	return nil, nil
+}
 
+func completeCloseInTx(ctx context.Context, tx DBTX, id string, completion closeCompletion) (*CloseResult, error) {
 	// A closed issue holds no lease (no-op for wisps, which are never leased).
 	if err := DeleteLeaseInTx(ctx, tx, id); err != nil {
 		return nil, err
 	}
 
-	if recordEvent {
-		if err := RecordEventInTable(ctx, tx, eventTable, id, types.EventClosed, actor, reason); err != nil {
+	if completion.recordEvent {
+		if err := RecordEventInTable(ctx, tx, completion.eventTable, id, types.EventClosed, completion.actor, completion.reason); err != nil {
 			return nil, fmt.Errorf("failed to record event: %w", err)
 		}
 	}
 
-	recompute, err := RecomputeIsBlockedInTxWithResult(ctx, tx, affectedIssues, affectedWisps)
+	recompute, err := RecomputeIsBlockedInTxWithResult(ctx, tx, completion.affectedIssues, completion.affectedWisps)
 	if err != nil {
 		return nil, fmt.Errorf("recompute is_blocked after close for %s: %w", id, err)
 	}
@@ -388,5 +440,5 @@ func closeIssueInTx(ctx context.Context, tx DBTX, id string, reason, actor, sess
 		return nil, err
 	}
 
-	return &CloseResult{IsWisp: isWisp, IssueRowsChanged: !isWisp || recompute.IssueRowsChanged}, nil
+	return &CloseResult{IsWisp: completion.isWisp, IssueRowsChanged: !completion.isWisp || recompute.IssueRowsChanged}, nil
 }

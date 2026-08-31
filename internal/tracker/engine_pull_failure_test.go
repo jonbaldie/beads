@@ -127,12 +127,20 @@ func TestEngineSyncFailedPullIsNotPushed(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
 			local := &types.Issue{
-				ID:        test.localID,
-				Title:     "local",
-				Status:    types.StatusOpen,
-				Priority:  2,
-				IssueType: types.TypeTask,
-				UpdatedAt: test.localUpdated,
+				IssueID: types.IssueID{
+					ID: test.localID,
+				},
+				IssueContent: types.IssueContent{
+					Title: "local",
+				},
+				IssueWorkflow: types.IssueWorkflow{
+					Status:    types.StatusOpen,
+					Priority:  2,
+					IssueType: types.TypeTask,
+				},
+				IssueTimes: types.IssueTimes{
+					UpdatedAt: test.localUpdated,
+				},
 			}
 			if test.externalRef != "" {
 				ref := test.externalRef
@@ -150,8 +158,20 @@ func TestEngineSyncFailedPullIsNotPushed(t *testing.T) {
 			}}
 			mock.fieldMapper = &mockMapper{issueToBeads: func(*TrackerIssue) *IssueConversion {
 				return &IssueConversion{Issue: &types.Issue{
-					ID: test.localID, Title: "remote", Status: types.StatusClosed,
-					Priority: 2, IssueType: types.TypeTask, Labels: []string{"remote"},
+					IssueID: types.IssueID{
+						ID: test.localID,
+					},
+					IssueContent: types.IssueContent{
+						Title: "remote",
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Status:    types.StatusClosed,
+						Priority:  2,
+						IssueType: types.TypeTask,
+					},
+					IssueGraph: types.IssueGraph{
+						Labels: []string{"remote"},
+					},
 				}}
 			}}
 
@@ -184,12 +204,20 @@ func TestEngineSyncFailedPullIsNotPushed(t *testing.T) {
 func TestReimportIssuePreservesLabels(t *testing.T) {
 	ctx := context.Background()
 	local := &types.Issue{
-		ID:        "reimport-labels",
-		Title:     "local",
-		Status:    types.StatusOpen,
-		Priority:  2,
-		IssueType: types.TypeTask,
-		Labels:    []string{"keep-local-label"},
+		IssueID: types.IssueID{
+			ID: "reimport-labels",
+		},
+		IssueContent: types.IssueContent{
+			Title: "local",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"keep-local-label"},
+		},
 	}
 	store := &pullFailureStore{
 		pureTestStore: newPureTestStore(local),
@@ -199,7 +227,14 @@ func TestReimportIssuePreservesLabels(t *testing.T) {
 	mock.issues = []TrackerIssue{{ID: "EXT-2", Identifier: "EXT-2", Title: "remote"}}
 	mock.fieldMapper = &mockMapper{issueToBeads: func(*TrackerIssue) *IssueConversion {
 		return &IssueConversion{Issue: &types.Issue{
-			Title: "remote", Status: types.StatusClosed, Priority: 1, IssueType: types.TypeTask,
+			IssueContent: types.IssueContent{
+				Title: "remote",
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusClosed,
+				Priority:  1,
+				IssueType: types.TypeTask,
+			},
 		}}
 	}}
 

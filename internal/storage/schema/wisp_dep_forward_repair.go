@@ -121,27 +121,35 @@ var wispDepFinalKeys = []struct{ name, definition string }{
 // on a fresh store (which never had the generated column, so 0058 applies to it
 // cleanly).
 func repairWispDependenciesForwardShape(ctx context.Context, db DBConn) error {
+	ready, err := wispDepRepairPrerequisites(ctx, db)
+	if err != nil || !ready {
+		return err
+	}
+	return applyWispDependenciesForwardRepair(ctx, db)
+}
+
+func wispDepRepairPrerequisites(ctx context.Context, db DBConn) (bool, error) {
 	// Both referenced tables must exist before any foreign key can be added.
 	// 0058 carries the same @has_wisps/@has_issues guards; a database missing
 	// one is left untouched rather than assumed into a shape it may not have.
 	for _, t := range []string{wispDepTable, "wisps", "issues"} {
 		exists, err := schemaTableExists(ctx, db, t)
 		if err != nil {
-			return fmt.Errorf("checking %s for the pre-0058 repair: %w", t, err)
+			return false, fmt.Errorf("checking %s for the pre-0058 repair: %w", t, err)
 		}
 		if !exists {
-			return nil
+			return false, nil
 		}
 	}
 
 	needed, err := wispDepNeedsForwardRepair(ctx, db)
 	if err != nil {
-		return err
+		return false, err
 	}
-	if !needed {
-		return nil
-	}
+	return needed, nil
+}
 
+func applyWispDependenciesForwardRepair(ctx context.Context, db DBConn) error {
 	if err := deleteWispDepRowsRejectedByFinalShape(ctx, db); err != nil {
 		return err
 	}
@@ -320,6 +328,19 @@ func normalizeWispDepMultiTargetRows(ctx context.Context, db DBConn) error {
 // Each drop is guarded on the live schema, so a resume after a crash mid-drop
 // skips what is already gone rather than failing on a missing object.
 func dropWispDepLegacyShape(ctx context.Context, db DBConn) error {
+	if err := dropWispDepTypeTargetIndex(ctx, db); err != nil {
+		return err
+	}
+	if err := dropWispDepForeignKeys(ctx, db); err != nil {
+		return err
+	}
+	if err := dropWispDepPrimaryKey(ctx, db); err != nil {
+		return err
+	}
+	return dropWispDepGeneratedColumn(ctx, db)
+}
+
+func dropWispDepTypeTargetIndex(ctx context.Context, db DBConn) error {
 	hasIndex, err := schemaIndexExists(ctx, db, wispDepTable, "idx_wisp_dep_type_target")
 	if err != nil {
 		return err
@@ -329,7 +350,10 @@ func dropWispDepLegacyShape(ctx context.Context, db DBConn) error {
 			return fmt.Errorf("dropping idx_wisp_dep_type_target for the 0058 repair: %w", err)
 		}
 	}
+	return nil
+}
 
+func dropWispDepForeignKeys(ctx context.Context, db DBConn) error {
 	for _, c := range wispDepFinalConstraints {
 		if !strings.HasPrefix(c.name, "fk_") {
 			continue
@@ -345,7 +369,10 @@ func dropWispDepLegacyShape(ctx context.Context, db DBConn) error {
 			return fmt.Errorf("dropping %s for the 0058 repair: %w", c.name, err)
 		}
 	}
+	return nil
+}
 
+func dropWispDepPrimaryKey(ctx context.Context, db DBConn) error {
 	hasPK, err := schemaHasPrimaryKey(ctx, db, wispDepTable)
 	if err != nil {
 		return err
@@ -355,7 +382,10 @@ func dropWispDepLegacyShape(ctx context.Context, db DBConn) error {
 			return fmt.Errorf("dropping the wisp_dependencies primary key for the 0058 repair: %w", err)
 		}
 	}
+	return nil
+}
 
+func dropWispDepGeneratedColumn(ctx context.Context, db DBConn) error {
 	hasGenerated, err := schemaColumnExists(ctx, db, wispDepTable, "depends_on_id")
 	if err != nil {
 		return err

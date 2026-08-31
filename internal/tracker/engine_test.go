@@ -14,6 +14,21 @@ import (
 	"github.com/jonbaldie/beads/internal/types"
 )
 
+// These private method shims keep the focused unit tests readable while the
+// production implementations remain package-level helpers for messgo's
+// production-only design analysis.
+func (e *Engine) createDependencies(ctx context.Context, deps []DependencyInfo) int {
+	return createDependencies(e, ctx, deps)
+}
+
+func (e *Engine) previewDependencies(ctx context.Context, deps []DependencyInfo, dryRunIssues []*types.Issue) int {
+	return previewDependencies(e, ctx, deps, dryRunIssues)
+}
+
+func (e *Engine) shouldPushIssue(issue *types.Issue, opts SyncOptions) bool {
+	return shouldPushIssue(e, issue, opts)
+}
+
 // newTestStore creates a dolt store on the shared database with branch isolation.
 func newTestStore(t *testing.T) *dolt.DoltStore {
 	t.Helper()
@@ -23,11 +38,15 @@ func newTestStore(t *testing.T) *dolt.DoltStore {
 	}
 	ctx := context.Background()
 	store, err := dolt.New(ctx, &dolt.Config{
-		Path:         t.TempDir(),
-		ServerHost:   "127.0.0.1",
-		ServerPort:   testServerPort,
-		Database:     testSharedDB,
-		MaxOpenConns: 1,
+		Path: t.TempDir(),
+		ServerOptions: dolt.ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: testServerPort,
+		},
+		Database: testSharedDB,
+		PoolOptions: dolt.PoolOptions{
+			MaxOpenConns: 1,
+		},
 	})
 	if err != nil {
 		t.Fatalf("Failed to create dolt store: %v", err)
@@ -49,13 +68,21 @@ func TestEnginePullMatchesExistingIssueByLocalID(t *testing.T) {
 	defer store.Close()
 
 	issue := &types.Issue{
-		ID:          "bd-local",
-		Title:       "Local title",
-		Description: "Local description",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeTask,
-		Priority:    2,
-		UpdatedAt:   time.Now().UTC().Add(-2 * time.Hour),
+		IssueID: types.IssueID{
+			ID: "bd-local",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Local title",
+			Description: "Local description",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
+		IssueTimes: types.IssueTimes{
+			UpdatedAt: time.Now().UTC().Add(-2 * time.Hour),
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue() error: %v", err)
@@ -74,12 +101,18 @@ func TestEnginePullMatchesExistingIssueByLocalID(t *testing.T) {
 		issueToBeads: func(ti *TrackerIssue) *IssueConversion {
 			return &IssueConversion{
 				Issue: &types.Issue{
-					ID:          "bd-local",
-					Title:       ti.Title,
-					Description: ti.Description,
-					Priority:    2,
-					Status:      types.StatusOpen,
-					IssueType:   types.TypeTask,
+					IssueID: types.IssueID{
+						ID: "bd-local",
+					},
+					IssueContent: types.IssueContent{
+						Title:       ti.Title,
+						Description: ti.Description,
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Priority:  2,
+						Status:    types.StatusOpen,
+						IssueType: types.TypeTask,
+					},
 				},
 			}
 		},
@@ -109,16 +142,28 @@ func TestEnginePullSkipsNoopUpdate(t *testing.T) {
 
 	extRef := "https://www.notion.so/32be5bf97fae804d9e07f93af6c79467"
 	issue := &types.Issue{
-		ID:          "bd-local",
-		Title:       "Remote title",
-		Description: "Remote description",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeTask,
-		Priority:    2,
-		Assignee:    "Osamu",
-		Labels:      []string{"alpha", "beta"},
-		ExternalRef: &extRef,
-		UpdatedAt:   time.Now().UTC().Add(-2 * time.Hour),
+		IssueID: types.IssueID{
+			ID: "bd-local",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Remote title",
+			Description: "Remote description",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+			Assignee:  "Osamu",
+		},
+		IssueTimes: types.IssueTimes{
+			UpdatedAt: time.Now().UTC().Add(-2 * time.Hour),
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: &extRef,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"alpha", "beta"},
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue() error: %v", err)
@@ -137,14 +182,22 @@ func TestEnginePullSkipsNoopUpdate(t *testing.T) {
 		issueToBeads: func(ti *TrackerIssue) *IssueConversion {
 			return &IssueConversion{
 				Issue: &types.Issue{
-					ID:          "bd-local",
-					Title:       ti.Title,
-					Description: ti.Description,
-					Priority:    2,
-					Status:      types.StatusOpen,
-					IssueType:   types.TypeTask,
-					Assignee:    "Osamu",
-					Labels:      []string{"beta", "alpha"},
+					IssueID: types.IssueID{
+						ID: "bd-local",
+					},
+					IssueContent: types.IssueContent{
+						Title:       ti.Title,
+						Description: ti.Description,
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Priority:  2,
+						Status:    types.StatusOpen,
+						IssueType: types.TypeTask,
+						Assignee:  "Osamu",
+					},
+					IssueGraph: types.IssueGraph{
+						Labels: []string{"beta", "alpha"},
+					},
 				},
 			}
 		},
@@ -167,16 +220,28 @@ func TestEnginePullUpdatesLabelsOnExistingIssue(t *testing.T) {
 
 	extRef := "https://www.notion.so/32be5bf97fae804d9e07f93af6c79467"
 	issue := &types.Issue{
-		ID:          "bd-local",
-		Title:       "Remote title",
-		Description: "Remote description",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeTask,
-		Priority:    2,
-		Assignee:    "Osamu",
-		Labels:      []string{"old-label"},
-		ExternalRef: &extRef,
-		UpdatedAt:   time.Now().UTC().Add(-2 * time.Hour),
+		IssueID: types.IssueID{
+			ID: "bd-local",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Remote title",
+			Description: "Remote description",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+			Assignee:  "Osamu",
+		},
+		IssueTimes: types.IssueTimes{
+			UpdatedAt: time.Now().UTC().Add(-2 * time.Hour),
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: &extRef,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"old-label"},
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue() error: %v", err)
@@ -196,14 +261,22 @@ func TestEnginePullUpdatesLabelsOnExistingIssue(t *testing.T) {
 		issueToBeads: func(ti *TrackerIssue) *IssueConversion {
 			return &IssueConversion{
 				Issue: &types.Issue{
-					ID:          "bd-local",
-					Title:       ti.Title,
-					Description: ti.Description,
-					Priority:    2,
-					Status:      types.StatusOpen,
-					IssueType:   types.TypeTask,
-					Assignee:    "Osamu",
-					Labels:      append([]string(nil), ti.Labels...),
+					IssueID: types.IssueID{
+						ID: "bd-local",
+					},
+					IssueContent: types.IssueContent{
+						Title:       ti.Title,
+						Description: ti.Description,
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Priority:  2,
+						Status:    types.StatusOpen,
+						IssueType: types.TypeTask,
+						Assignee:  "Osamu",
+					},
+					IssueGraph: types.IssueGraph{
+						Labels: append([]string(nil), ti.Labels...),
+					},
 				},
 			}
 		},
@@ -233,14 +306,26 @@ func TestEnginePullClosesExistingIssueAndSyncsLabels(t *testing.T) {
 
 	extRef := "https://test.test/EXT-closed"
 	issue := &types.Issue{
-		ID:          "bd-closed-boundary",
-		Title:       "Local title",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeTask,
-		Priority:    2,
-		Labels:      []string{"old-label"},
-		ExternalRef: &extRef,
-		UpdatedAt:   time.Now().UTC().Add(-time.Hour),
+		IssueID: types.IssueID{
+			ID: "bd-closed-boundary",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Local title",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
+		IssueTimes: types.IssueTimes{
+			UpdatedAt: time.Now().UTC().Add(-time.Hour),
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: &extRef,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"old-label"},
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue() error: %v", err)
@@ -257,12 +342,20 @@ func TestEnginePullClosesExistingIssueAndSyncsLabels(t *testing.T) {
 	}}
 	tracker.fieldMapper = &mockMapper{issueToBeads: func(ti *TrackerIssue) *IssueConversion {
 		return &IssueConversion{Issue: &types.Issue{
-			ID:        "bd-closed-boundary",
-			Title:     ti.Title,
-			Status:    types.StatusClosed,
-			IssueType: types.TypeTask,
-			Priority:  2,
-			Labels:    append([]string(nil), ti.Labels...),
+			IssueID: types.IssueID{
+				ID: "bd-closed-boundary",
+			},
+			IssueContent: types.IssueContent{
+				Title: ti.Title,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusClosed,
+				IssueType: types.TypeTask,
+				Priority:  2,
+			},
+			IssueGraph: types.IssueGraph{
+				Labels: append([]string(nil), ti.Labels...),
+			},
 		}}
 	}}
 
@@ -307,16 +400,28 @@ func TestEnginePullDryRunTreatsLabelOnlyChangeAsUpdate(t *testing.T) {
 
 	extRef := "https://www.notion.so/32be5bf97fae804d9e07f93af6c79467"
 	issue := &types.Issue{
-		ID:          "bd-local",
-		Title:       "Remote title",
-		Description: "Remote description",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeTask,
-		Priority:    2,
-		Assignee:    "Osamu",
-		Labels:      []string{"old-label"},
-		ExternalRef: &extRef,
-		UpdatedAt:   time.Now().UTC().Add(-2 * time.Hour),
+		IssueID: types.IssueID{
+			ID: "bd-local",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Remote title",
+			Description: "Remote description",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+			Assignee:  "Osamu",
+		},
+		IssueTimes: types.IssueTimes{
+			UpdatedAt: time.Now().UTC().Add(-2 * time.Hour),
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: &extRef,
+		},
+		IssueGraph: types.IssueGraph{
+			Labels: []string{"old-label"},
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue() error: %v", err)
@@ -336,14 +441,22 @@ func TestEnginePullDryRunTreatsLabelOnlyChangeAsUpdate(t *testing.T) {
 		issueToBeads: func(ti *TrackerIssue) *IssueConversion {
 			return &IssueConversion{
 				Issue: &types.Issue{
-					ID:          "bd-local",
-					Title:       ti.Title,
-					Description: ti.Description,
-					Priority:    2,
-					Status:      types.StatusOpen,
-					IssueType:   types.TypeTask,
-					Assignee:    "Osamu",
-					Labels:      append([]string(nil), ti.Labels...),
+					IssueID: types.IssueID{
+						ID: "bd-local",
+					},
+					IssueContent: types.IssueContent{
+						Title:       ti.Title,
+						Description: ti.Description,
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Priority:  2,
+						Status:    types.StatusOpen,
+						IssueType: types.TypeTask,
+						Assignee:  "Osamu",
+					},
+					IssueGraph: types.IssueGraph{
+						Labels: append([]string(nil), ti.Labels...),
+					},
 				},
 			}
 		},
@@ -373,13 +486,21 @@ func TestEnginePullDoesNotTreatPreviousPullAsLocalConflict(t *testing.T) {
 
 	extRef := "https://www.notion.so/32be5bf97fae804d9e07f93af6c79467"
 	issue := &types.Issue{
-		ID:          "bd-local",
-		Title:       "Local title",
-		Description: "Local description",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeTask,
-		Priority:    2,
-		ExternalRef: &extRef,
+		IssueID: types.IssueID{
+			ID: "bd-local",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Local title",
+			Description: "Local description",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: &extRef,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue() error: %v", err)
@@ -390,12 +511,18 @@ func TestEnginePullDoesNotTreatPreviousPullAsLocalConflict(t *testing.T) {
 		issueToBeads: func(ti *TrackerIssue) *IssueConversion {
 			return &IssueConversion{
 				Issue: &types.Issue{
-					ID:          "bd-local",
-					Title:       ti.Title,
-					Description: ti.Description,
-					Priority:    2,
-					Status:      types.StatusOpen,
-					IssueType:   types.TypeTask,
+					IssueID: types.IssueID{
+						ID: "bd-local",
+					},
+					IssueContent: types.IssueContent{
+						Title:       ti.Title,
+						Description: ti.Description,
+					},
+					IssueWorkflow: types.IssueWorkflow{
+						Priority:  2,
+						Status:    types.StatusOpen,
+						IssueType: types.TypeTask,
+					},
 				},
 			}
 		},
@@ -485,13 +612,21 @@ func TestEnginePullUsesPrelinkedExternalRefIdentifier(t *testing.T) {
 
 	localRef := "https://linear.app/team/issue/TEAM-123/fix-login"
 	local := &types.Issue{
-		ID:          "bd-linear-prelink",
-		Title:       "Fix login",
-		Description: "Local draft",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeTask,
-		Priority:    2,
-		ExternalRef: strPtr(localRef),
+		IssueID: types.IssueID{
+			ID: "bd-linear-prelink",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Fix login",
+			Description: "Local draft",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: strPtr(localRef),
+		},
 	}
 	if err := store.CreateIssue(ctx, local, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue() error: %v", err)
@@ -536,7 +671,7 @@ func TestEnginePullUsesPrelinkedExternalRefIdentifier(t *testing.T) {
 		t.Fatalf("PullStats = %+v, want Created=0 Updated=1", result.PullStats)
 	}
 
-	issues, err := store.SearchIssues(ctx, "", types.IssueFilter{ExternalRefContains: "TEAM-123"})
+	issues, err := store.SearchIssues(ctx, "", types.IssueFilter{IssueFilterMatch: types.IssueFilterMatch{ExternalRefContains: "TEAM-123"}})
 	if err != nil {
 		t.Fatalf("SearchIssues() error: %v", err)
 	}
@@ -563,11 +698,17 @@ func TestEnginePushOnly(t *testing.T) {
 
 	// Create a local issue
 	issue := &types.Issue{
-		ID:        "bd-test1",
-		Title:     "Local issue",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
-		Priority:  2,
+		IssueID: types.IssueID{
+			ID: "bd-test1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Local issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue() error: %v", err)
@@ -604,8 +745,8 @@ func TestEnginePushUsesBatchTrackerWhenAvailable(t *testing.T) {
 
 	ref := strPtr("https://notion.so/existing")
 	issues := []*types.Issue{
-		{ID: "bd-batch-1", Title: "Create me", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
-		{ID: "bd-batch-2", Title: "Update me", Status: types.StatusInProgress, IssueType: types.TypeFeature, Priority: 1, ExternalRef: ref},
+		{IssueID: types.IssueID{ID: "bd-batch-1"}, IssueContent: types.IssueContent{Title: "Create me"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
+		{IssueID: types.IssueID{ID: "bd-batch-2"}, IssueContent: types.IssueContent{Title: "Update me"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusInProgress, IssueType: types.TypeFeature, Priority: 1}, IssueMeta: types.IssueMeta{ExternalRef: ref}},
 	}
 	for _, issue := range issues {
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
@@ -616,9 +757,9 @@ func TestEnginePushUsesBatchTrackerWhenAvailable(t *testing.T) {
 	tracker := &mockBatchTracker{
 		mockTracker: newMockTracker("notion"),
 		batchResult: &BatchPushResult{
-			Created:  []BatchPushItem{{LocalID: "bd-batch-1", ExternalRef: "https://notion.so/new-page"}},
-			Updated:  []BatchPushItem{{LocalID: "bd-batch-2", ExternalRef: "https://notion.so/existing"}},
-			Warnings: []string{"Skipped unsupported Notion issue types: pm=1"},
+			Created:             []BatchPushItem{{LocalID: "bd-batch-1", ExternalRef: "https://notion.so/new-page"}},
+			Updated:             []BatchPushItem{{LocalID: "bd-batch-2", ExternalRef: "https://notion.so/existing"}},
+			TrackerIssueDetails: TrackerIssueDetails{Warnings: []string{"Skipped unsupported Notion issue types: pm=1"}},
 		},
 	}
 	engine := NewEngine(tracker, store, "test-actor")
@@ -661,12 +802,20 @@ func TestEngineDryRunUsesBatchPreviewWhenAvailable(t *testing.T) {
 	defer store.Close()
 
 	issue := &types.Issue{
-		ID:          "bd-batch-preview",
-		Title:       "Preview me",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeTask,
-		Priority:    2,
-		ExternalRef: strPtr("https://notion.so/existing"),
+		IssueID: types.IssueID{
+			ID: "bd-batch-preview",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Preview me",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: strPtr("https://notion.so/existing"),
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue() error: %v", err)
@@ -675,8 +824,8 @@ func TestEngineDryRunUsesBatchPreviewWhenAvailable(t *testing.T) {
 	tracker := &mockBatchTracker{
 		mockTracker: newMockTracker("notion"),
 		batchDryRun: &BatchPushResult{
-			Skipped:  []string{"bd-batch-preview"},
-			Warnings: []string{"Skipped bd-batch-preview: Notion external_ref points outside the current target"},
+			Skipped:             []string{"bd-batch-preview"},
+			TrackerIssueDetails: TrackerIssueDetails{Warnings: []string{"Skipped bd-batch-preview: Notion external_ref points outside the current target"}},
 		},
 	}
 	engine := NewEngine(tracker, store, "test-actor")
@@ -722,11 +871,17 @@ func TestEnginePushCountsCreateErrors(t *testing.T) {
 	defer store.Close()
 
 	issue := &types.Issue{
-		ID:        "bd-createerr1",
-		Title:     "Local issue",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
-		Priority:  2,
+		IssueID: types.IssueID{
+			ID: "bd-createerr1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Local issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue() error: %v", err)
@@ -799,13 +954,21 @@ func TestEnginePullMatchesExistingIssueByExternalIdentifier(t *testing.T) {
 
 	externalRef := strPtr("https://www.notion.so/0123456789abcdef0123456789abcdef")
 	issue := &types.Issue{
-		ID:          "bd-notion1",
-		Title:       "Existing issue",
-		Description: "old description",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeTask,
-		Priority:    2,
-		ExternalRef: externalRef,
+		IssueID: types.IssueID{
+			ID: "bd-notion1",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Existing issue",
+			Description: "old description",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: externalRef,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue() error: %v", err)
@@ -869,12 +1032,20 @@ func TestEngineDryRunCountsExistingIssuesAsUpdates(t *testing.T) {
 
 	extRef := strPtr("https://notion.test/EXT-1")
 	issue := &types.Issue{
-		ID:          "bd-existing1",
-		Title:       "Existing issue",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeTask,
-		Priority:    2,
-		ExternalRef: extRef,
+		IssueID: types.IssueID{
+			ID: "bd-existing1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Existing issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: extRef,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue() error: %v", err)
@@ -936,11 +1107,17 @@ func TestEngineExcludeTypes(t *testing.T) {
 		{"bd-feat1", types.TypeFeature},
 	} {
 		issue := &types.Issue{
-			ID:        tc.id,
-			Title:     "Issue " + tc.id,
-			Status:    types.StatusOpen,
-			IssueType: tc.typ,
-			Priority:  2,
+			IssueID: types.IssueID{
+				ID: tc.id,
+			},
+			IssueContent: types.IssueContent{
+				Title: "Issue " + tc.id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				IssueType: tc.typ,
+				Priority:  2,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 			t.Fatalf("CreateIssue(%s) error: %v", tc.id, err)
@@ -977,13 +1154,24 @@ func TestEngineConflictResolution(t *testing.T) {
 
 	// Create a local issue that was modified after last_sync
 	issue := &types.Issue{
-		ID:          "bd-conflict1",
-		Title:       "Local version",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeTask,
-		Priority:    2,
-		ExternalRef: strPtr("https://test.test/EXT-1"),
-		UpdatedAt:   time.Now().UTC().Add(-30 * time.Minute), // Modified 30 min ago
+		IssueID: types.IssueID{
+			ID: "bd-conflict1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Local version",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
+		IssueTimes: types.IssueTimes{
+			UpdatedAt: time.Now().UTC().Add(-30 * time.Minute),
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: strPtr("https://test.test/EXT-1"),
+		},
+		// Modified 30 min ago,
 	}
 	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue() error: %v", err)
@@ -1026,14 +1214,24 @@ func TestEngineSyncDoesNotCreateFalseConflictsAfterPull(t *testing.T) {
 	}
 
 	issue := &types.Issue{
-		ID:          "bd-sync1",
-		Title:       "Local title",
-		Description: "Local description",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeTask,
-		Priority:    2,
-		ExternalRef: strPtr("https://test.test/EXT-1"),
-		UpdatedAt:   lastSync.Add(-10 * time.Minute),
+		IssueID: types.IssueID{
+			ID: "bd-sync1",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Local title",
+			Description: "Local description",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
+		IssueTimes: types.IssueTimes{
+			UpdatedAt: lastSync.Add(-10 * time.Minute),
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: strPtr("https://test.test/EXT-1"),
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue() error: %v", err)
@@ -1217,13 +1415,19 @@ func TestEnginePushWithFormatDescription(t *testing.T) {
 	defer store.Close()
 
 	issue := &types.Issue{
-		ID:          "bd-fmt1",
-		Title:       "Issue with design",
-		Description: "Base description",
-		Design:      "Some design notes",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeTask,
-		Priority:    2,
+		IssueID: types.IssueID{
+			ID: "bd-fmt1",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Issue with design",
+			Description: "Base description",
+			Design:      "Some design notes",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue() error: %v", err)
@@ -1273,11 +1477,17 @@ func TestEnginePushWithShouldPush(t *testing.T) {
 		{"bd-skip1", "Skip this"},
 	} {
 		issue := &types.Issue{
-			ID:        tc.id,
-			Title:     tc.title,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
-			Priority:  2,
+			IssueID: types.IssueID{
+				ID: tc.id,
+			},
+			IssueContent: types.IssueContent{
+				Title: tc.title,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+				Priority:  2,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 			t.Fatalf("CreateIssue(%s) error: %v", tc.id, err)
@@ -1318,11 +1528,17 @@ func TestEnginePushWithShouldPushCanInspectLabels(t *testing.T) {
 		{id: "bd-labelskip1", title: "Skip unlabeled"},
 	} {
 		issue := &types.Issue{
-			ID:        tc.id,
-			Title:     tc.title,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
-			Priority:  2,
+			IssueID: types.IssueID{
+				ID: tc.id,
+			},
+			IssueContent: types.IssueContent{
+				Title: tc.title,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+				Priority:  2,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 			t.Fatalf("CreateIssue(%s) error: %v", tc.id, err)
@@ -1369,12 +1585,20 @@ func TestEngineDryRunTreatsForeignExternalRefAsCreate(t *testing.T) {
 
 	foreignRef := "https://github.com/example/repo/issues/1"
 	issue := &types.Issue{
-		ID:          "bd-foreign1",
-		Title:       "Mirror me to Notion",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeTask,
-		Priority:    2,
-		ExternalRef: &foreignRef,
+		IssueID: types.IssueID{
+			ID: "bd-foreign1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Mirror me to Notion",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: &foreignRef,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue() error: %v", err)
@@ -1426,12 +1650,20 @@ func TestEnginePushWithContentEqual(t *testing.T) {
 
 	// Create a local issue that already exists externally
 	issue := &types.Issue{
-		ID:          "bd-eq1",
-		Title:       "Identical content",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeTask,
-		Priority:    2,
-		ExternalRef: strPtr("https://test.test/EXT-EQ1"),
+		IssueID: types.IssueID{
+			ID: "bd-eq1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Identical content",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: strPtr("https://test.test/EXT-EQ1"),
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue() error: %v", err)
@@ -1479,12 +1711,20 @@ func TestEnginePushWithContentHash(t *testing.T) {
 	defer store.Close()
 
 	issue := &types.Issue{
-		ID:          "bd-hash1",
-		Title:       "Hashable content",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeTask,
-		Priority:    2,
-		ExternalRef: strPtr("https://test.test/EXT-HASH1"),
+		IssueID: types.IssueID{
+			ID: "bd-hash1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Hashable content",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: strPtr("https://test.test/EXT-HASH1"),
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue() error: %v", err)
@@ -1588,12 +1828,20 @@ func TestEnginePushContentHashInvalidatedByRelink(t *testing.T) {
 	defer store.Close()
 
 	issue := &types.Issue{
-		ID:          "bd-hash-relink",
-		Title:       "Unchanged content",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeTask,
-		Priority:    2,
-		ExternalRef: strPtr("https://github.com/acme/widgets/issues/41"),
+		IssueID: types.IssueID{
+			ID: "bd-hash-relink",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Unchanged content",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: strPtr("https://github.com/acme/widgets/issues/41"),
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue() error: %v", err)
@@ -1648,12 +1896,20 @@ func TestEnginePushContentHashInvalidatedByTargetScope(t *testing.T) {
 	defer store.Close()
 
 	issue := &types.Issue{
-		ID:          "bd-hash-scope",
-		Title:       "Unchanged content",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeTask,
-		Priority:    2,
-		ExternalRef: strPtr("github:42"),
+		IssueID: types.IssueID{
+			ID: "bd-hash-scope",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Unchanged content",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: strPtr("github:42"),
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue() error: %v", err)
@@ -1715,19 +1971,33 @@ func TestEnginePushExcludeEphemeral(t *testing.T) {
 
 	// Create a normal issue and an ephemeral one
 	normal := &types.Issue{
-		ID:        "bd-normal1",
-		Title:     "Normal issue",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
-		Priority:  2,
+		IssueID: types.IssueID{
+			ID: "bd-normal1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Normal issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
 	}
 	ephemeral := &types.Issue{
-		ID:        "bd-wisp-eph1",
-		Title:     "Ephemeral wisp",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
-		Priority:  2,
-		Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: "bd-wisp-eph1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Ephemeral wisp",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}
 	if err := store.CreateIssue(ctx, normal, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue(normal) error: %v", err)
@@ -1761,11 +2031,17 @@ func TestEnginePushWithStateCache(t *testing.T) {
 	defer store.Close()
 
 	issue := &types.Issue{
-		ID:        "bd-state1",
-		Title:     "Issue with state",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
-		Priority:  2,
+		IssueID: types.IssueID{
+			ID: "bd-state1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Issue with state",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
 	}
 	if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue() error: %v", err)
@@ -1819,10 +2095,10 @@ func TestEnginePushWithParentFilterBasic(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	parent := &types.Issue{ID: "bd-par1", Title: "Parent", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}
-	child1 := &types.Issue{ID: "bd-ch1", Title: "Child 1", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}
-	child2 := &types.Issue{ID: "bd-ch2", Title: "Child 2", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}
-	unrelated := &types.Issue{ID: "bd-unrel1", Title: "Unrelated", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}
+	parent := &types.Issue{IssueID: types.IssueID{ID: "bd-par1"}, IssueContent: types.IssueContent{Title: "Parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}}
+	child1 := &types.Issue{IssueID: types.IssueID{ID: "bd-ch1"}, IssueContent: types.IssueContent{Title: "Child 1"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}}
+	child2 := &types.Issue{IssueID: types.IssueID{ID: "bd-ch2"}, IssueContent: types.IssueContent{Title: "Child 2"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}}
+	unrelated := &types.Issue{IssueID: types.IssueID{ID: "bd-unrel1"}, IssueContent: types.IssueContent{Title: "Unrelated"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}}
 
 	for _, issue := range []*types.Issue{parent, child1, child2, unrelated} {
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
@@ -1861,8 +2137,8 @@ func TestEnginePushWithParentFilterDoesNotUpdateOrphanExternalIssues(t *testing.
 	store := newTestStore(t)
 	defer store.Close()
 
-	parent := &types.Issue{ID: "bd-par-orphan", Title: "Parent", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}
-	child := &types.Issue{ID: "bd-child-orphan", Title: "Canceled upstream title", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}
+	parent := &types.Issue{IssueID: types.IssueID{ID: "bd-par-orphan"}, IssueContent: types.IssueContent{Title: "Parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}}
+	child := &types.Issue{IssueID: types.IssueID{ID: "bd-child-orphan"}, IssueContent: types.IssueContent{Title: "Canceled upstream title"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}}
 	for _, issue := range []*types.Issue{parent, child} {
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 			t.Fatalf("CreateIssue(%s) error: %v", issue.ID, err)
@@ -1908,10 +2184,10 @@ func TestEnginePushWithParentFilterDeep(t *testing.T) {
 
 	// parent → child → grandchild; unrelated is separate
 	for _, issue := range []*types.Issue{
-		{ID: "bd-dep1", Title: "Parent", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
-		{ID: "bd-dch1", Title: "Child", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
-		{ID: "bd-dgc1", Title: "Grandchild", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
-		{ID: "bd-dunrel1", Title: "Unrelated", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
+		{IssueID: types.IssueID{ID: "bd-dep1"}, IssueContent: types.IssueContent{Title: "Parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
+		{IssueID: types.IssueID{ID: "bd-dch1"}, IssueContent: types.IssueContent{Title: "Child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
+		{IssueID: types.IssueID{ID: "bd-dgc1"}, IssueContent: types.IssueContent{Title: "Grandchild"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
+		{IssueID: types.IssueID{ID: "bd-dunrel1"}, IssueContent: types.IssueContent{Title: "Unrelated"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
 	} {
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 			t.Fatalf("CreateIssue(%s) error: %v", issue.ID, err)
@@ -1945,8 +2221,8 @@ func TestEnginePushWithParentFilterLeaf(t *testing.T) {
 	defer store.Close()
 
 	for _, issue := range []*types.Issue{
-		{ID: "bd-leaf1", Title: "Leaf", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
-		{ID: "bd-lother1", Title: "Other", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
+		{IssueID: types.IssueID{ID: "bd-leaf1"}, IssueContent: types.IssueContent{Title: "Leaf"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
+		{IssueID: types.IssueID{ID: "bd-lother1"}, IssueContent: types.IssueContent{Title: "Other"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
 	} {
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 			t.Fatalf("CreateIssue(%s) error: %v", issue.ID, err)
@@ -1975,8 +2251,8 @@ func TestEnginePushWithParentFilterNonParentChildIgnored(t *testing.T) {
 
 	// "blocks" dep should not be followed — only parent-child edges count.
 	for _, issue := range []*types.Issue{
-		{ID: "bd-fp1", Title: "Parent", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
-		{ID: "bd-fbl1", Title: "Blocked", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
+		{IssueID: types.IssueID{ID: "bd-fp1"}, IssueContent: types.IssueContent{Title: "Parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
+		{IssueID: types.IssueID{ID: "bd-fbl1"}, IssueContent: types.IssueContent{Title: "Blocked"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
 	} {
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 			t.Fatalf("CreateIssue(%s) error: %v", issue.ID, err)
@@ -2009,11 +2285,17 @@ func TestEnginePushWithParentFilterEmptyMeansAll(t *testing.T) {
 
 	for i, title := range []string{"Issue A", "Issue B", "Issue C"} {
 		issue := &types.Issue{
-			ID:        fmt.Sprintf("bd-all%d", i+1),
-			Title:     title,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
-			Priority:  2,
+			IssueID: types.IssueID{
+				ID: fmt.Sprintf("bd-all%d", i+1),
+			},
+			IssueContent: types.IssueContent{
+				Title: title,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+				Priority:  2,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 			t.Fatalf("CreateIssue error: %v", err)
@@ -2038,9 +2320,9 @@ func TestEnginePushWithParentFilterDryRun(t *testing.T) {
 	defer store.Close()
 
 	for _, issue := range []*types.Issue{
-		{ID: "bd-drp1", Title: "Parent", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
-		{ID: "bd-drc1", Title: "Child", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
-		{ID: "bd-dro1", Title: "Other", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
+		{IssueID: types.IssueID{ID: "bd-drp1"}, IssueContent: types.IssueContent{Title: "Parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
+		{IssueID: types.IssueID{ID: "bd-drc1"}, IssueContent: types.IssueContent{Title: "Child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
+		{IssueID: types.IssueID{ID: "bd-dro1"}, IssueContent: types.IssueContent{Title: "Other"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
 	} {
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 			t.Fatalf("CreateIssue(%s) error: %v", issue.ID, err)
@@ -2074,11 +2356,17 @@ func TestEnginePushPartialFailure(t *testing.T) {
 	// Create 3 local issues
 	for i, id := range []string{"bd-pf1", "bd-pf2", "bd-pf3"} {
 		issue := &types.Issue{
-			ID:        id,
-			Title:     fmt.Sprintf("Partial failure issue %d", i+1),
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
-			Priority:  2,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: fmt.Sprintf("Partial failure issue %d", i+1),
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+				Priority:  2,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 			t.Fatalf("CreateIssue(%s) error: %v", id, err)
@@ -2137,11 +2425,17 @@ func TestEngineSyncCollectsWarnings(t *testing.T) {
 		{"bd-warn2", "Fails"},
 	} {
 		issue := &types.Issue{
-			ID:        tc.id,
-			Title:     tc.title,
-			Status:    types.StatusOpen,
-			IssueType: types.TypeTask,
-			Priority:  2,
+			IssueID: types.IssueID{
+				ID: tc.id,
+			},
+			IssueContent: types.IssueContent{
+				Title: tc.title,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+				Priority:  2,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 			t.Fatalf("CreateIssue(%s) error: %v", tc.id, err)
@@ -2186,18 +2480,30 @@ func TestEngineCreateDependencies(t *testing.T) {
 
 	// Create two issues that will be the dependency endpoints
 	issue1 := &types.Issue{
-		ID:        "bd-dep1",
-		Title:     "Dependency source",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
-		Priority:  2,
+		IssueID: types.IssueID{
+			ID: "bd-dep1",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Dependency source",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
 	}
 	issue2 := &types.Issue{
-		ID:        "bd-dep2",
-		Title:     "Dependency target",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
-		Priority:  2,
+		IssueID: types.IssueID{
+			ID: "bd-dep2",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Dependency target",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
 	}
 	for _, issue := range []*types.Issue{issue1, issue2} {
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
@@ -2237,18 +2543,30 @@ func TestEngineCreateDependenciesResolvesExternalIdentifiers(t *testing.T) {
 	defer store.Close()
 
 	issue1 := &types.Issue{
-		ID:        "bd-linear-blocked",
-		Title:     "Blocked issue",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
-		Priority:  2,
+		IssueID: types.IssueID{
+			ID: "bd-linear-blocked",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocked issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
 	}
 	issue2 := &types.Issue{
-		ID:        "bd-linear-blocker",
-		Title:     "Blocker issue",
-		Status:    types.StatusOpen,
-		IssueType: types.TypeTask,
-		Priority:  2,
+		IssueID: types.IssueID{
+			ID: "bd-linear-blocker",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Blocker issue",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
 	}
 	for _, issue := range []*types.Issue{issue1, issue2} {
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
@@ -2306,8 +2624,8 @@ func TestEngineCreateDependenciesResolvesBareIdentifierFromExternalRef(t *testin
 	defer store.Close()
 
 	issues := []*types.Issue{
-		{ID: "bd-linear-child", Title: "Child", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
-		{ID: "bd-linear-parent", Title: "Parent", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
+		{IssueID: types.IssueID{ID: "bd-linear-child"}, IssueContent: types.IssueContent{Title: "Child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
+		{IssueID: types.IssueID{ID: "bd-linear-parent"}, IssueContent: types.IssueContent{Title: "Parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
 	}
 	for _, issue := range issues {
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
@@ -2363,8 +2681,8 @@ func TestEngineCreateDependenciesResolvesSyntheticExternalRef(t *testing.T) {
 	defer store.Close()
 
 	issues := []*types.Issue{
-		{ID: "bd-linear-child", Title: "Child", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
-		{ID: "bd-linear-milestone", Title: "Milestone", Status: types.StatusOpen, IssueType: types.TypeEpic, Priority: 2},
+		{IssueID: types.IssueID{ID: "bd-linear-child"}, IssueContent: types.IssueContent{Title: "Child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
+		{IssueID: types.IssueID{ID: "bd-linear-milestone"}, IssueContent: types.IssueContent{Title: "Milestone"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeEpic, Priority: 2}},
 	}
 	for _, issue := range issues {
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
@@ -2422,8 +2740,8 @@ func TestEnginePullCreatesDependenciesForUnchangedIssues(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	issue1 := &types.Issue{ID: "bd-unchanged-1", Title: "Blocked issue", Description: "already pulled", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}
-	issue2 := &types.Issue{ID: "bd-unchanged-2", Title: "Blocker issue", Description: "already pulled", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}
+	issue1 := &types.Issue{IssueID: types.IssueID{ID: "bd-unchanged-1"}, IssueContent: types.IssueContent{Title: "Blocked issue", Description: "already pulled"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}}
+	issue2 := &types.Issue{IssueID: types.IssueID{ID: "bd-unchanged-2"}, IssueContent: types.IssueContent{Title: "Blocker issue", Description: "already pulled"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}}
 	for _, issue := range []*types.Issue{issue1, issue2} {
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 			t.Fatalf("CreateIssue error: %v", err)
@@ -2477,24 +2795,44 @@ func TestEnginePullDoesNotCreateDependenciesForLocallyModifiedSkippedIssue(t *te
 		t.Fatalf("SetLocalMetadata error: %v", err)
 	}
 	child := &types.Issue{
-		ID:          "bd-local-child",
-		Title:       "Local child",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeTask,
-		Priority:    2,
-		ExternalRef: strPtr("https://test.test/EXT-1"),
-		CreatedAt:   lastSync.Add(-2 * time.Hour),
-		UpdatedAt:   lastSync.Add(30 * time.Minute),
+		IssueID: types.IssueID{
+			ID: "bd-local-child",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Local child",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: lastSync.Add(-2 * time.Hour),
+			UpdatedAt: lastSync.Add(30 * time.Minute),
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: strPtr("https://test.test/EXT-1"),
+		},
 	}
 	parent := &types.Issue{
-		ID:          "bd-local-parent",
-		Title:       "Parent",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeTask,
-		Priority:    2,
-		ExternalRef: strPtr("https://test.test/EXT-2"),
-		CreatedAt:   lastSync.Add(-2 * time.Hour),
-		UpdatedAt:   lastSync.Add(-30 * time.Minute),
+		IssueID: types.IssueID{
+			ID: "bd-local-parent",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Parent",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: lastSync.Add(-2 * time.Hour),
+			UpdatedAt: lastSync.Add(-30 * time.Minute),
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: strPtr("https://test.test/EXT-2"),
+		},
 	}
 	for _, issue := range []*types.Issue{child, parent} {
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
@@ -2536,8 +2874,8 @@ func TestEnginePullDryRunPreviewsDependencies(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	issue1 := &types.Issue{ID: "bd-dry-child", Title: "Child", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}
-	issue2 := &types.Issue{ID: "bd-dry-blocker", Title: "Blocker", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}
+	issue1 := &types.Issue{IssueID: types.IssueID{ID: "bd-dry-child"}, IssueContent: types.IssueContent{Title: "Child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}}
+	issue2 := &types.Issue{IssueID: types.IssueID{ID: "bd-dry-blocker"}, IssueContent: types.IssueContent{Title: "Blocker"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}}
 	for _, issue := range []*types.Issue{issue1, issue2} {
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 			t.Fatalf("CreateIssue error: %v", err)
@@ -2598,9 +2936,9 @@ func TestEnginePullFiltersDependencyTypes(t *testing.T) {
 	defer store.Close()
 
 	issues := []*types.Issue{
-		{ID: "bd-filter-child", Title: "Child", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
-		{ID: "bd-filter-parent", Title: "Parent", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
-		{ID: "bd-filter-blocker", Title: "Blocker", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
+		{IssueID: types.IssueID{ID: "bd-filter-child"}, IssueContent: types.IssueContent{Title: "Child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
+		{IssueID: types.IssueID{ID: "bd-filter-parent"}, IssueContent: types.IssueContent{Title: "Parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
+		{IssueID: types.IssueID{ID: "bd-filter-blocker"}, IssueContent: types.IssueContent{Title: "Blocker"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
 	}
 	for i, issue := range issues {
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
@@ -2656,9 +2994,9 @@ func TestEnginePullFiltersLinearRelationsBySource(t *testing.T) {
 	defer store.Close()
 
 	issues := []*types.Issue{
-		{ID: "bd-source-child", Title: "Child", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
-		{ID: "bd-source-parent", Title: "Parent", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
-		{ID: "bd-source-related-parent", Title: "Related parent", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
+		{IssueID: types.IssueID{ID: "bd-source-child"}, IssueContent: types.IssueContent{Title: "Child"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
+		{IssueID: types.IssueID{ID: "bd-source-parent"}, IssueContent: types.IssueContent{Title: "Parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
+		{IssueID: types.IssueID{ID: "bd-source-related-parent"}, IssueContent: types.IssueContent{Title: "Related parent"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
 	}
 	for i, issue := range issues {
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
@@ -2724,8 +3062,8 @@ func TestEnginePreviewDependenciesDedupesPendingRelations(t *testing.T) {
 	defer store.Close()
 
 	issues := []*types.Issue{
-		{ID: "bd-preview-source", Title: "Source", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
-		{ID: "bd-preview-target", Title: "Target", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2},
+		{IssueID: types.IssueID{ID: "bd-preview-source"}, IssueContent: types.IssueContent{Title: "Source"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
+		{IssueID: types.IssueID{ID: "bd-preview-target"}, IssueContent: types.IssueContent{Title: "Target"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}},
 	}
 	for i, issue := range issues {
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
@@ -2786,15 +3124,25 @@ func TestEnginePullHydratesNewPrelinkedExternalRefAfterLastSync(t *testing.T) {
 	}
 	localRef := "https://linear.app/team/issue/TEAM-123/stub"
 	local := &types.Issue{
-		ID:          "bd-prelinked-after-sync",
-		Title:       "Local stub",
-		Description: "stub",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeTask,
-		Priority:    2,
-		ExternalRef: strPtr(localRef),
-		CreatedAt:   lastSync.Add(30 * time.Minute),
-		UpdatedAt:   lastSync.Add(30 * time.Minute),
+		IssueID: types.IssueID{
+			ID: "bd-prelinked-after-sync",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Local stub",
+			Description: "stub",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: lastSync.Add(30 * time.Minute),
+			UpdatedAt: lastSync.Add(30 * time.Minute),
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: strPtr(localRef),
+		},
 	}
 	if err := store.CreateIssue(ctx, local, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue error: %v", err)
@@ -2865,14 +3213,22 @@ func TestEnginePullHydratesOlderIssueWhenExternalRefAddedAfterLastSync(t *testin
 	defer store.Close()
 
 	local := &types.Issue{
-		ID:          "bd-prelinked-existing",
-		Title:       "Local stub",
-		Description: "stub",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeTask,
-		Priority:    2,
-		CreatedAt:   time.Now().UTC().Add(-4 * time.Hour),
-		UpdatedAt:   time.Now().UTC().Add(-4 * time.Hour),
+		IssueID: types.IssueID{
+			ID: "bd-prelinked-existing",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Local stub",
+			Description: "stub",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now().UTC().Add(-4 * time.Hour),
+			UpdatedAt: time.Now().UTC().Add(-4 * time.Hour),
+		},
 	}
 	if err := store.CreateIssue(ctx, local, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue error: %v", err)
@@ -2948,14 +3304,22 @@ func TestEngineSyncPrelinkedHydrationFailureStopsPushAndLastSync(t *testing.T) {
 	defer store.Close()
 
 	local := &types.Issue{
-		ID:          "bd-prelinked-failure",
-		Title:       "Local stub",
-		Description: "stub",
-		Status:      types.StatusOpen,
-		IssueType:   types.TypeTask,
-		Priority:    2,
-		CreatedAt:   time.Now().UTC().Add(-4 * time.Hour),
-		UpdatedAt:   time.Now().UTC().Add(-4 * time.Hour),
+		IssueID: types.IssueID{
+			ID: "bd-prelinked-failure",
+		},
+		IssueContent: types.IssueContent{
+			Title:       "Local stub",
+			Description: "stub",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
+		IssueTimes: types.IssueTimes{
+			CreatedAt: time.Now().UTC().Add(-4 * time.Hour),
+			UpdatedAt: time.Now().UTC().Add(-4 * time.Hour),
+		},
 	}
 	if err := store.CreateIssue(ctx, local, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue error: %v", err)
@@ -3123,7 +3487,17 @@ func TestEngineExcludeIDPrefix(t *testing.T) {
 
 	for _, id := range []string{"hw-mol-foo", "hw-mol-bar", "hw-real-1", "hw-real-2"} {
 		issue := &types.Issue{
-			ID: id, Title: "Issue " + id, Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: "Issue " + id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+				Priority:  2,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 			t.Fatalf("CreateIssue(%s) error: %v", id, err)
@@ -3160,7 +3534,17 @@ func TestEngineExcludeIDPatterns(t *testing.T) {
 
 	for _, id := range []string{"hw-mol-x", "hw-wisp-y", "hw-sandbox-z", "hw-real-keep"} {
 		issue := &types.Issue{
-			ID: id, Title: "Issue " + id, Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: "Issue " + id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+				Priority:  2,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 			t.Fatalf("CreateIssue(%s) error: %v", id, err)
@@ -3203,7 +3587,17 @@ func TestEngineExcludeIDBoth(t *testing.T) {
 		"hw-real-keep",       // matches neither — pushed
 	} {
 		issue := &types.Issue{
-			ID: id, Title: "Issue " + id, Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: "Issue " + id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+				Priority:  2,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 			t.Fatalf("CreateIssue(%s) error: %v", id, err)
@@ -3246,9 +3640,20 @@ func TestEngineExcludeID_AlreadySynced(t *testing.T) {
 	// A previously-synced bead — has external_ref. After the new exclude
 	// rule lands, it must not be updated.
 	stale := &types.Issue{
-		ID: "hw-mol-stale", Title: "Previously synced", Status: types.StatusOpen,
-		IssueType: types.TypeTask, Priority: 2,
-		ExternalRef: strPtr("https://test.test/EXT-STALE"),
+		IssueID: types.IssueID{
+			ID: "hw-mol-stale",
+		},
+		IssueContent: types.IssueContent{
+			Title: "Previously synced",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			IssueType: types.TypeTask,
+			Priority:  2,
+		},
+		IssueMeta: types.IssueMeta{
+			ExternalRef: strPtr("https://test.test/EXT-STALE"),
+		},
 	}
 	if err := store.CreateIssue(ctx, stale, "test-actor"); err != nil {
 		t.Fatalf("CreateIssue() error: %v", err)
@@ -3286,7 +3691,17 @@ func TestEngineDryRunRespectsExcludeID(t *testing.T) {
 
 	for _, id := range []string{"hw-mol-skip", "hw-real-1"} {
 		issue := &types.Issue{
-			ID: id, Title: "Issue " + id, Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2,
+			IssueID: types.IssueID{
+				ID: id,
+			},
+			IssueContent: types.IssueContent{
+				Title: "Issue " + id,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+				Priority:  2,
+			},
 		}
 		if err := store.CreateIssue(ctx, issue, "test-actor"); err != nil {
 			t.Fatalf("CreateIssue(%s) error: %v", id, err)
@@ -3345,7 +3760,7 @@ func TestShouldPushIssue_ExcludeIDDirect(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			issue := &types.Issue{ID: tt.id, IssueType: types.TypeTask, Status: types.StatusOpen}
+			issue := &types.Issue{IssueID: types.IssueID{ID: tt.id}, IssueWorkflow: types.IssueWorkflow{IssueType: types.TypeTask, Status: types.StatusOpen}}
 			got := engine.shouldPushIssue(issue, tt.opts)
 			if got != tt.want {
 				t.Errorf("shouldPushIssue(%q, %+v) = %v, want %v", tt.id, tt.opts, got, tt.want)

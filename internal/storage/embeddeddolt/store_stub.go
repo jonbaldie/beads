@@ -8,11 +8,7 @@ import (
 )
 
 // EmbeddedDoltStore is a stub for builds without CGO.
-type EmbeddedDoltStore struct {
-	dataDir  string
-	database string
-	branch   string
-}
+type EmbeddedDoltStore struct{}
 
 var errNoCGO = errors.New("embeddeddolt: requires CGO (build with CGO_ENABLED=1)")
 

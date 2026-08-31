@@ -79,7 +79,7 @@ func TestHookReadyClaimerFiresOnlyForAWonRow(t *testing.T) {
 	}{
 		{
 			name:    "won row fires update",
-			claimer: &fakeReadyClaimer{claimed: &types.IssueWithCounts{Issue: &types.Issue{ID: "bd-1"}}},
+			claimer: &fakeReadyClaimer{claimed: &types.IssueWithCounts{Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-1"}}}},
 			want:    []string{"update"},
 		},
 		{
@@ -89,7 +89,7 @@ func TestHookReadyClaimerFiresOnlyForAWonRow(t *testing.T) {
 		},
 		{
 			name:    "error fires nothing",
-			claimer: &fakeReadyClaimer{claimed: &types.IssueWithCounts{Issue: &types.Issue{ID: "bd-1"}}, err: errors.New("boom")},
+			claimer: &fakeReadyClaimer{claimed: &types.IssueWithCounts{Issue: &types.Issue{IssueID: types.IssueID{ID: "bd-1"}}}, err: errors.New("boom")},
 			want:    nil,
 		},
 	} {

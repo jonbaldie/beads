@@ -41,68 +41,72 @@ func DiffInTx(ctx context.Context, tx *sql.Tx, fromRef, toRef string) ([]*storag
 
 	var entries []*storage.DiffEntry
 	for rows.Next() {
-		var fromID, toID, diffType string
-		var fromTitle, toTitle, fromDesc, toDesc, fromStatus, toStatus *string
-		var fromPriority, toPriority *int
-
-		if err := rows.Scan(&fromID, &toID, &diffType,
-			&fromTitle, &toTitle,
-			&fromDesc, &toDesc,
-			&fromStatus, &toStatus,
-			&fromPriority, &toPriority); err != nil {
-			return nil, fmt.Errorf("failed to scan diff: %w", err)
+		row, err := scanDiffRow(rows)
+		if err != nil {
+			return nil, err
 		}
-
-		entry := &storage.DiffEntry{
-			DiffType: diffType,
-		}
-
-		if toID != "" {
-			entry.IssueID = toID
-		} else {
-			entry.IssueID = fromID
-		}
-
-		// Build old value for modified/removed
-		if diffType != "added" && fromID != "" {
-			entry.OldValue = &types.Issue{
-				ID: fromID,
-			}
-			if fromTitle != nil {
-				entry.OldValue.Title = *fromTitle
-			}
-			if fromDesc != nil {
-				entry.OldValue.Description = *fromDesc
-			}
-			if fromStatus != nil {
-				entry.OldValue.Status = types.Status(*fromStatus)
-			}
-			if fromPriority != nil {
-				entry.OldValue.Priority = *fromPriority
-			}
-		}
-
-		// Build new value for modified/added
-		if diffType != "removed" && toID != "" {
-			entry.NewValue = &types.Issue{
-				ID: toID,
-			}
-			if toTitle != nil {
-				entry.NewValue.Title = *toTitle
-			}
-			if toDesc != nil {
-				entry.NewValue.Description = *toDesc
-			}
-			if toStatus != nil {
-				entry.NewValue.Status = types.Status(*toStatus)
-			}
-			if toPriority != nil {
-				entry.NewValue.Priority = *toPriority
-			}
-		}
-
-		entries = append(entries, entry)
+		entries = append(entries, diffEntry(row))
 	}
 
 	return entries, rows.Err()
+}
+
+type diffRow struct {
+	fromID, toID string
+	diffType     string
+	old, new     diffIssueValues
+}
+
+type diffIssueValues struct {
+	title, description, status *string
+	priority                   *int
+}
+
+func scanDiffRow(rows *sql.Rows) (diffRow, error) {
+	var row diffRow
+	if err := rows.Scan(
+		&row.fromID, &row.toID, &row.diffType,
+		&row.old.title, &row.new.title,
+		&row.old.description, &row.new.description,
+		&row.old.status, &row.new.status,
+		&row.old.priority, &row.new.priority,
+	); err != nil {
+		return diffRow{}, fmt.Errorf("failed to scan diff: %w", err)
+	}
+	return row, nil
+}
+
+func diffEntry(row diffRow) *storage.DiffEntry {
+	issueID := row.fromID
+	if row.toID != "" {
+		issueID = row.toID
+	}
+	entry := &storage.DiffEntry{IssueID: issueID, DiffType: row.diffType}
+	if row.diffType != "added" {
+		entry.OldValue = diffIssue(row.fromID, row.old)
+	}
+	if row.diffType != "removed" {
+		entry.NewValue = diffIssue(row.toID, row.new)
+	}
+	return entry
+}
+
+func diffIssue(id string, values diffIssueValues) *types.Issue {
+	if id == "" {
+		return nil
+	}
+	issue := &types.Issue{IssueID: types.IssueID{ID: id}}
+	if values.title != nil {
+		issue.Title = *values.title
+	}
+	if values.description != nil {
+		issue.Description = *values.description
+	}
+	if values.status != nil {
+		issue.Status = types.Status(*values.status)
+	}
+	if values.priority != nil {
+		issue.Priority = *values.priority
+	}
+	return issue
 }

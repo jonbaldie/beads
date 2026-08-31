@@ -39,47 +39,49 @@ func validateMigrationRef(ref string) error {
 // fail server-side with `unbound variable "v1" in query`, so the validated ref is
 // interpolated into the SQL text (bd-6dnrw.27).
 func ReadMigrationContentHashes(ctx context.Context, db DBConn, ref string) (map[int]string, error) {
-	var (
-		rows *sql.Rows
-		err  error
-	)
-	if ref == "" {
-		rows, err = db.QueryContext(ctx, "SELECT version, content_hash FROM schema_migrations")
-	} else {
-		if verr := validateMigrationRef(ref); verr != nil {
-			return nil, fmt.Errorf("invalid ref: %w", verr)
-		}
-		// A cached ref may legitimately predate schema_migrations or its
-		// content_hash column. Probe the historical shape before selecting from
-		// it: letting the SELECT fail emits a Dolt server warning for every
-		// read-only doctor run.
-		//nolint:gosec // G201: ref is validated above — AS OF requires a literal, not a bind param
-		hasTable, queryErr := queryHasRows(ctx, db,
-			fmt.Sprintf("SHOW TABLES AS OF '%s' LIKE 'schema_migrations'", ref))
-		if queryErr != nil {
-			return nil, queryErr
-		}
-		if !hasTable {
-			return nil, fmt.Errorf("table not found: schema_migrations at %q", ref)
-		}
-		//nolint:gosec // G201: ref is validated above — AS OF requires a literal, not a bind param
-		hasContentHash, queryErr := queryHasRows(ctx, db,
-			fmt.Sprintf("SHOW COLUMNS FROM schema_migrations AS OF '%s' LIKE 'content_hash'", ref))
-		if queryErr != nil {
-			return nil, queryErr
-		}
-		if !hasContentHash {
-			return nil, fmt.Errorf("unknown column content_hash in schema_migrations at %q", ref)
-		}
-		//nolint:gosec // G201: ref is validated above — AS OF requires a literal, not a bind param
-		rows, err = db.QueryContext(ctx,
-			fmt.Sprintf("SELECT version, content_hash FROM schema_migrations AS OF '%s'", ref))
-	}
+	rows, err := migrationContentHashRows(ctx, db, ref)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	return scanMigrationContentHashes(rows)
+}
 
+func migrationContentHashRows(ctx context.Context, db DBConn, ref string) (*sql.Rows, error) {
+	if ref == "" {
+		return db.QueryContext(ctx, "SELECT version, content_hash FROM schema_migrations")
+	}
+	if verr := validateMigrationRef(ref); verr != nil {
+		return nil, fmt.Errorf("invalid ref: %w", verr)
+	}
+	// A cached ref may legitimately predate schema_migrations or its
+	// content_hash column. Probe the historical shape before selecting from
+	// it: letting the SELECT fail emits a Dolt server warning for every
+	// read-only doctor run.
+	//nolint:gosec // G201: ref is validated above — AS OF requires a literal, not a bind param
+	hasTable, err := queryHasRows(ctx, db,
+		fmt.Sprintf("SHOW TABLES AS OF '%s' LIKE 'schema_migrations'", ref))
+	if err != nil {
+		return nil, err
+	}
+	if !hasTable {
+		return nil, fmt.Errorf("table not found: schema_migrations at %q", ref)
+	}
+	//nolint:gosec // G201: ref is validated above — AS OF requires a literal, not a bind param
+	hasContentHash, err := queryHasRows(ctx, db,
+		fmt.Sprintf("SHOW COLUMNS FROM schema_migrations AS OF '%s' LIKE 'content_hash'", ref))
+	if err != nil {
+		return nil, err
+	}
+	if !hasContentHash {
+		return nil, fmt.Errorf("unknown column content_hash in schema_migrations at %q", ref)
+	}
+	//nolint:gosec // G201: ref is validated above — AS OF requires a literal, not a bind param
+	return db.QueryContext(ctx,
+		fmt.Sprintf("SELECT version, content_hash FROM schema_migrations AS OF '%s'", ref))
+}
+
+func scanMigrationContentHashes(rows *sql.Rows) (map[int]string, error) {
 	out := map[int]string{}
 	for rows.Next() {
 		var version int

@@ -63,11 +63,15 @@ func testMainInner(m *testing.M) int {
 func initTrackerSharedSchema(port int) error {
 	ctx := context.Background()
 	cfg := &dolt.Config{
-		Path:         "/tmp/tracker-shared-init",
-		ServerHost:   "127.0.0.1",
-		ServerPort:   port,
-		Database:     testSharedDB,
-		MaxOpenConns: 1,
+		Path: "/tmp/tracker-shared-init",
+		ServerOptions: dolt.ServerOptions{
+			ServerHost: "127.0.0.1",
+			ServerPort: port,
+		},
+		Database: testSharedDB,
+		PoolOptions: dolt.PoolOptions{
+			MaxOpenConns: 1,
+		},
 	}
 	store, err := dolt.New(ctx, cfg)
 	if err != nil {

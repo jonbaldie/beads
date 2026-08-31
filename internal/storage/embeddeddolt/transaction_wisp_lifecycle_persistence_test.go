@@ -141,7 +141,7 @@ func TestEmbeddedTransactionStandaloneWispLifecyclePersistsWithoutDoltCommit(t *
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			te := newTestEnv(t, "txstandalone")
-			if err := te.store.CreateIssue(ctx, &types.Issue{ID: test.wispID, Title: test.wispID, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true}, "tester"); err != nil {
+			if err := te.store.CreateIssue(ctx, &types.Issue{IssueID: types.IssueID{ID: test.wispID}, IssueContent: types.IssueContent{Title: test.wispID}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}, "tester"); err != nil {
 				t.Fatalf("CreateIssue: %v", err)
 			}
 			before, err := te.store.GetCurrentCommit(ctx)
@@ -179,8 +179,8 @@ func TestEmbeddedTransactionSameStatusDoesNotPublishUnrelatedDurableChanges(t *t
 		dirtyID  = "embedded-tx-same-status-dirty"
 	)
 	for _, issue := range []*types.Issue{
-		{ID: targetID, Title: "target baseline", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
-		{ID: dirtyID, Title: "dirty baseline", Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask},
+		{IssueID: types.IssueID{ID: targetID}, IssueContent: types.IssueContent{Title: "target baseline"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
+		{IssueID: types.IssueID{ID: dirtyID}, IssueContent: types.IssueContent{Title: "dirty baseline"}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}},
 	} {
 		if err := te.store.CreateIssue(ctx, issue, "tester"); err != nil {
 			t.Fatalf("CreateIssue(%s): %v", issue.ID, err)
@@ -248,8 +248,17 @@ func TestEmbeddedTransactionStandaloneWispMutationDoesNotPublishUnrelatedDurable
 	)
 
 	if err := te.store.CreateIssue(ctx, &types.Issue{
-		ID: durableID, Title: "durable baseline", Status: types.StatusOpen,
-		Priority: 2, IssueType: types.TypeTask,
+		IssueID: types.IssueID{
+			ID: durableID,
+		},
+		IssueContent: types.IssueContent{
+			Title: "durable baseline",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
 	}, "tester"); err != nil {
 		t.Fatalf("CreateIssue durable: %v", err)
 	}
@@ -257,8 +266,20 @@ func TestEmbeddedTransactionStandaloneWispMutationDoesNotPublishUnrelatedDurable
 		t.Fatalf("AddLabel durable baseline: %v", err)
 	}
 	if err := te.store.CreateIssue(ctx, &types.Issue{
-		ID: wispID, Title: "wisp baseline", Status: types.StatusOpen,
-		Priority: 2, IssueType: types.TypeTask, Ephemeral: true,
+		IssueID: types.IssueID{
+			ID: wispID,
+		},
+		IssueContent: types.IssueContent{
+			Title: "wisp baseline",
+		},
+		IssueWorkflow: types.IssueWorkflow{
+			Status:    types.StatusOpen,
+			Priority:  2,
+			IssueType: types.TypeTask,
+		},
+		IssueWisp: types.IssueWisp{
+			Ephemeral: true,
+		},
 	}, "tester"); err != nil {
 		t.Fatalf("CreateIssue wisp: %v", err)
 	}
@@ -370,10 +391,10 @@ func TestEmbeddedTransactionStandaloneWispMutationDoesNotPublishUnrelatedDurable
 
 func seedEmbeddedTransactionWispBlocker(t *testing.T, te *testEnv, ctx context.Context, dependerID, wispID string) {
 	t.Helper()
-	if err := te.store.CreateIssue(ctx, &types.Issue{ID: dependerID, Title: dependerID, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, "tester"); err != nil {
+	if err := te.store.CreateIssue(ctx, &types.Issue{IssueID: types.IssueID{ID: dependerID}, IssueContent: types.IssueContent{Title: dependerID}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}}, "tester"); err != nil {
 		t.Fatalf("CreateIssue durable: %v", err)
 	}
-	if err := te.store.CreateIssue(ctx, &types.Issue{ID: wispID, Title: wispID, Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask, Ephemeral: true}, "tester"); err != nil {
+	if err := te.store.CreateIssue(ctx, &types.Issue{IssueID: types.IssueID{ID: wispID}, IssueContent: types.IssueContent{Title: wispID}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen, Priority: 2, IssueType: types.TypeTask}, IssueWisp: types.IssueWisp{Ephemeral: true}}, "tester"); err != nil {
 		t.Fatalf("CreateIssue wisp: %v", err)
 	}
 	if err := te.store.AddDependency(ctx, &types.Dependency{IssueID: dependerID, DependsOnID: wispID, Type: types.DepBlocks}, "tester"); err != nil {

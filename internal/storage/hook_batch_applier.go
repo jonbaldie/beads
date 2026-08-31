@@ -61,8 +61,14 @@ func (o *hookBatchApplier) ApplyBatch(ctx context.Context, request issueops.Appl
 	if err != nil {
 		return result, err
 	}
-	created := make(map[string]struct{}, len(result.Items))
-	for _, item := range result.Items {
+	created := o.fireChangedItemHooks(ctx, result.Items)
+	o.fireChangedDependencyHooks(ctx, result.Items, created)
+	return result, nil
+}
+
+func (o *hookBatchApplier) fireChangedItemHooks(ctx context.Context, items []issueops.ItemResult) map[string]struct{} {
+	created := make(map[string]struct{}, len(items))
+	for _, item := range items {
 		if !item.Changed {
 			continue
 		}
@@ -76,8 +82,12 @@ func (o *hookBatchApplier) ApplyBatch(ctx context.Context, request issueops.Appl
 			o.hooks.CompleteIssueOperationClose(item.Issue)
 		}
 	}
-	fired := make(map[string]struct{}, len(result.Items))
-	for _, item := range result.Items {
+	return created
+}
+
+func (o *hookBatchApplier) fireChangedDependencyHooks(ctx context.Context, items []issueops.ItemResult, created map[string]struct{}) {
+	fired := make(map[string]struct{}, len(items))
+	for _, item := range items {
 		if item.Kind != issueops.ItemDepAdd || !item.Changed {
 			continue
 		}
@@ -90,5 +100,4 @@ func (o *hookBatchApplier) ApplyBatch(ctx context.Context, request issueops.Appl
 		fired[item.IssueID] = struct{}{}
 		o.hooks.CompleteIssueOperationDependency(ctx, item.IssueID)
 	}
-	return result, nil
 }

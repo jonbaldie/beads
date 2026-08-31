@@ -132,10 +132,11 @@ func GetCommentsForIssuesInTx(ctx context.Context, tx *sql.Tx, issueIDs []string
 
 //nolint:gosec // G201: table is hardcoded
 func getCommentsForIDsInto(ctx context.Context, tx *sql.Tx, table string, ids []string, result map[string][]*types.Comment) error {
-	for start := 0; start < len(ids); start += queryBatchSize {
+	totalIDs := len(ids)
+	for start := 0; start < totalIDs; start += queryBatchSize {
 		end := start + queryBatchSize
-		if end > len(ids) {
-			end = len(ids)
+		if end > totalIDs {
+			end = totalIDs
 		}
 		batch := ids[start:end]
 		placeholders, args := buildSQLInClause(batch)
@@ -173,30 +174,50 @@ func getCommentsForIDsInto(ctx context.Context, tx *sql.Tx, table string, ids []
 //
 //nolint:gosec // G201: table is validated by hardcoded list
 func DeleteIssuesBySourceRepoInTx(ctx context.Context, tx *sql.Tx, sourceRepo string) (int, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id FROM issues WHERE source_repo = ?`, sourceRepo)
+	issueIDs, err := issueIDsForSourceRepo(ctx, tx, sourceRepo)
 	if err != nil {
-		return 0, fmt.Errorf("query issues: %w", err)
+		return 0, err
 	}
-	var issueIDs []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
-			return 0, fmt.Errorf("scan issue ID: %w", err)
-		}
-		issueIDs = append(issueIDs, id)
-	}
-	_ = rows.Close()
-
 	if len(issueIDs) == 0 {
 		return 0, nil
 	}
 
-	affectedIssues, affectedWisps, aerr := AffectedByDeletionInTx(ctx, tx, issueIDs, nil)
-	if aerr != nil {
-		return 0, fmt.Errorf("affected by source-repo delete: %w", aerr)
+	affectedIssues, affectedWisps, err := AffectedByDeletionInTx(ctx, tx, issueIDs, nil)
+	if err != nil {
+		return 0, fmt.Errorf("affected by source-repo delete: %w", err)
 	}
 
+	rowsAffected, err := deleteSourceRepoRows(ctx, tx, sourceRepo, issueIDs)
+	if err != nil {
+		return 0, err
+	}
+	if err := journalSourceRepoDeletes(ctx, tx, issueIDs); err != nil {
+		return rowsAffected, err
+	}
+	if err := RecomputeIsBlockedInTx(ctx, tx, affectedIssues, affectedWisps); err != nil {
+		return rowsAffected, fmt.Errorf("recompute is_blocked after source-repo delete: %w", err)
+	}
+	return rowsAffected, nil
+}
+
+func issueIDsForSourceRepo(ctx context.Context, tx *sql.Tx, sourceRepo string) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM issues WHERE source_repo = ?`, sourceRepo)
+	if err != nil {
+		return nil, fmt.Errorf("query issues: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var issueIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan issue ID: %w", err)
+		}
+		issueIDs = append(issueIDs, id)
+	}
+	return issueIDs, nil
+}
+
+func deleteSourceRepoRows(ctx context.Context, tx *sql.Tx, sourceRepo string, issueIDs []string) (int, error) {
 	// Deleted issues hold no leases: clear them while the id set is still
 	// joinable (before the issues rows go away).
 	if _, err := tx.ExecContext(ctx,
@@ -219,21 +240,19 @@ func DeleteIssuesBySourceRepoInTx(ctx context.Context, tx *sql.Tx, sourceRepo st
 	if err != nil {
 		return 0, fmt.Errorf("rows affected: %w", err)
 	}
+	return int(rowsAffected), nil
+}
 
+func journalSourceRepoDeletes(ctx context.Context, tx *sql.Tx, issueIDs []string) error {
 	// Journal each deleted issue in the same transaction. issueIDs is the exact
 	// set removed by the DELETE above (both were scoped to source_repo), so
 	// there are no phantom records here.
 	for _, id := range issueIDs {
 		if err := RecordDeleteInTx(ctx, tx, id); err != nil {
-			return int(rowsAffected), err
+			return err
 		}
 	}
-
-	if err := RecomputeIsBlockedInTx(ctx, tx, affectedIssues, affectedWisps); err != nil {
-		return int(rowsAffected), fmt.Errorf("recompute is_blocked after source-repo delete: %w", err)
-	}
-
-	return int(rowsAffected), nil
+	return nil
 }
 
 //nolint:gosec // G201: table names are hardcoded
@@ -368,7 +387,10 @@ func FindWispDependentsRecursiveInTx(ctx context.Context, tx DBTX, ids []string)
 	copy(toProcess, ids)
 	discovered := make(map[string]bool)
 
-	for len(toProcess) > 0 {
+	for {
+		if len(toProcess) == 0 {
+			break
+		}
 		if len(seen) > maxResults {
 			return discovered, fmt.Errorf("wisp cascade traversal discovered over %d issues; aborting", maxResults)
 		}
@@ -380,33 +402,39 @@ func FindWispDependentsRecursiveInTx(ctx context.Context, tx DBTX, ids []string)
 		batch := toProcess[:end]
 		toProcess = toProcess[end:]
 
-		placeholders, args := buildSQLInClause(batch)
-		rows, err := tx.QueryContext(ctx,
-			fmt.Sprintf(`SELECT issue_id FROM wisp_dependencies WHERE %s IN (%s)`, DepTargetExpr, placeholders),
-			args...)
-		if err != nil {
-			return discovered, fmt.Errorf("query wisp dependents: %w", err)
-		}
-
-		for rows.Next() {
-			var depID string
-			if err := rows.Scan(&depID); err != nil {
-				_ = rows.Close()
-				return discovered, fmt.Errorf("scan wisp dependent: %w", err)
-			}
-			if !seen[depID] {
-				seen[depID] = true
-				discovered[depID] = true
-				toProcess = append(toProcess, depID)
-			}
-		}
-		_ = rows.Close()
-		if err := rows.Err(); err != nil {
-			return discovered, fmt.Errorf("iterate wisp dependents: %w", err)
+		if err := processWispDependentBatch(ctx, tx, batch, seen, discovered, &toProcess); err != nil {
+			return discovered, err
 		}
 	}
 
 	return discovered, nil
+}
+
+func processWispDependentBatch(ctx context.Context, tx DBTX, batch []string, seen, discovered map[string]bool, toProcess *[]string) error {
+	placeholders, args := buildSQLInClause(batch)
+	rows, err := tx.QueryContext(ctx,
+		fmt.Sprintf(`SELECT issue_id FROM wisp_dependencies WHERE %s IN (%s)`, DepTargetExpr, placeholders),
+		args...)
+	if err != nil {
+		return fmt.Errorf("query wisp dependents: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var depID string
+		if err := rows.Scan(&depID); err != nil {
+			return fmt.Errorf("scan wisp dependent: %w", err)
+		}
+		if !seen[depID] {
+			seen[depID] = true
+			discovered[depID] = true
+			*toProcess = append(*toProcess, depID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate wisp dependents: %w", err)
+	}
+	return nil
 }
 
 // GetRepoMtimeInTx returns the cached mtime (nanoseconds) for a repo path.

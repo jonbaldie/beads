@@ -346,22 +346,22 @@ func TestIsWisp(t *testing.T) {
 	}{
 		{
 			name:      "neither ephemeral nor no_history",
-			issue:     &types.Issue{Ephemeral: false, NoHistory: false},
+			issue:     &types.Issue{IssueWisp: types.IssueWisp{Ephemeral: false, NoHistory: false}},
 			expectVal: false,
 		},
 		{
 			name:      "ephemeral only",
-			issue:     &types.Issue{Ephemeral: true, NoHistory: false},
+			issue:     &types.Issue{IssueWisp: types.IssueWisp{Ephemeral: true, NoHistory: false}},
 			expectVal: true,
 		},
 		{
 			name:      "no_history only",
-			issue:     &types.Issue{Ephemeral: false, NoHistory: true},
+			issue:     &types.Issue{IssueWisp: types.IssueWisp{Ephemeral: false, NoHistory: true}},
 			expectVal: true,
 		},
 		{
 			name:      "both ephemeral and no_history",
-			issue:     &types.Issue{Ephemeral: true, NoHistory: true},
+			issue:     &types.Issue{IssueWisp: types.IssueWisp{Ephemeral: true, NoHistory: true}},
 			expectVal: true,
 		},
 	}
@@ -388,25 +388,25 @@ func TestTableRouting(t *testing.T) {
 	}{
 		{
 			name:      "regular issue routes to issues/events",
-			issue:     &types.Issue{Ephemeral: false, NoHistory: false},
+			issue:     &types.Issue{IssueWisp: types.IssueWisp{Ephemeral: false, NoHistory: false}},
 			wantIssue: "issues",
 			wantEvent: "events",
 		},
 		{
 			name:      "ephemeral routes to wisps/wisp_events",
-			issue:     &types.Issue{Ephemeral: true},
+			issue:     &types.Issue{IssueWisp: types.IssueWisp{Ephemeral: true}},
 			wantIssue: "wisps",
 			wantEvent: "wisp_events",
 		},
 		{
 			name:      "no_history routes to wisps/wisp_events",
-			issue:     &types.Issue{NoHistory: true},
+			issue:     &types.Issue{IssueWisp: types.IssueWisp{NoHistory: true}},
 			wantIssue: "wisps",
 			wantEvent: "wisp_events",
 		},
 		{
 			name:      "both flags routes to wisps/wisp_events",
-			issue:     &types.Issue{Ephemeral: true, NoHistory: true},
+			issue:     &types.Issue{IssueWisp: types.IssueWisp{Ephemeral: true, NoHistory: true}},
 			wantIssue: "wisps",
 			wantEvent: "wisp_events",
 		},

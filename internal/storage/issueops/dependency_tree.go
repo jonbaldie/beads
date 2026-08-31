@@ -9,7 +9,7 @@ import (
 // GetDependencyTreeInTx returns a flattened dependency tree for visualization.
 // It performs a recursive BFS traversal up to maxDepth, using GetIssueInTx and
 // GetDependenciesInTx/GetDependentsInTx which handle wisp routing.
-func GetDependencyTreeInTx(ctx context.Context, tx DBTX, issueID string, maxDepth int, showAllPaths bool, reverse bool) ([]*types.TreeNode, error) {
+func GetDependencyTreeInTx(ctx context.Context, tx DBTX, issueID string, maxDepth int, _ bool, reverse bool) ([]*types.TreeNode, error) {
 	visited := make(map[string]bool)
 	return buildDependencyTreeInTx(ctx, tx, issueID, 0, maxDepth, reverse, visited, "", "")
 }

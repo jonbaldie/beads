@@ -212,11 +212,15 @@ func (m *mockMapper) IssueToBeads(ti *TrackerIssue) *IssueConversion {
 	}
 	return &IssueConversion{
 		Issue: &types.Issue{
-			Title:       ti.Title,
-			Description: ti.Description,
-			Priority:    2,
-			Status:      types.StatusOpen,
-			IssueType:   types.TypeTask,
+			IssueContent: types.IssueContent{
+				Title:       ti.Title,
+				Description: ti.Description,
+			},
+			IssueWorkflow: types.IssueWorkflow{
+				Priority:  2,
+				Status:    types.StatusOpen,
+				IssueType: types.TypeTask,
+			},
 		},
 	}
 }

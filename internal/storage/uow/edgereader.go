@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	storageissueops "github.com/jonbaldie/beads/internal/storage/issueops"
+	"github.com/jonbaldie/beads/internal/types"
 	publicops "github.com/jonbaldie/beads/issueops"
 )
 
@@ -51,33 +52,37 @@ func (r *edgeReader) ReadEdges(ctx context.Context, request publicops.EdgeReadRe
 		return publicops.EdgeReadResult{Anchors: []publicops.AnchorEdges{}}, nil
 	}
 	return RunTxRead(ctx, r.provider, func(ctx context.Context, uw UnitOfWork) (publicops.EdgeReadResult, error) {
-		present := make(map[string]struct{}, len(anchors))
-		issues, err := uw.IssueUseCase().GetIssuesByIDs(ctx, anchors)
-		if err != nil {
-			return publicops.EdgeReadResult{}, err
-		}
-		for _, issue := range issues {
-			if issue != nil {
-				present[issue.ID] = struct{}{}
-			}
-		}
-		wisps, err := uw.IssueUseCase().GetWispsByIDs(ctx, anchors)
-		if err != nil {
-			return publicops.EdgeReadResult{}, err
-		}
-		for _, wisp := range wisps {
-			if wisp != nil {
-				present[wisp.ID] = struct{}{}
-			}
-		}
-		edges, err := uw.DependencyUseCase().GetIssueDependencyRecords(ctx, anchors)
-		if err != nil {
-			return publicops.EdgeReadResult{}, err
-		}
-		// The type filter and the order run HERE rather than in the reads
-		// above, so both implementations narrow and order through one function;
-		// a filter pushed into one side's query would put the narrowing in SQL
-		// on one backend and in Go on the other.
-		return storageissueops.FinishEdgeRead(anchors, present, edges, request.Types), nil
+		return readEdgesInUOW(ctx, uw, anchors, request.Types)
 	})
+}
+
+func readEdgesInUOW(ctx context.Context, uw UnitOfWork, anchors []string, depTypes []publicops.DependencyType) (publicops.EdgeReadResult, error) {
+	present := make(map[string]struct{}, len(anchors))
+	issues, err := uw.IssueUseCase().GetIssuesByIDs(ctx, anchors)
+	if err != nil {
+		return publicops.EdgeReadResult{}, err
+	}
+	addPresentEdges(present, issues)
+	wisps, err := uw.IssueUseCase().GetWispsByIDs(ctx, anchors)
+	if err != nil {
+		return publicops.EdgeReadResult{}, err
+	}
+	addPresentEdges(present, wisps)
+	edges, err := uw.DependencyUseCase().GetIssueDependencyRecords(ctx, anchors)
+	if err != nil {
+		return publicops.EdgeReadResult{}, err
+	}
+	// The type filter and the order run HERE rather than in the reads
+	// above, so both implementations narrow and order through one function;
+	// a filter pushed into one side's query would put the narrowing in SQL
+	// on one backend and in Go on the other.
+	return storageissueops.FinishEdgeRead(anchors, present, edges, depTypes), nil
+}
+
+func addPresentEdges(present map[string]struct{}, issues []*types.Issue) {
+	for _, issue := range issues {
+		if issue != nil {
+			present[issue.ID] = struct{}{}
+		}
+	}
 }

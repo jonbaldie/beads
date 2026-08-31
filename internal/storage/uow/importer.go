@@ -51,66 +51,89 @@ func (o *importer) ImportBatch(ctx context.Context, request publicops.ImportBatc
 		return publicops.ImportBatchResult{}, fmt.Errorf("import batch: actor must not be empty")
 	}
 	return RunTxResult(ctx, o.provider, func(ctx context.Context, uw UnitOfWork) (publicops.ImportBatchResult, string, error) {
-		var result publicops.ImportBatchResult
-
-		if len(request.Issues) > 0 {
-			runner, err := importStatementRunner(uw)
-			if err != nil {
-				return publicops.ImportBatchResult{}, "", err
-			}
-			staleRejected := make(map[string]struct{})
-			skippedSeen := make(map[string]struct{})
-			opts := storage.BatchCreateOptions{
-				SkipPrefixValidation:           request.SkipPrefixValidation,
-				RejectStaleUpserts:             !request.AllowStale,
-				SkipDependencyValidationErrors: true,
-				OnSkippedDependency: func(issueID, dependsOnID, reason string) {
-					key := issueID + "\x00" + dependsOnID + "\x00" + reason
-					if _, ok := skippedSeen[key]; ok {
-						return
-					}
-					skippedSeen[key] = struct{}{}
-					result.SkippedDependencies = append(result.SkippedDependencies, publicops.SkippedDependency{
-						IssueID:     issueID,
-						DependsOnID: dependsOnID,
-						Reason:      reason,
-					})
-				},
-				OnStaleRejected: func(issueID string) {
-					if _, ok := staleRejected[issueID]; ok {
-						return
-					}
-					staleRejected[issueID] = struct{}{}
-					result.StaleRejectedIDs = append(result.StaleRejectedIDs, issueID)
-				},
-			}
-			if _, err := storageissueops.CreateIssuesInTxWithResult(ctx, runner, request.Issues, request.Actor, opts); err != nil {
-				return publicops.ImportBatchResult{}, "", err
-			}
-			result.Created = len(request.Issues) - len(staleRejected)
+		result, err := importBatchInUOW(ctx, uw, request)
+		if err != nil {
+			return publicops.ImportBatchResult{}, "", err
 		}
-
-		for _, memory := range request.Memories {
-			if err := uw.ConfigUseCase().SetConfig(ctx, memory.Key, memory.Value); err != nil {
-				return publicops.ImportBatchResult{}, "", fmt.Errorf("import memory %q: %w", memory.Key, err)
-			}
-			result.MemoriesImported++
-		}
-
-		// config.yaml is authoritative for issue_prefix on the import flow
-		// (be-llaf); a read or write failure here degrades to "not synced"
-		// rather than failing the batch, matching the classic path.
-		if request.SyncIssuePrefix != "" {
-			stored, _ := uw.ConfigUseCase().GetConfig(ctx, "issue_prefix")
-			if stored != request.SyncIssuePrefix {
-				if err := uw.ConfigUseCase().SetConfig(ctx, "issue_prefix", request.SyncIssuePrefix); err == nil {
-					result.PrefixSynced = true
-				}
-			}
-		}
-
 		return result, importBatchCommitMessage(request, result), nil
 	})
+}
+
+func importBatchInUOW(ctx context.Context, uw UnitOfWork, request publicops.ImportBatchRequest) (publicops.ImportBatchResult, error) {
+	result := publicops.ImportBatchResult{}
+	if len(request.Issues) > 0 {
+		if err := importIssuesInUOW(ctx, uw, request, &result); err != nil {
+			return publicops.ImportBatchResult{}, err
+		}
+	}
+	if err := importMemoriesInUOW(ctx, uw, request, &result); err != nil {
+		return publicops.ImportBatchResult{}, err
+	}
+	syncImportIssuePrefix(ctx, uw, request, &result)
+	return result, nil
+}
+
+func importIssuesInUOW(ctx context.Context, uw UnitOfWork, request publicops.ImportBatchRequest, result *publicops.ImportBatchResult) error {
+	runner, err := importStatementRunner(uw)
+	if err != nil {
+		return err
+	}
+	staleRejected := make(map[string]struct{})
+	skippedSeen := make(map[string]struct{})
+	opts := storage.BatchCreateOptions{
+		SkipPrefixValidation:           request.SkipPrefixValidation,
+		RejectStaleUpserts:             !request.AllowStale,
+		SkipDependencyValidationErrors: true,
+		OnSkippedDependency: func(issueID, dependsOnID, reason string) {
+			key := issueID + "\x00" + dependsOnID + "\x00" + reason
+			if _, ok := skippedSeen[key]; ok {
+				return
+			}
+			skippedSeen[key] = struct{}{}
+			result.SkippedDependencies = append(result.SkippedDependencies, publicops.SkippedDependency{
+				IssueID:     issueID,
+				DependsOnID: dependsOnID,
+				Reason:      reason,
+			})
+		},
+		OnStaleRejected: func(issueID string) {
+			if _, ok := staleRejected[issueID]; ok {
+				return
+			}
+			staleRejected[issueID] = struct{}{}
+			result.StaleRejectedIDs = append(result.StaleRejectedIDs, issueID)
+		},
+	}
+	if _, err := storageissueops.CreateIssuesInTxWithResult(ctx, runner, request.Issues, request.Actor, opts); err != nil {
+		return err
+	}
+	result.Created = len(request.Issues) - len(staleRejected)
+	return nil
+}
+
+func importMemoriesInUOW(ctx context.Context, uw UnitOfWork, request publicops.ImportBatchRequest, result *publicops.ImportBatchResult) error {
+	for _, memory := range request.Memories {
+		if err := uw.ConfigUseCase().SetConfig(ctx, memory.Key, memory.Value); err != nil {
+			return fmt.Errorf("import memory %q: %w", memory.Key, err)
+		}
+		result.MemoriesImported++
+	}
+	return nil
+}
+
+func syncImportIssuePrefix(ctx context.Context, uw UnitOfWork, request publicops.ImportBatchRequest, result *publicops.ImportBatchResult) {
+	// config.yaml is authoritative for issue_prefix on the import flow
+	// (be-llaf); a read or write failure here degrades to "not synced"
+	// rather than failing the batch, matching the classic path.
+	if request.SyncIssuePrefix == "" {
+		return
+	}
+	stored, _ := uw.ConfigUseCase().GetConfig(ctx, "issue_prefix")
+	if stored != request.SyncIssuePrefix {
+		if err := uw.ConfigUseCase().SetConfig(ctx, "issue_prefix", request.SyncIssuePrefix); err == nil {
+			result.PrefixSynced = true
+		}
+	}
 }
 
 // importBatchCommitMessage names what LANDED, in the exact shape the classic

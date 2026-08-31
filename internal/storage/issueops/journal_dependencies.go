@@ -71,42 +71,55 @@ func dependencyEdgesInTableForIssueIDsInTx(ctx context.Context, tx DBTX, table s
 	}
 
 	byKey := make(map[string]journalDependencyEdge)
-	for start := 0; start < len(ids); start += deleteBatchSize {
+	totalIDs := len(ids)
+	for start := 0; start < totalIDs; start += deleteBatchSize {
 		end := start + deleteBatchSize
-		if end > len(ids) {
-			end = len(ids)
+		if end > totalIDs {
+			end = totalIDs
 		}
-		inClause, args := buildSQLInClause(ids[start:end])
-		queryArgs := append(append([]any{}, args...), args...)
-		//nolint:gosec // table is validated above and inClause contains only placeholders.
-		rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
-			SELECT issue_id, %s AS target, type, metadata
-			FROM %s
-			WHERE issue_id IN (%s) OR %s IN (%s)
-		`, DepTargetExpr, table, inClause, DepTargetExpr, inClause), queryArgs...)
+		edges, err := readDependencyEdgesBatch(ctx, tx, table, ids[start:end])
 		if err != nil {
-			if optionalBlockedTable(table) && isTableNotExistError(err) {
-				continue
-			}
-			return nil, fmt.Errorf("journal: query dependency removals from %s: %w", table, err)
+			return nil, err
 		}
-		for rows.Next() {
-			var edge journalDependencyEdge
-			if err := rows.Scan(&edge.source, &edge.target, &edge.kind, &edge.metadata); err != nil {
-				_ = rows.Close()
-				return nil, fmt.Errorf("journal: scan dependency removal from %s: %w", table, err)
-			}
+		for _, edge := range edges {
 			byKey[dependencyEdgeKey(edge)] = edge
-		}
-		if err := rows.Err(); err != nil {
-			_ = rows.Close()
-			return nil, fmt.Errorf("journal: iterate dependency removals from %s: %w", table, err)
-		}
-		if err := rows.Close(); err != nil {
-			return nil, fmt.Errorf("journal: close dependency removals from %s: %w", table, err)
 		}
 	}
 	return sortedDependencyEdges(byKey), nil
+}
+
+func readDependencyEdgesBatch(ctx context.Context, tx DBTX, table string, ids []string) ([]journalDependencyEdge, error) {
+	inClause, args := buildSQLInClause(ids)
+	queryArgs := append(append([]any{}, args...), args...)
+	//nolint:gosec // G201: table is validated above and inClause contains only placeholders.
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf(`
+		SELECT issue_id, %s AS target, type, metadata
+		FROM %s
+		WHERE issue_id IN (%s) OR %s IN (%s)
+	`, DepTargetExpr, table, inClause, DepTargetExpr, inClause), queryArgs...)
+	if err != nil {
+		if optionalBlockedTable(table) && isTableNotExistError(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("journal: query dependency removals from %s: %w", table, err)
+	}
+	var edges []journalDependencyEdge
+	for rows.Next() {
+		var edge journalDependencyEdge
+		if err := rows.Scan(&edge.source, &edge.target, &edge.kind, &edge.metadata); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("scan dependency removal from %s: %w", table, err)
+		}
+		edges = append(edges, edge)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, fmt.Errorf("iterate dependency removals from %s: %w", table, err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close dependency removals from %s: %w", table, err)
+	}
+	return edges, nil
 }
 
 func dependencyEdgeKey(edge journalDependencyEdge) string {

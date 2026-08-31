@@ -57,28 +57,8 @@ func ValidateCloseBatchRequest(request publicops.CloseBatchRequest) error {
 // It returns "" when nothing landed, which is how the callers spell "commit
 // nothing" — a batch that wrote nothing records no history entry.
 func CloseBatchCommitMessage(result publicops.CloseBatchResult) string {
-	ids := make([]string, 0, len(result.Outcomes))
-	ephemeral := 0
-	for _, outcome := range result.Outcomes {
-		if outcome.Err != nil || !outcome.Changed {
-			continue
-		}
-		if closeOutcomeIsEphemeral(outcome) {
-			ephemeral++
-			continue
-		}
-		ids = append(ids, outcome.IssueID)
-	}
-
-	var parts []string
-	switch {
-	case len(ids) > 0:
-		parts = append(parts, "close "+strings.Join(ids, ", "))
-	case ephemeral == 1:
-		parts = append(parts, "close 1 ephemeral item")
-	case ephemeral > 1:
-		parts = append(parts, fmt.Sprintf("close %d ephemeral items", ephemeral))
-	}
+	summary := summarizeCloseBatch(result)
+	parts := closeBatchMessageParts(summary)
 	if result.ClaimedNext != nil {
 		parts = append(parts, "claim "+result.ClaimedNext.ID)
 	}
@@ -86,6 +66,39 @@ func CloseBatchCommitMessage(result publicops.CloseBatchResult) string {
 		return ""
 	}
 	return "bd: " + strings.Join(parts, "; ")
+}
+
+type closeBatchSummary struct {
+	durableIDs []string
+	ephemeral  int
+}
+
+func summarizeCloseBatch(result publicops.CloseBatchResult) closeBatchSummary {
+	var summary closeBatchSummary
+	for _, outcome := range result.Outcomes {
+		if outcome.Err != nil || !outcome.Changed {
+			continue
+		}
+		if closeOutcomeIsEphemeral(outcome) {
+			summary.ephemeral++
+			continue
+		}
+		summary.durableIDs = append(summary.durableIDs, outcome.IssueID)
+	}
+	return summary
+}
+
+func closeBatchMessageParts(summary closeBatchSummary) []string {
+	var parts []string
+	switch {
+	case len(summary.durableIDs) > 0:
+		parts = append(parts, "close "+strings.Join(summary.durableIDs, ", "))
+	case summary.ephemeral == 1:
+		parts = append(parts, "close 1 ephemeral item")
+	case summary.ephemeral > 1:
+		parts = append(parts, fmt.Sprintf("close %d ephemeral items", summary.ephemeral))
+	}
+	return parts
 }
 
 // closeOutcomeIsEphemeral reports whether this landing was on the wisps plane,

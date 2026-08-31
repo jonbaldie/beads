@@ -61,36 +61,53 @@ func ResolveCustomConfigInTx(ctx context.Context, tx DBTX) (statuses []types.Cus
 
 	cfg, err := getConfigKeysInTx(ctx, tx, "status.custom", "types.custom")
 	if err != nil {
-		if !statusesFromTable {
-			if yamlStatuses := config.GetCustomStatusesFromYAML(); len(yamlStatuses) > 0 {
-				statuses = ParseStatusFallback(yamlStatuses)
-			}
-		}
-		if !typesFromTable {
-			if yamlTypes := config.GetCustomTypesFromYAML(); len(yamlTypes) > 0 {
-				customTypes = yamlTypes
-			}
-		}
+		statuses, customTypes = resolveCustomConfigYAMLFallback(statuses, customTypes, statusesFromTable, typesFromTable)
 		return statuses, customTypes, nil
 	}
-
 	if !statusesFromTable {
-		if v := cfg["status.custom"]; v != "" {
-			if parsed, parseErr := types.ParseCustomStatusConfig(v); parseErr == nil {
-				statuses = parsed
-			}
-		} else if yamlStatuses := config.GetCustomStatusesFromYAML(); len(yamlStatuses) > 0 {
+		statuses = resolveConfiguredStatuses(cfg["status.custom"])
+	}
+	if !typesFromTable {
+		customTypes = resolveConfiguredTypes(cfg["types.custom"])
+	}
+	return statuses, customTypes, nil
+}
+
+func resolveCustomConfigYAMLFallback(statuses []types.CustomStatus, customTypes []string, statusesFromTable, typesFromTable bool) ([]types.CustomStatus, []string) {
+	if !statusesFromTable {
+		if yamlStatuses := config.GetCustomStatusesFromYAML(); len(yamlStatuses) > 0 {
 			statuses = ParseStatusFallback(yamlStatuses)
 		}
 	}
 	if !typesFromTable {
-		if v := cfg["types.custom"]; v != "" {
-			customTypes = ParseTypesConfigValue(v)
-		} else if yamlTypes := config.GetCustomTypesFromYAML(); len(yamlTypes) > 0 {
+		if yamlTypes := config.GetCustomTypesFromYAML(); len(yamlTypes) > 0 {
 			customTypes = yamlTypes
 		}
 	}
-	return statuses, customTypes, nil
+	return statuses, customTypes
+}
+
+func resolveConfiguredStatuses(value string) []types.CustomStatus {
+	if value != "" {
+		if parsed, err := types.ParseCustomStatusConfig(value); err == nil {
+			return parsed
+		}
+		return nil
+	}
+	if yamlStatuses := config.GetCustomStatusesFromYAML(); len(yamlStatuses) > 0 {
+		return ParseStatusFallback(yamlStatuses)
+	}
+	return nil
+}
+
+func resolveConfiguredTypes(value string) []string {
+	if value != "" {
+		return ParseTypesConfigValue(value)
+	}
+	if yamlTypes := config.GetCustomTypesFromYAML(); len(yamlTypes) > 0 {
+		return yamlTypes
+	}
+	return nil
 }
 
 func resolveCustomStatusesFromTableInTx(ctx context.Context, tx DBTX) ([]types.CustomStatus, bool, error) {
@@ -170,38 +187,42 @@ func getConfigKeysInTx(ctx context.Context, tx DBTX, keys ...string) (map[string
 // Returns nil on parse errors (degraded mode). Does not cache or log —
 // callers layer those concerns on top.
 func ResolveCustomStatusesDetailedInTx(ctx context.Context, tx DBTX) ([]types.CustomStatus, error) {
-	// Try the normalized table first
-	rows, err := tx.QueryContext(ctx, "SELECT name, category FROM custom_statuses ORDER BY name")
+	statuses, found, err := readCustomStatusesTableInTx(ctx, tx)
 	if err != nil {
-		if !isTableNotExistError(err) {
-			return nil, fmt.Errorf("query custom_statuses: %w", err)
-		}
-	} else {
-		defer rows.Close()
-		var result []types.CustomStatus
-		for rows.Next() {
-			var name, category string
-			if err := rows.Scan(&name, &category); err != nil {
-				return nil, fmt.Errorf("scan custom_statuses: %w", err)
-			}
-			result = append(result, types.CustomStatus{
-				Name:     name,
-				Category: types.StatusCategory(category),
-			})
-		}
-		if err := rows.Err(); err != nil {
-			return nil, fmt.Errorf("reading custom_statuses: %w", err)
-		}
-		// Table has rows — use them as the authoritative source.
-		// If the table is empty (e.g. schema migration created the table but
-		// failed to populate it from status.custom config), fall through to
-		// the config string so existing custom statuses aren't silently lost.
-		if len(result) > 0 {
-			return result, nil
-		}
+		return nil, err
+	}
+	if found {
+		return statuses, nil
 	}
 
-	// Fallback: table doesn't exist or is empty — read from config string
+	return resolveCustomStatusesFallbackInTx(ctx, tx)
+}
+
+func readCustomStatusesTableInTx(ctx context.Context, tx DBTX) ([]types.CustomStatus, bool, error) {
+	rows, err := tx.QueryContext(ctx, "SELECT name, category FROM custom_statuses ORDER BY name")
+	if err != nil {
+		if isTableNotExistError(err) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("query custom_statuses: %w", err)
+	}
+	defer rows.Close()
+	var result []types.CustomStatus
+	for rows.Next() {
+		var name, category string
+		if err := rows.Scan(&name, &category); err != nil {
+			return nil, false, fmt.Errorf("scan custom_statuses: %w", err)
+		}
+		result = append(result, types.CustomStatus{Name: name, Category: types.StatusCategory(category)})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, fmt.Errorf("reading custom_statuses: %w", err)
+	}
+	return result, len(result) > 0, nil
+}
+
+func resolveCustomStatusesFallbackInTx(ctx context.Context, tx DBTX) ([]types.CustomStatus, error) {
+	// The normalized table is empty or absent, so read the legacy config string.
 	value, err := GetConfigInTx(ctx, tx, "status.custom")
 	if err != nil {
 		if yamlStatuses := config.GetCustomStatusesFromYAML(); len(yamlStatuses) > 0 {
@@ -318,29 +339,23 @@ func mergeWithYAMLCustomTypes(dbTypes []string, yamlGetter func() []string) []st
 	}
 	seen := make(map[string]struct{}, len(dbTypes)+len(yamlTypes))
 	out := make([]string, 0, len(dbTypes)+len(yamlTypes))
-	for _, t := range dbTypes {
-		t = strings.TrimSpace(t)
-		if t == "" {
-			continue
-		}
-		if _, ok := seen[t]; ok {
-			continue
-		}
-		seen[t] = struct{}{}
-		out = append(out, t)
-	}
-	for _, t := range yamlTypes {
-		t = strings.TrimSpace(t)
-		if t == "" {
-			continue
-		}
-		if _, ok := seen[t]; ok {
-			continue
-		}
-		seen[t] = struct{}{}
-		out = append(out, t)
-	}
+	appendUniqueTypes(&out, seen, dbTypes)
+	appendUniqueTypes(&out, seen, yamlTypes)
 	return out
+}
+
+func appendUniqueTypes(out *[]string, seen map[string]struct{}, values []string) {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		*out = append(*out, value)
+	}
 }
 
 // customTypesYAMLFallback decides what to return from ResolveCustomTypesInTx

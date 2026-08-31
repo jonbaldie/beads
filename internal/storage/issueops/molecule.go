@@ -24,15 +24,28 @@ func GetMoleculeProgressInTx(ctx context.Context, tx *sql.Tx, moleculeID string)
 	if isWisp {
 		parentCol = "depends_on_wisp_id"
 	}
+	setMoleculeTitle(ctx, tx, issueTable, moleculeID, stats)
+	childIDs, err := moleculeChildIDs(ctx, tx, depTable, parentCol, moleculeID)
+	if err != nil {
+		return nil, err
+	}
+	childStatuses, err := moleculeChildStatuses(ctx, tx, issueTable, childIDs)
+	if err != nil {
+		return nil, err
+	}
+	applyMoleculeProgress(stats, childIDs, childStatuses)
+	return stats, nil
+}
 
-	// Get molecule title.
+func setMoleculeTitle(ctx context.Context, tx *sql.Tx, issueTable, moleculeID string, stats *types.MoleculeProgressStats) {
 	var title sql.NullString
 	err := tx.QueryRowContext(ctx, fmt.Sprintf("SELECT title FROM %s WHERE id = ?", issueTable), moleculeID).Scan(&title)
 	if err == nil && title.Valid {
 		stats.MoleculeTitle = title.String
 	}
+}
 
-	// Step 1: Get child issue IDs from dependencies table.
+func moleculeChildIDs(ctx context.Context, tx *sql.Tx, depTable, parentCol, moleculeID string) ([]string, error) {
 	depRows, err := tx.QueryContext(ctx, fmt.Sprintf(`
 		SELECT issue_id FROM %s
 		WHERE %s = ? AND type = 'parent-child'
@@ -53,61 +66,56 @@ func GetMoleculeProgressInTx(ctx context.Context, tx *sql.Tx, moleculeID string)
 	if err := depRows.Err(); err != nil {
 		return nil, fmt.Errorf("get molecule progress: child rows: %w", err)
 	}
+	return childIDs, nil
+}
 
-	// Step 2: Batch-fetch status for all children.
-	// Children of a wisp molecule are also wisps, so use the same table.
-	if len(childIDs) > 0 {
-		type childInfo struct {
-			status string
+func moleculeChildStatuses(ctx context.Context, tx *sql.Tx, issueTable string, childIDs []string) (map[string]string, error) {
+	childMap := make(map[string]string, len(childIDs))
+	totalChildIDs := len(childIDs)
+	for start := 0; start < totalChildIDs; start += queryBatchSize {
+		end := start + queryBatchSize
+		if end > totalChildIDs {
+			end = totalChildIDs
 		}
-		childMap := make(map[string]childInfo)
-		for start := 0; start < len(childIDs); start += queryBatchSize {
-			end := start + queryBatchSize
-			if end > len(childIDs) {
-				end = len(childIDs)
-			}
-			batch := childIDs[start:end]
-			placeholders := make([]string, len(batch))
-			args := make([]any, len(batch))
-			for i, id := range batch {
-				placeholders[i] = "?"
-				args[i] = id
-			}
-			inClause := strings.Join(placeholders, ",")
-
-			query := fmt.Sprintf("SELECT id, status FROM %s WHERE id IN (%s)", issueTable, inClause)
-			statusRows, err := tx.QueryContext(ctx, query, args...)
-			if err != nil {
-				return nil, fmt.Errorf("failed to batch-fetch child statuses: %w", err)
-			}
-			for statusRows.Next() {
-				var id, status string
-				if err := statusRows.Scan(&id, &status); err != nil {
-					_ = statusRows.Close()
-					return nil, fmt.Errorf("get molecule progress: scan status: %w", err)
-				}
-				childMap[id] = childInfo{status: status}
-			}
-			_ = statusRows.Close()
+		batch := childIDs[start:end]
+		placeholders := make([]string, len(batch))
+		args := make([]any, len(batch))
+		for i, id := range batch {
+			placeholders[i] = "?"
+			args[i] = id
 		}
-
-		for _, childID := range childIDs {
-			info, ok := childMap[childID]
-			if !ok {
-				continue
+		statusRows, err := tx.QueryContext(ctx, fmt.Sprintf("SELECT id, status FROM %s WHERE id IN (%s)", issueTable, strings.Join(placeholders, ",")), args...)
+		if err != nil {
+			return nil, fmt.Errorf("failed to batch-fetch child statuses: %w", err)
+		}
+		for statusRows.Next() {
+			var id, status string
+			if err := statusRows.Scan(&id, &status); err != nil {
+				_ = statusRows.Close()
+				return nil, fmt.Errorf("get molecule progress: scan status: %w", err)
 			}
-			stats.Total++
-			switch types.Status(info.status) {
-			case types.StatusClosed:
-				stats.Completed++
-			case types.StatusInProgress:
-				stats.InProgress++
-				if stats.CurrentStepID == "" {
-					stats.CurrentStepID = childID
-				}
+			childMap[id] = status
+		}
+		_ = statusRows.Close()
+	}
+	return childMap, nil
+}
+
+func applyMoleculeProgress(stats *types.MoleculeProgressStats, childIDs []string, childStatuses map[string]string) {
+	for _, childID := range childIDs {
+		status, ok := childStatuses[childID]
+		if !ok {
+			continue
+		}
+		stats.Total++
+		switch types.Status(status) {
+		case types.StatusClosed:
+			stats.Completed++
+		case types.StatusInProgress:
+			stats.InProgress++
+			if stats.CurrentStepID == "" {
+				stats.CurrentStepID = childID
 			}
 		}
 	}
-
-	return stats, nil
 }

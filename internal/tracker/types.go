@@ -15,6 +15,8 @@ import (
 // TrackerIssue represents an issue from an external tracker in a generic format.
 // Each tracker adapter converts its native issue type to/from this intermediate form.
 type TrackerIssue struct {
+	TrackerIssueDetails
+
 	// Core identification
 	ID         string // External tracker's internal ID (e.g., UUID)
 	Identifier string // Human-readable identifier (e.g., "TEAM-123", "PROJ-456")
@@ -31,30 +33,30 @@ type TrackerIssue struct {
 	Labels   []string    // Labels/tags
 
 	// Assignment
-	Assignee      string // Assignee name or email
-	AssigneeID    string // Assignee's tracker-specific ID
-	AssigneeEmail string // Assignee email if available
+	Assignee string // Assignee name or email
 
 	// Timestamps
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	CompletedAt *time.Time
-
-	// Relationships
-	ParentID         string // Parent issue identifier (for subtasks/children)
-	ParentInternalID string // Parent issue internal ID
-
-	// Warnings carries non-fatal, partial-success messages from a create/update
-	// (e.g. the issue was created but a follow-up state change failed). The sync
-	// engine drains these into the sync result's warnings so a degraded push is
-	// visible in --json output instead of being silently swallowed.
-	Warnings []string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 
 	// Raw data for tracker-specific processing
 	Raw interface{} // Original API response for tracker-specific access
 
-	// Metadata for tracker-specific fields that don't map to core Issue fields.
-	// Stored in Issue.Metadata for round-trip preservation.
+}
+
+// TrackerIssueDetails carries optional adapter details that are independent of
+// the core issue projection.
+type TrackerIssueDetails struct {
+	AssigneeID       string // Assignee's tracker-specific ID
+	AssigneeEmail    string // Assignee email if available
+	CompletedAt      *time.Time
+	ParentID         string // Parent issue identifier (for subtasks/children)
+	ParentInternalID string // Parent issue internal ID
+
+	// Warnings carries non-fatal partial-success messages from a create or update.
+	Warnings []string
+
+	// Metadata preserves tracker-specific fields for round trips.
 	Metadata map[string]interface{}
 }
 

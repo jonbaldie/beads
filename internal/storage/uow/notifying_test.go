@@ -270,7 +270,7 @@ func (f *notifyFixture) newUOW(t *testing.T) UnitOfWork {
 }
 
 func seedIssue(id string) *types.Issue {
-	return &types.Issue{ID: id, Title: id, Status: types.StatusOpen}
+	return &types.Issue{IssueID: types.IssueID{ID: id}, IssueContent: types.IssueContent{Title: id}, IssueWorkflow: types.IssueWorkflow{Status: types.StatusOpen}}
 }
 
 // closeThroughBatch closes ids through the REAL batch composition rather than
