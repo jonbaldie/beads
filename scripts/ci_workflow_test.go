@@ -93,7 +93,7 @@ func TestPRCIGateRequiresMessgoAndMutago(t *testing.T) {
 	if mutago.TimeoutMinutes != 60 {
 		t.Errorf("mutago timeout = %d, want 60 minutes", mutago.TimeoutMinutes)
 	}
-	if got, want := mutago.Strategy.Matrix.Shard, []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63}; !equalInts(got, want) {
+	if got, want := mutago.Strategy.Matrix.Shard, []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127}; !equalInts(got, want) {
 		t.Errorf("mutago shard matrix = %v, want %v", got, want)
 	}
 	mutagoStep := mutago.step(t, "Check covered mutation score")
@@ -104,7 +104,7 @@ func TestPRCIGateRequiresMessgoAndMutago(t *testing.T) {
 		t.Errorf("mutago base env = %q", mutagoStep.Env["MUTAGO_DIFF_BASE"])
 	}
 	for key, want := range map[string]string{
-		"MUTAGO_SHARDS":          "64",
+		"MUTAGO_SHARDS":          "128",
 		"MUTAGO_SHARD_INDEX":     "${{ matrix.shard }}",
 		"MUTAGO_MIN_COVERED_MSI": "0",
 		"MUTAGO_PER_TEST":        "0",
@@ -123,7 +123,7 @@ func TestPRCIGateRequiresMessgoAndMutago(t *testing.T) {
 		t.Errorf("mutago-gate needs mutago: %v", mutagoGate.Needs)
 	}
 	aggregate := mutagoGate.step(t, "Check aggregate covered mutation score")
-	if aggregate.Run == "" || aggregate.Env["MUTAGO_SHARD_RESULT"] != "${{ needs.mutago.result }}" || aggregate.Env["MUTAGO_EXPECTED_SHARDS"] != "64" {
+	if aggregate.Run == "" || aggregate.Env["MUTAGO_SHARD_RESULT"] != "${{ needs.mutago.result }}" || aggregate.Env["MUTAGO_EXPECTED_SHARDS"] != "128" {
 		t.Errorf("mutago-gate aggregate step = run %q env %v", aggregate.Run, aggregate.Env)
 	}
 

@@ -752,7 +752,7 @@ jobs:
       # deterministically so every shard keeps the same diff filter and package
       # tests while both memory and wall-clock cost stay bounded.
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127]
     # Mutation analysis is deliberately bounded: a pathological shard must
     # fail with a useful timeout rather than consume an unbounded runner.
     timeout-minutes: 60
@@ -770,7 +770,7 @@ jobs:
       - name: Check covered mutation score
         env:
           MUTAGO_DIFF_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
-          MUTAGO_SHARDS: '64'
+          MUTAGO_SHARDS: '128'
           MUTAGO_SHARD_INDEX: ${{ matrix.shard }}
           # The aggregate job applies the 80% threshold after summing all
           # shard counts. Applying it per shard would make tiny shards fail
@@ -781,7 +781,7 @@ jobs:
           # runner's one-hour job limit while preserving aggregate MSI counts.
           MUTAGO_PER_TEST: '0'
           # Two workers keep mutago below the hosted runner memory ceiling;
-          # the 64-way file split keeps the smaller worker pool within budget.
+          # the 128-way file split keeps the smaller worker pool within budget.
           MUTAGO_WORKERS: '2'
         run: ./scripts/ci/mutago.sh
 
@@ -822,7 +822,7 @@ jobs:
       - name: Check aggregate covered mutation score
         env:
           MUTAGO_SHARD_RESULT: ${{ needs.mutago.result }}
-          MUTAGO_EXPECTED_SHARDS: '64'
+          MUTAGO_EXPECTED_SHARDS: '128'
         run: |
           set -euo pipefail
           status=0
