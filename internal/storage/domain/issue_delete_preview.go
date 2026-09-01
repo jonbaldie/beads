@@ -59,7 +59,7 @@ func addPreviewIssues(target map[string]*types.Issue, issues []*types.Issue) {
 }
 
 func previewMissingIDs(ids []string, issues map[string]*types.Issue) []string {
-	missing := make([]string, 0)
+	var missing []string
 	for _, id := range ids {
 		if _, ok := issues[id]; !ok {
 			missing = append(missing, id)
