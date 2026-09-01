@@ -98,7 +98,7 @@ func readContributorWizardResponse(ctx context.Context, reader *bufio.Reader, pr
 		}
 		response = ""
 	}
-	return strings.TrimSpace(strings.ToLower(response)), nil
+	return strings.TrimSpace(response), nil
 }
 
 func confirmContributorBeadsDir(ctx context.Context, reader *bufio.Reader) (bool, error) {
@@ -115,6 +115,7 @@ func confirmContributorBeadsDir(ctx context.Context, reader *bufio.Reader) (bool
 	if err != nil {
 		return false, err
 	}
+	response = strings.ToLower(response)
 	if response != "y" && response != "yes" {
 		fmt.Println("Setup canceled.")
 		return false, nil
@@ -136,6 +137,7 @@ func confirmContributorFork(ctx context.Context, reader *bufio.Reader, isFork bo
 	if err != nil {
 		return false, err
 	}
+	response = strings.ToLower(response)
 	if response != "y" && response != "yes" {
 		fmt.Println("Setup canceled.")
 		return false, nil
@@ -156,6 +158,7 @@ func confirmContributorPushAccess(ctx context.Context, reader *bufio.Reader, has
 	if err != nil {
 		return false, err
 	}
+	response = strings.ToLower(response)
 	if response == "n" || response == "no" {
 		fmt.Println("\nSetup canceled. Your issues will be stored in the current repository.")
 		return false, nil
