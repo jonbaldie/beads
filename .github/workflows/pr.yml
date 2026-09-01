@@ -776,7 +776,10 @@ jobs:
           # shard counts. Applying it per shard would make tiny shards fail
           # merely because their local covered denominator is small.
           MUTAGO_MIN_COVERED_MSI: '0'
-          MUTAGO_PER_TEST: '1'
+          # Covered-MSI does not require per-test attribution. Disabling the
+          # per-test coverage map keeps large packages below the hosted
+          # runner's one-hour job limit while preserving aggregate MSI counts.
+          MUTAGO_PER_TEST: '0'
           # Two workers keep mutago below the hosted runner memory ceiling;
           # the 64-way file split keeps the smaller worker pool within budget.
           MUTAGO_WORKERS: '2'

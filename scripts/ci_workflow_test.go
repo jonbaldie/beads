@@ -107,7 +107,7 @@ func TestPRCIGateRequiresMessgoAndMutago(t *testing.T) {
 		"MUTAGO_SHARDS":          "64",
 		"MUTAGO_SHARD_INDEX":     "${{ matrix.shard }}",
 		"MUTAGO_MIN_COVERED_MSI": "0",
-		"MUTAGO_PER_TEST":        "1",
+		"MUTAGO_PER_TEST":        "0",
 		"MUTAGO_WORKERS":         "2",
 	} {
 		if got := mutagoStep.Env[key]; got != want {
