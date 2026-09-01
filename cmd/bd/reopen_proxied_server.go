@@ -62,7 +62,7 @@ func runReopenProxiedServer(cmd *cobra.Command, ctx context.Context, args []stri
 	if jsonOut && len(reopenedIssues) > 0 {
 		_ = outputJSON(reopenedIssues)
 	}
-	if processError {
+	if hasError || processError {
 		return SilentExit()
 	}
 	return nil

@@ -28,8 +28,12 @@ func (s *EmbeddedDoltStore) initSchema(ctx context.Context) error {
 	if err := schema.CheckForwardDrift(ctx, conn); err != nil {
 		return err
 	}
-	if err := s.checkRemoteMigrateGate(ctx, conn); err != nil {
+	skipMigration, err := s.checkRemoteMigrateGate(ctx, conn)
+	if err != nil {
 		return err
+	}
+	if skipMigration {
+		return nil
 	}
 	return s.migrateSchema(ctx, conn)
 }
@@ -81,7 +85,7 @@ func validateEmbeddedDatabaseName(database string) error {
 	return errors.New(msg)
 }
 
-func (s *EmbeddedDoltStore) checkRemoteMigrateGate(ctx context.Context, conn *sql.Conn) error {
+func (s *EmbeddedDoltStore) checkRemoteMigrateGate(ctx context.Context, conn *sql.Conn) (bool, error) {
 	// #4259: refuse to silently apply pending migrations to a remote-backed,
 	// already-initialized database — independently migrating each clone forks the
 	// schema. Embedded mode syncs via Dolt remotes too, so it needs the same gate
@@ -107,13 +111,13 @@ func (s *EmbeddedDoltStore) checkRemoteMigrateGate(ctx context.Context, conn *sq
 	if err := schema.CheckRemoteMigrateGateWithAdopt(ctx, conn, adopt); err != nil {
 		return s.handleRemoteMigrateGateError(err)
 	}
-	return nil
+	return false, nil
 }
 
-func (s *EmbeddedDoltStore) handleRemoteMigrateGateError(err error) error {
+func (s *EmbeddedDoltStore) handleRemoteMigrateGateError(err error) (bool, error) {
 	var gateErr *schema.RemoteMigrateGateError
 	if s.intent == openStrict || !errors.As(err, &gateErr) {
-		return err
+		return false, err
 	}
 
 	const sharedGuidance = "  This is\n" +
@@ -131,14 +135,14 @@ func (s *EmbeddedDoltStore) handleRemoteMigrateGateError(err error) error {
 				"  migrating; the commit applies to the working set at the current\n"+
 				"  schema."+sharedGuidance,
 			gateErr, gateErr.CurrentVersion)
-		return nil
+		return true, nil
 	}
 	fmt.Fprintf(os.Stderr,
 		"Warning: %v\n"+
 			"  Read-only command: continuing on schema v%d without migrating.\n"+
 			"  Writes are blocked until the schema is reconciled."+sharedGuidance,
 		gateErr, gateErr.CurrentVersion)
-	return nil
+	return true, nil
 }
 
 func (s *EmbeddedDoltStore) migrateSchema(ctx context.Context, conn *sql.Conn) error {

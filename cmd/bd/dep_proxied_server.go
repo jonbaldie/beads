@@ -236,11 +236,15 @@ func runDepAddProxiedServer(cmd *cobra.Command, ctx context.Context, args []stri
 func proxiedDependencyTarget(cmd *cobra.Command, args []string) (string, error) {
 	blockedBy, _ := cmd.Flags().GetString("blocked-by")
 	dependsOn, _ := cmd.Flags().GetString("depends-on")
-	dependsOnArg := args[1]
+	var dependsOnArg string
 	if blockedBy != "" {
 		dependsOnArg = blockedBy
 	} else if dependsOn != "" {
 		dependsOnArg = dependsOn
+	} else if len(args) > 1 {
+		dependsOnArg = args[1]
+	} else {
+		return "", fmt.Errorf("requires 2 arg(s), only received %d (or use --blocked-by/--depends-on flag)", len(args))
 	}
 	if strings.HasPrefix(dependsOnArg, "external:") {
 		if err := validateExternalRef(dependsOnArg); err != nil {
