@@ -44,8 +44,30 @@ while IFS= read -r path; do
   paths+=("$path")
 done <<<"$changed_files"
 
+shard_count="${MUTAGO_SHARDS:-1}"
+shard_index="${MUTAGO_SHARD_INDEX:-0}"
+if [[ ! "$shard_count" =~ ^[1-9][0-9]*$ ]]; then
+  printf 'mutago: MUTAGO_SHARDS must be a positive integer (got %q)\n' "$shard_count" >&2
+  exit 1
+fi
+if [[ ! "$shard_index" =~ ^[0-9]+$ ]] || ((shard_index >= shard_count)); then
+  printf 'mutago: MUTAGO_SHARD_INDEX must be an integer in [0,%d) (got %q)\n' "$shard_count" "$shard_index" >&2
+  exit 1
+fi
+
+all_paths=("${paths[@]}")
+paths=()
+for i in "${!all_paths[@]}"; do
+  if ((i % shard_count == shard_index)); then
+    paths+=("${all_paths[$i]}")
+  fi
+done
+
 if ((${#paths[@]} == 0)); then
-  echo 'mutago: no changed production Go files; skipping'
+  printf 'mutago: shard %d/%d has no changed production Go files; writing an empty summary\n' "$shard_index" "$shard_count"
+  cat > mutago-summary.json <<'EOF'
+{"totalMutantsCount":0,"killedCount":0,"escapedCount":0,"errorCount":0,"skippedCount":0,"notCoveredCount":0,"msi":0,"coveredCodeMsi":0}
+EOF
   exit 0
 fi
 
@@ -57,15 +79,20 @@ else
   mutago=(go run github.com/quality-gates/mutago/v2/cmd/mutago@v2.9.1)
 fi
 
-printf 'mutago: scanning %d changed production Go file(s) against %s\n' "${#paths[@]}" "$diff_base"
-"${mutago[@]}" \
+printf 'mutago: scanning %d changed production Go file(s) in shard %d/%d against %s\n' "${#paths[@]}" "$shard_index" "$shard_count" "$diff_base"
+mutago_args=(
   --coverage \
   --git-diff-lines \
   --git-diff-base="$diff_base" \
-  --min-covered-msi=80 \
+  --min-covered-msi="${MUTAGO_MIN_COVERED_MSI:-80}" \
   --ignore-msi-with-no-mutations \
   --quiet \
   --no-diffs \
+  --logger-summary-json \
   --workers="${MUTAGO_WORKERS:-2}" \
   --test-flags=-tags=gms_pure_go \
-  "${paths[@]}"
+)
+if [[ "${MUTAGO_PER_TEST:-0}" == 1 ]]; then
+  mutago_args+=(--per-test)
+fi
+"${mutago[@]}" "${mutago_args[@]}" "${paths[@]}"

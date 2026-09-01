@@ -93,6 +93,9 @@ func TestPRCIGateRequiresMessgoAndMutago(t *testing.T) {
 	if mutago.TimeoutMinutes != 60 {
 		t.Errorf("mutago timeout = %d, want 60 minutes", mutago.TimeoutMinutes)
 	}
+	if got, want := mutago.Strategy.Matrix.Shard, []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}; !equalInts(got, want) {
+		t.Errorf("mutago shard matrix = %v, want %v", got, want)
+	}
 	mutagoStep := mutago.step(t, "Check covered mutation score")
 	if mutagoStep.Run != "./scripts/ci/mutago.sh" {
 		t.Errorf("mutago command = %q", mutagoStep.Run)
@@ -100,8 +103,31 @@ func TestPRCIGateRequiresMessgoAndMutago(t *testing.T) {
 	if mutagoStep.Env["MUTAGO_DIFF_BASE"] != "${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}" {
 		t.Errorf("mutago base env = %q", mutagoStep.Env["MUTAGO_DIFF_BASE"])
 	}
+	for key, want := range map[string]string{
+		"MUTAGO_SHARDS":          "16",
+		"MUTAGO_SHARD_INDEX":     "${{ matrix.shard }}",
+		"MUTAGO_MIN_COVERED_MSI": "0",
+		"MUTAGO_PER_TEST":        "1",
+		"MUTAGO_WORKERS":         "2",
+	} {
+		if got := mutagoStep.Env[key]; got != want {
+			t.Errorf("mutago %s = %q, want %q", key, got, want)
+		}
+	}
 
-	for jobName, gateKey := range map[string]string{"messgo": "MESSGO", "mutago": "MUTAGO"} {
+	mutagoGate := workflow.job(t, "mutago-gate")
+	if mutagoGate.RunsOn != "ubuntu-latest" || mutagoGate.If != "${{ always() }}" {
+		t.Errorf("mutago-gate runs-on/if = %q/%q", mutagoGate.RunsOn, mutagoGate.If)
+	}
+	if !contains(mutagoGate.Needs, "mutago") {
+		t.Errorf("mutago-gate needs mutago: %v", mutagoGate.Needs)
+	}
+	aggregate := mutagoGate.step(t, "Check aggregate covered mutation score")
+	if aggregate.Run == "" || aggregate.Env["MUTAGO_SHARD_RESULT"] != "${{ needs.mutago.result }}" || aggregate.Env["MUTAGO_EXPECTED_SHARDS"] != "16" {
+		t.Errorf("mutago-gate aggregate step = run %q env %v", aggregate.Run, aggregate.Env)
+	}
+
+	for jobName, gateKey := range map[string]string{"messgo": "MESSGO", "mutago-gate": "MUTAGO_GATE"} {
 		if !contains(gate.Needs, jobName) {
 			t.Errorf("ci-gate needs %q: %v", jobName, gate.Needs)
 		}
@@ -892,6 +918,18 @@ func equalStrings(got, want []string) bool {
 	return true
 }
 
+func equalInts(got, want []int) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func assertGoCacheWriter(t *testing.T, workflow ciWorkflow, wantJob, wantRunner, wantStep, wantCondition string) {
 	t.Helper()
 
@@ -986,6 +1024,7 @@ type ciWorkflowStrategy struct {
 
 type ciWorkflowMatrix struct {
 	OS      []string                  `yaml:"os"`
+	Shard   []int                     `yaml:"shard"`
 	Include []ciWorkflowMatrixInclude `yaml:"include"`
 }
 
