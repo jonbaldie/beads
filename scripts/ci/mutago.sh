@@ -3,7 +3,8 @@ set -euo pipefail
 
 # mutago measures only changed production lines. This keeps the required
 # covered-MSI gate focused on the code a change actually owns while still
-# running the package's full test suite for those lines.
+# running the package's full test suite for those lines. CI shards the file
+# list so a large package cannot consume the entire runner timeout.
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/../.." && pwd)"

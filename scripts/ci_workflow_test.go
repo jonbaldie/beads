@@ -93,7 +93,7 @@ func TestPRCIGateRequiresMessgoAndMutago(t *testing.T) {
 	if mutago.TimeoutMinutes != 60 {
 		t.Errorf("mutago timeout = %d, want 60 minutes", mutago.TimeoutMinutes)
 	}
-	if got, want := mutago.Strategy.Matrix.Shard, []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}; !equalInts(got, want) {
+	if got, want := mutago.Strategy.Matrix.Shard, []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31}; !equalInts(got, want) {
 		t.Errorf("mutago shard matrix = %v, want %v", got, want)
 	}
 	mutagoStep := mutago.step(t, "Check covered mutation score")
@@ -104,11 +104,11 @@ func TestPRCIGateRequiresMessgoAndMutago(t *testing.T) {
 		t.Errorf("mutago base env = %q", mutagoStep.Env["MUTAGO_DIFF_BASE"])
 	}
 	for key, want := range map[string]string{
-		"MUTAGO_SHARDS":          "16",
+		"MUTAGO_SHARDS":          "32",
 		"MUTAGO_SHARD_INDEX":     "${{ matrix.shard }}",
 		"MUTAGO_MIN_COVERED_MSI": "0",
 		"MUTAGO_PER_TEST":        "1",
-		"MUTAGO_WORKERS":         "2",
+		"MUTAGO_WORKERS":         "4",
 	} {
 		if got := mutagoStep.Env[key]; got != want {
 			t.Errorf("mutago %s = %q, want %q", key, got, want)
@@ -123,7 +123,7 @@ func TestPRCIGateRequiresMessgoAndMutago(t *testing.T) {
 		t.Errorf("mutago-gate needs mutago: %v", mutagoGate.Needs)
 	}
 	aggregate := mutagoGate.step(t, "Check aggregate covered mutation score")
-	if aggregate.Run == "" || aggregate.Env["MUTAGO_SHARD_RESULT"] != "${{ needs.mutago.result }}" || aggregate.Env["MUTAGO_EXPECTED_SHARDS"] != "16" {
+	if aggregate.Run == "" || aggregate.Env["MUTAGO_SHARD_RESULT"] != "${{ needs.mutago.result }}" || aggregate.Env["MUTAGO_EXPECTED_SHARDS"] != "32" {
 		t.Errorf("mutago-gate aggregate step = run %q env %v", aggregate.Run, aggregate.Env)
 	}
 
