@@ -27,7 +27,7 @@ func runFederationSync(cmd *cobra.Command, _ []string) error {
 		}
 	}()
 
-	ctx := rootCtx
+	ctx := getRootContext()
 
 	ds, err := getFederatedStore()
 	if err != nil {
@@ -48,7 +48,7 @@ func runFederationSync(cmd *cobra.Command, _ []string) error {
 
 	results := syncFederationPeers(ctx, ds, peers, opts.strategy)
 
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(map[string]interface{}{
 			"peers":   peers,
 			"results": results,
@@ -84,19 +84,19 @@ func federationPeerNames(ctx context.Context, ds storage.DoltStorage, selected s
 func syncFederationPeers(ctx context.Context, ds storage.DoltStorage, peers []string, strategy string) []*storage.SyncResult {
 	results := make([]*storage.SyncResult, 0, len(peers))
 	for _, peer := range peers {
-		if !jsonOutput {
+		if !isJSONOutput() {
 			fmt.Printf("%s Syncing with %s...\n", ui.RenderAccent("🔄"), peer)
 		}
 
 		result, err := ds.Sync(ctx, peer, strategy)
 		results = append(results, result)
 		if err != nil {
-			if !jsonOutput {
+			if !isJSONOutput() {
 				fmt.Printf("  %s %v\n", ui.RenderFail("✗"), err)
 			}
 			continue
 		}
-		if !jsonOutput {
+		if !isJSONOutput() {
 			printFederationSyncResult(result, strategy)
 		}
 	}
@@ -155,7 +155,7 @@ func runFederationStatus(cmd *cobra.Command, _ []string) error {
 		}
 	}()
 
-	ctx := rootCtx
+	ctx := getRootContext()
 
 	ds, err := getFederatedStore()
 	if err != nil {
@@ -170,7 +170,7 @@ func runFederationStatus(cmd *cobra.Command, _ []string) error {
 	peers := federationStatusPeers(allRemotes, opts.peer)
 
 	if len(peers) == 0 {
-		if jsonOutput {
+		if isJSONOutput() {
 			return outputJSON(map[string]interface{}{
 				"peers":          []string{},
 				"pendingChanges": 0,
@@ -183,7 +183,7 @@ func runFederationStatus(cmd *cobra.Command, _ []string) error {
 	pendingChanges := federationPendingChanges(ctx, ds)
 	peerStatuses := loadFederationPeerStatuses(ctx, ds, peers, remoteURLs)
 
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(map[string]interface{}{
 			"peers":          peerStatuses,
 			"pendingChanges": pendingChanges,
@@ -290,7 +290,7 @@ func runFederationAddPeer(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	ctx := rootCtx
+	ctx := getRootContext()
 
 	name := args[0]
 	url := args[1]
@@ -309,7 +309,7 @@ func runFederationAddPeer(cmd *cobra.Command, args []string) error {
 		return HandleErrorRespectJSON("failed to add peer: %v", err)
 	}
 
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(map[string]interface{}{
 			"added":       name,
 			"url":         url,
@@ -380,7 +380,7 @@ func runFederationRemovePeer(_ *cobra.Command, args []string) error {
 		}
 	}()
 
-	ctx := rootCtx
+	ctx := getRootContext()
 
 	name := args[0]
 
@@ -388,7 +388,7 @@ func runFederationRemovePeer(_ *cobra.Command, args []string) error {
 		return HandleErrorRespectJSON("failed to remove peer: %v", err)
 	}
 
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(map[string]interface{}{
 			"removed": name,
 		})
@@ -409,14 +409,14 @@ func runFederationListPeers(_ *cobra.Command, _ []string) error {
 		}
 	}()
 
-	ctx := rootCtx
+	ctx := getRootContext()
 
 	remotes, err := getStore().ListRemotes(ctx)
 	if err != nil {
 		return HandleErrorRespectJSON("failed to list peers: %v", err)
 	}
 
-	if jsonOutput {
+	if isJSONOutput() {
 		return outputJSON(formatFederationPeerListJSON(remotes))
 	}
 
