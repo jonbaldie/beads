@@ -221,6 +221,13 @@ type VersionChange struct {
 // versionChanges contains agent-actionable changes for recent versions
 var versionChanges = []VersionChange{
 	{
+		Version: "1.2.4",
+		Date:    "2026-09-02",
+		Changes: []string{
+			"FIX: default go install no longer compiles the in-process Dolt engine or ICU. Use -tags=embeddeddolt when you want that engine (#19).",
+		},
+	},
+	{
 		Version: "1.2.3",
 		Date:    "2026-08-26",
 		Changes: []string{
