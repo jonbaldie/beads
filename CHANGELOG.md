@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.4] - 2026-09-02
+
+### Fixed
+
+- **Default `go install` no longer compiles the in-process Dolt engine** (#19).
+  `go install github.com/jonbaldie/beads/cmd/bd@latest` (and `@main`) needs Go,
+  git, and a C compiler. It does not need ICU headers or `CGO_ENABLED=0`.
+  The embedded Dolt engine remains available behind `-tags=embeddeddolt`.
+
 ## [1.2.3] - 2026-08-26
 
 ### Fixed
