@@ -1,4 +1,4 @@
-//go:build cgo
+//go:build cgo && embeddeddolt
 
 // Package legacysqlite reads the small, authenticated SQLite history that
 // predates the current Dolt store. It intentionally has no general migration
