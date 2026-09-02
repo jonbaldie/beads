@@ -84,18 +84,40 @@ printf '%s' "$CGO_ENABLED"
 }
 
 func TestNoCGOSDKOmitsDoltHubPackages(t *testing.T) {
-	t.Setenv("CGO_ENABLED", "0")
+	assertDepsOmitPrefixes(t, "0", ".", []string{"github.com/dolthub/"})
+}
+
+func TestDefaultCGOSDKOmitsEmbeddedEngine(t *testing.T) {
+	// go install uses CGO_ENABLED=1 when a C compiler is present. That
+	// must not compile the in-process Dolt engine (ICU C++).
+	assertDepsOmitPrefixes(t, "1", ".", firstRunEnginePrefixes)
+}
+
+func TestDefaultCGOBdOmitsEmbeddedEngine(t *testing.T) {
+	assertDepsOmitPrefixes(t, "1", "./cmd/bd", firstRunEnginePrefixes)
+}
+
+var firstRunEnginePrefixes = []string{
+	"github.com/dolthub/go-icu-regex",
+	"github.com/dolthub/driver",
+}
+
+func assertDepsOmitPrefixes(t *testing.T, cgo, pkg string, prefixes []string) {
+	t.Helper()
+	t.Setenv("CGO_ENABLED", cgo)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "go", "list", "-deps", ".")
+	cmd := exec.CommandContext(ctx, "go", "list", "-deps", pkg)
 	cmd.Dir = repoRoot(t)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("CGO_ENABLED=0 go list -deps .: %v\n%s", err, out)
+		t.Fatalf("CGO_ENABLED=%s go list -deps %s: %v\n%s", cgo, pkg, err, out)
 	}
 	for _, dep := range strings.Fields(string(out)) {
-		if strings.HasPrefix(dep, "github.com/dolthub/") {
-			t.Errorf("CGO-disabled public SDK imports %s", dep)
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(dep, prefix) {
+				t.Errorf("CGO_ENABLED=%s %s imports %s", cgo, pkg, dep)
+			}
 		}
 	}
 }
